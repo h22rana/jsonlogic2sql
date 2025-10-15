@@ -103,11 +103,18 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 		return "", fmt.Errorf("comparison operator requires array arguments")
 
 	// Logical operators
-	case "and", "or", "!", "!!", "if", "?:":
+	case "and", "or", "if", "?:":
 		if arr, ok := args.([]interface{}); ok {
 			return p.logicalOp.ToSQL(operator, arr)
 		}
-		return "", fmt.Errorf("logical operator requires array arguments")
+		return "", fmt.Errorf("%s operator requires array arguments", operator)
+	case "!", "!!":
+		// These unary operators can accept both array and non-array arguments
+		if arr, ok := args.([]interface{}); ok {
+			return p.logicalOp.ToSQL(operator, arr)
+		}
+		// Wrap non-array argument in array for processing
+		return p.logicalOp.ToSQL(operator, []interface{}{args})
 
 	// Numeric operators
 	case "+", "-", "*", "/", "%", "max", "min", "between":

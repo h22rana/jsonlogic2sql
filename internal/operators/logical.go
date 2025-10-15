@@ -103,6 +103,17 @@ func (l *LogicalOperator) handleDoubleNot(args []interface{}) (string, error) {
 		return "", fmt.Errorf("!! operator requires exactly 1 argument")
 	}
 
+	// Check if the argument is an array (for array length checking)
+	if arr, ok := args[0].([]interface{}); ok {
+		// For arrays, check if they are non-empty
+		// This would typically use CARDINALITY or ARRAY_LENGTH depending on the SQL dialect
+		// Using a generic approach that works with most databases
+		if len(arr) == 0 {
+			return "FALSE", nil
+		}
+		return "TRUE", nil
+	}
+
 	condition, err := l.expressionToSQL(args[0])
 	if err != nil {
 		return "", fmt.Errorf("invalid !! argument: %v", err)
@@ -203,11 +214,18 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 					return l.comparisonOp.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("comparison operator requires array arguments")
-			case "and", "or", "!", "!!", "if":
+			case "and", "or", "if":
 				if arr, ok := args.([]interface{}); ok {
 					return l.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("logical operator requires array arguments")
+			case "!", "!!":
+				// Allow both array and non-array arguments for unary operators
+				if arr, ok := args.([]interface{}); ok {
+					return l.ToSQL(operator, arr)
+				}
+				// Wrap non-array argument in array for consistency
+				return l.ToSQL(operator, []interface{}{args})
 			case "+", "-", "*", "/", "%", "max", "min":
 				if arr, ok := args.([]interface{}); ok {
 					numericOp := NewNumericOperator()

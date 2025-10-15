@@ -39,33 +39,55 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 		return columnName, nil
 	}
 
+	// Handle numeric argument (array indexing)
+	if index, err := d.getNumber(args[0]); err == nil {
+		// In JSONLogic, numeric var refers to the data array at that index
+		// In SQL context, we'll use JSON array indexing
+		// This assumes the data is an array in SQL context
+		return fmt.Sprintf("data[%d]", int(index)), nil
+	}
+
 	// Handle array argument [varName, defaultValue]
 	if arr, ok := args[0].([]interface{}); ok {
 		if len(arr) == 0 {
 			return "", fmt.Errorf("var operator array cannot be empty")
 		}
 
-		varName, ok := arr[0].(string)
-		if !ok {
-			return "", fmt.Errorf("var operator first argument must be a string")
-		}
+		// Check if first element is a string (variable name)
+		if varName, ok := arr[0].(string); ok {
+			columnName := d.convertVarName(varName)
 
-		columnName := d.convertVarName(varName)
-
-		// If there's a default value, use COALESCE
-		if len(arr) > 1 {
-			defaultValue := arr[1]
-			defaultSQL, err := d.valueToSQL(defaultValue)
-			if err != nil {
-				return "", fmt.Errorf("invalid default value: %v", err)
+			// If there's a default value, use COALESCE
+			if len(arr) > 1 {
+				defaultValue := arr[1]
+				defaultSQL, err := d.valueToSQL(defaultValue)
+				if err != nil {
+					return "", fmt.Errorf("invalid default value: %v", err)
+				}
+				return fmt.Sprintf("COALESCE(%s, %s)", columnName, defaultSQL), nil
 			}
-			return fmt.Sprintf("COALESCE(%s, %s)", columnName, defaultSQL), nil
+
+			return columnName, nil
 		}
 
-		return columnName, nil
+		// Check if first element is a number (array index)
+		if index, err := d.getNumber(arr[0]); err == nil {
+			// Handle array indexing with default value
+			if len(arr) > 1 {
+				defaultValue := arr[1]
+				defaultSQL, err := d.valueToSQL(defaultValue)
+				if err != nil {
+					return "", fmt.Errorf("invalid default value: %v", err)
+				}
+				return fmt.Sprintf("COALESCE(data[%d], %s)", int(index), defaultSQL), nil
+			}
+			return fmt.Sprintf("data[%d]", int(index)), nil
+		}
+
+		return "", fmt.Errorf("var operator first argument must be a string or number")
 	}
 
-	return "", fmt.Errorf("var operator requires string or array argument")
+	return "", fmt.Errorf("var operator requires string, number, or array argument")
 }
 
 // handleMissing converts missing operator to SQL
@@ -74,13 +96,33 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 		return "", fmt.Errorf("missing operator requires exactly 1 argument")
 	}
 
-	varName, ok := args[0].(string)
-	if !ok {
-		return "", fmt.Errorf("missing operator argument must be a string")
+	// Handle single string argument
+	if varName, ok := args[0].(string); ok {
+		columnName := d.convertVarName(varName)
+		return fmt.Sprintf("%s IS NULL", columnName), nil
 	}
 
-	columnName := d.convertVarName(varName)
-	return fmt.Sprintf("%s IS NULL", columnName), nil
+	// Handle array of fields to check if any are missing
+	if varNames, ok := args[0].([]interface{}); ok {
+		if len(varNames) == 0 {
+			return "", fmt.Errorf("missing operator array cannot be empty")
+		}
+
+		var nullConditions []string
+		for _, varName := range varNames {
+			name, ok := varName.(string)
+			if !ok {
+				return "", fmt.Errorf("all variable names in missing must be strings")
+			}
+			columnName := d.convertVarName(name)
+			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
+		}
+
+		// Check if ANY of the fields are missing (OR condition)
+		return fmt.Sprintf("(%s)", strings.Join(nullConditions, " OR ")), nil
+	}
+
+	return "", fmt.Errorf("missing operator argument must be a string or array of strings")
 }
 
 // handleMissingSome converts missing_some operator to SQL

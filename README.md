@@ -9,7 +9,10 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - **Complex Nested Expressions**: Full support for deeply nested arithmetic and logical operations
 - **Array Operations**: Complete support for all/none/some with proper SQL subqueries
 - **String Operations**: String containment, concatenation, and substring operations
-- **Unary Operators**: Support for unary minus and plus operations
+- **Unary Operators**: Flexible support for both array and non-array syntax
+- **Array Indexing**: Support for numeric indices in var operations
+- **Multiple Field Checks**: Missing operator supports both single and multiple fields
+- **Array Boolean Casting**: Proper handling of empty/non-empty array boolean conversion
 - **Strict Validation**: Comprehensive validation with detailed error messages
 - **Library & CLI**: Both programmatic API and interactive REPL
 - **Type Safety**: Full Go type safety with proper error handling
@@ -17,8 +20,8 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 ## Supported Operators
 
 ### Data Access
-- `var` - Access variable values
-- `missing` - Check if variable is missing
+- `var` - Access variable values (including array indexing)
+- `missing` - Check if variable(s) are missing
 - `missing_some` - Check if some variables are missing
 
 ### Logic and Boolean Operations
@@ -137,6 +140,14 @@ jsonlogic> :quit
 WHERE name
 ```
 
+#### Variable with Array Index
+```json
+{"var": 1}
+```
+```sql
+WHERE data[1]
+```
+
 #### Variable with Default Value
 ```json
 {"var": ["status", "pending"]}
@@ -145,12 +156,20 @@ WHERE name
 WHERE COALESCE(status, 'pending')
 ```
 
-#### Missing Field Check
+#### Missing Field Check (Single)
 ```json
 {"missing": "email"}
 ```
 ```sql
 WHERE email IS NULL
+```
+
+#### Missing Field Check (Multiple)
+```json
+{"missing": ["email", "phone"]}
+```
+```sql
+WHERE (email IS NULL OR phone IS NULL)
 ```
 
 #### Missing Some Fields
@@ -203,12 +222,28 @@ WHERE status != 'inactive'
 WHERE count <> 0
 ```
 
-#### Logical NOT
+#### Logical NOT (with array wrapper)
 ```json
 {"!": [{"var": "isDeleted"}]}
 ```
 ```sql
 WHERE NOT (isDeleted)
+```
+
+#### Logical NOT (without array wrapper)
+```json
+{"!": {"var": "isDeleted"}}
+```
+```sql
+WHERE NOT (isDeleted)
+```
+
+#### Logical NOT (literal)
+```json
+{"!": true}
+```
+```sql
+WHERE NOT (TRUE)
 ```
 
 #### Double Negation (Boolean Conversion)
@@ -217,6 +252,22 @@ WHERE NOT (isDeleted)
 ```
 ```sql
 WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
+```
+
+#### Double Negation (Empty Array)
+```json
+{"!!": [[]]}
+```
+```sql
+WHERE FALSE
+```
+
+#### Double Negation (Non-Empty Array)
+```json
+{"!!": [[1, 2, 3]]}
+```
+```sql
+WHERE TRUE
 ```
 
 #### Logical AND
@@ -571,13 +622,15 @@ jsonlogic2sql/
 
 The project includes comprehensive tests with **100% test coverage**:
 
-- **Unit Tests**: Each operator and component is thoroughly tested (46/46 tests passing)
+- **Unit Tests**: Each operator and component is thoroughly tested (52/52 tests passing)
 - **Integration Tests**: End-to-end tests with real JSON Logic examples
 - **Error Cases**: Validation and error handling tests
 - **Edge Cases**: Boundary conditions and special cases
 - **Complex Expressions**: Deeply nested arithmetic and logical operations
 - **Array Operations**: All/none/some with proper SQL subqueries
-- **Unary Operators**: Single-argument arithmetic operations
+- **Unary Operators**: Flexible support for both array and non-array syntax
+- **Array Indexing**: Support for numeric indices in var operations
+- **Multiple Field Checks**: Missing operator supports both single and multiple fields
 
 Run tests with:
 

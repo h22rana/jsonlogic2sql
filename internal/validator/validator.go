@@ -82,12 +82,8 @@ func (v *Validator) validateRecursive(logic interface{}, path string) error {
 
 // validateArray validates an array expression
 func (v *Validator) validateArray(arr []interface{}, path string) error {
-	if len(arr) == 0 {
-		return ValidationError{
-			Message: "array cannot be empty",
-			Path:    path,
-		}
-	}
+	// Empty arrays are valid in JSONLogic (they evaluate to falsy)
+	// So we don't reject them
 
 	for i, item := range arr {
 		itemPath := fmt.Sprintf("%s[%d]", path, i)
@@ -136,8 +132,13 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 	switch operator {
 	case "var":
 		// var can have 1 or 2 arguments: [path] or [path, default]
+		// It can also be a number for array indexing
 		if _, ok := args.(string); ok {
 			// Single string argument
+			return nil
+		}
+		if v.isNumber(args) {
+			// Single numeric argument for array indexing
 			return nil
 		}
 		if arr, ok := args.([]interface{}); ok {
@@ -148,11 +149,11 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 					Path:     path,
 				}
 			}
-			// First argument must be string
-			if _, ok := arr[0].(string); !ok {
+			// First argument can be string or number
+			if !v.isString(arr[0]) && !v.isNumber(arr[0]) {
 				return ValidationError{
 					Operator: operator,
-					Message:  "var operator first argument must be a string",
+					Message:  "var operator first argument must be a string or number",
 					Path:     path,
 				}
 			}
@@ -160,7 +161,7 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 		}
 		return ValidationError{
 			Operator: operator,
-			Message:  "var operator requires string or array arguments",
+			Message:  "var operator requires string, number, or array arguments",
 			Path:     path,
 		}
 
@@ -177,13 +178,27 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 // validateMissingOperator validates missing and missing_some operators
 func (v *Validator) validateMissingOperator(operator string, args interface{}, path string) error {
 	if operator == "missing" {
-		// missing takes a string argument directly
-		if _, ok := args.(string); !ok {
-			return ValidationError{
-				Operator: operator,
-				Message:  "missing operator argument must be a string",
-				Path:     path,
+		// missing takes a string argument directly or an array of strings
+		if _, ok := args.(string); ok {
+			return nil
+		}
+		if arr, ok := args.([]interface{}); ok {
+			// Check that all array elements are strings
+			for _, elem := range arr {
+				if !v.isString(elem) {
+					return ValidationError{
+						Operator: operator,
+						Message:  "all elements in missing operator array must be strings",
+						Path:     path,
+					}
+				}
 			}
+			return nil
+		}
+		return ValidationError{
+			Operator: operator,
+			Message:  "missing operator argument must be a string or array of strings",
+			Path:     path,
 		}
 	} else if operator == "missing_some" {
 		// missing_some takes an array argument
@@ -225,6 +240,24 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 
 // validateStandardOperator validates standard operators with array arguments
 func (v *Validator) validateStandardOperator(operator string, args interface{}, spec OperatorSpec, path string) error {
+	// Special handling for unary operators (! and !!) - they can accept non-array arguments
+	if operator == "!" || operator == "!!" {
+		// Accept both array and non-array arguments
+		if arr, ok := args.([]interface{}); ok {
+			if len(arr) != 1 {
+				return ValidationError{
+					Operator: operator,
+					Message:  fmt.Sprintf("%s operator requires exactly 1 argument", operator),
+					Path:     path,
+				}
+			}
+			// Validate the single argument recursively
+			return v.validateRecursive(arr[0], fmt.Sprintf("%s[0]", path))
+		}
+		// Non-array argument is also valid for unary operators
+		return v.validateRecursive(args, path)
+	}
+
 	arr, ok := args.([]interface{})
 	if !ok {
 		return ValidationError{
