@@ -44,11 +44,11 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 			hasError: false,
 		},
 		{
-			name:     "addition with too few arguments",
+			name:     "unary plus (cast to number)",
 			operator: "+",
 			args:     []interface{}{5},
-			expected: "",
-			hasError: true,
+			expected: "CAST(5 AS NUMERIC)",
+			hasError: false,
 		},
 
 		// Subtraction tests
@@ -74,11 +74,11 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 			hasError: false,
 		},
 		{
-			name:     "subtraction with too few arguments",
+			name:     "unary minus (negation)",
 			operator: "-",
 			args:     []interface{}{10},
-			expected: "",
-			hasError: true,
+			expected: "-10",
+			hasError: false,
 		},
 
 		// Multiplication tests

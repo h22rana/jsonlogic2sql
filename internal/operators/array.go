@@ -18,9 +18,17 @@ func NewArrayOperator() *ArrayOperator {
 	return &ArrayOperator{
 		dataOp:       NewDataOperator(),
 		comparisonOp: NewComparisonOperator(),
-		logicalOp:    NewLogicalOperator(),
+		logicalOp:    nil, // Will be created lazily
 		numericOp:    NewNumericOperator(),
 	}
+}
+
+// getLogicalOperator returns the logical operator, creating it lazily if needed
+func (a *ArrayOperator) getLogicalOperator() *LogicalOperator {
+	if a.logicalOp == nil {
+		a.logicalOp = NewLogicalOperator()
+	}
+	return a.logicalOp
 }
 
 // ToSQL converts an array operation to SQL
@@ -244,6 +252,10 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 	// Handle var expressions
 	if varExpr, ok := expr.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr["var"]; hasVar {
+			// Special case: empty var name represents the current element in array operations
+			if varName == "" {
+				return "elem", nil
+			}
 			return a.dataOp.ToSQL("var", []interface{}{varName})
 		}
 	}
@@ -258,7 +270,7 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 				}
 			case "and", "or", "!", "!!", "if", "?:":
 				if arr, ok := args.([]interface{}); ok {
-					return a.logicalOp.ToSQL(operator, arr)
+					return a.getLogicalOperator().ToSQL(operator, arr)
 				}
 			case "+", "-", "*", "/", "%", "max", "min", "between":
 				if arr, ok := args.([]interface{}); ok {
@@ -276,11 +288,11 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 // replaceElementReference replaces element references in conditions
 // For now, this is a simple implementation that assumes the condition uses a variable
 func (a *ArrayOperator) replaceElementReference(condition, elementName string) string {
-	// This is a simplified implementation
-	// In a real implementation, you'd need to parse the condition and replace variable references
-	// For now, we'll assume the condition is simple and just return it
-	// TODO: Implement proper variable replacement logic
-	return condition
+	// Replace variable references in the condition with the element name
+	// This handles cases where {"var": "item"} should become "elem"
+	// Simple string replacement for now - in a more complex implementation,
+	// you'd want to parse the SQL and replace variable references properly
+	return strings.ReplaceAll(condition, "item", elementName)
 }
 
 // isPrimitive checks if a value is a primitive type

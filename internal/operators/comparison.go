@@ -79,6 +79,10 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 		if len(varExpr) == 1 {
 			for operator, args := range varExpr {
 				if operator == "var" {
+					// Special case: empty var name represents the current element in array operations
+					if varName, ok := args.(string); ok && varName == "" {
+						return "elem", nil
+					}
 					return c.dataOp.ToSQL("var", []interface{}{args})
 				}
 			}
@@ -96,12 +100,25 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 		return c.dataOp.valueToSQL(value)
 	}
 
-	// Handle complex expressions by delegating to the parser
-	// This avoids circular dependencies by using the parser's expressionToSQL method
-	if _, ok := value.(map[string]interface{}); ok {
-		// For now, we'll return a placeholder for complex expressions
-		// The parser should handle these cases when they're encountered
-		return "", fmt.Errorf("complex expressions in comparisons should be handled by the parser")
+	// Handle complex expressions (arithmetic, comparisons, etc.)
+	if expr, ok := value.(map[string]interface{}); ok {
+		if len(expr) == 1 {
+			for op, args := range expr {
+				switch op {
+				case "+", "-", "*", "/", "%":
+					// Handle arithmetic operations
+					return c.processArithmeticExpression(op, args)
+				case ">", ">=", "<", "<=", "==", "!=", "===", "!==":
+					// Handle comparison operations
+					return c.processComparisonExpression(op, args)
+				case "max", "min":
+					// Handle min/max operations
+					return c.processMinMaxExpression(op, args)
+				default:
+					return "", fmt.Errorf("unsupported expression type in comparison: %s", op)
+				}
+			}
+		}
 	}
 
 	// Handle arrays (for 'in' operator)
@@ -127,27 +144,46 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}) (s
 		}
 	}
 
-	// The right side should be an array
-	arr, ok := rightValue.([]interface{})
-	if !ok {
-		return "", fmt.Errorf("in operator requires array or variable as second argument")
-	}
-
-	if len(arr) == 0 {
-		return "", fmt.Errorf("in operator array cannot be empty")
-	}
-
-	// Convert array elements to SQL values
-	var values []string
-	for _, item := range arr {
-		valueSQL, err := c.dataOp.valueToSQL(item)
-		if err != nil {
-			return "", fmt.Errorf("invalid array element: %v", err)
+	// Check if right side is an array
+	if arr, ok := rightValue.([]interface{}); ok {
+		if len(arr) == 0 {
+			return "", fmt.Errorf("in operator array cannot be empty")
 		}
-		values = append(values, valueSQL)
+
+		// Convert array elements to SQL values
+		var values []string
+		for _, item := range arr {
+			valueSQL, err := c.dataOp.valueToSQL(item)
+			if err != nil {
+				return "", fmt.Errorf("invalid array element: %v", err)
+			}
+			values = append(values, valueSQL)
+		}
+
+		return fmt.Sprintf("%s IN (%s)", leftSQL, strings.Join(values, ", ")), nil
 	}
 
-	return fmt.Sprintf("%s IN (%s)", leftSQL, strings.Join(values, ", ")), nil
+	// Check if right side is a string (string containment)
+	if str, ok := rightValue.(string); ok {
+		// Use POSITION function for string containment: POSITION(left IN right) > 0
+		rightSQL, err := c.dataOp.valueToSQL(str)
+		if err != nil {
+			return "", fmt.Errorf("invalid string in IN operator: %v", err)
+		}
+		return fmt.Sprintf("POSITION(%s IN %s) > 0", leftSQL, rightSQL), nil
+	}
+
+	// Check if right side is a number (convert to string for containment)
+	if num, ok := rightValue.(float64); ok {
+		// Convert number to string for containment check
+		rightSQL, err := c.dataOp.valueToSQL(num)
+		if err != nil {
+			return "", fmt.Errorf("invalid number in IN operator: %v", err)
+		}
+		return fmt.Sprintf("POSITION(%s IN %s) > 0", leftSQL, rightSQL), nil
+	}
+
+	return "", fmt.Errorf("in operator requires array, variable, string, or number as second argument")
 }
 
 // handleChainedComparison handles chained comparisons like {"<": [10, {"var": "x"}, 20, 30]}
@@ -181,4 +217,119 @@ func (c *ComparisonOperator) handleChainedComparison(operator string, args []int
 	}
 
 	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND ")), nil
+}
+
+// processArithmeticExpression handles arithmetic operations within comparison operations
+func (c *ComparisonOperator) processArithmeticExpression(op string, args interface{}) (string, error) {
+	argsSlice, ok := args.([]interface{})
+	if !ok {
+		return "", fmt.Errorf("arithmetic operation requires array of arguments")
+	}
+
+	if len(argsSlice) < 2 {
+		return "", fmt.Errorf("arithmetic operation requires at least 2 arguments")
+	}
+
+	// Convert arguments to SQL
+	operands := make([]string, len(argsSlice))
+	for i, arg := range argsSlice {
+		operand, err := c.valueToSQL(arg)
+		if err != nil {
+			return "", fmt.Errorf("invalid arithmetic argument %d: %v", i, err)
+		}
+		operands[i] = operand
+	}
+
+	// Generate SQL based on operation
+	switch op {
+	case "+":
+		return fmt.Sprintf("(%s)", strings.Join(operands, " + ")), nil
+	case "-":
+		return fmt.Sprintf("(%s)", strings.Join(operands, " - ")), nil
+	case "*":
+		return fmt.Sprintf("(%s)", strings.Join(operands, " * ")), nil
+	case "/":
+		return fmt.Sprintf("(%s)", strings.Join(operands, " / ")), nil
+	case "%":
+		return fmt.Sprintf("(%s)", strings.Join(operands, " % ")), nil
+	default:
+		return "", fmt.Errorf("unsupported arithmetic operation: %s", op)
+	}
+}
+
+// processComparisonExpression handles comparison operations within comparison operations
+func (c *ComparisonOperator) processComparisonExpression(op string, args interface{}) (string, error) {
+	argsSlice, ok := args.([]interface{})
+	if !ok {
+		return "", fmt.Errorf("comparison operation requires array of arguments")
+	}
+
+	if len(argsSlice) != 2 {
+		return "", fmt.Errorf("comparison operation requires exactly 2 arguments")
+	}
+
+	// Convert arguments to SQL
+	left, err := c.valueToSQL(argsSlice[0])
+	if err != nil {
+		return "", fmt.Errorf("invalid comparison left argument: %v", err)
+	}
+
+	right, err := c.valueToSQL(argsSlice[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid comparison right argument: %v", err)
+	}
+
+	// Generate SQL based on operation
+	switch op {
+	case ">":
+		return fmt.Sprintf("(%s > %s)", left, right), nil
+	case ">=":
+		return fmt.Sprintf("(%s >= %s)", left, right), nil
+	case "<":
+		return fmt.Sprintf("(%s < %s)", left, right), nil
+	case "<=":
+		return fmt.Sprintf("(%s <= %s)", left, right), nil
+	case "==":
+		return fmt.Sprintf("(%s = %s)", left, right), nil
+	case "!=":
+		return fmt.Sprintf("(%s != %s)", left, right), nil
+	case "===":
+		return fmt.Sprintf("(%s = %s)", left, right), nil
+	case "!==":
+		return fmt.Sprintf("(%s <> %s)", left, right), nil
+	default:
+		return "", fmt.Errorf("unsupported comparison operation: %s", op)
+	}
+}
+
+// processMinMaxExpression handles min/max operations within comparison operations
+func (c *ComparisonOperator) processMinMaxExpression(op string, args interface{}) (string, error) {
+	argsSlice, ok := args.([]interface{})
+	if !ok {
+		return "", fmt.Errorf("min/max operation requires array of arguments")
+	}
+
+	if len(argsSlice) < 2 {
+		return "", fmt.Errorf("min/max operation requires at least 2 arguments")
+	}
+
+	// Convert arguments to SQL
+	operands := make([]string, len(argsSlice))
+	for i, arg := range argsSlice {
+		operand, err := c.valueToSQL(arg)
+		if err != nil {
+			return "", fmt.Errorf("invalid min/max argument %d: %v", i, err)
+		}
+		operands[i] = operand
+	}
+
+	// Generate SQL based on operation
+	switch op {
+	case "max":
+		return fmt.Sprintf("GREATEST(%s)", strings.Join(operands, ", ")), nil
+	case "min":
+		return fmt.Sprintf("LEAST(%s)", strings.Join(operands, ", ")), nil
+	default:
+		return "", fmt.Errorf("unsupported min/max operation: %s", op)
+	}
 }

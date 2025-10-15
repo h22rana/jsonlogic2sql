@@ -193,11 +193,11 @@ func TestComparisonOperator_ToSQL(t *testing.T) {
 			hasError: true,
 		},
 		{
-			name:     "in with non-array second arg",
+			name:     "in with string containment",
 			operator: "in",
 			args:     []interface{}{map[string]interface{}{"var": "field"}, "not-array"},
-			expected: "",
-			hasError: true,
+			expected: "POSITION(field IN 'not-array') > 0",
+			hasError: false,
 		},
 
 		// Error cases

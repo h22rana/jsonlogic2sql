@@ -208,6 +208,24 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 					return l.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("logical operator requires array arguments")
+			case "+", "-", "*", "/", "%", "max", "min":
+				if arr, ok := args.([]interface{}); ok {
+					numericOp := NewNumericOperator()
+					return numericOp.ToSQL(operator, arr)
+				}
+				return "", fmt.Errorf("numeric operator requires array arguments")
+			case "cat", "substr":
+				if arr, ok := args.([]interface{}); ok {
+					stringOp := NewStringOperator()
+					return stringOp.ToSQL(operator, arr)
+				}
+				return "", fmt.Errorf("string operator requires array arguments")
+			case "map", "filter", "reduce", "all", "some", "none", "merge":
+				if arr, ok := args.([]interface{}); ok {
+					arrayOp := NewArrayOperator()
+					return arrayOp.ToSQL(operator, arr)
+				}
+				return "", fmt.Errorf("array operator requires array arguments")
 			default:
 				return "", fmt.Errorf("unsupported operator in logical expression: %s", operator)
 			}

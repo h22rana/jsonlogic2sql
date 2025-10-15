@@ -253,7 +253,7 @@ func TestParser_Parse(t *testing.T) {
 			input: map[string]interface{}{
 				"substr": []interface{}{map[string]interface{}{"var": "name"}, 1, 5},
 			},
-			expected: "WHERE SUBSTRING(name, 1 + 1, 5)",
+			expected: "WHERE SUBSTRING(name, 2, 5)",
 			hasError: false,
 		},
 

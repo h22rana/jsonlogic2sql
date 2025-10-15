@@ -494,19 +494,19 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "all elements",
 			input:    `{"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}`,
-			expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (item >= 18))",
+			expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))",
 			hasError: false,
 		},
 		{
 			name:     "some elements",
 			input:    `{"some": [{"var": "statuses"}, {"==": [{"var": "item"}, "active"]}]}`,
-			expected: "WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE item = 'active')",
+			expected: "WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
 			hasError: false,
 		},
 		{
 			name:     "none elements",
 			input:    `{"none": [{"var": "values"}, {"==": [{"var": "item"}, "invalid"]}]}`,
-			expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE item = 'invalid')",
+			expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
 			hasError: false,
 		},
 		{
@@ -526,13 +526,13 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "substring with length",
 			input:    `{"substr": [{"var": "email"}, 1, 10]}`,
-			expected: "WHERE SUBSTRING(email, 1 + 1, 10)",
+			expected: "WHERE SUBSTRING(email, 2, 10)",
 			hasError: false,
 		},
 		{
 			name:     "substring without length",
 			input:    `{"substr": [{"var": "email"}, 5]}`,
-			expected: "WHERE SUBSTRING(email, 5 + 1)",
+			expected: "WHERE SUBSTRING(email, 6)",
 			hasError: false,
 		},
 

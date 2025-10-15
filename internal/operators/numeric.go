@@ -49,8 +49,17 @@ func (n *NumericOperator) ToSQL(operator string, args []interface{}) (string, er
 
 // handleAddition converts + operator to SQL
 func (n *NumericOperator) handleAddition(args []interface{}) (string, error) {
-	if len(args) < 2 {
-		return "", fmt.Errorf("addition requires at least 2 arguments")
+	if len(args) < 1 {
+		return "", fmt.Errorf("addition requires at least 1 argument")
+	}
+
+	// Handle unary plus (cast to number)
+	if len(args) == 1 {
+		operand, err := n.valueToSQL(args[0])
+		if err != nil {
+			return "", fmt.Errorf("invalid unary plus argument: %v", err)
+		}
+		return fmt.Sprintf("CAST(%s AS NUMERIC)", operand), nil
 	}
 
 	operands := make([]string, len(args))
@@ -67,8 +76,17 @@ func (n *NumericOperator) handleAddition(args []interface{}) (string, error) {
 
 // handleSubtraction converts - operator to SQL
 func (n *NumericOperator) handleSubtraction(args []interface{}) (string, error) {
-	if len(args) < 2 {
-		return "", fmt.Errorf("subtraction requires at least 2 arguments")
+	if len(args) < 1 {
+		return "", fmt.Errorf("subtraction requires at least 1 argument")
+	}
+
+	// Handle unary minus (negation)
+	if len(args) == 1 {
+		operand, err := n.valueToSQL(args[0])
+		if err != nil {
+			return "", fmt.Errorf("invalid unary minus argument: %v", err)
+		}
+		return fmt.Sprintf("-%s", operand), nil
 	}
 
 	operands := make([]string, len(args))
@@ -206,13 +224,88 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 		return sqlStr, nil
 	}
 
-	// Handle var expressions
+	// Handle var expressions and complex expressions
 	if expr, ok := value.(map[string]interface{}); ok {
 		if varExpr, hasVar := expr["var"]; hasVar {
 			return n.dataOp.ToSQL("var", []interface{}{varExpr})
+		}
+		// Handle complex expressions by recursively parsing them
+		for operator, args := range expr {
+			if arr, ok := args.([]interface{}); ok {
+				// Recursively process the arguments
+				processedArgs, err := n.processComplexArgs(arr)
+				if err != nil {
+					return "", err
+				}
+				// Generate SQL for the complex expression
+				return n.generateComplexSQL(operator, processedArgs)
+			}
 		}
 	}
 
 	// Handle primitive values
 	return n.dataOp.valueToSQL(value)
+}
+
+// processComplexArgs recursively processes arguments for complex expressions
+func (n *NumericOperator) processComplexArgs(args []interface{}) ([]string, error) {
+	processed := make([]string, len(args))
+
+	for i, arg := range args {
+		sql, err := n.valueToSQL(arg)
+		if err != nil {
+			return nil, err
+		}
+		processed[i] = sql
+	}
+
+	return processed, nil
+}
+
+// generateComplexSQL generates SQL for complex expressions
+func (n *NumericOperator) generateComplexSQL(operator string, args []string) (string, error) {
+	switch operator {
+	case "+":
+		if len(args) < 2 {
+			return "", fmt.Errorf("addition requires at least 2 arguments")
+		}
+		return fmt.Sprintf("(%s)", strings.Join(args, " + ")), nil
+	case "-":
+		if len(args) < 2 {
+			return "", fmt.Errorf("subtraction requires at least 2 arguments")
+		}
+		return fmt.Sprintf("(%s)", strings.Join(args, " - ")), nil
+	case "*":
+		if len(args) < 2 {
+			return "", fmt.Errorf("multiplication requires at least 2 arguments")
+		}
+		return fmt.Sprintf("(%s)", strings.Join(args, " * ")), nil
+	case "/":
+		if len(args) < 2 {
+			return "", fmt.Errorf("division requires at least 2 arguments")
+		}
+		return fmt.Sprintf("(%s)", strings.Join(args, " / ")), nil
+	case "%":
+		if len(args) < 2 {
+			return "", fmt.Errorf("modulo requires at least 2 arguments")
+		}
+		return fmt.Sprintf("(%s)", strings.Join(args, " % ")), nil
+	case "max":
+		if len(args) < 2 {
+			return "", fmt.Errorf("max requires at least 2 arguments")
+		}
+		return fmt.Sprintf("GREATEST(%s)", strings.Join(args, ", ")), nil
+	case "min":
+		if len(args) < 2 {
+			return "", fmt.Errorf("min requires at least 2 arguments")
+		}
+		return fmt.Sprintf("LEAST(%s)", strings.Join(args, ", ")), nil
+	case "between":
+		if len(args) != 3 {
+			return "", fmt.Errorf("between requires exactly 3 arguments")
+		}
+		return fmt.Sprintf("(%s BETWEEN %s AND %s)", args[1], args[0], args[2]), nil
+	default:
+		return "", fmt.Errorf("unsupported operator in complex expression: %s", operator)
+	}
 }
