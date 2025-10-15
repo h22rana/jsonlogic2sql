@@ -289,7 +289,7 @@ func TestValidateComparisonOperators(t *testing.T) {
 		{
 			name:     "too many args",
 			input:    map[string]interface{}{">": []interface{}{5, 3, 1}},
-			expected: ValidationError{Operator: ">", Message: "> operator requires at most 2 arguments, got 3"},
+			expected: nil, // Now supports variable arguments for chained comparisons
 		},
 	}
 
@@ -408,7 +408,7 @@ func TestGetSupportedOperators(t *testing.T) {
 	v := NewValidator()
 	operators := v.GetSupportedOperators()
 
-	expectedCount := 34 // Based on the operators we defined
+	expectedCount := 35 // Based on the operators we defined (added ?: operator)
 	if len(operators) != expectedCount {
 		t.Errorf("Expected %d operators, got %d", expectedCount, len(operators))
 	}

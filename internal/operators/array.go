@@ -10,6 +10,7 @@ type ArrayOperator struct {
 	dataOp       *DataOperator
 	comparisonOp *ComparisonOperator
 	logicalOp    *LogicalOperator
+	numericOp    *NumericOperator
 }
 
 // NewArrayOperator creates a new ArrayOperator instance
@@ -18,6 +19,7 @@ func NewArrayOperator() *ArrayOperator {
 		dataOp:       NewDataOperator(),
 		comparisonOp: NewComparisonOperator(),
 		logicalOp:    NewLogicalOperator(),
+		numericOp:    NewNumericOperator(),
 	}
 }
 
@@ -125,8 +127,15 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression
-	// For now, we'll return a placeholder since all operations are complex in SQL
-	return fmt.Sprintf("ARRAY_ALL(%s, %s)", array, "condition_placeholder"), nil
+	condition, err := a.expressionToSQL(args[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid all condition argument: %v", err)
+	}
+
+	// Use standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE NOT (condition))
+	// Replace 'elem' in condition with the actual element reference
+	conditionWithElem := a.replaceElementReference(condition, "elem")
+	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE NOT (%s))", array, conditionWithElem), nil
 }
 
 // handleSome converts some operator to SQL
@@ -143,8 +152,14 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression
-	// For now, we'll return a placeholder since some operations are complex in SQL
-	return fmt.Sprintf("ARRAY_SOME(%s, %s)", array, "condition_placeholder"), nil
+	condition, err := a.expressionToSQL(args[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid some condition argument: %v", err)
+	}
+
+	// Use standard SQL: EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
+	conditionWithElem := a.replaceElementReference(condition, "elem")
+	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
 }
 
 // handleNone converts none operator to SQL
@@ -161,8 +176,14 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression
-	// For now, we'll return a placeholder since none operations are complex in SQL
-	return fmt.Sprintf("ARRAY_NONE(%s, %s)", array, "condition_placeholder"), nil
+	condition, err := a.expressionToSQL(args[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid none condition argument: %v", err)
+	}
+
+	// Use standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
+	conditionWithElem := a.replaceElementReference(condition, "elem")
+	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
 }
 
 // handleMerge converts merge operator to SQL
@@ -211,4 +232,65 @@ func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
 
 	// Handle primitive values
 	return a.dataOp.valueToSQL(value)
+}
+
+// expressionToSQL converts a JSON Logic expression to SQL
+func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
+	// Handle primitive values
+	if a.isPrimitive(expr) {
+		return a.dataOp.valueToSQL(expr)
+	}
+
+	// Handle var expressions
+	if varExpr, ok := expr.(map[string]interface{}); ok {
+		if varName, hasVar := varExpr["var"]; hasVar {
+			return a.dataOp.ToSQL("var", []interface{}{varName})
+		}
+	}
+
+	// Handle complex expressions by delegating to other operators
+	if exprMap, ok := expr.(map[string]interface{}); ok {
+		for operator, args := range exprMap {
+			switch operator {
+			case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
+				if arr, ok := args.([]interface{}); ok {
+					return a.comparisonOp.ToSQL(operator, arr)
+				}
+			case "and", "or", "!", "!!", "if", "?:":
+				if arr, ok := args.([]interface{}); ok {
+					return a.logicalOp.ToSQL(operator, arr)
+				}
+			case "+", "-", "*", "/", "%", "max", "min", "between":
+				if arr, ok := args.([]interface{}); ok {
+					return a.numericOp.ToSQL(operator, arr)
+				}
+			default:
+				return "", fmt.Errorf("unsupported operator in array expression: %s", operator)
+			}
+		}
+	}
+
+	return "", fmt.Errorf("invalid expression type: %T", expr)
+}
+
+// replaceElementReference replaces element references in conditions
+// For now, this is a simple implementation that assumes the condition uses a variable
+func (a *ArrayOperator) replaceElementReference(condition, elementName string) string {
+	// This is a simplified implementation
+	// In a real implementation, you'd need to parse the condition and replace variable references
+	// For now, we'll assume the condition is simple and just return it
+	// TODO: Implement proper variable replacement logic
+	return condition
+}
+
+// isPrimitive checks if a value is a primitive type
+func (a *ArrayOperator) isPrimitive(value interface{}) bool {
+	switch value.(type) {
+	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+		return true
+	case nil:
+		return true
+	default:
+		return false
+	}
 }

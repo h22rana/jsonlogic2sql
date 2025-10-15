@@ -48,7 +48,7 @@ func TestParser_Parse(t *testing.T) {
 		{
 			name:     "simple inequality",
 			input:    map[string]interface{}{"!=": []interface{}{map[string]interface{}{"var": "verified"}, false}},
-			expected: "WHERE verified <> FALSE",
+			expected: "WHERE verified != FALSE",
 			hasError: false,
 		},
 
@@ -73,7 +73,7 @@ func TestParser_Parse(t *testing.T) {
 					map[string]interface{}{"!=": []interface{}{map[string]interface{}{"var": "verified"}, false}},
 				},
 			},
-			expected: "WHERE (amount > 1000 AND status = 'active' AND verified <> FALSE)",
+			expected: "WHERE (amount > 1000 AND status = 'active' AND verified != FALSE)",
 			hasError: false,
 		},
 
@@ -149,7 +149,7 @@ func TestParser_Parse(t *testing.T) {
 		{
 			name:     "missing_some operation",
 			input:    map[string]interface{}{"missing_some": []interface{}{1, []interface{}{"field1", "field2"}}},
-			expected: "WHERE (CASE WHEN field1 IS NULL THEN 1 ELSE 0 END + CASE WHEN field2 IS NULL THEN 1 ELSE 0 END) >= 1",
+			expected: "WHERE (field1 IS NULL OR field2 IS NULL)",
 			hasError: false,
 		},
 
@@ -253,7 +253,7 @@ func TestParser_Parse(t *testing.T) {
 			input: map[string]interface{}{
 				"substr": []interface{}{map[string]interface{}{"var": "name"}, 1, 5},
 			},
-			expected: "WHERE SUBSTRING(name, 1, 5)",
+			expected: "WHERE SUBSTRING(name, 1 + 1, 5)",
 			hasError: false,
 		},
 

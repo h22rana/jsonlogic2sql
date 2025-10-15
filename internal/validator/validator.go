@@ -243,7 +243,7 @@ func (v *Validator) validateStandardOperator(operator string, args interface{}, 
 		}
 	}
 
-	if spec.MaxArgs > 0 && len(arr) > spec.MaxArgs {
+	if spec.MaxArgs != -1 && len(arr) > spec.MaxArgs {
 		return ValidationError{
 			Operator: operator,
 			Message:  fmt.Sprintf("%s operator requires at most %d arguments, got %d", operator, spec.MaxArgs, len(arr)),
@@ -369,7 +369,7 @@ func getSupportedOperators() map[string]OperatorSpec {
 		"if": {
 			Name:        "if",
 			MinArgs:     2,
-			MaxArgs:     3,
+			MaxArgs:     -1, // Variable number of arguments for nested IF
 			Description: "Conditional expression",
 		},
 		"==": {
@@ -414,6 +414,13 @@ func getSupportedOperators() map[string]OperatorSpec {
 			ArgTypes:    []ArgType{AnyType},
 			Description: "Double negation (boolean conversion)",
 		},
+		"?:": {
+			Name:        "?:",
+			MinArgs:     2,
+			MaxArgs:     -1, // Variable number of arguments for chained ternary
+			ArgTypes:    []ArgType{AnyType, AnyType},
+			Description: "Ternary operator (condition ? true_value : false_value)",
+		},
 		"or": {
 			Name:        "or",
 			MinArgs:     1,
@@ -431,28 +438,28 @@ func getSupportedOperators() map[string]OperatorSpec {
 		">": {
 			Name:        ">",
 			MinArgs:     2,
-			MaxArgs:     2,
+			MaxArgs:     -1, // Variable number of arguments for chained comparisons
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Greater than",
 		},
 		">=": {
 			Name:        ">=",
 			MinArgs:     2,
-			MaxArgs:     2,
+			MaxArgs:     -1, // Variable number of arguments for chained comparisons
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Greater than or equal",
 		},
 		"<": {
 			Name:        "<",
 			MinArgs:     2,
-			MaxArgs:     2,
+			MaxArgs:     -1, // Variable number of arguments for chained comparisons
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Less than",
 		},
 		"<=": {
 			Name:        "<=",
 			MinArgs:     2,
-			MaxArgs:     2,
+			MaxArgs:     -1, // Variable number of arguments for chained comparisons
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Less than or equal",
 		},
@@ -512,7 +519,7 @@ func getSupportedOperators() map[string]OperatorSpec {
 			Name:        "in",
 			MinArgs:     2,
 			MaxArgs:     2,
-			ArgTypes:    []ArgType{AnyType, ArrayType},
+			ArgTypes:    []ArgType{AnyType, AnyType}, // Allow variables on right side
 			Description: "Check if value is in array",
 		},
 		"map": {

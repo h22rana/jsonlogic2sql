@@ -64,7 +64,7 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid substring string argument: %v", err)
 	}
 
-	// Second argument: start position (1-based in SQL)
+	// Second argument: start position (convert from 0-based to 1-based)
 	start, err := s.valueToSQL(args[1])
 	if err != nil {
 		return "", fmt.Errorf("invalid substring start argument: %v", err)
@@ -76,11 +76,13 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("invalid substring length argument: %v", err)
 		}
-		return fmt.Sprintf("SUBSTRING(%s, %s, %s)", str, start, length), nil
+		// Convert 0-based start to 1-based: start + 1
+		return fmt.Sprintf("SUBSTRING(%s, %s + 1, %s)", str, start, length), nil
 	}
 
 	// If no length provided, use SUBSTRING without length parameter
-	return fmt.Sprintf("SUBSTRING(%s, %s)", str, start), nil
+	// Convert 0-based start to 1-based: start + 1
+	return fmt.Sprintf("SUBSTRING(%s, %s + 1)", str, start), nil
 }
 
 // valueToSQL converts a value to SQL, handling var expressions and literals

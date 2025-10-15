@@ -121,7 +121,7 @@ func TestDataOperator_ToSQL(t *testing.T) {
 			name:     "missing_some with single field",
 			operator: "missing_some",
 			args:     []interface{}{1, []interface{}{"field"}},
-			expected: "(CASE WHEN field IS NULL THEN 1 ELSE 0 END) >= 1",
+			expected: "(field IS NULL)",
 			hasError: false,
 		},
 		{
@@ -135,7 +135,7 @@ func TestDataOperator_ToSQL(t *testing.T) {
 			name:     "missing_some with dotted fields",
 			operator: "missing_some",
 			args:     []interface{}{1, []interface{}{"user.name", "user.email"}},
-			expected: "(CASE WHEN user.name IS NULL THEN 1 ELSE 0 END + CASE WHEN user.email IS NULL THEN 1 ELSE 0 END) >= 1",
+			expected: "(user.name IS NULL OR user.email IS NULL)",
 			hasError: false,
 		},
 		{

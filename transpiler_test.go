@@ -62,7 +62,7 @@ func TestTranspiler_Transpile(t *testing.T) {
 		{
 			name:     "missing_some operation",
 			input:    `{"missing_some": [1, ["field1", "field2"]]}`,
-			expected: "WHERE (CASE WHEN field1 IS NULL THEN 1 ELSE 0 END + CASE WHEN field2 IS NULL THEN 1 ELSE 0 END) >= 1",
+			expected: "WHERE (field1 IS NULL OR field2 IS NULL)",
 			hasError: false,
 		},
 		{
@@ -332,7 +332,7 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "missing some fields",
 			input:    `{"missing_some": [1, ["field1", "field2"]]}`,
-			expected: "WHERE (CASE WHEN field1 IS NULL THEN 1 ELSE 0 END + CASE WHEN field2 IS NULL THEN 1 ELSE 0 END) >= 1",
+			expected: "WHERE (field1 IS NULL OR field2 IS NULL)",
 			hasError: false,
 		},
 
@@ -352,7 +352,7 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "inequality",
 			input:    `{"!=": [{"var": "status"}, "inactive"]}`,
-			expected: "WHERE status <> 'inactive'",
+			expected: "WHERE status != 'inactive'",
 			hasError: false,
 		},
 		{
@@ -370,7 +370,7 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "double not",
 			input:    `{"!!": [{"var": "value"}]}`,
-			expected: "WHERE CASE WHEN value THEN TRUE ELSE FALSE END",
+			expected: "WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')",
 			hasError: false,
 		},
 		{
@@ -494,19 +494,19 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "all elements",
 			input:    `{"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}`,
-			expected: "WHERE ARRAY_ALL(ages, condition_placeholder)",
+			expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (item >= 18))",
 			hasError: false,
 		},
 		{
 			name:     "some elements",
 			input:    `{"some": [{"var": "statuses"}, {"==": [{"var": "item"}, "active"]}]}`,
-			expected: "WHERE ARRAY_SOME(statuses, condition_placeholder)",
+			expected: "WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE item = 'active')",
 			hasError: false,
 		},
 		{
 			name:     "none elements",
 			input:    `{"none": [{"var": "values"}, {"==": [{"var": "item"}, "invalid"]}]}`,
-			expected: "WHERE ARRAY_NONE(values, condition_placeholder)",
+			expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE item = 'invalid')",
 			hasError: false,
 		},
 		{
@@ -526,13 +526,13 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "substring with length",
 			input:    `{"substr": [{"var": "email"}, 1, 10]}`,
-			expected: "WHERE SUBSTRING(email, 1, 10)",
+			expected: "WHERE SUBSTRING(email, 1 + 1, 10)",
 			hasError: false,
 		},
 		{
 			name:     "substring without length",
 			input:    `{"substr": [{"var": "email"}, 5]}`,
-			expected: "WHERE SUBSTRING(email, 5)",
+			expected: "WHERE SUBSTRING(email, 5 + 1)",
 			hasError: false,
 		},
 

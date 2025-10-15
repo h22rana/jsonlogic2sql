@@ -93,12 +93,17 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 	// Comparison operators
 	case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
 		if arr, ok := args.([]interface{}); ok {
-			return p.comparisonOp.ToSQL(operator, arr)
+			// Process arguments to handle complex expressions
+			processedArgs, err := p.processArgs(arr)
+			if err != nil {
+				return "", fmt.Errorf("failed to process comparison arguments: %v", err)
+			}
+			return p.comparisonOp.ToSQL(operator, processedArgs)
 		}
 		return "", fmt.Errorf("comparison operator requires array arguments")
 
 	// Logical operators
-	case "and", "or", "!", "!!", "if":
+	case "and", "or", "!", "!!", "if", "?:":
 		if arr, ok := args.([]interface{}); ok {
 			return p.logicalOp.ToSQL(operator, arr)
 		}
@@ -107,7 +112,12 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 	// Numeric operators
 	case "+", "-", "*", "/", "%", "max", "min", "between":
 		if arr, ok := args.([]interface{}); ok {
-			return p.numericOp.ToSQL(operator, arr)
+			// Process arguments to handle complex expressions
+			processedArgs, err := p.processArgs(arr)
+			if err != nil {
+				return "", fmt.Errorf("failed to process numeric arguments: %v", err)
+			}
+			return p.numericOp.ToSQL(operator, processedArgs)
 		}
 		return "", fmt.Errorf("numeric operator requires array arguments")
 
@@ -129,6 +139,39 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 	default:
 		return "", fmt.Errorf("unsupported operator: %s", operator)
 	}
+}
+
+// processArgs recursively processes arguments to handle complex expressions
+func (p *Parser) processArgs(args []interface{}) ([]interface{}, error) {
+	processed := make([]interface{}, len(args))
+
+	for i, arg := range args {
+		// If it's a complex expression, parse it recursively
+		if exprMap, ok := arg.(map[string]interface{}); ok {
+			// Check if it's a complex expression (not just a var)
+			if len(exprMap) == 1 {
+				for operator := range exprMap {
+					if operator != "var" {
+						// It's a complex expression, parse it directly
+						sql, err := p.parseOperator(operator, exprMap[operator])
+						if err != nil {
+							return nil, err
+						}
+						// Store the SQL as a string for the operator to use
+						processed[i] = sql
+						continue
+					}
+				}
+			}
+			// For var expressions, keep as is
+			processed[i] = arg
+			continue
+		}
+		// For simple expressions or primitives, keep as is
+		processed[i] = arg
+	}
+
+	return processed, nil
 }
 
 // isPrimitive checks if a value is a primitive type

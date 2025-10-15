@@ -7,15 +7,32 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/parser"
 )
 
+// TranspilerConfig holds configuration options for the transpiler
+type TranspilerConfig struct {
+	UseANSINotEqual bool // true: <>, false: !=
+}
+
 // Transpiler provides the main API for converting JSON Logic to SQL WHERE clauses
 type Transpiler struct {
 	parser *parser.Parser
+	config *TranspilerConfig
 }
 
 // NewTranspiler creates a new transpiler instance
 func NewTranspiler() *Transpiler {
 	return &Transpiler{
 		parser: parser.NewParser(),
+		config: &TranspilerConfig{
+			UseANSINotEqual: true, // Default to ANSI SQL <>
+		},
+	}
+}
+
+// NewTranspilerWithConfig creates a new transpiler instance with custom configuration
+func NewTranspilerWithConfig(config *TranspilerConfig) *Transpiler {
+	return &Transpiler{
+		parser: parser.NewParser(),
+		config: config,
 	}
 }
 

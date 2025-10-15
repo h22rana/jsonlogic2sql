@@ -200,6 +200,12 @@ func (n *NumericOperator) handleBetween(args []interface{}) (string, error) {
 
 // valueToSQL converts a value to SQL, handling var expressions and literals
 func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
+	// Handle pre-processed SQL strings from the parser
+	if sqlStr, ok := value.(string); ok {
+		// This is a pre-processed SQL string from the parser
+		return sqlStr, nil
+	}
+
 	// Handle var expressions
 	if expr, ok := value.(map[string]interface{}); ok {
 		if varExpr, hasVar := expr["var"]; hasVar {

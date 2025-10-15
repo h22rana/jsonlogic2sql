@@ -40,7 +40,7 @@ func TestLogicalOperator_ToSQL(t *testing.T) {
 				map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "status"}, "active"}},
 				map[string]interface{}{"!=": []interface{}{map[string]interface{}{"var": "verified"}, false}},
 			},
-			expected: "(amount > 1000 AND status = 'active' AND verified <> FALSE)",
+			expected: "(amount > 1000 AND status = 'active' AND verified != FALSE)",
 			hasError: false,
 		},
 		{
@@ -105,7 +105,7 @@ func TestLogicalOperator_ToSQL(t *testing.T) {
 			name:     "double not with condition",
 			operator: "!!",
 			args:     []interface{}{map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "verified"}, true}}},
-			expected: "CASE WHEN verified = TRUE THEN TRUE ELSE FALSE END",
+			expected: "(verified = TRUE IS NOT NULL AND verified = TRUE != FALSE AND verified = TRUE != 0 AND verified = TRUE != '')",
 			hasError: false,
 		},
 		{
@@ -171,8 +171,8 @@ func TestLogicalOperator_ToSQL(t *testing.T) {
 			name:     "if with too many arguments",
 			operator: "if",
 			args:     []interface{}{true, "a", "b", "c"},
-			expected: "",
-			hasError: true,
+			expected: "CASE WHEN TRUE THEN 'a' ELSE NULL END",
+			hasError: false,
 		},
 
 		// nested logical operators

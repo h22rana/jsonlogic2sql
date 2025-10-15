@@ -105,6 +105,21 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 		return "", fmt.Errorf("missing_some operator variable list cannot be empty")
 	}
 
+	// For minCount = 1, use simpler OR syntax
+	if minCount == 1 {
+		var nullConditions []string
+		for _, varName := range varNames {
+			name, ok := varName.(string)
+			if !ok {
+				return "", fmt.Errorf("all variable names in missing_some must be strings")
+			}
+			columnName := d.convertVarName(name)
+			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
+		}
+		return fmt.Sprintf("(%s)", strings.Join(nullConditions, " OR ")), nil
+	}
+
+	// For other minCount values, use the counting approach
 	// Convert variable names to column names and build CASE WHEN conditions to count NULLs
 	var caseStatements []string
 	for _, varName := range varNames {

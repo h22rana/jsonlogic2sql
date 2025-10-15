@@ -32,6 +32,8 @@ func (l *LogicalOperator) ToSQL(operator string, args []interface{}) (string, er
 		return l.handleDoubleNot(args)
 	case "if":
 		return l.handleIf(args)
+	case "?:":
+		return l.handleTernary(args)
 	default:
 		return "", fmt.Errorf("unsupported logical operator: %s", operator)
 	}
@@ -106,16 +108,48 @@ func (l *LogicalOperator) handleDoubleNot(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid !! argument: %v", err)
 	}
 
-	// !! converts to boolean - in SQL this is typically done with CASE WHEN
-	return fmt.Sprintf("CASE WHEN %s THEN TRUE ELSE FALSE END", condition), nil
+	// !! converts to boolean - check for non-null/truthy values
+	// This checks for non-null, non-false, non-zero, non-empty string
+	return fmt.Sprintf("(%s IS NOT NULL AND %s != FALSE AND %s != 0 AND %s != '')",
+		condition, condition, condition, condition), nil
 }
 
 // handleIf converts if operator to SQL
 func (l *LogicalOperator) handleIf(args []interface{}) (string, error) {
-	if len(args) < 2 || len(args) > 3 {
-		return "", fmt.Errorf("if operator requires 2 or 3 arguments")
+	if len(args) < 2 {
+		return "", fmt.Errorf("if requires at least 2 arguments")
 	}
 
+	// Handle nested IF statements (multiple condition/value pairs)
+	if len(args) > 3 && len(args)%2 == 1 {
+		// Odd number of arguments means we have multiple condition/value pairs + final else
+		var caseParts []string
+
+		// Process condition/value pairs
+		for i := 0; i < len(args)-1; i += 2 {
+			condition, err := l.expressionToSQL(args[i])
+			if err != nil {
+				return "", fmt.Errorf("invalid if condition %d: %v", i/2, err)
+			}
+
+			value, err := l.expressionToSQL(args[i+1])
+			if err != nil {
+				return "", fmt.Errorf("invalid if value %d: %v", i/2, err)
+			}
+
+			caseParts = append(caseParts, fmt.Sprintf("WHEN %s THEN %s", condition, value))
+		}
+
+		// Handle final else value
+		elseValue, err := l.expressionToSQL(args[len(args)-1])
+		if err != nil {
+			return "", fmt.Errorf("invalid if else value: %v", err)
+		}
+
+		return fmt.Sprintf("CASE %s ELSE %s END", strings.Join(caseParts, " "), elseValue), nil
+	}
+
+	// Handle simple IF (2-3 arguments)
 	// Convert condition
 	condition, err := l.expressionToSQL(args[0])
 	if err != nil {
@@ -181,6 +215,46 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 	}
 
 	return "", fmt.Errorf("invalid expression type: %T", expr)
+}
+
+// handleTernary converts ternary operator to SQL CASE WHEN statement
+func (l *LogicalOperator) handleTernary(args []interface{}) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("ternary operator requires at least 2 arguments")
+	}
+
+	// For 2 arguments: condition ? true_value : NULL
+	if len(args) == 2 {
+		condition, err := l.expressionToSQL(args[0])
+		if err != nil {
+			return "", fmt.Errorf("invalid condition: %v", err)
+		}
+
+		trueValue, err := l.expressionToSQL(args[1])
+		if err != nil {
+			return "", fmt.Errorf("invalid true value: %v", err)
+		}
+
+		return fmt.Sprintf("CASE WHEN %s THEN %s ELSE NULL END", condition, trueValue), nil
+	}
+
+	// For 3+ arguments: condition ? true_value : false_value
+	condition, err := l.expressionToSQL(args[0])
+	if err != nil {
+		return "", fmt.Errorf("invalid condition: %v", err)
+	}
+
+	trueValue, err := l.expressionToSQL(args[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid true value: %v", err)
+	}
+
+	falseValue, err := l.expressionToSQL(args[2])
+	if err != nil {
+		return "", fmt.Errorf("invalid false value: %v", err)
+	}
+
+	return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, trueValue, falseValue), nil
 }
 
 // isPrimitive checks if a value is a primitive type

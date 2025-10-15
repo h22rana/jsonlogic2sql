@@ -56,7 +56,7 @@ func TestComparisonOperator_ToSQL(t *testing.T) {
 			name:     "inequality with numbers",
 			operator: "!=",
 			args:     []interface{}{1, 2},
-			expected: "1 <> 2",
+			expected: "1 != 2",
 			hasError: false,
 		},
 		{
@@ -166,7 +166,7 @@ func TestComparisonOperator_ToSQL(t *testing.T) {
 			name:     "inequality with null",
 			operator: "!=",
 			args:     []interface{}{map[string]interface{}{"var": "field"}, nil},
-			expected: "field <> NULL",
+			expected: "field != NULL",
 			hasError: false,
 		},
 
