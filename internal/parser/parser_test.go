@@ -142,14 +142,14 @@ func TestParser_Parse(t *testing.T) {
 		// Missing operations
 		{
 			name:     "missing operation",
-			input:    map[string]interface{}{"missing": []interface{}{"field"}},
+			input:    map[string]interface{}{"missing": "field"},
 			expected: "WHERE field IS NULL",
 			hasError: false,
 		},
 		{
 			name:     "missing_some operation",
 			input:    map[string]interface{}{"missing_some": []interface{}{1, []interface{}{"field1", "field2"}}},
-			expected: "WHERE (field1 IS NULL + field2 IS NULL) >= 1",
+			expected: "WHERE (CASE WHEN field1 IS NULL THEN 1 ELSE 0 END + CASE WHEN field2 IS NULL THEN 1 ELSE 0 END) >= 1",
 			hasError: false,
 		},
 
@@ -203,6 +203,76 @@ func TestParser_Parse(t *testing.T) {
 			input:    map[string]interface{}{"and": "not-array"},
 			expected: "",
 			hasError: true,
+		},
+
+		// Numeric operations
+		{
+			name: "addition operation",
+			input: map[string]interface{}{
+				"+": []interface{}{5, 3},
+			},
+			expected: "WHERE (5 + 3)",
+			hasError: false,
+		},
+		{
+			name: "multiplication with var",
+			input: map[string]interface{}{
+				"*": []interface{}{map[string]interface{}{"var": "price"}, 1.2},
+			},
+			expected: "WHERE (price * 1.2)",
+			hasError: false,
+		},
+		{
+			name: "between operation",
+			input: map[string]interface{}{
+				"between": []interface{}{map[string]interface{}{"var": "age"}, 18, 65},
+			},
+			expected: "WHERE (age BETWEEN 18 AND 65)",
+			hasError: false,
+		},
+		{
+			name: "max operation",
+			input: map[string]interface{}{
+				"max": []interface{}{10, 20, 15},
+			},
+			expected: "WHERE GREATEST(10, 20, 15)",
+			hasError: false,
+		},
+
+		// String operations
+		{
+			name: "concatenation operation",
+			input: map[string]interface{}{
+				"cat": []interface{}{"Hello", " ", "World"},
+			},
+			expected: "WHERE CONCAT('Hello', ' ', 'World')",
+			hasError: false,
+		},
+		{
+			name: "substring operation",
+			input: map[string]interface{}{
+				"substr": []interface{}{map[string]interface{}{"var": "name"}, 1, 5},
+			},
+			expected: "WHERE SUBSTRING(name, 1, 5)",
+			hasError: false,
+		},
+
+		// Array operations
+		{
+			name: "merge operation",
+			input: map[string]interface{}{
+				"merge": []interface{}{[]interface{}{1, 2}, []interface{}{3, 4}},
+			},
+			expected: "WHERE ARRAY_CONCAT([1 2], [3 4])",
+			hasError: false,
+		},
+		{
+			name: "map operation",
+			input: map[string]interface{}{
+				"map": []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "item"}, 1}}},
+			},
+			expected: "WHERE ARRAY_MAP(numbers, transformation_placeholder)",
+			hasError: false,
 		},
 	}
 

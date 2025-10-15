@@ -8,7 +8,6 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - **ANSI SQL Output**: Generates standard SQL WHERE clauses compatible with most databases
 - **Strict Validation**: Comprehensive validation with detailed error messages
 - **Library & CLI**: Both programmatic API and interactive REPL
-- **Comprehensive Testing**: 100+ unit tests with >90% coverage
 - **Type Safety**: Full Go type safety with proper error handling
 
 ## Supported Operators
@@ -123,8 +122,43 @@ jsonlogic> :quit
 
 ## Examples
 
-### Simple Comparisons
+### Data Access Operations
 
+#### Variable Access
+```json
+{"var": "name"}
+```
+```sql
+WHERE name
+```
+
+#### Variable with Default Value
+```json
+{"var": ["status", "pending"]}
+```
+```sql
+WHERE COALESCE(status, 'pending')
+```
+
+#### Missing Field Check
+```json
+{"missing": "email"}
+```
+```sql
+WHERE email IS NULL
+```
+
+#### Missing Some Fields
+```json
+{"missing_some": [1, ["field1", "field2"]]}
+```
+```sql
+WHERE (CASE WHEN field1 IS NULL THEN 1 ELSE 0 END + CASE WHEN field2 IS NULL THEN 1 ELSE 0 END) >= 1
+```
+
+### Logic and Boolean Operations
+
+#### Simple Comparison
 ```json
 {">": [{"var": "amount"}, 1000]}
 ```
@@ -132,8 +166,55 @@ jsonlogic> :quit
 WHERE amount > 1000
 ```
 
-### Multiple Conditions (AND)
+#### Equality Comparison
+```json
+{"==": [{"var": "status"}, "active"]}
+```
+```sql
+WHERE status = 'active'
+```
 
+#### Strict Equality
+```json
+{"===": [{"var": "count"}, 5]}
+```
+```sql
+WHERE count = 5
+```
+
+#### Inequality
+```json
+{"!=": [{"var": "status"}, "inactive"]}
+```
+```sql
+WHERE status <> 'inactive'
+```
+
+#### Strict Inequality
+```json
+{"!==": [{"var": "count"}, 0]}
+```
+```sql
+WHERE count <> 0
+```
+
+#### Logical NOT
+```json
+{"!": [{"var": "isDeleted"}]}
+```
+```sql
+WHERE NOT (isDeleted)
+```
+
+#### Double Negation (Boolean Conversion)
+```json
+{"!!": [{"var": "value"}]}
+```
+```sql
+WHERE CASE WHEN value THEN TRUE ELSE FALSE END
+```
+
+#### Logical AND
 ```json
 {"and": [
   {">": [{"var": "amount"}, 5000]},
@@ -144,8 +225,7 @@ WHERE amount > 1000
 WHERE (amount > 5000 AND status = 'pending')
 ```
 
-### Multiple Conditions (OR)
-
+#### Logical OR
 ```json
 {"or": [
   {">=": [{"var": "failedAttempts"}, 5]},
@@ -156,8 +236,211 @@ WHERE (amount > 5000 AND status = 'pending')
 WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 ```
 
-### Nested Conditions
+#### Conditional Expression
+```json
+{"if": [
+  {">": [{"var": "age"}, 18]},
+  "adult",
+  "minor"
+]}
+```
+```sql
+WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
+```
 
+### Numeric Operations
+
+#### Greater Than
+```json
+{">": [{"var": "amount"}, 1000]}
+```
+```sql
+WHERE amount > 1000
+```
+
+#### Greater Than or Equal
+```json
+{">=": [{"var": "score"}, 80]}
+```
+```sql
+WHERE score >= 80
+```
+
+#### Less Than
+```json
+{"<": [{"var": "age"}, 65]}
+```
+```sql
+WHERE age < 65
+```
+
+#### Less Than or Equal
+```json
+{"<=": [{"var": "count"}, 10]}
+```
+```sql
+WHERE count <= 10
+```
+
+#### Between
+```json
+{"between": [{"var": "age"}, 18, 65]}
+```
+```sql
+WHERE (age BETWEEN 18 AND 65)
+```
+
+#### Maximum Value
+```json
+{"max": [{"var": "score1"}, {"var": "score2"}, {"var": "score3"}]}
+```
+```sql
+WHERE GREATEST(score1, score2, score3)
+```
+
+#### Minimum Value
+```json
+{"min": [{"var": "price1"}, {"var": "price2"}]}
+```
+```sql
+WHERE LEAST(price1, price2)
+```
+
+#### Addition
+```json
+{"+": [{"var": "price"}, {"var": "tax"}]}
+```
+```sql
+WHERE (price + tax)
+```
+
+#### Subtraction
+```json
+{"-": [{"var": "total"}, {"var": "discount"}]}
+```
+```sql
+WHERE (total - discount)
+```
+
+#### Multiplication
+```json
+{"*": [{"var": "price"}, 1.2]}
+```
+```sql
+WHERE (price * 1.2)
+```
+
+#### Division
+```json
+{"/": [{"var": "total"}, 2]}
+```
+```sql
+WHERE (total / 2)
+```
+
+#### Modulo
+```json
+{"%": [{"var": "count"}, 3]}
+```
+```sql
+WHERE (count % 3)
+```
+
+### Array Operations
+
+#### In Array
+```json
+{"in": [{"var": "country"}, ["US", "CA", "MX"]]}
+```
+```sql
+WHERE country IN ('US', 'CA', 'MX')
+```
+
+#### Map Array
+```json
+{"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
+```
+```sql
+WHERE ARRAY_MAP(numbers, transformation_placeholder)
+```
+
+#### Filter Array
+```json
+{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+```
+```sql
+WHERE ARRAY_FILTER(scores, condition_placeholder)
+```
+
+#### Reduce Array
+```json
+{"reduce": [{"var": "numbers"}, 0, {"+": [{"var": "accumulator"}, {"var": "item"}]}]}
+```
+```sql
+WHERE ARRAY_REDUCE(numbers, 0, reduction_placeholder)
+```
+
+#### All Elements Satisfy Condition
+```json
+{"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}
+```
+```sql
+WHERE ARRAY_ALL(ages, condition_placeholder)
+```
+
+#### Some Elements Satisfy Condition
+```json
+{"some": [{"var": "statuses"}, {"==": [{"var": "item"}, "active"]}]}
+```
+```sql
+WHERE ARRAY_SOME(statuses, condition_placeholder)
+```
+
+#### No Elements Satisfy Condition
+```json
+{"none": [{"var": "values"}, {"==": [{"var": "item"}, "invalid"]}]}
+```
+```sql
+WHERE ARRAY_NONE(values, condition_placeholder)
+```
+
+#### Merge Arrays
+```json
+{"merge": [{"var": "array1"}, {"var": "array2"}]}
+```
+```sql
+WHERE ARRAY_CONCAT(array1, array2)
+```
+
+### String Operations
+
+#### Concatenate Strings
+```json
+{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
+```
+```sql
+WHERE CONCAT(firstName, ' ', lastName)
+```
+
+#### Substring with Length
+```json
+{"substr": [{"var": "email"}, 1, 10]}
+```
+```sql
+WHERE SUBSTRING(email, 1, 10)
+```
+
+#### Substring without Length
+```json
+{"substr": [{"var": "email"}, 5]}
+```
+```sql
+WHERE SUBSTRING(email, 5)
+```
+
+### Complex Nested Examples
+
+#### Nested Conditions
 ```json
 {"and": [
   {">": [{"var": "transaction.amount"}, 10000]},
@@ -171,33 +454,19 @@ WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7))
 ```
 
-### Conditional Expressions
-
+#### Complex Conditional Logic
 ```json
 {"if": [
-  {">": [{"var": "age"}, 18]},
-  "adult",
-  "minor"
+  {"and": [
+    {">=": [{"var": "age"}, 18]},
+    {"==": [{"var": "country"}, "US"]}
+  ]},
+  "eligible",
+  "ineligible"
 ]}
 ```
 ```sql
-WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
-```
-
-### Missing Field Checks
-
-```json
-{"missing": ["field"]}
-```
-```sql
-WHERE field IS NULL
-```
-
-```json
-{"missing_some": [1, ["field1", "field2"]]}
-```
-```sql
-WHERE (field1 IS NULL + field2 IS NULL) >= 1
+WHERE CASE WHEN (age >= 18 AND country = 'US') THEN 'eligible' ELSE 'ineligible' END
 ```
 
 ## Variable Naming
@@ -229,9 +498,6 @@ make test
 # Build the REPL
 make build
 
-# Run with coverage
-make coverage
-
 # Run linter
 make lint
 ```
@@ -240,8 +506,8 @@ make lint
 
 ```
 jsonlogic2sql/
-├── transpiler.go              # Main public API
-├── transpiler_test.go         # Public API tests
+├── transpiler.go             # Main public API
+├── transpiler_test.go        # Public API tests
 ├── internal/
 │   ├── parser/               # Core parsing logic
 │   ├── operators/            # Operator implementations
@@ -249,7 +515,7 @@ jsonlogic2sql/
 ├── cmd/repl/                 # Interactive REPL
 ├── examples/                 # Usage examples
 ├── Makefile                  # Build automation
-└── README.md                 # This file
+└── README.md
 ```
 
 ### Testing
@@ -317,11 +583,3 @@ if err != nil {
     // Output: Error: parse error: unsupported operator: unsupported
 }
 ```
-
-## Roadmap
-
-- [ ] Additional operator support (numeric, array, string operations)
-- [ ] SQL dialect-specific output (PostgreSQL, MySQL, etc.)
-- [ ] Performance optimizations
-- [ ] Additional validation rules
-- [ ] Documentation improvements

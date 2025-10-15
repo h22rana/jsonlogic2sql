@@ -176,24 +176,9 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 
 // validateMissingOperator validates missing and missing_some operators
 func (v *Validator) validateMissingOperator(operator string, args interface{}, path string) error {
-	arr, ok := args.([]interface{})
-	if !ok {
-		return ValidationError{
-			Operator: operator,
-			Message:  fmt.Sprintf("%s operator requires array argument", operator),
-			Path:     path,
-		}
-	}
-
 	if operator == "missing" {
-		if len(arr) != 1 {
-			return ValidationError{
-				Operator: operator,
-				Message:  "missing operator requires exactly 1 argument",
-				Path:     path,
-			}
-		}
-		if _, ok := arr[0].(string); !ok {
+		// missing takes a string argument directly
+		if _, ok := args.(string); !ok {
 			return ValidationError{
 				Operator: operator,
 				Message:  "missing operator argument must be a string",
@@ -201,6 +186,15 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 			}
 		}
 	} else if operator == "missing_some" {
+		// missing_some takes an array argument
+		arr, ok := args.([]interface{})
+		if !ok {
+			return ValidationError{
+				Operator: operator,
+				Message:  "missing_some operator requires array argument",
+				Path:     path,
+			}
+		}
 		if len(arr) != 2 {
 			return ValidationError{
 				Operator: operator,
@@ -466,7 +460,7 @@ func getSupportedOperators() map[string]OperatorSpec {
 			Name:        "between",
 			MinArgs:     3,
 			MaxArgs:     3,
-			ArgTypes:    []ArgType{NumberType, NumberType, NumberType},
+			ArgTypes:    []ArgType{AnyType, AnyType, AnyType},
 			Description: "Check if value is between two numbers",
 		},
 		"max": {
@@ -509,7 +503,7 @@ func getSupportedOperators() map[string]OperatorSpec {
 			Name:        "%",
 			MinArgs:     2,
 			MaxArgs:     2,
-			ArgTypes:    []ArgType{NumberType, NumberType},
+			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Modulo",
 		},
 

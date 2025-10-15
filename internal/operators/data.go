@@ -105,19 +105,19 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 		return "", fmt.Errorf("missing_some operator variable list cannot be empty")
 	}
 
-	// Convert variable names to column names and build IS NULL conditions
-	var conditions []string
+	// Convert variable names to column names and build CASE WHEN conditions to count NULLs
+	var caseStatements []string
 	for _, varName := range varNames {
 		name, ok := varName.(string)
 		if !ok {
 			return "", fmt.Errorf("all variable names in missing_some must be strings")
 		}
 		columnName := d.convertVarName(name)
-		conditions = append(conditions, fmt.Sprintf("%s IS NULL", columnName))
+		caseStatements = append(caseStatements, fmt.Sprintf("CASE WHEN %s IS NULL THEN 1 ELSE 0 END", columnName))
 	}
 
 	// Count how many are NULL and compare with minimum
-	nullCount := strings.Join(conditions, " + ")
+	nullCount := strings.Join(caseStatements, " + ")
 	return fmt.Sprintf("(%s) >= %d", nullCount, int(minCount)), nil
 }
 

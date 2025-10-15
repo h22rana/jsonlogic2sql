@@ -9,10 +9,13 @@ import (
 
 // Parser parses JSON Logic expressions and converts them to SQL WHERE clauses
 type Parser struct {
-	validator        *validator.Validator
-	dataOp           *operators.DataOperator
-	comparisonOp     *operators.ComparisonOperator
-	logicalOp        *operators.LogicalOperator
+	validator    *validator.Validator
+	dataOp       *operators.DataOperator
+	comparisonOp *operators.ComparisonOperator
+	logicalOp    *operators.LogicalOperator
+	numericOp    *operators.NumericOperator
+	stringOp     *operators.StringOperator
+	arrayOp      *operators.ArrayOperator
 }
 
 // NewParser creates a new parser instance
@@ -22,6 +25,9 @@ func NewParser() *Parser {
 		dataOp:       operators.NewDataOperator(),
 		comparisonOp: operators.NewComparisonOperator(),
 		logicalOp:    operators.NewLogicalOperator(),
+		numericOp:    operators.NewNumericOperator(),
+		stringOp:     operators.NewStringOperator(),
+		arrayOp:      operators.NewArrayOperator(),
 	}
 }
 
@@ -75,11 +81,14 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 	// Data access operators
 	case "var":
 		return p.dataOp.ToSQL(operator, []interface{}{args})
-	case "missing", "missing_some":
+	case "missing":
+		// missing takes a single string argument, wrap it in an array
+		return p.dataOp.ToSQL(operator, []interface{}{args})
+	case "missing_some":
 		if arr, ok := args.([]interface{}); ok {
 			return p.dataOp.ToSQL(operator, arr)
 		}
-		return "", fmt.Errorf("%s operator requires array arguments", operator)
+		return "", fmt.Errorf("missing_some operator requires array arguments")
 
 	// Comparison operators
 	case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
@@ -95,8 +104,28 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 		}
 		return "", fmt.Errorf("logical operator requires array arguments")
 
-	// For now, return error for unsupported operators
-	// TODO: Add support for numeric, array, and string operators
+	// Numeric operators
+	case "+", "-", "*", "/", "%", "max", "min", "between":
+		if arr, ok := args.([]interface{}); ok {
+			return p.numericOp.ToSQL(operator, arr)
+		}
+		return "", fmt.Errorf("numeric operator requires array arguments")
+
+	// String operators
+	case "cat", "substr":
+		if arr, ok := args.([]interface{}); ok {
+			return p.stringOp.ToSQL(operator, arr)
+		}
+		return "", fmt.Errorf("string operator requires array arguments")
+
+	// Array operators
+	case "map", "filter", "reduce", "all", "some", "none", "merge":
+		if arr, ok := args.([]interface{}); ok {
+			return p.arrayOp.ToSQL(operator, arr)
+		}
+		return "", fmt.Errorf("array operator requires array arguments")
+
+	// All operators are now supported
 	default:
 		return "", fmt.Errorf("unsupported operator: %s", operator)
 	}
