@@ -93,7 +93,9 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 	// Only treat as pre-processed if it contains SQL keywords or operators
 	if sqlStr, ok := value.(string); ok {
 		// Check if this looks like a pre-processed SQL string (contains SQL keywords/operators)
-		if strings.Contains(sqlStr, " ") || strings.Contains(sqlStr, "(") || strings.Contains(sqlStr, ")") {
+		// This includes strings with spaces, parentheses, or SQL function names
+		if strings.Contains(sqlStr, " ") || strings.Contains(sqlStr, "(") || strings.Contains(sqlStr, ")") ||
+			strings.Contains(sqlStr, "ARRAY_") || strings.Contains(sqlStr, "EXISTS") || strings.Contains(sqlStr, "SELECT") {
 			return sqlStr, nil
 		}
 		// Otherwise treat as a regular string literal that needs quoting
@@ -101,6 +103,8 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 	}
 
 	// Handle complex expressions (arithmetic, comparisons, etc.)
+	// Note: Array operators (reduce, filter, some, etc.) should be pre-processed by the parser
+	// into SQL strings, but if they're not, we'll return an error here
 	if expr, ok := value.(map[string]interface{}); ok {
 		if len(expr) == 1 {
 			for op, args := range expr {
@@ -108,12 +112,35 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 				case "+", "-", "*", "/", "%":
 					// Handle arithmetic operations
 					return c.processArithmeticExpression(op, args)
-				case ">", ">=", "<", "<=", "==", "!=", "===", "!==":
+				case ">", ">=", "<", "<=", "==", "===", "!=", "!==":
 					// Handle comparison operations
 					return c.processComparisonExpression(op, args)
 				case "max", "min":
 					// Handle min/max operations
 					return c.processMinMaxExpression(op, args)
+				case "if":
+					// Handle if operator - delegate to logical operator
+					if arr, ok := args.([]interface{}); ok {
+						logicalOp := NewLogicalOperator()
+						return logicalOp.ToSQL("if", arr)
+					}
+					return "", fmt.Errorf("if operator requires array arguments")
+				case "reduce", "filter", "map", "some", "all", "none", "merge":
+					// Array operators should have been pre-processed by the parser/logical operator
+					// If we see them here, it means they weren't processed correctly
+					// Try to process them directly as a fallback
+					if arr, ok := args.([]interface{}); ok {
+						arrayOp := NewArrayOperator()
+						return arrayOp.ToSQL(op, arr)
+					}
+					return "", fmt.Errorf("array operator %s requires array arguments", op)
+				case "cat", "substr":
+					// Handle string operators
+					if arr, ok := args.([]interface{}); ok {
+						stringOp := NewStringOperator()
+						return stringOp.ToSQL(op, arr)
+					}
+					return "", fmt.Errorf("string operator %s requires array arguments", op)
 				default:
 					return "", fmt.Errorf("unsupported expression type in comparison: %s", op)
 				}
@@ -291,10 +318,10 @@ func (c *ComparisonOperator) processComparisonExpression(op string, args interfa
 		return fmt.Sprintf("(%s <= %s)", left, right), nil
 	case "==":
 		return fmt.Sprintf("(%s = %s)", left, right), nil
-	case "!=":
-		return fmt.Sprintf("(%s != %s)", left, right), nil
 	case "===":
 		return fmt.Sprintf("(%s = %s)", left, right), nil
+	case "!=":
+		return fmt.Sprintf("(%s != %s)", left, right), nil
 	case "!==":
 		return fmt.Sprintf("(%s <> %s)", left, right), nil
 	default:

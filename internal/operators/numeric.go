@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// NumericOperator handles numeric operations like +, -, *, /, %, max, min, between
+// NumericOperator handles numeric operations like +, -, *, /, %, max, min
 type NumericOperator struct {
 	dataOp       *DataOperator
 	comparisonOp *ComparisonOperator
@@ -40,8 +40,6 @@ func (n *NumericOperator) ToSQL(operator string, args []interface{}) (string, er
 		return n.handleMax(args)
 	case "min":
 		return n.handleMin(args)
-	case "between":
-		return n.handleBetween(args)
 	default:
 		return "", fmt.Errorf("unsupported numeric operator: %s", operator)
 	}
@@ -232,13 +230,40 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 		// Handle complex expressions by recursively parsing them
 		for operator, args := range expr {
 			if arr, ok := args.([]interface{}); ok {
-				// Recursively process the arguments
-				processedArgs, err := n.processComplexArgs(arr)
-				if err != nil {
-					return "", err
+				// Handle different operator types
+				switch operator {
+				case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
+					// Process arguments first to handle nested expressions
+					processedArgs, err := n.processComplexArgsForComparison(arr)
+					if err != nil {
+						return "", err
+					}
+					// Delegate to comparison operator
+					return n.comparisonOp.ToSQL(operator, processedArgs)
+				case "+", "-", "*", "/", "%", "max", "min":
+					// Recursively process the arguments
+					processedArgs, err := n.processComplexArgs(arr)
+					if err != nil {
+						return "", err
+					}
+					// Generate SQL for the complex expression
+					return n.generateComplexSQL(operator, processedArgs)
+				case "if":
+					// Handle if operator - delegate to logical operator
+					logicalOp := NewLogicalOperator()
+					return logicalOp.ToSQL("if", arr)
+				case "and", "or", "!":
+					// Handle logical operators - delegate to logical operator
+					logicalOp := NewLogicalOperator()
+					return logicalOp.ToSQL(operator, arr)
+				case "reduce", "filter", "map", "some", "all", "none", "merge":
+					// Handle array operators - delegate to array operator
+					arrayOp := NewArrayOperator()
+					return arrayOp.ToSQL(operator, arr)
+				default:
+					// For other operators, they should have been pre-processed
+					return "", fmt.Errorf("unsupported operator in numeric expression: %s", operator)
 				}
-				// Generate SQL for the complex expression
-				return n.generateComplexSQL(operator, processedArgs)
 			}
 		}
 	}
@@ -250,6 +275,22 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 // processComplexArgs recursively processes arguments for complex expressions
 func (n *NumericOperator) processComplexArgs(args []interface{}) ([]string, error) {
 	processed := make([]string, len(args))
+
+	for i, arg := range args {
+		sql, err := n.valueToSQL(arg)
+		if err != nil {
+			return nil, err
+		}
+		processed[i] = sql
+	}
+
+	return processed, nil
+}
+
+// processComplexArgsForComparison processes arguments for comparison operators
+// Returns []interface{} instead of []string to match comparison operator's expectations
+func (n *NumericOperator) processComplexArgsForComparison(args []interface{}) ([]interface{}, error) {
+	processed := make([]interface{}, len(args))
 
 	for i, arg := range args {
 		sql, err := n.valueToSQL(arg)
@@ -300,12 +341,9 @@ func (n *NumericOperator) generateComplexSQL(operator string, args []string) (st
 			return "", fmt.Errorf("min requires at least 2 arguments")
 		}
 		return fmt.Sprintf("LEAST(%s)", strings.Join(args, ", ")), nil
-	case "between":
-		if len(args) != 3 {
-			return "", fmt.Errorf("between requires exactly 3 arguments")
-		}
-		return fmt.Sprintf("(%s BETWEEN %s AND %s)", args[1], args[0], args[2]), nil
 	default:
-		return "", fmt.Errorf("unsupported operator in complex expression: %s", operator)
+		// For other operators (array, logical, etc.), they should have been pre-processed
+		// If we see them here, it means they weren't processed correctly
+		return "", fmt.Errorf("unsupported operator in numeric expression: %s", operator)
 	}
 }

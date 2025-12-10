@@ -82,8 +82,13 @@ func (v *Validator) validateRecursive(logic interface{}, path string) error {
 
 // validateArray validates an array expression
 func (v *Validator) validateArray(arr []interface{}, path string) error {
-	// Empty arrays are valid in JSONLogic (they evaluate to falsy)
-	// So we don't reject them
+	// Empty arrays are not allowed in SQL context
+	if len(arr) == 0 {
+		return ValidationError{
+			Message: "array cannot be empty",
+			Path:    path,
+		}
+	}
 
 	for i, item := range arr {
 		itemPath := fmt.Sprintf("%s[%d]", path, i)
@@ -132,13 +137,9 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 	switch operator {
 	case "var":
 		// var can have 1 or 2 arguments: [path] or [path, default]
-		// It can also be a number for array indexing
+		// For SQL context, only string arguments (column names) are supported
 		if _, ok := args.(string); ok {
 			// Single string argument
-			return nil
-		}
-		if v.isNumber(args) {
-			// Single numeric argument for array indexing
 			return nil
 		}
 		if arr, ok := args.([]interface{}); ok {
@@ -149,11 +150,11 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 					Path:     path,
 				}
 			}
-			// First argument can be string or number
-			if !v.isString(arr[0]) && !v.isNumber(arr[0]) {
+			// First argument must be a string (column name)
+			if !v.isString(arr[0]) {
 				return ValidationError{
 					Operator: operator,
-					Message:  "var operator first argument must be a string or number",
+					Message:  "var operator first argument must be a string",
 					Path:     path,
 				}
 			}
@@ -161,7 +162,7 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 		}
 		return ValidationError{
 			Operator: operator,
-			Message:  "var operator requires string, number, or array arguments",
+			Message:  "var operator requires string or array arguments",
 			Path:     path,
 		}
 
@@ -178,26 +179,21 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 // validateMissingOperator validates missing and missing_some operators
 func (v *Validator) validateMissingOperator(operator string, args interface{}, path string) error {
 	if operator == "missing" {
-		// missing takes a string argument directly or an array of strings
-		if _, ok := args.(string); ok {
-			return nil
-		}
-		if arr, ok := args.([]interface{}); ok {
-			// Check that all array elements are strings
-			for _, elem := range arr {
-				if !v.isString(elem) {
-					return ValidationError{
-						Operator: operator,
-						Message:  "all elements in missing operator array must be strings",
-						Path:     path,
-					}
+		// missing takes a single string argument (column name)
+		if varName, ok := args.(string); ok {
+			if varName == "" {
+				return ValidationError{
+					Operator: operator,
+					Message:  "missing operator argument must be a string",
+					Path:     path,
 				}
 			}
 			return nil
 		}
+		// Array arguments are not allowed for missing operator
 		return ValidationError{
 			Operator: operator,
-			Message:  "missing operator argument must be a string or array of strings",
+			Message:  "missing operator argument must be a string",
 			Path:     path,
 		}
 	} else if operator == "missing_some" {
@@ -412,19 +408,19 @@ func getSupportedOperators() map[string]OperatorSpec {
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Equality comparison",
 		},
-		"===": {
-			Name:        "===",
-			MinArgs:     2,
-			MaxArgs:     2,
-			ArgTypes:    []ArgType{AnyType, AnyType},
-			Description: "Strict equality comparison",
-		},
 		"!=": {
 			Name:        "!=",
 			MinArgs:     2,
 			MaxArgs:     2,
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Inequality comparison",
+		},
+		"===": {
+			Name:        "===",
+			MinArgs:     2,
+			MaxArgs:     2,
+			ArgTypes:    []ArgType{AnyType, AnyType},
+			Description: "Strict equality comparison",
 		},
 		"!==": {
 			Name:        "!==",
@@ -446,13 +442,6 @@ func getSupportedOperators() map[string]OperatorSpec {
 			MaxArgs:     1,
 			ArgTypes:    []ArgType{AnyType},
 			Description: "Double negation (boolean conversion)",
-		},
-		"?:": {
-			Name:        "?:",
-			MinArgs:     2,
-			MaxArgs:     -1, // Variable number of arguments for chained ternary
-			ArgTypes:    []ArgType{AnyType, AnyType},
-			Description: "Ternary operator (condition ? true_value : false_value)",
 		},
 		"or": {
 			Name:        "or",
@@ -495,13 +484,6 @@ func getSupportedOperators() map[string]OperatorSpec {
 			MaxArgs:     -1, // Variable number of arguments for chained comparisons
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Less than or equal",
-		},
-		"between": {
-			Name:        "between",
-			MinArgs:     3,
-			MaxArgs:     3,
-			ArgTypes:    []ArgType{AnyType, AnyType, AnyType},
-			Description: "Check if value is between two numbers",
 		},
 		"max": {
 			Name:        "max",

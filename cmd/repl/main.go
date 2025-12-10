@@ -15,26 +15,26 @@ func main() {
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
-	
+
 	for {
 		fmt.Print("jsonlogic> ")
 		if !scanner.Scan() {
 			break
 		}
-		
+
 		input := strings.TrimSpace(scanner.Text())
-		
+
 		// Handle empty input
 		if input == "" {
 			continue
 		}
-		
+
 		// Handle commands
 		if strings.HasPrefix(input, ":") {
 			handleCommand(input)
 			continue
 		}
-		
+
 		// Process JSON Logic input
 		result, err := jsonlogic2sql.Transpile(input)
 		if err != nil {
@@ -44,7 +44,7 @@ func main() {
 		}
 		fmt.Println()
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
 		os.Exit(1)
@@ -56,9 +56,9 @@ func handleCommand(input string) {
 	if len(parts) == 0 {
 		return
 	}
-	
+
 	command := parts[0]
-	
+
 	switch command {
 	case ":help":
 		showHelp()
@@ -134,10 +134,10 @@ func showExamples() {
 			sql:  "WHERE NOT (verified = TRUE)",
 		},
 	}
-	
+
 	fmt.Println("Example JSON Logic expressions:")
 	fmt.Println()
-	
+
 	for i, example := range examples {
 		fmt.Printf("%d. %s\n", i+1, example.name)
 		fmt.Printf("   JSON: %s\n", example.json)

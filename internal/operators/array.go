@@ -217,11 +217,14 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 
 // valueToSQL converts a value to SQL, handling var expressions, arrays, and literals
 func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
-	// Handle var expressions
+	// Handle complex expressions (operators)
 	if expr, ok := value.(map[string]interface{}); ok {
+		// Check if it's a var expression
 		if varExpr, hasVar := expr["var"]; hasVar {
 			return a.dataOp.ToSQL("var", []interface{}{varExpr})
 		}
+		// Otherwise, it's a complex expression - convert it using expressionToSQL
+		return a.expressionToSQL(value)
 	}
 
 	// Handle arrays
@@ -268,13 +271,18 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 				if arr, ok := args.([]interface{}); ok {
 					return a.comparisonOp.ToSQL(operator, arr)
 				}
-			case "and", "or", "!", "!!", "if", "?:":
+			case "and", "or", "!", "!!", "if":
 				if arr, ok := args.([]interface{}); ok {
 					return a.getLogicalOperator().ToSQL(operator, arr)
 				}
-			case "+", "-", "*", "/", "%", "max", "min", "between":
+			case "+", "-", "*", "/", "%", "max", "min":
 				if arr, ok := args.([]interface{}); ok {
 					return a.numericOp.ToSQL(operator, arr)
+				}
+			case "map", "filter", "reduce", "all", "some", "none", "merge":
+				// Handle nested array operators
+				if arr, ok := args.([]interface{}); ok {
+					return a.ToSQL(operator, arr)
 				}
 			default:
 				return "", fmt.Errorf("unsupported operator in array expression: %s", operator)

@@ -39,13 +39,8 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 		return columnName, nil
 	}
 
-	// Handle numeric argument (array indexing)
-	if index, err := d.getNumber(args[0]); err == nil {
-		// In JSONLogic, numeric var refers to the data array at that index
-		// In SQL context, we'll use JSON array indexing
-		// This assumes the data is an array in SQL context
-		return fmt.Sprintf("data[%d]", int(index)), nil
-	}
+	// For SQL context, var operator only accepts string arguments (column names)
+	// Numeric array indexing is not supported
 
 	// Handle array argument [varName, defaultValue]
 	if arr, ok := args[0].([]interface{}); ok {
@@ -70,21 +65,9 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 			return columnName, nil
 		}
 
-		// Check if first element is a number (array index)
-		if index, err := d.getNumber(arr[0]); err == nil {
-			// Handle array indexing with default value
-			if len(arr) > 1 {
-				defaultValue := arr[1]
-				defaultSQL, err := d.valueToSQL(defaultValue)
-				if err != nil {
-					return "", fmt.Errorf("invalid default value: %v", err)
-				}
-				return fmt.Sprintf("COALESCE(data[%d], %s)", int(index), defaultSQL), nil
-			}
-			return fmt.Sprintf("data[%d]", int(index)), nil
-		}
-
-		return "", fmt.Errorf("var operator first argument must be a string or number")
+		// For SQL context, var operator only accepts string arguments (column names)
+		// Numeric array indexing is not supported
+		return "", fmt.Errorf("var operator first argument must be a string")
 	}
 
 	return "", fmt.Errorf("var operator requires string, number, or array argument")

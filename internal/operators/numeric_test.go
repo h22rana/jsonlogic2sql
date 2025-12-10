@@ -231,42 +231,6 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 			hasError: true,
 		},
 
-		// Between tests
-		{
-			name:     "between with three numbers",
-			operator: "between",
-			args:     []interface{}{15, 10, 20},
-			expected: "(15 BETWEEN 10 AND 20)",
-			hasError: false,
-		},
-		{
-			name:     "between with var and numbers",
-			operator: "between",
-			args:     []interface{}{map[string]interface{}{"var": "age"}, 18, 65},
-			expected: "(age BETWEEN 18 AND 65)",
-			hasError: false,
-		},
-		{
-			name:     "between with dotted var",
-			operator: "between",
-			args:     []interface{}{map[string]interface{}{"var": "user.age"}, 18, 65},
-			expected: "(user.age BETWEEN 18 AND 65)",
-			hasError: false,
-		},
-		{
-			name:     "between with wrong argument count",
-			operator: "between",
-			args:     []interface{}{15, 10},
-			expected: "",
-			hasError: true,
-		},
-		{
-			name:     "between with too many arguments",
-			operator: "between",
-			args:     []interface{}{15, 10, 20, 25},
-			expected: "",
-			hasError: true,
-		},
 
 		// Unsupported operator
 		{

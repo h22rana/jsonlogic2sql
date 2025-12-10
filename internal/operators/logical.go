@@ -32,8 +32,6 @@ func (l *LogicalOperator) ToSQL(operator string, args []interface{}) (string, er
 		return l.handleDoubleNot(args)
 	case "if":
 		return l.handleIf(args)
-	case "?:":
-		return l.handleTernary(args)
 	default:
 		return "", fmt.Errorf("unsupported logical operator: %s", operator)
 	}
@@ -207,11 +205,22 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 		for operator, args := range obj {
 			// Handle different operator types
 			switch operator {
-			case "var", "missing", "missing_some":
+			case "var", "missing":
 				return l.dataOp.ToSQL(operator, []interface{}{args})
+			case "missing_some":
+				// missing_some expects args to be an array [minCount, [varNames]]
+				if arr, ok := args.([]interface{}); ok {
+					return l.dataOp.ToSQL(operator, arr)
+				}
+				return "", fmt.Errorf("missing_some operator requires array arguments")
 			case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
 				if arr, ok := args.([]interface{}); ok {
-					return l.comparisonOp.ToSQL(operator, arr)
+					// Process arguments to handle complex nested expressions
+					processedArgs, err := l.processArgs(arr)
+					if err != nil {
+						return "", fmt.Errorf("failed to process comparison arguments: %v", err)
+					}
+					return l.comparisonOp.ToSQL(operator, processedArgs)
 				}
 				return "", fmt.Errorf("comparison operator requires array arguments")
 			case "and", "or", "if":
@@ -291,6 +300,40 @@ func (l *LogicalOperator) handleTernary(args []interface{}) (string, error) {
 	}
 
 	return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, trueValue, falseValue), nil
+}
+
+// processArgs recursively processes arguments to handle complex expressions
+// This converts nested operators (like reduce, filter, etc.) to SQL strings
+func (l *LogicalOperator) processArgs(args []interface{}) ([]interface{}, error) {
+	processed := make([]interface{}, len(args))
+
+	for i, arg := range args {
+		// If it's a complex expression, convert it to SQL
+		if exprMap, ok := arg.(map[string]interface{}); ok {
+			// Check if it's a complex expression (not just a var)
+			if len(exprMap) == 1 {
+				for operator := range exprMap {
+					if operator != "var" {
+						// It's a complex expression, convert it to SQL
+						sql, err := l.expressionToSQL(arg)
+						if err != nil {
+							return nil, fmt.Errorf("invalid argument %d: %v", i, err)
+						}
+						// Store the SQL as a string for the operator to use
+						processed[i] = sql
+						continue
+					}
+				}
+			}
+			// For var expressions, keep as is
+			processed[i] = arg
+			continue
+		}
+		// For simple expressions or primitives, keep as is
+		processed[i] = arg
+	}
+
+	return processed, nil
 }
 
 // isPrimitive checks if a value is a primitive type

@@ -80,11 +80,11 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("invalid substring length argument: %v", err)
 		}
-		return fmt.Sprintf("SUBSTRING(%s, %s, %s)", str, startSQL, length), nil
+		return fmt.Sprintf("SUBSTR(%s, %s, %s)", str, startSQL, length), nil
 	}
 
-	// If no length provided, use SUBSTRING without length parameter
-	return fmt.Sprintf("SUBSTRING(%s, %s)", str, startSQL), nil
+	// If no length provided, use SUBSTR without length parameter
+	return fmt.Sprintf("SUBSTR(%s, %s)", str, startSQL), nil
 }
 
 // valueToSQL converts a value to SQL, handling var expressions, complex expressions, and literals
@@ -104,7 +104,7 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 				case "+", "-", "*", "/", "%":
 					// Handle arithmetic operations
 					return s.processArithmeticExpression(op, args)
-				case ">", ">=", "<", "<=", "==", "!=", "===", "!==":
+				case ">", ">=", "<", "<=", "==", "===", "!=", "!==":
 					// Handle comparison operations
 					return s.processComparisonExpression(op, args)
 				default:
@@ -118,7 +118,7 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 	return s.dataOp.valueToSQL(value)
 }
 
-// convertStartIndex converts a 0-based start index to 1-based for SQL SUBSTRING
+// convertStartIndex converts a 0-based start index to 1-based for SQL SUBSTR
 // Handles numeric literals cleanly (e.g., "0" becomes "1", "5" becomes "6")
 // For complex expressions, adds "+ 1" (e.g., "x" becomes "x + 1")
 func (s *StringOperator) convertStartIndex(start string) string {
@@ -204,10 +204,10 @@ func (s *StringOperator) processComparisonExpression(op string, args interface{}
 		return fmt.Sprintf("(%s <= %s)", left, right), nil
 	case "==":
 		return fmt.Sprintf("(%s = %s)", left, right), nil
-	case "!=":
-		return fmt.Sprintf("(%s != %s)", left, right), nil
 	case "===":
 		return fmt.Sprintf("(%s = %s)", left, right), nil
+	case "!=":
+		return fmt.Sprintf("(%s != %s)", left, right), nil
 	case "!==":
 		return fmt.Sprintf("(%s <> %s)", left, right), nil
 	default:
