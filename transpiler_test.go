@@ -335,12 +335,30 @@ func TestAllOperators(t *testing.T) {
 			expected: "WHERE (field1 IS NULL OR field2 IS NULL)",
 			hasError: false,
 		},
+		{
+			name:     "missing with array of fields",
+			input:    `{"missing": ["email", "phone", "address"]}`,
+			expected: "WHERE (email IS NULL OR phone IS NULL OR address IS NULL)",
+			hasError: false,
+		},
 
 		// Logic and Boolean Operations
 		{
 			name:     "equality",
 			input:    `{"==": [{"var": "status"}, "active"]}`,
 			expected: "WHERE status = 'active'",
+			hasError: false,
+		},
+		{
+			name:     "equality with null",
+			input:    `{"==": [{"var": "deleted_at"}, null]}`,
+			expected: "WHERE deleted_at IS NULL",
+			hasError: false,
+		},
+		{
+			name:     "inequality with null",
+			input:    `{"!=": [{"var": "field"}, null]}`,
+			expected: "WHERE field IS NOT NULL",
 			hasError: false,
 		},
 		{
@@ -765,6 +783,267 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 			name:     "nested missing operations",
 			input:    `{"and": [{"!": [{"missing": "email"}]}, {"missing_some": [1, ["phone", "address"]]}]}`,
 			expected: "WHERE (NOT (email IS NULL) AND (phone IS NULL OR address IS NULL))",
+			hasError: false,
+		},
+		// Additional NULL comparison edge cases
+		{
+			name:     "strict equality with null",
+			input:    `{"===": [{"var": "field"}, null]}`,
+			expected: "WHERE field IS NULL",
+			hasError: false,
+		},
+		{
+			name:     "null on left side of equality",
+			input:    `{"==": [null, {"var": "field"}]}`,
+			expected: "WHERE field IS NULL",
+			hasError: false,
+		},
+		{
+			name:     "null on left side of inequality",
+			input:    `{"!=": [null, {"var": "field"}]}`,
+			expected: "WHERE field IS NOT NULL",
+			hasError: false,
+		},
+		{
+			name:     "both null equality",
+			input:    `{"==": [null, null]}`,
+			expected: "WHERE NULL IS NULL",
+			hasError: false,
+		},
+		{
+			name:     "both null inequality",
+			input:    `{"!=": [null, null]}`,
+			expected: "WHERE NULL IS NOT NULL",
+			hasError: false,
+		},
+		// Missing operator edge cases
+		{
+			name:     "missing with single element array",
+			input:    `{"missing": ["email"]}`,
+			expected: "WHERE (email IS NULL)",
+			hasError: false,
+		},
+		{
+			name:     "missing with two fields",
+			input:    `{"missing": ["email", "phone"]}`,
+			expected: "WHERE (email IS NULL OR phone IS NULL)",
+			hasError: false,
+		},
+		{
+			name:     "NOT with missing array",
+			input:    `{"!": [{"missing": ["email", "phone"]}]}`,
+			expected: "WHERE NOT ((email IS NULL OR phone IS NULL))",
+			hasError: false,
+		},
+		// Complex NULL scenarios
+		{
+			name:     "null comparison in and",
+			input:    `{"and": [{"==": [{"var": "deleted_at"}, null]}, {"!=": [{"var": "archived_at"}, null]}]}`,
+			expected: "WHERE (deleted_at IS NULL AND archived_at IS NOT NULL)",
+			hasError: false,
+		},
+		{
+			name:     "null comparison in or",
+			input:    `{"or": [{"==": [{"var": "field1"}, null]}, {"==": [{"var": "field2"}, null]}]}`,
+			expected: "WHERE (field1 IS NULL OR field2 IS NULL)",
+			hasError: false,
+		},
+		{
+			name:     "null comparison with var default",
+			input:    `{"==": [{"var": ["deleted_at", null]}, null]}`,
+			expected: "WHERE COALESCE(deleted_at, NULL) IS NULL",
+			hasError: false,
+		},
+		// Edge case: NULL in arithmetic (should error or handle gracefully)
+		{
+			name:     "null in arithmetic should handle",
+			input:    `{"+": [{"var": "value"}, null]}`,
+			expected: "WHERE (value + NULL)",
+			hasError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Transpile(tt.input)
+
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("Transpile() expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Transpile() unexpected error = %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("Transpile() = %v, expected %v", result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+// TestAdditionalEdgeCases tests additional edge cases for comprehensive coverage
+func TestAdditionalEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		hasError bool
+	}{
+		// NULL comparison tests
+		{
+			name:     "equal to null uses IS NULL",
+			input:    `{"==": [{"var": "deleted_at"}, null]}`,
+			expected: "WHERE deleted_at IS NULL",
+			hasError: false,
+		},
+		{
+			name:     "not equal to null uses IS NOT NULL",
+			input:    `{"!=": [{"var": "field"}, null]}`,
+			expected: "WHERE field IS NOT NULL",
+			hasError: false,
+		},
+		{
+			name:     "strict not equal to null uses IS NOT NULL",
+			input:    `{"!==": [{"var": "value"}, null]}`,
+			expected: "WHERE value IS NOT NULL",
+			hasError: false,
+		},
+
+		// Missing operator with array
+		{
+			name:     "missing with array of fields",
+			input:    `{"missing": ["email", "phone", "address"]}`,
+			expected: "WHERE (email IS NULL OR phone IS NULL OR address IS NULL)",
+			hasError: false,
+		},
+
+		// Cat with nested if
+		{
+			name:     "cat with nested if expression",
+			input:    `{"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}`,
+			expected: "WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)",
+			hasError: false,
+		},
+
+		// NOT with missing
+		{
+			name:     "NOT with missing",
+			input:    `{"!": [{"missing": "email"}]}`,
+			expected: "WHERE NOT (email IS NULL)",
+			hasError: false,
+		},
+
+		// Double NOT
+		{
+			name:     "double NOT",
+			input:    `{"!": [{"!": [{"var": "flag"}]}]}`,
+			expected: "WHERE NOT (NOT (flag))",
+			hasError: false,
+		},
+
+		// Five-value chained comparison
+		{
+			name:     "five value chained comparison",
+			input:    `{"<": [1, {"var": "a"}, {"var": "b"}, {"var": "c"}, 100]}`,
+			expected: "WHERE (1 < a AND a < b AND b < c AND c < 100)",
+			hasError: false,
+		},
+
+		// Nested max/min
+		{
+			name:     "nested max min",
+			input:    `{"max": [{"min": [{"var": "a"}, {"var": "b"}]}, {"min": [{"var": "c"}, {"var": "d"}]}]}`,
+			expected: "WHERE GREATEST(LEAST(a, b), LEAST(c, d))",
+			hasError: false,
+		},
+
+		// Complex negation
+		{
+			name:     "complex negation",
+			input:    `{"!": [{"or": [{"==": [{"var": "a"}, 1]}, {"==": [{"var": "b"}, 2]}]}]}`,
+			expected: "WHERE NOT ((a = 1 OR b = 2))",
+			hasError: false,
+		},
+
+		// Between pattern
+		{
+			name:     "between pattern with and",
+			input:    `{"and": [{">=": [{"var": "value"}, 10]}, {"<=": [{"var": "value"}, 20]}]}`,
+			expected: "WHERE (value >= 10 AND value <= 20)",
+			hasError: false,
+		},
+
+		// Triple nested if
+		{
+			name:     "triple nested if",
+			input:    `{"if": [{"var": "a"}, {"if": [{"var": "b"}, {"if": [{"var": "c"}, "deep", "c_false"]}, "b_false"]}, "a_false"]}`,
+			expected: "WHERE CASE WHEN a THEN CASE WHEN b THEN CASE WHEN c THEN 'deep' ELSE 'c_false' END ELSE 'b_false' END ELSE 'a_false' END",
+			hasError: false,
+		},
+
+		// Comparison with var default
+		{
+			name:     "comparison with var default",
+			input:    `{"==": [{"var": ["status", "unknown"]}, "active"]}`,
+			expected: "WHERE COALESCE(status, 'unknown') = 'active'",
+			hasError: false,
+		},
+
+		// Nested all with some
+		{
+			name:     "nested all with some",
+			input:    `{"all": [{"var": "groups"}, {"some": [{"var": "members"}, {"==": [{"var": "role"}, "admin"]}]}]}`,
+			expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(groups) AS elem WHERE NOT (EXISTS (SELECT 1 FROM UNNEST(members) AS elem WHERE role = 'admin')))",
+			hasError: false,
+		},
+
+		// If with arithmetic result
+		{
+			name:     "if with arithmetic result",
+			input:    `{"if": [{">": [{"var": "qty"}, 100]}, {"*": [{"var": "price"}, 0.9]}, {"*": [{"var": "price"}, 1.0]}]}`,
+			expected: "WHERE CASE WHEN qty > 100 THEN (price * 0.9) ELSE (price * 1) END",
+			hasError: false,
+		},
+
+		// Empty string in cat
+		{
+			name:     "empty string in cat",
+			input:    `{"cat": ["", {"var": "name"}, ""]}`,
+			expected: "WHERE CONCAT('', name, '')",
+			hasError: false,
+		},
+
+		// Negative index in substr
+		{
+			name:     "negative index in substr",
+			input:    `{"substr": [{"var": "text"}, -5, 3]}`,
+			expected: "WHERE SUBSTR(text, -4, 3)",
+			hasError: false,
+		},
+
+		// In with string (substring check)
+		{
+			name:     "in with string for substring check",
+			input:    `{"in": ["test", "this is a test string"]}`,
+			expected: "WHERE POSITION('test' IN 'this is a test string') > 0",
+			hasError: false,
+		},
+
+		// Or with literals
+		{
+			name:     "or with literals",
+			input:    `{"or": [false, {"var": "flag"}, true]}`,
+			expected: "WHERE (FALSE OR flag OR TRUE)",
+			hasError: false,
+		},
+
+		// And with falsy values
+		{
+			name:     "and with falsy values",
+			input:    `{"and": [false, null, 0, ""]}`,
+			expected: "WHERE (FALSE AND NULL AND 0 AND '')",
 			hasError: false,
 		},
 	}

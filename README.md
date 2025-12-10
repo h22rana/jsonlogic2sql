@@ -13,6 +13,8 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - **Array Indexing**: Support for numeric indices in var operations
 - **Multiple Field Checks**: Missing operator supports both single and multiple fields
 - **Array Boolean Casting**: Proper handling of empty/non-empty array boolean conversion
+- **Proper NULL Handling**: Uses IS NULL/IS NOT NULL for null comparisons (SQL standard)
+- **Nested If in Concatenation**: Full support for conditional expressions inside string concatenation
 - **Strict Validation**: Comprehensive validation with detailed error messages
 - **Library & CLI**: Both programmatic API and interactive REPL
 - **Type Safety**: Full Go type safety with proper error handling
@@ -220,6 +222,22 @@ WHERE status != 'inactive'
 ```
 ```sql
 WHERE count <> 0
+```
+
+#### Equality with NULL (IS NULL)
+```json
+{"==": [{"var": "deleted_at"}, null]}
+```
+```sql
+WHERE deleted_at IS NULL
+```
+
+#### Inequality with NULL (IS NOT NULL)
+```json
+{"!=": [{"var": "field"}, null]}
+```
+```sql
+WHERE field IS NOT NULL
 ```
 
 #### Logical NOT (with array wrapper)
@@ -514,12 +532,20 @@ WHERE ARRAY_CONCAT(array1, array2)
 WHERE CONCAT(firstName, ' ', lastName)
 ```
 
+#### Concatenate with Conditional (Nested If)
+```json
+{"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}
+```
+```sql
+WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
+```
+
 #### Substring with Length
 ```json
 {"substr": [{"var": "email"}, 0, 10]}
 ```
 ```sql
-WHERE SUBSTRING(email, 1, 10)
+WHERE SUBSTR(email, 1, 10)
 ```
 
 #### Substring without Length
@@ -527,7 +553,7 @@ WHERE SUBSTRING(email, 1, 10)
 {"substr": [{"var": "email"}, 4]}
 ```
 ```sql
-WHERE SUBSTRING(email, 5)
+WHERE SUBSTR(email, 5)
 ```
 
 ### Complex Nested Examples
@@ -622,8 +648,8 @@ jsonlogic2sql/
 
 The project includes comprehensive tests with **100% test coverage**:
 
-- **Unit Tests**: Each operator and component is thoroughly tested (52/52 tests passing)
-- **Integration Tests**: End-to-end tests with real JSON Logic examples
+- **Unit Tests**: Each operator and component is thoroughly tested (400+ test cases passing)
+- **Integration Tests**: End-to-end tests with real JSON Logic examples (168 REPL test cases)
 - **Error Cases**: Validation and error handling tests
 - **Edge Cases**: Boundary conditions and special cases
 - **Complex Expressions**: Deeply nested arithmetic and logical operations
@@ -631,6 +657,8 @@ The project includes comprehensive tests with **100% test coverage**:
 - **Unary Operators**: Flexible support for both array and non-array syntax
 - **Array Indexing**: Support for numeric indices in var operations
 - **Multiple Field Checks**: Missing operator supports both single and multiple fields
+- **NULL Handling**: Proper IS NULL/IS NOT NULL for null comparisons
+- **Nested Conditionals**: If expressions inside string concatenation
 
 Run tests with:
 

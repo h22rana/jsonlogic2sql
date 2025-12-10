@@ -47,17 +47,58 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 		return "", fmt.Errorf("invalid right operand: %v", err)
 	}
 
+	// Handle NULL comparisons - use IS NULL/IS NOT NULL instead of = NULL/!= NULL
+	isLeftNull := args[0] == nil || leftSQL == "NULL"
+	isRightNull := args[1] == nil || rightSQL == "NULL"
+
 	switch operator {
 	case "==":
+		// Handle NULL comparisons
+		if isLeftNull && isRightNull {
+			return "NULL IS NULL", nil
+		}
+		if isLeftNull {
+			return fmt.Sprintf("%s IS NULL", rightSQL), nil
+		}
+		if isRightNull {
+			return fmt.Sprintf("%s IS NULL", leftSQL), nil
+		}
 		return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil
 	case "===":
-		// Strict equality - in SQL this is the same as regular equality
-		// but we could add type checking if needed
+		// Strict equality - same as == but handle NULL
+		if isLeftNull && isRightNull {
+			return "NULL IS NULL", nil
+		}
+		if isLeftNull {
+			return fmt.Sprintf("%s IS NULL", rightSQL), nil
+		}
+		if isRightNull {
+			return fmt.Sprintf("%s IS NULL", leftSQL), nil
+		}
 		return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil
 	case "!=":
+		// Handle NULL comparisons
+		if isLeftNull && isRightNull {
+			return "NULL IS NOT NULL", nil
+		}
+		if isLeftNull {
+			return fmt.Sprintf("%s IS NOT NULL", rightSQL), nil
+		}
+		if isRightNull {
+			return fmt.Sprintf("%s IS NOT NULL", leftSQL), nil
+		}
 		return fmt.Sprintf("%s != %s", leftSQL, rightSQL), nil
 	case "!==":
-		// Strict inequality - in SQL this is the same as regular inequality
+		// Strict inequality - same as != but handle NULL
+		if isLeftNull && isRightNull {
+			return "NULL IS NOT NULL", nil
+		}
+		if isLeftNull {
+			return fmt.Sprintf("%s IS NOT NULL", rightSQL), nil
+		}
+		if isRightNull {
+			return fmt.Sprintf("%s IS NOT NULL", leftSQL), nil
+		}
 		return fmt.Sprintf("%s <> %s", leftSQL, rightSQL), nil
 	case ">":
 		return fmt.Sprintf("%s > %s", leftSQL, rightSQL), nil

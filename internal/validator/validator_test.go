@@ -206,24 +206,24 @@ func TestValidateMissingOperator(t *testing.T) {
 		expected error
 	}{
 		{
-			name:     "valid missing",
+			name:     "valid missing with single field",
 			input:    map[string]interface{}{"missing": "field"},
 			expected: nil,
 		},
 		{
-			name:     "missing with non-string args",
+			name:     "valid missing with array of strings",
 			input:    map[string]interface{}{"missing": []interface{}{"field"}},
-			expected: ValidationError{Operator: "missing", Message: "missing operator argument must be a string"},
+			expected: nil,
 		},
 		{
-			name:     "missing with wrong arg count",
+			name:     "valid missing with multiple fields",
 			input:    map[string]interface{}{"missing": []interface{}{"field", "extra"}},
-			expected: ValidationError{Operator: "missing", Message: "missing operator argument must be a string"},
+			expected: nil,
 		},
 		{
-			name:     "missing with non-string arg",
+			name:     "missing with non-string arg in array",
 			input:    map[string]interface{}{"missing": []interface{}{123}},
-			expected: ValidationError{Operator: "missing", Message: "missing operator argument must be a string"},
+			expected: ValidationError{Operator: "missing", Message: "missing operator array elements must be strings"},
 		},
 		{
 			name:     "valid missing_some",

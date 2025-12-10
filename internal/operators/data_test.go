@@ -115,6 +115,27 @@ func TestDataOperator_ToSQL(t *testing.T) {
 			expected: "",
 			hasError: true,
 		},
+		{
+			name:     "missing with array of fields",
+			operator: "missing",
+			args:     []interface{}{[]interface{}{"email", "phone", "address"}},
+			expected: "(email IS NULL OR phone IS NULL OR address IS NULL)",
+			hasError: false,
+		},
+		{
+			name:     "missing with array of single field",
+			operator: "missing",
+			args:     []interface{}{[]interface{}{"email"}},
+			expected: "(email IS NULL)",
+			hasError: false,
+		},
+		{
+			name:     "missing with empty array",
+			operator: "missing",
+			args:     []interface{}{[]interface{}{}},
+			expected: "",
+			hasError: true,
+		},
 
 		// missing_some operator tests
 		{

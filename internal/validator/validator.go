@@ -179,21 +179,42 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 // validateMissingOperator validates missing and missing_some operators
 func (v *Validator) validateMissingOperator(operator string, args interface{}, path string) error {
 	if operator == "missing" {
-		// missing takes a single string argument (column name)
+		// missing takes a single string argument (column name) or array of strings
 		if varName, ok := args.(string); ok {
 			if varName == "" {
 				return ValidationError{
 					Operator: operator,
-					Message:  "missing operator argument must be a string",
+					Message:  "missing operator argument must be a non-empty string",
 					Path:     path,
 				}
 			}
 			return nil
 		}
-		// Array arguments are not allowed for missing operator
+		// Also allow array of strings
+		if varNames, ok := args.([]interface{}); ok {
+			if len(varNames) == 0 {
+				return ValidationError{
+					Operator: operator,
+					Message:  "missing operator array cannot be empty",
+					Path:     path,
+				}
+			}
+			// Validate all elements are strings
+			for i, varName := range varNames {
+				if name, ok := varName.(string); !ok || name == "" {
+					return ValidationError{
+						Operator: operator,
+						Message:  fmt.Sprintf("missing operator array element %d must be a non-empty string", i),
+						Path:     path,
+					}
+				}
+			}
+			return nil
+		}
+		// Neither string nor array
 		return ValidationError{
 			Operator: operator,
-			Message:  "missing operator argument must be a string",
+			Message:  "missing operator argument must be a string or array of strings",
 			Path:     path,
 		}
 	} else if operator == "missing_some" {

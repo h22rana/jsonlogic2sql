@@ -95,7 +95,7 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 			return s.dataOp.ToSQL("var", []interface{}{varExpr})
 		}
 
-		// Handle complex expressions (arithmetic, comparisons, etc.)
+		// Handle complex expressions (arithmetic, comparisons, conditionals, etc.)
 		// This is a simplified approach - in a full implementation, you'd want
 		// to delegate to the appropriate operator based on the expression type
 		if len(expr) == 1 {
@@ -107,6 +107,9 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 				case ">", ">=", "<", "<=", "==", "===", "!=", "!==":
 					// Handle comparison operations
 					return s.processComparisonExpression(op, args)
+				case "if":
+					// Handle conditional expressions
+					return s.processIfExpression(args)
 				default:
 					return "", fmt.Errorf("unsupported expression type in string operation: %s", op)
 				}
@@ -168,6 +171,58 @@ func (s *StringOperator) processArithmeticExpression(op string, args interface{}
 	default:
 		return "", fmt.Errorf("unsupported arithmetic operation: %s", op)
 	}
+}
+
+// processIfExpression handles if/then/else expressions within string operations
+func (s *StringOperator) processIfExpression(args interface{}) (string, error) {
+	argsSlice, ok := args.([]interface{})
+	if !ok {
+		return "", fmt.Errorf("if operation requires array of arguments")
+	}
+
+	if len(argsSlice) < 2 {
+		return "", fmt.Errorf("if operation requires at least 2 arguments (condition, then)")
+	}
+
+	// Build CASE WHEN expression
+	var result strings.Builder
+	result.WriteString("CASE")
+
+	// Process condition/then pairs
+	i := 0
+	for i < len(argsSlice)-1 {
+		// Condition
+		condition, err := s.valueToSQL(argsSlice[i])
+		if err != nil {
+			return "", fmt.Errorf("invalid if condition: %v", err)
+		}
+
+		// Then value
+		thenValue, err := s.valueToSQL(argsSlice[i+1])
+		if err != nil {
+			return "", fmt.Errorf("invalid if then value: %v", err)
+		}
+
+		result.WriteString(fmt.Sprintf(" WHEN %s THEN %s", condition, thenValue))
+		i += 2
+
+		// Check if there are more condition/then pairs or just an else
+		if i < len(argsSlice)-1 {
+			// More pairs to process
+			continue
+		} else if i < len(argsSlice) {
+			// Last element is the else value
+			elseValue, err := s.valueToSQL(argsSlice[i])
+			if err != nil {
+				return "", fmt.Errorf("invalid if else value: %v", err)
+			}
+			result.WriteString(fmt.Sprintf(" ELSE %s", elseValue))
+			break
+		}
+	}
+
+	result.WriteString(" END")
+	return result.String(), nil
 }
 
 // processComparisonExpression handles comparison operations within string operations
