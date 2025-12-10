@@ -5,6 +5,7 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 ## Features
 
 - **Complete JSON Logic Support**: Implements all core JSON Logic operators with 100% test coverage
+- **Custom Operators**: Extensible registry pattern to add custom SQL functions (LENGTH, UPPER, etc.)
 - **ANSI SQL Output**: Generates standard SQL WHERE clauses compatible with most databases
 - **Complex Nested Expressions**: Full support for deeply nested arithmetic and logical operations
 - **Array Operations**: Complete support for all/none/some with proper SQL subqueries
@@ -101,6 +102,130 @@ func main() {
     }
     fmt.Println(sql) // Output: WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 }
+```
+
+### Custom Operators
+
+You can extend the transpiler with custom operators to support additional SQL functions like `LENGTH`, `UPPER`, `LOWER`, etc.
+
+#### Using a Function
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/h22rana/jsonlogic2sql"
+)
+
+func main() {
+    transpiler := jsonlogic2sql.NewTranspiler()
+
+    // Register a custom "length" operator
+    err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+        if len(args) != 1 {
+            return "", fmt.Errorf("length requires exactly 1 argument")
+        }
+        return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+    })
+    if err != nil {
+        panic(err)
+    }
+
+    // Use the custom operator
+    sql, err := transpiler.Transpile(`{"length": [{"var": "email"}]}`)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE LENGTH(email)
+
+    // Use in comparisons
+    sql, err = transpiler.Transpile(`{">": [{"length": [{"var": "email"}]}, 10]}`)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE LENGTH(email) > 10
+}
+```
+
+#### Using a Handler Struct
+
+For more complex operators or those that need state, implement the `OperatorHandler` interface:
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/h22rana/jsonlogic2sql"
+)
+
+// UpperOperator implements the OperatorHandler interface
+type UpperOperator struct{}
+
+func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("upper requires exactly 1 argument")
+    }
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+}
+
+func main() {
+    transpiler := jsonlogic2sql.NewTranspiler()
+
+    // Register the handler
+    err := transpiler.RegisterOperator("upper", &UpperOperator{})
+    if err != nil {
+        panic(err)
+    }
+
+    sql, err := transpiler.Transpile(`{"==": [{"upper": [{"var": "name"}]}, "JOHN"]}`)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE UPPER(name) = 'JOHN'
+}
+```
+
+#### Multiple Custom Operators
+
+You can register multiple custom operators and use them together:
+
+```go
+transpiler := jsonlogic2sql.NewTranspiler()
+
+transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+})
+
+transpiler.RegisterOperatorFunc("upper", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+})
+
+// Use both in a complex expression
+sql, _ := transpiler.Transpile(`{"and": [{">": [{"length": [{"var": "name"}]}, 5]}, {"==": [{"upper": [{"var": "status"}]}, "ACTIVE"]}]}`)
+// Output: WHERE (LENGTH(name) > 5 AND UPPER(status) = 'ACTIVE')
+```
+
+#### Managing Custom Operators
+
+```go
+transpiler := jsonlogic2sql.NewTranspiler()
+
+// Check if an operator is registered
+if transpiler.HasCustomOperator("length") {
+    fmt.Println("length is registered")
+}
+
+// List all custom operators
+operators := transpiler.ListCustomOperators()
+fmt.Println(operators)
+
+// Unregister an operator
+transpiler.UnregisterOperator("length")
+
+// Clear all custom operators
+transpiler.ClearCustomOperators()
 ```
 
 ### Interactive REPL
