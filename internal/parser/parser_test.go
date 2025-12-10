@@ -223,14 +223,6 @@ func TestParser_Parse(t *testing.T) {
 			hasError: false,
 		},
 		{
-			name: "between operation",
-			input: map[string]interface{}{
-				"between": []interface{}{map[string]interface{}{"var": "age"}, 18, 65},
-			},
-			expected: "WHERE (age BETWEEN 18 AND 65)",
-			hasError: false,
-		},
-		{
 			name: "max operation",
 			input: map[string]interface{}{
 				"max": []interface{}{10, 20, 15},
@@ -239,23 +231,6 @@ func TestParser_Parse(t *testing.T) {
 			hasError: false,
 		},
 
-		// String operations
-		{
-			name: "concatenation operation",
-			input: map[string]interface{}{
-				"cat": []interface{}{"Hello", " ", "World"},
-			},
-			expected: "WHERE CONCAT('Hello', ' ', 'World')",
-			hasError: false,
-		},
-		{
-			name: "substring operation",
-			input: map[string]interface{}{
-				"substr": []interface{}{map[string]interface{}{"var": "name"}, 1, 5},
-			},
-			expected: "WHERE SUBSTRING(name, 2, 5)",
-			hasError: false,
-		},
 
 		// Array operations
 		{

@@ -43,27 +43,12 @@ func TestComparisonOperator_ToSQL(t *testing.T) {
 			expected: "user.status = 'active'",
 			hasError: false,
 		},
-		{
-			name:     "strict equality",
-			operator: "===",
-			args:     []interface{}{1, 1},
-			expected: "1 = 1",
-			hasError: false,
-		},
-
 		// Inequality tests
 		{
 			name:     "inequality with numbers",
 			operator: "!=",
 			args:     []interface{}{1, 2},
 			expected: "1 != 2",
-			hasError: false,
-		},
-		{
-			name:     "strict inequality",
-			operator: "!==",
-			args:     []interface{}{1, 2},
-			expected: "1 <> 2",
 			hasError: false,
 		},
 

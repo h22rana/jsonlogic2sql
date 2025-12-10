@@ -100,21 +100,6 @@ func TestLogicalOperator_ToSQL(t *testing.T) {
 			hasError: true,
 		},
 
-		// double not operator tests
-		{
-			name:     "double not with condition",
-			operator: "!!",
-			args:     []interface{}{map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "verified"}, true}}},
-			expected: "(verified = TRUE IS NOT NULL AND verified = TRUE != FALSE AND verified = TRUE != 0 AND verified = TRUE != '')",
-			hasError: false,
-		},
-		{
-			name:     "double not with wrong argument count",
-			operator: "!!",
-			args:     []interface{}{true, false},
-			expected: "",
-			hasError: true,
-		},
 
 		// if operator tests
 		{

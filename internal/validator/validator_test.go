@@ -408,13 +408,13 @@ func TestGetSupportedOperators(t *testing.T) {
 	v := NewValidator()
 	operators := v.GetSupportedOperators()
 
-	expectedCount := 35 // Based on the operators we defined (added ?: operator)
+	expectedCount := 33 // Standard JSON Logic operators (including ===, !==, !!, cat, substr)
 	if len(operators) != expectedCount {
 		t.Errorf("Expected %d operators, got %d", expectedCount, len(operators))
 	}
 
-	// Check for some key operators
-	expectedOps := []string{"var", "==", ">", "and", "or", "in", "cat"}
+	// Check for some key operators (standard JSON Logic)
+	expectedOps := []string{"var", "==", "===", ">", "and", "or", "in", "if", "cat", "substr", "!!"}
 	for _, op := range expectedOps {
 		found := false
 		for _, supported := range operators {
