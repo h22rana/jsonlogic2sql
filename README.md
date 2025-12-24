@@ -50,13 +50,14 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - `merge` - Merge arrays
 
 ### String Operations
+- `in` - Check if substring is in string
 - `cat` - Concatenate strings
 - `substr` - Substring operations
 
 ## Installation
 
 ```bash
-go get github.com/h22rana/jsonlogic2sql
+go get github.com/h22rana/jsonlogic2sql@latest
 ```
 
 ## Usage
@@ -759,6 +760,8 @@ make lint
 jsonlogic2sql/
 ├── transpiler.go             # Main public API
 ├── transpiler_test.go        # Public API tests
+├── operator.go               # Custom operators registry and types
+├── operator_test.go          # Custom operators tests
 ├── internal/
 │   ├── parser/               # Core parsing logic
 │   ├── operators/            # Operator implementations
@@ -814,13 +817,58 @@ Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
 #### `TranspileFromInterface(logic interface{}) (string, error)`
 Converts any JSON Logic interface{} to a SQL WHERE clause.
 
+#### `NewTranspiler() *Transpiler`
+Creates a new transpiler instance with default configuration.
+
+#### `NewTranspilerWithConfig(config *TranspilerConfig) *Transpiler`
+Creates a new transpiler instance with custom configuration.
+
+#### `NewOperatorRegistry() *OperatorRegistry`
+Creates a new empty operator registry for managing custom operators.
+
 ### Types
 
 #### `Transpiler`
 Main transpiler instance with methods:
-- `Transpile(jsonLogic string) (string, error)`
-- `TranspileFromMap(logic map[string]interface{}) (string, error)`
-- `TranspileFromInterface(logic interface{}) (string, error)`
+- `Transpile(jsonLogic string) (string, error)` - Convert JSON string to SQL
+- `TranspileFromMap(logic map[string]interface{}) (string, error)` - Convert map to SQL
+- `TranspileFromInterface(logic interface{}) (string, error)` - Convert interface to SQL
+- `RegisterOperator(name string, handler OperatorHandler) error` - Register custom operator with handler
+- `RegisterOperatorFunc(name string, fn OperatorFunc) error` - Register custom operator with function
+- `UnregisterOperator(name string) bool` - Remove a custom operator
+- `HasCustomOperator(name string) bool` - Check if operator is registered
+- `ListCustomOperators() []string` - List all custom operator names
+- `ClearCustomOperators()` - Remove all custom operators
+
+#### `TranspilerConfig`
+Configuration options for the transpiler:
+- `UseANSINotEqual bool` - When true uses `<>`, when false uses `!=` (default: true)
+
+#### `OperatorFunc`
+Function type for simple custom operator implementations:
+```go
+type OperatorFunc func(operator string, args []interface{}) (string, error)
+```
+
+#### `OperatorHandler`
+Interface for custom operator implementations that need state:
+```go
+type OperatorHandler interface {
+    ToSQL(operator string, args []interface{}) (string, error)
+}
+```
+
+#### `OperatorRegistry`
+Thread-safe registry for managing custom operators with methods:
+- `Register(operatorName string, handler OperatorHandler)` - Add operator handler
+- `RegisterFunc(operatorName string, fn OperatorFunc)` - Add operator function
+- `Unregister(operatorName string) bool` - Remove an operator
+- `Get(operatorName string) (OperatorHandler, bool)` - Get operator handler
+- `Has(operatorName string) bool` - Check if operator exists
+- `List() []string` - List all operator names
+- `Clear()` - Remove all operators
+- `Clone() *OperatorRegistry` - Create a copy of the registry
+- `Merge(other *OperatorRegistry)` - Merge operators from another registry
 
 ## Error Handling
 

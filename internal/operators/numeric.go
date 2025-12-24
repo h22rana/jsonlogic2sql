@@ -241,13 +241,13 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 					// Delegate to comparison operator
 					return n.comparisonOp.ToSQL(operator, processedArgs)
 				case "+", "-", "*", "/", "%", "max", "min":
-					// Recursively process the arguments
-					processedArgs, err := n.processComplexArgs(arr)
-					if err != nil {
-						return "", err
-					}
-					// Generate SQL for the complex expression
-					return n.generateComplexSQL(operator, processedArgs)
+				// Recursively process the arguments
+				processedArgs, err := n.processComplexArgs(arr)
+				if err != nil {
+					return "", err
+				}
+				// Generate SQL for the complex expression
+				return n.generateComplexSQL(operator, processedArgs)
 				case "if":
 					// Handle if operator - delegate to logical operator
 					logicalOp := NewLogicalOperator()
