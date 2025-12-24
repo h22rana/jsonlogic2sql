@@ -2,6 +2,7 @@ package jsonlogic2sql
 
 import (
 	"fmt"
+	"maps"
 	"sync"
 )
 
@@ -151,9 +152,7 @@ func (r *OperatorRegistry) Merge(other *OperatorRegistry) {
 	defer other.mu.RUnlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for name, handler := range other.handlers {
-		r.handlers[name] = handler
-	}
+	maps.Copy(r.handlers, other.handlers)
 }
 
 // validateOperatorName checks if an operator name is valid.
@@ -162,17 +161,16 @@ func validateOperatorName(name string) error {
 	builtInOperators := map[string]bool{
 		// Data access
 		"var": true, "missing": true, "missing_some": true,
-		// Comparison
-		"==": true, "===": true, "!=": true, "!==": true,
-		">": true, ">=": true, "<": true, "<=": true, "in": true,
-		// Logical
-		"and": true, "or": true, "!": true, "!!": true, "if": true, "?:": true,
+		// Logical and Boolean
+		"if": true, "==": true, "===": true, "!=": true, "!==": true,
+		"and": true, "or": true, "!": true, "!!": true,
 		// Numeric
+		">": true, ">=": true, "<": true, "<=": true,
 		"+": true, "-": true, "*": true, "/": true, "%": true,
-		"max": true, "min": true, "between": true,
-		// String
+		"max": true, "min": true,
+		// String and Array
 		"cat": true, "substr": true,
-		// Array
+		"in":  true,
 		"map": true, "filter": true, "reduce": true,
 		"all": true, "some": true, "none": true, "merge": true,
 	}
