@@ -15,6 +15,102 @@ func main() {
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
+	transpiler := jsonlogic2sql.NewTranspiler()
+
+	// startsWith operator is basically column LIKE 'value%'
+	// args[0] is the column name (SQL), args[1] is the pattern (already quoted SQL string)
+	transpiler.RegisterOperatorFunc("startsWith", func(op string, args []interface{}) (string, error) {
+		if len(args) != 2 {
+			return "", fmt.Errorf("startsWith requires exactly 2 arguments")
+		}
+		column := args[0].(string)
+		pattern := args[1].(string)
+		// Extract value from quoted string (e.g., "'T'" -> "T")
+		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
+			pattern = pattern[1 : len(pattern)-1]
+		}
+		return fmt.Sprintf("%s LIKE '%s%%'", column, pattern), nil
+	})
+
+	// endsWith operator is basically column LIKE '%value'
+	transpiler.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
+		if len(args) != 2 {
+			return "", fmt.Errorf("endsWith requires exactly 2 arguments")
+		}
+		column := args[0].(string)
+		pattern := args[1].(string)
+		// Extract value from quoted string
+		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
+			pattern = pattern[1 : len(pattern)-1]
+		}
+		return fmt.Sprintf("%s LIKE '%%%s'", column, pattern), nil
+	})
+
+	// contains operator is basically column LIKE '%value%'
+	// Supports: {"contains": [{"var": "field"}, "T"]} or {"contains": [{"var": "field"}, ["T"]]}
+	// Also handles reversed: {"contains": ["T", {"var": "field"}]}
+	transpiler.RegisterOperatorFunc("contains", func(op string, args []interface{}) (string, error) {
+		if len(args) != 2 {
+			return "", fmt.Errorf("contains requires exactly 2 arguments")
+		}
+
+		var column, pattern string
+		arg0Str, arg0IsStr := args[0].(string)
+		arg1Str, arg1IsStr := args[1].(string)
+
+		// Helper function to extract value from array string representation like "[T]"
+		extractFromArrayString := func(s string) string {
+			// If it's an array representation like "[T]", extract "T"
+			if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+				inner := s[1 : len(s)-1] // Remove "[" and "]"
+				// Remove quotes if present
+				if len(inner) >= 2 && inner[0] == '\'' && inner[len(inner)-1] == '\'' {
+					return inner[1 : len(inner)-1]
+				}
+				return inner
+			}
+			return s
+		}
+
+		if arg0IsStr && arg1IsStr {
+			// Check if either argument is an array string representation
+			if strings.HasPrefix(arg1Str, "[") && strings.HasSuffix(arg1Str, "]") {
+				// Second arg is an array, extract first element
+				column = arg0Str
+				pattern = extractFromArrayString(arg1Str)
+			} else if strings.HasPrefix(arg0Str, "[") && strings.HasSuffix(arg0Str, "]") {
+				// First arg is an array (reversed case)
+				column = arg1Str
+				pattern = extractFromArrayString(arg0Str)
+			} else {
+				// Check if arguments are reversed (pattern first, column second)
+				arg0Quoted := len(arg0Str) >= 2 && arg0Str[0] == '\'' && arg0Str[len(arg0Str)-1] == '\''
+				arg1Quoted := len(arg1Str) >= 2 && arg1Str[0] == '\'' && arg1Str[len(arg1Str)-1] == '\''
+
+				if arg0Quoted && !arg1Quoted {
+					// Reversed: pattern is first, column is second
+					column = arg1Str
+					pattern = arg0Str
+				} else {
+					// Normal: column is first, pattern is second
+					column = arg0Str
+					pattern = arg1Str
+				}
+			}
+		} else {
+			// Default: first is column, second is pattern
+			column = args[0].(string)
+			pattern = args[1].(string)
+			// Check if pattern is an array string and extract value
+			pattern = extractFromArrayString(pattern)
+		}
+
+		// Extract value from quoted string pattern
+		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
+			pattern = pattern[1 : len(pattern)-1]
+		}
+		return fmt.Sprintf("%s LIKE '%%%s%%'", column, pattern), nil
+	})
 
 	for {
 		fmt.Print("jsonlogic> ")
@@ -36,7 +132,7 @@ func main() {
 		}
 
 		// Process JSON Logic input
-		result, err := jsonlogic2sql.Transpile(input)
+		result, err := transpiler.Transpile(input)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 		} else {

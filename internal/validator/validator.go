@@ -18,9 +18,13 @@ func (e ValidationError) Error() string {
 	return fmt.Sprintf("validation error: %s", e.Message)
 }
 
+// CustomOperatorChecker is a function that checks if a custom operator exists
+type CustomOperatorChecker func(operatorName string) bool
+
 // Validator validates JSON Logic expressions
 type Validator struct {
-	supportedOperators map[string]OperatorSpec
+	supportedOperators    map[string]OperatorSpec
+	customOperatorChecker CustomOperatorChecker
 }
 
 // OperatorSpec defines the specification for an operator
@@ -50,6 +54,12 @@ func NewValidator() *Validator {
 	return &Validator{
 		supportedOperators: getSupportedOperators(),
 	}
+}
+
+// SetCustomOperatorChecker sets a function to check for custom operators.
+// When set, unknown operators will be checked against this function before failing validation.
+func (v *Validator) SetCustomOperatorChecker(checker CustomOperatorChecker) {
+	v.customOperatorChecker = checker
 }
 
 // Validate validates a JSON Logic expression
@@ -115,6 +125,11 @@ func (v *Validator) validateObject(obj map[string]interface{}, path string) erro
 		// Check if operator is supported
 		spec, exists := v.supportedOperators[operator]
 		if !exists {
+			// Check if it's a custom operator
+			if v.customOperatorChecker != nil && v.customOperatorChecker(operator) {
+				// Custom operator - skip detailed validation, just validate args recursively
+				return v.validateCustomOperatorArgs(args, operatorPath)
+			}
 			return ValidationError{
 				Operator: operator,
 				Message:  fmt.Sprintf("unsupported operator: %s", operator),
@@ -129,6 +144,24 @@ func (v *Validator) validateObject(obj map[string]interface{}, path string) erro
 	}
 
 	return nil
+}
+
+// validateCustomOperatorArgs validates arguments for custom operators.
+// We don't know the exact argument requirements, so we just validate nested expressions recursively.
+func (v *Validator) validateCustomOperatorArgs(args interface{}, path string) error {
+	// Handle array arguments
+	if arr, ok := args.([]interface{}); ok {
+		for i, arg := range arr {
+			argPath := fmt.Sprintf("%s[%d]", path, i)
+			if err := v.validateRecursive(arg, argPath); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Handle single argument (like {"length": {"var": "x"}})
+	return v.validateRecursive(args, path)
 }
 
 // validateOperatorArgs validates the arguments for a specific operator
@@ -178,7 +211,8 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 
 // validateMissingOperator validates missing and missing_some operators
 func (v *Validator) validateMissingOperator(operator string, args interface{}, path string) error {
-	if operator == "missing" {
+	switch operator {
+	case "missing":
 		// missing takes a single string argument (column name) or array of strings
 		if varName, ok := args.(string); ok {
 			if varName == "" {
@@ -217,7 +251,7 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 			Message:  "missing operator argument must be a string or array of strings",
 			Path:     path,
 		}
-	} else if operator == "missing_some" {
+	case "missing_some":
 		// missing_some takes an array argument
 		arr, ok := args.([]interface{})
 		if !ok {

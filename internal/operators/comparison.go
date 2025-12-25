@@ -203,12 +203,25 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}) (s
 	// Check if right side is a variable expression
 	if varExpr, ok := rightValue.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr["var"]; hasVar {
-			// Handle variable on right side: 'admin' IN roles
+			// Handle variable on right side
+			// According to JSON Logic spec, "in" supports both:
+			// 1. Array membership: {"in": [value, array]} → value IN array
+			// 2. String containment: {"in": [substring, string]} → substring contained in string
+			//
+			// For Spanner and BigQuery:
+			// - If variable is an ARRAY column: 'value' IN column (array membership)
+			// - If variable is a STRING column: STRPOS(column, 'value') > 0 (string containment)
+			//
+			// Since we can't determine the type at transpile time, we use string containment
+			// syntax (STRPOS) which is the more common use case for JSON Logic "in" with variables.
+			// For array membership, users should use: {"in": [{"var": "field"}, [values]]}
 			rightSQL, err := c.dataOp.ToSQL("var", []interface{}{varName})
 			if err != nil {
 				return "", fmt.Errorf("invalid variable in IN operator: %v", err)
 			}
-			return fmt.Sprintf("%s IN %s", leftSQL, rightSQL), nil
+			// Generate: STRPOS(column, 'value') > 0 (string containment for Spanner/BigQuery)
+			// STRPOS works for both Spanner and BigQuery
+			return fmt.Sprintf("STRPOS(%s, %s) > 0", rightSQL, leftSQL), nil
 		}
 	}
 
