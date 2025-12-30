@@ -5,10 +5,10 @@
 # Default target
 all: test build
 
-# Build the REPL binary
+# Build the REPL binary (reproducible build)
 build:
 	@echo "Building REPL binary..."
-	@go build -o bin/repl ./cmd/repl
+	@go build -trimpath -buildvcs=false -ldflags="-buildid=" -o bin/repl ./cmd/repl
 	@echo "Binary built at bin/repl"
 
 # Run all tests

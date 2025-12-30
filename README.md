@@ -6,6 +6,7 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 
 - **Complete JSON Logic Support**: Implements all core JSON Logic operators with 100% test coverage
 - **Custom Operators**: Extensible registry pattern to add custom SQL functions (LENGTH, UPPER, etc.)
+- **Schema/Metadata Validation**: Optional field schema to enforce strict column validation and type-aware SQL generation
 - **ANSI SQL Output**: Generates standard SQL WHERE clauses compatible with most databases
 - **Complex Nested Expressions**: Full support for deeply nested arithmetic and logical operations
 - **Array Operations**: Complete support for all/none/some with proper SQL subqueries
@@ -225,6 +226,122 @@ transpiler.UnregisterOperator("length")
 
 // Clear all custom operators
 transpiler.ClearCustomOperators()
+```
+
+### Schema/Metadata Validation
+
+You can optionally provide a schema to enforce strict field validation. When a schema is set, the transpiler will only accept fields defined in the schema and will return errors for undefined fields.
+
+#### Defining a Schema
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/h22rana/jsonlogic2sql"
+)
+
+func main() {
+    // Create a schema with field definitions
+    schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "order.amount", Type: jsonlogic2sql.FieldTypeInteger},
+        {Name: "order.status", Type: jsonlogic2sql.FieldTypeString},
+        {Name: "user.verified", Type: jsonlogic2sql.FieldTypeBoolean},
+        {Name: "user.roles", Type: jsonlogic2sql.FieldTypeArray},
+    })
+
+    transpiler := jsonlogic2sql.NewTranspiler()
+    transpiler.SetSchema(schema)
+
+    // Valid field - works
+    sql, err := transpiler.Transpile(`{"==": [{"var": "order.status"}, "active"]}`)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE order.status = 'active'
+
+    // Invalid field - returns error
+    _, err = transpiler.Transpile(`{"==": [{"var": "invalid.field"}, "value"]}`)
+    if err != nil {
+        fmt.Println(err) // Output: field 'invalid.field' is not defined in schema
+    }
+}
+```
+
+#### Loading Schema from JSON
+
+```go
+// From JSON string
+schemaJSON := `[
+    {"name": "order.amount", "type": "integer"},
+    {"name": "order.status", "type": "string"},
+    {"name": "user.verified", "type": "boolean"},
+    {"name": "user.roles", "type": "array"}
+]`
+
+schema, err := jsonlogic2sql.NewSchemaFromJSON([]byte(schemaJSON))
+if err != nil {
+    panic(err)
+}
+
+// From JSON file
+schema, err = jsonlogic2sql.NewSchemaFromFile("schema.json")
+if err != nil {
+    panic(err)
+}
+```
+
+#### Type-Aware `in` Operator
+
+When a schema is provided, the `in` operator uses field type information to generate the correct SQL:
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
+    {Name: "description", Type: jsonlogic2sql.FieldTypeString},
+})
+
+transpiler := jsonlogic2sql.NewTranspiler()
+transpiler.SetSchema(schema)
+
+// Array field: uses IN syntax
+sql, _ := transpiler.Transpile(`{"in": ["admin", {"var": "tags"}]}`)
+fmt.Println(sql) // Output: WHERE 'admin' IN tags
+
+// String field: uses STRPOS for containment
+sql, _ = transpiler.Transpile(`{"in": ["hello", {"var": "description"}]}`)
+fmt.Println(sql) // Output: WHERE STRPOS(description, 'hello') > 0
+```
+
+#### Supported Field Types
+
+- `string` - String fields
+- `integer` - Integer fields
+- `number` - Numeric fields (float/decimal)
+- `boolean` - Boolean fields
+- `array` - Array fields
+- `object` - Object/struct fields
+
+#### Schema API Reference
+
+```go
+// Schema creation
+schema := jsonlogic2sql.NewSchema(fields []FieldSchema)
+schema, err := jsonlogic2sql.NewSchemaFromJSON(data []byte)
+schema, err := jsonlogic2sql.NewSchemaFromFile(filepath string)
+
+// Schema methods
+schema.HasField(fieldName string) bool           // Check if field exists
+schema.ValidateField(fieldName string) error     // Validate field existence
+schema.GetFieldType(fieldName string) string     // Get field type as string
+schema.IsArrayType(fieldName string) bool        // Check if field is array type
+schema.IsStringType(fieldName string) bool       // Check if field is string type
+schema.IsNumericType(fieldName string) bool      // Check if field is numeric type
+schema.GetFields() []string                      // Get all field names
+
+// Transpiler schema methods
+transpiler.SetSchema(schema *Schema)             // Set schema for validation
 ```
 
 ### Interactive REPL
@@ -740,9 +857,11 @@ jsonlogic2sql/
 ├── transpiler_test.go        # Public API tests
 ├── operator.go               # Custom operators registry and types
 ├── operator_test.go          # Custom operators tests
+├── schema.go                 # Schema/metadata validation
+├── schema_test.go            # Schema tests
 ├── internal/
 │   ├── parser/               # Core parsing logic
-│   ├── operators/            # Operator implementations
+│   ├── operators/            # Operator implementations (includes schema.go)
 │   └── validator/            # Validation logic
 ├── cmd/repl/                 # Interactive REPL
 ├── examples/                 # Usage examples
@@ -847,6 +966,34 @@ Thread-safe registry for managing custom operators with methods:
 - `Clear()` - Remove all operators
 - `Clone() *OperatorRegistry` - Create a copy of the registry
 - `Merge(other *OperatorRegistry)` - Merge operators from another registry
+
+#### `Schema`
+Schema for field validation with methods:
+- `HasField(fieldName string) bool` - Check if field exists in schema
+- `ValidateField(fieldName string) error` - Validate field existence
+- `GetFieldType(fieldName string) string` - Get field type as string
+- `IsArrayType(fieldName string) bool` - Check if field is array type
+- `IsStringType(fieldName string) bool` - Check if field is string type
+- `IsNumericType(fieldName string) bool` - Check if field is numeric type
+- `GetFields() []string` - Get all field names
+
+#### `FieldSchema`
+Field definition for schema:
+```go
+type FieldSchema struct {
+    Name string    // Field name (e.g., "order.amount")
+    Type FieldType // Field type (e.g., FieldTypeInteger)
+}
+```
+
+#### `FieldType`
+Field type constants:
+- `FieldTypeString` - String field type
+- `FieldTypeInteger` - Integer field type
+- `FieldTypeNumber` - Numeric field type (float/decimal)
+- `FieldTypeBoolean` - Boolean field type
+- `FieldTypeArray` - Array field type
+- `FieldTypeObject` - Object/struct field type
 
 ## Error Handling
 

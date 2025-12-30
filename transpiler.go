@@ -9,7 +9,8 @@ import (
 
 // TranspilerConfig holds configuration options for the transpiler
 type TranspilerConfig struct {
-	UseANSINotEqual bool // true: <>, false: !=
+	UseANSINotEqual bool   // true: <>, false: !=
+	Schema          *Schema // Optional schema for field validation
 }
 
 // Transpiler provides the main API for converting JSON Logic to SQL WHERE clauses
@@ -17,6 +18,16 @@ type Transpiler struct {
 	parser           *parser.Parser
 	config           *TranspilerConfig
 	customOperators  *OperatorRegistry
+	schema           *Schema
+}
+
+// SetSchema sets the schema for field validation and type checking
+// This is optional - if not set, no schema validation will be performed
+func (t *Transpiler) SetSchema(schema *Schema) {
+	t.schema = schema
+	if t.parser != nil {
+		t.parser.SetSchema(schema)
+	}
 }
 
 // NewTranspiler creates a new transpiler instance
@@ -40,6 +51,10 @@ func NewTranspilerWithConfig(config *TranspilerConfig) *Transpiler {
 		customOperators: NewOperatorRegistry(),
 	}
 	t.setupCustomOperatorLookup()
+	// Set schema if provided
+	if config != nil && config.Schema != nil {
+		t.parser.SetSchema(config.Schema)
+	}
 	return t
 }
 

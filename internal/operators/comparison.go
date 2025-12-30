@@ -8,12 +8,21 @@ import (
 // ComparisonOperator handles comparison operators (==, ===, !=, !==, >, >=, <, <=)
 type ComparisonOperator struct {
 	dataOp *DataOperator
+	schema SchemaProvider
 }
 
 // NewComparisonOperator creates a new comparison operator
 func NewComparisonOperator() *ComparisonOperator {
 	return &ComparisonOperator{
 		dataOp: NewDataOperator(),
+	}
+}
+
+// SetSchema sets the schema provider for field validation and type checking
+func (c *ComparisonOperator) SetSchema(schema SchemaProvider) {
+	c.schema = schema
+	if c.dataOp != nil {
+		c.dataOp.SetSchema(schema)
 	}
 }
 
@@ -208,20 +217,44 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}) (s
 			// 1. Array membership: {"in": [value, array]} → value IN array
 			// 2. String containment: {"in": [substring, string]} → substring contained in string
 			//
-			// For Spanner and BigQuery:
+			// Use schema to determine the correct SQL:
 			// - If variable is an ARRAY column: 'value' IN column (array membership)
 			// - If variable is a STRING column: STRPOS(column, 'value') > 0 (string containment)
-			//
-			// Since we can't determine the type at transpile time, we use string containment
-			// syntax (STRPOS) which is the more common use case for JSON Logic "in" with variables.
-			// For array membership, users should use: {"in": [{"var": "field"}, [values]]}
 			rightSQL, err := c.dataOp.ToSQL("var", []interface{}{varName})
 			if err != nil {
 				return "", fmt.Errorf("invalid variable in IN operator: %v", err)
 			}
-			// Generate: STRPOS(column, 'value') > 0 (string containment for Spanner/BigQuery)
-			// STRPOS works for both Spanner and BigQuery
-			return fmt.Sprintf("STRPOS(%s, %s) > 0", rightSQL, leftSQL), nil
+
+			// Extract field name from varName (handle both string and array cases)
+			var fieldName string
+			if nameStr, ok := varName.(string); ok {
+				fieldName = nameStr
+			} else if nameArr, ok := varName.([]interface{}); ok && len(nameArr) > 0 {
+				if nameStr, ok := nameArr[0].(string); ok {
+					fieldName = nameStr
+				}
+			}
+
+			// Use schema to determine type if available
+			if c.schema != nil && fieldName != "" {
+				if c.schema.IsArrayType(fieldName) {
+					// Array type: use array membership syntax
+					return fmt.Sprintf("%s IN %s", leftSQL, rightSQL), nil
+				} else if c.schema.IsStringType(fieldName) {
+					// String type: use string containment syntax
+					return fmt.Sprintf("STRPOS(%s, %s) > 0", rightSQL, leftSQL), nil
+				}
+			}
+
+			// No schema or unknown type: use heuristic based on left side
+			// If left side is a literal (quoted), assume string containment
+			isLeftLiteral := strings.HasPrefix(leftSQL, "'") && strings.HasSuffix(leftSQL, "'")
+			if isLeftLiteral {
+				// Use STRPOS for string containment (default for Spanner/BigQuery)
+				return fmt.Sprintf("STRPOS(%s, %s) > 0", rightSQL, leftSQL), nil
+			}
+			// Otherwise, assume array membership
+			return fmt.Sprintf("%s IN %s", leftSQL, rightSQL), nil
 		}
 	}
 
