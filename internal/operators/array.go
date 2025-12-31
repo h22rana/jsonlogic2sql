@@ -11,6 +11,7 @@ type ArrayOperator struct {
 	comparisonOp *ComparisonOperator
 	logicalOp    *LogicalOperator
 	numericOp    *NumericOperator
+	schema       SchemaProvider
 }
 
 // NewArrayOperator creates a new ArrayOperator instance
@@ -23,12 +24,81 @@ func NewArrayOperator() *ArrayOperator {
 	}
 }
 
+// SetSchema sets the schema provider for type validation
+func (a *ArrayOperator) SetSchema(schema SchemaProvider) {
+	a.schema = schema
+	if a.dataOp != nil {
+		a.dataOp.SetSchema(schema)
+	}
+	if a.comparisonOp != nil {
+		a.comparisonOp.SetSchema(schema)
+	}
+	if a.numericOp != nil {
+		a.numericOp.SetSchema(schema)
+	}
+	// logicalOp is created lazily, schema will be set when it's created
+}
+
 // getLogicalOperator returns the logical operator, creating it lazily if needed
 func (a *ArrayOperator) getLogicalOperator() *LogicalOperator {
 	if a.logicalOp == nil {
 		a.logicalOp = NewLogicalOperator()
+		if a.schema != nil {
+			a.logicalOp.SetSchema(a.schema)
+		}
 	}
 	return a.logicalOp
+}
+
+// validateArrayOperand checks if a field used in an array operation is of array type
+func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
+	if a.schema == nil {
+		return nil // No schema, no validation
+	}
+
+	// If it's a literal array, it's valid
+	if _, ok := value.([]interface{}); ok {
+		return nil
+	}
+
+	fieldName := a.extractFieldNameFromValue(value)
+	if fieldName == "" {
+		return nil // Can't determine field name, skip validation
+	}
+
+	fieldType := a.schema.GetFieldType(fieldName)
+	if fieldType == "" {
+		return nil // Field not in schema, skip validation (existence checked by DataOperator)
+	}
+
+	if !a.schema.IsArrayType(fieldName) {
+		return fmt.Errorf("array operation on non-array field '%s' (type: %s)", fieldName, fieldType)
+	}
+
+	return nil
+}
+
+// extractFieldNameFromValue extracts field name from a value that might be a var expression
+func (a *ArrayOperator) extractFieldNameFromValue(value interface{}) string {
+	if varExpr, ok := value.(map[string]interface{}); ok {
+		if varName, hasVar := varExpr["var"]; hasVar {
+			return a.extractFieldName(varName)
+		}
+	}
+	return ""
+}
+
+// extractFieldName extracts the field name from a var argument
+func (a *ArrayOperator) extractFieldName(varName interface{}) string {
+	if nameStr, ok := varName.(string); ok {
+		return nameStr
+	}
+	if nameArr, ok := varName.([]interface{}); ok && len(nameArr) > 0 {
+		if nameStr, ok := nameArr[0].(string); ok {
+			return nameStr
+		}
+	}
+	return ""
 }
 
 // ToSQL converts an array operation to SQL
@@ -65,6 +135,11 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 		return "", fmt.Errorf("map requires exactly 2 arguments")
 	}
 
+	// Validate that first argument is an array type
+	if err := a.validateArrayOperand(args[0]); err != nil {
+		return "", err
+	}
+
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
@@ -85,6 +160,11 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 		return "", fmt.Errorf("filter requires exactly 2 arguments")
 	}
 
+	// Validate that first argument is an array type
+	if err := a.validateArrayOperand(args[0]); err != nil {
+		return "", err
+	}
+
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
@@ -102,6 +182,11 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	if len(args) != 3 {
 		return "", fmt.Errorf("reduce requires exactly 3 arguments")
+	}
+
+	// Validate that first argument is an array type
+	if err := a.validateArrayOperand(args[0]); err != nil {
+		return "", err
 	}
 
 	// First argument: array
@@ -126,6 +211,11 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("all requires exactly 2 arguments")
+	}
+
+	// Validate that first argument is an array type
+	if err := a.validateArrayOperand(args[0]); err != nil {
+		return "", err
 	}
 
 	// First argument: array
@@ -153,6 +243,11 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 		return "", fmt.Errorf("some requires exactly 2 arguments")
 	}
 
+	// Validate that first argument is an array type
+	if err := a.validateArrayOperand(args[0]); err != nil {
+		return "", err
+	}
+
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
@@ -177,6 +272,11 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 		return "", fmt.Errorf("none requires exactly 2 arguments")
 	}
 
+	// Validate that first argument is an array type
+	if err := a.validateArrayOperand(args[0]); err != nil {
+		return "", err
+	}
+
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
@@ -199,6 +299,13 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("merge requires at least 1 argument")
+	}
+
+	// Validate that all arguments are array types
+	for _, arg := range args {
+		if err := a.validateArrayOperand(arg); err != nil {
+			return "", err
+		}
 	}
 
 	// Convert all array arguments to SQL

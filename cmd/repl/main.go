@@ -14,15 +14,9 @@ func main() {
 	fmt.Println("Type ':help' for commands, ':quit' to exit")
 	fmt.Println()
 
-	schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
-		{Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
-		{Name: "status", Type: jsonlogic2sql.FieldTypeString},
-	})
-
 	scanner := bufio.NewScanner(os.Stdin)
 	transpiler := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
 		UseANSINotEqual: true,
-		Schema:          schema,
 	})
 
 	// startsWith operator is basically column LIKE 'value%'

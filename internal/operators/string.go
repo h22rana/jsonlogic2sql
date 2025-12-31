@@ -9,6 +9,7 @@ import (
 // StringOperator handles string operations like cat, substr
 type StringOperator struct {
 	dataOp *DataOperator
+	schema SchemaProvider
 }
 
 // NewStringOperator creates a new StringOperator instance
@@ -16,6 +17,68 @@ func NewStringOperator() *StringOperator {
 	return &StringOperator{
 		dataOp: NewDataOperator(),
 	}
+}
+
+// SetSchema sets the schema provider for type validation
+func (s *StringOperator) SetSchema(schema SchemaProvider) {
+	s.schema = schema
+	if s.dataOp != nil {
+		s.dataOp.SetSchema(schema)
+	}
+}
+
+// validateStringOperand checks if a field used in a string operation is of compatible type
+// Allows string types and numeric types (implicit conversion is common)
+// Rejects array and object types
+func (s *StringOperator) validateStringOperand(value interface{}) error {
+	if s.schema == nil {
+		return nil // No schema, no validation
+	}
+
+	fieldName := s.extractFieldNameFromValue(value)
+	if fieldName == "" {
+		return nil // Can't determine field name, skip validation
+	}
+
+	fieldType := s.schema.GetFieldType(fieldName)
+	if fieldType == "" {
+		return nil // Field not in schema, skip validation (existence checked by DataOperator)
+	}
+
+	// Allow string and numeric types (implicit conversion is common)
+	if s.schema.IsStringType(fieldName) || s.schema.IsNumericType(fieldName) {
+		return nil
+	}
+
+	// Disallow array and object types
+	if s.schema.IsArrayType(fieldName) || fieldType == "object" {
+		return fmt.Errorf("string operation on incompatible field '%s' (type: %s)", fieldName, fieldType)
+	}
+
+	return nil
+}
+
+// extractFieldNameFromValue extracts field name from a value that might be a var expression
+func (s *StringOperator) extractFieldNameFromValue(value interface{}) string {
+	if varExpr, ok := value.(map[string]interface{}); ok {
+		if varName, hasVar := varExpr["var"]; hasVar {
+			return s.extractFieldName(varName)
+		}
+	}
+	return ""
+}
+
+// extractFieldName extracts the field name from a var argument
+func (s *StringOperator) extractFieldName(varName interface{}) string {
+	if nameStr, ok := varName.(string); ok {
+		return nameStr
+	}
+	if nameArr, ok := varName.([]interface{}); ok && len(nameArr) > 0 {
+		if nameStr, ok := nameArr[0].(string); ok {
+			return nameStr
+		}
+	}
+	return ""
 }
 
 // ToSQL converts a string operation to SQL
@@ -40,6 +103,13 @@ func (s *StringOperator) handleConcatenation(args []interface{}) (string, error)
 		return "", fmt.Errorf("concatenation requires at least 1 argument")
 	}
 
+	// Validate operand types
+	for _, arg := range args {
+		if err := s.validateStringOperand(arg); err != nil {
+			return "", err
+		}
+	}
+
 	operands := make([]string, len(args))
 	for i, arg := range args {
 		operand, err := s.valueToSQL(arg)
@@ -57,6 +127,11 @@ func (s *StringOperator) handleConcatenation(args []interface{}) (string, error)
 func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 	if len(args) < 2 || len(args) > 3 {
 		return "", fmt.Errorf("substring requires 2 or 3 arguments")
+	}
+
+	// Validate first argument type (string source)
+	if err := s.validateStringOperand(args[0]); err != nil {
+		return "", err
 	}
 
 	// First argument: string

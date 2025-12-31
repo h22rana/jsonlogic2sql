@@ -12,4 +12,8 @@ type SchemaProvider interface {
 	IsArrayType(fieldName string) bool
 	// IsStringType checks if a field is of string type
 	IsStringType(fieldName string) bool
+	// IsNumericType checks if a field is of numeric type (integer or number)
+	IsNumericType(fieldName string) bool
+	// IsBooleanType checks if a field is of boolean type
+	IsBooleanType(fieldName string) bool
 }

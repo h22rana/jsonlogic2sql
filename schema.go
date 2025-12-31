@@ -106,6 +106,11 @@ func (s *Schema) IsNumericType(fieldName string) bool {
 	return fieldType == FieldTypeInteger || fieldType == FieldTypeNumber
 }
 
+// IsBooleanType checks if a field is of boolean type
+func (s *Schema) IsBooleanType(fieldName string) bool {
+	return s.GetFieldTypeFieldType(fieldName) == FieldTypeBoolean
+}
+
 // GetFieldTypeString returns the type of a field as a string (for SchemaProvider interface)
 // This implements the operators.SchemaProvider interface
 func (s *Schema) GetFieldType(fieldName string) string {

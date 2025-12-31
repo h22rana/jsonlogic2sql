@@ -292,27 +292,57 @@ if err != nil {
 }
 ```
 
-#### Type-Aware `in` Operator
+#### Type-Aware Operators
 
-When a schema is provided, the `in` operator uses field type information to generate the correct SQL:
+When a schema is provided, operators perform strict type validation and generate appropriate SQL based on field types:
+
+**Type Validation Rules:**
+
+| Operator Category | Allowed Types | Rejected Types |
+|------------------|---------------|----------------|
+| Numeric (`+`, `-`, `*`, `/`, `%`, `max`, `min`) | integer, number | string, array, object, boolean |
+| String (`cat`, `substr`) | string, integer, number | array, object |
+| Array (`all`, `some`, `none`, `map`, `filter`, `reduce`, `merge`) | array | all non-array types |
+| Comparison (`>`, `>=`, `<`, `<=`) | integer, number, string | array, object, boolean |
+| Equality (`==`, `!=`, `===`, `!==`) | any | none (type-agnostic) |
+| In (`in`) | array (membership), string (containment) | varies by usage |
 
 ```go
 schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
     {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
-    {Name: "description", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "name", Type: jsonlogic2sql.FieldTypeString},
 })
 
 transpiler := jsonlogic2sql.NewTranspiler()
 transpiler.SetSchema(schema)
+
+// Valid: numeric operation on integer field
+sql, _ := transpiler.Transpile(`{"+": [{"var": "amount"}, 10]}`)
+fmt.Println(sql) // Output: WHERE (amount + 10)
+
+// Valid: array operation on array field
+sql, _ = transpiler.Transpile(`{"some": [{"var": "tags"}, {"==": [{"var": ""}, "important"]}]}`)
+fmt.Println(sql) // Output: WHERE EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem = 'important')
+
+// Error: numeric operation on string field
+_, err := transpiler.Transpile(`{"+": [{"var": "name"}, 10]}`)
+// Error: numeric operation on non-numeric field 'name' (type: string)
+
+// Error: array operation on non-array field
+_, err = transpiler.Transpile(`{"some": [{"var": "amount"}, {"==": [{"var": ""}, 0]}]}`)
+// Error: array operation on non-array field 'amount' (type: integer)
 
 // Array field: uses IN syntax
 sql, _ := transpiler.Transpile(`{"in": ["admin", {"var": "tags"}]}`)
 fmt.Println(sql) // Output: WHERE 'admin' IN tags
 
 // String field: uses STRPOS for containment
-sql, _ = transpiler.Transpile(`{"in": ["hello", {"var": "description"}]}`)
-fmt.Println(sql) // Output: WHERE STRPOS(description, 'hello') > 0
+sql, _ = transpiler.Transpile(`{"in": ["hello", {"var": "name"}]}`)
+fmt.Println(sql) // Output: WHERE STRPOS(name, 'hello') > 0
 ```
+
+**Note:** Type validation is only performed when a schema is set. Without a schema, all operations are allowed.
 
 #### Supported Field Types
 
@@ -338,6 +368,7 @@ schema.GetFieldType(fieldName string) string     // Get field type as string
 schema.IsArrayType(fieldName string) bool        // Check if field is array type
 schema.IsStringType(fieldName string) bool       // Check if field is string type
 schema.IsNumericType(fieldName string) bool      // Check if field is numeric type
+schema.IsBooleanType(fieldName string) bool      // Check if field is boolean type
 schema.GetFields() []string                      // Get all field names
 
 // Transpiler schema methods

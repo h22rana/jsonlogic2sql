@@ -69,6 +69,15 @@ func (p *Parser) SetSchema(schema operators.SchemaProvider) {
 	if p.logicalOp != nil {
 		p.logicalOp.SetSchema(schema)
 	}
+	if p.numericOp != nil {
+		p.numericOp.SetSchema(schema)
+	}
+	if p.stringOp != nil {
+		p.stringOp.SetSchema(schema)
+	}
+	if p.arrayOp != nil {
+		p.arrayOp.SetSchema(schema)
+	}
 }
 
 // Parse converts a JSON Logic expression to SQL WHERE clause

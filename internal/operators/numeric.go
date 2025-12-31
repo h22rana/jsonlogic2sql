@@ -9,6 +9,7 @@ import (
 type NumericOperator struct {
 	dataOp       *DataOperator
 	comparisonOp *ComparisonOperator
+	schema       SchemaProvider
 }
 
 // NewNumericOperator creates a new NumericOperator instance
@@ -17,6 +18,63 @@ func NewNumericOperator() *NumericOperator {
 		dataOp:       NewDataOperator(),
 		comparisonOp: NewComparisonOperator(),
 	}
+}
+
+// SetSchema sets the schema provider for type validation
+func (n *NumericOperator) SetSchema(schema SchemaProvider) {
+	n.schema = schema
+	if n.dataOp != nil {
+		n.dataOp.SetSchema(schema)
+	}
+	if n.comparisonOp != nil {
+		n.comparisonOp.SetSchema(schema)
+	}
+}
+
+// validateNumericOperand checks if a field used in a numeric operation is of numeric type
+func (n *NumericOperator) validateNumericOperand(value interface{}) error {
+	if n.schema == nil {
+		return nil // No schema, no validation
+	}
+
+	fieldName := n.extractFieldNameFromValue(value)
+	if fieldName == "" {
+		return nil // Can't determine field name, skip validation
+	}
+
+	fieldType := n.schema.GetFieldType(fieldName)
+	if fieldType == "" {
+		return nil // Field not in schema, skip validation (existence checked by DataOperator)
+	}
+
+	if !n.schema.IsNumericType(fieldName) {
+		return fmt.Errorf("numeric operation on non-numeric field '%s' (type: %s)", fieldName, fieldType)
+	}
+
+	return nil
+}
+
+// extractFieldNameFromValue extracts field name from a value that might be a var expression
+func (n *NumericOperator) extractFieldNameFromValue(value interface{}) string {
+	if varExpr, ok := value.(map[string]interface{}); ok {
+		if varName, hasVar := varExpr["var"]; hasVar {
+			return n.extractFieldName(varName)
+		}
+	}
+	return ""
+}
+
+// extractFieldName extracts the field name from a var argument
+func (n *NumericOperator) extractFieldName(varName interface{}) string {
+	if nameStr, ok := varName.(string); ok {
+		return nameStr
+	}
+	if nameArr, ok := varName.([]interface{}); ok && len(nameArr) > 0 {
+		if nameStr, ok := nameArr[0].(string); ok {
+			return nameStr
+		}
+	}
+	return ""
 }
 
 // ToSQL converts a numeric operation to SQL
@@ -51,6 +109,13 @@ func (n *NumericOperator) handleAddition(args []interface{}) (string, error) {
 		return "", fmt.Errorf("addition requires at least 1 argument")
 	}
 
+	// Validate operand types
+	for _, arg := range args {
+		if err := n.validateNumericOperand(arg); err != nil {
+			return "", err
+		}
+	}
+
 	// Handle unary plus (cast to number)
 	if len(args) == 1 {
 		operand, err := n.valueToSQL(args[0])
@@ -76,6 +141,13 @@ func (n *NumericOperator) handleAddition(args []interface{}) (string, error) {
 func (n *NumericOperator) handleSubtraction(args []interface{}) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("subtraction requires at least 1 argument")
+	}
+
+	// Validate operand types
+	for _, arg := range args {
+		if err := n.validateNumericOperand(arg); err != nil {
+			return "", err
+		}
 	}
 
 	// Handle unary minus (negation)
@@ -105,6 +177,13 @@ func (n *NumericOperator) handleMultiplication(args []interface{}) (string, erro
 		return "", fmt.Errorf("multiplication requires at least 2 arguments")
 	}
 
+	// Validate operand types
+	for _, arg := range args {
+		if err := n.validateNumericOperand(arg); err != nil {
+			return "", err
+		}
+	}
+
 	operands := make([]string, len(args))
 	for i, arg := range args {
 		operand, err := n.valueToSQL(arg)
@@ -123,6 +202,13 @@ func (n *NumericOperator) handleDivision(args []interface{}) (string, error) {
 		return "", fmt.Errorf("division requires at least 2 arguments")
 	}
 
+	// Validate operand types
+	for _, arg := range args {
+		if err := n.validateNumericOperand(arg); err != nil {
+			return "", err
+		}
+	}
+
 	operands := make([]string, len(args))
 	for i, arg := range args {
 		operand, err := n.valueToSQL(arg)
@@ -139,6 +225,13 @@ func (n *NumericOperator) handleDivision(args []interface{}) (string, error) {
 func (n *NumericOperator) handleModulo(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("modulo requires exactly 2 arguments")
+	}
+
+	// Validate operand types
+	for _, arg := range args {
+		if err := n.validateNumericOperand(arg); err != nil {
+			return "", err
+		}
 	}
 
 	left, err := n.valueToSQL(args[0])
@@ -160,6 +253,13 @@ func (n *NumericOperator) handleMax(args []interface{}) (string, error) {
 		return "", fmt.Errorf("max requires at least 2 arguments")
 	}
 
+	// Validate operand types
+	for _, arg := range args {
+		if err := n.validateNumericOperand(arg); err != nil {
+			return "", err
+		}
+	}
+
 	operands := make([]string, len(args))
 	for i, arg := range args {
 		operand, err := n.valueToSQL(arg)
@@ -176,6 +276,13 @@ func (n *NumericOperator) handleMax(args []interface{}) (string, error) {
 func (n *NumericOperator) handleMin(args []interface{}) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("min requires at least 2 arguments")
+	}
+
+	// Validate operand types
+	for _, arg := range args {
+		if err := n.validateNumericOperand(arg); err != nil {
+			return "", err
+		}
 	}
 
 	operands := make([]string, len(args))

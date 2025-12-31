@@ -2,6 +2,7 @@ package operators
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -26,6 +27,84 @@ func (c *ComparisonOperator) SetSchema(schema SchemaProvider) {
 	}
 }
 
+// validateOrderingOperand checks if a field used in an ordering comparison is of a valid type
+// Only numeric and string types support ordering comparisons (>, >=, <, <=)
+// Rejects array, object, and boolean types
+func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator string) error {
+	if c.schema == nil {
+		return nil // No schema, no validation
+	}
+
+	fieldName := c.extractFieldNameFromValue(value)
+	if fieldName == "" {
+		return nil // Can't determine field name, skip validation
+	}
+
+	fieldType := c.schema.GetFieldType(fieldName)
+	if fieldType == "" {
+		return nil // Field not in schema, skip validation (existence checked by DataOperator)
+	}
+
+	// Allow numeric and string types for ordering comparisons
+	if c.schema.IsNumericType(fieldName) || c.schema.IsStringType(fieldName) {
+		return nil
+	}
+
+	// Disallow array, object, boolean for ordering comparisons
+	return fmt.Errorf("ordering comparison '%s' on incompatible field '%s' (type: %s)", operator, fieldName, fieldType)
+}
+
+// extractFieldNameFromValue extracts field name from a value that might be a var expression
+func (c *ComparisonOperator) extractFieldNameFromValue(value interface{}) string {
+	if varExpr, ok := value.(map[string]interface{}); ok {
+		if varName, hasVar := varExpr["var"]; hasVar {
+			return c.extractFieldName(varName)
+		}
+	}
+	return ""
+}
+
+// extractFieldName extracts the field name from a var argument
+func (c *ComparisonOperator) extractFieldName(varName interface{}) string {
+	if nameStr, ok := varName.(string); ok {
+		return nameStr
+	}
+	if nameArr, ok := varName.([]interface{}); ok && len(nameArr) > 0 {
+		if nameStr, ok := nameArr[0].(string); ok {
+			return nameStr
+		}
+	}
+	return ""
+}
+
+// coerceValueForComparison coerces a literal value based on the type of the field being compared.
+// If the field is numeric and the value is a string that represents a number, it returns the unquoted number.
+// This ensures proper SQL comparisons like "field >= 50000" instead of "field >= '50000'".
+func (c *ComparisonOperator) coerceValueForComparison(value interface{}, fieldName string) interface{} {
+	if c.schema == nil || fieldName == "" {
+		return value
+	}
+
+	// Only coerce if the field is a numeric type
+	if !c.schema.IsNumericType(fieldName) {
+		return value
+	}
+
+	// If value is a string, try to parse it as a number
+	if strVal, ok := value.(string); ok {
+		// Try to parse as integer first
+		if intVal, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+			return intVal
+		}
+		// Try to parse as float
+		if floatVal, err := strconv.ParseFloat(strVal, 64); err == nil {
+			return floatVal
+		}
+	}
+
+	return value
+}
+
 // ToSQL converts a comparison operator to SQL
 func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	// Handle chained comparisons (2+ arguments)
@@ -46,12 +125,29 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 		return c.handleIn(leftSQL, args[1])
 	}
 
-	leftSQL, err := c.valueToSQL(args[0])
+	// Apply type coercion based on schema
+	// If one side is a field and the other is a literal, coerce the literal to match the field type
+	leftArg := args[0]
+	rightArg := args[1]
+
+	leftFieldName := c.extractFieldNameFromValue(leftArg)
+	rightFieldName := c.extractFieldNameFromValue(rightArg)
+
+	// If left is a field and right is a literal, coerce right based on left's type
+	if leftFieldName != "" && rightFieldName == "" {
+		rightArg = c.coerceValueForComparison(rightArg, leftFieldName)
+	}
+	// If right is a field and left is a literal, coerce left based on right's type
+	if rightFieldName != "" && leftFieldName == "" {
+		leftArg = c.coerceValueForComparison(leftArg, rightFieldName)
+	}
+
+	leftSQL, err := c.valueToSQL(leftArg)
 	if err != nil {
 		return "", fmt.Errorf("invalid left operand: %v", err)
 	}
 
-	rightSQL, err := c.valueToSQL(args[1])
+	rightSQL, err := c.valueToSQL(rightArg)
 	if err != nil {
 		return "", fmt.Errorf("invalid right operand: %v", err)
 	}
@@ -109,14 +205,15 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 			return fmt.Sprintf("%s IS NOT NULL", leftSQL), nil
 		}
 		return fmt.Sprintf("%s <> %s", leftSQL, rightSQL), nil
-	case ">":
-		return fmt.Sprintf("%s > %s", leftSQL, rightSQL), nil
-	case ">=":
-		return fmt.Sprintf("%s >= %s", leftSQL, rightSQL), nil
-	case "<":
-		return fmt.Sprintf("%s < %s", leftSQL, rightSQL), nil
-	case "<=":
-		return fmt.Sprintf("%s <= %s", leftSQL, rightSQL), nil
+	case ">", ">=", "<", "<=":
+		// Validate operands for ordering comparisons
+		if err := c.validateOrderingOperand(args[0], operator); err != nil {
+			return "", err
+		}
+		if err := c.validateOrderingOperand(args[1], operator); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s %s %s", leftSQL, operator, rightSQL), nil
 	default:
 		return "", fmt.Errorf("unsupported comparison operator: %s", operator)
 	}
@@ -308,9 +405,38 @@ func (c *ComparisonOperator) handleChainedComparison(operator string, args []int
 		return "", fmt.Errorf("chained comparison requires at least 2 arguments")
 	}
 
+	// Validate operands for ordering comparisons
+	for _, arg := range args {
+		if err := c.validateOrderingOperand(arg, operator); err != nil {
+			return "", err
+		}
+	}
+
+	// Apply type coercion: find field names and coerce adjacent literals
+	coercedArgs := make([]interface{}, len(args))
+	copy(coercedArgs, args)
+
+	// Find the field name from any var expression to use for coercion
+	var fieldName string
+	for _, arg := range args {
+		if name := c.extractFieldNameFromValue(arg); name != "" {
+			fieldName = name
+			break
+		}
+	}
+
+	// Coerce all literal arguments based on the field type
+	if fieldName != "" {
+		for i, arg := range coercedArgs {
+			if c.extractFieldNameFromValue(arg) == "" {
+				coercedArgs[i] = c.coerceValueForComparison(arg, fieldName)
+			}
+		}
+	}
+
 	// Convert all arguments to SQL
 	var sqlArgs []string
-	for i, arg := range args {
+	for i, arg := range coercedArgs {
 		argSQL, err := c.valueToSQL(arg)
 		if err != nil {
 			return "", fmt.Errorf("invalid argument %d: %v", i, err)
