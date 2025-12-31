@@ -105,6 +105,36 @@ func (c *ComparisonOperator) coerceValueForComparison(value interface{}, fieldNa
 	return value
 }
 
+// validateEnumValue validates that a value is valid for an enum field.
+// Returns nil if valid or if not an enum field.
+func (c *ComparisonOperator) validateEnumValue(value interface{}, fieldName string) error {
+	if c.schema == nil || fieldName == "" {
+		return nil
+	}
+
+	// Skip validation for null values (null is valid for any field)
+	if value == nil {
+		return nil
+	}
+
+	// Only validate if the field is an enum type
+	if !c.schema.IsEnumType(fieldName) {
+		return nil
+	}
+
+	// Extract string value for validation
+	var strVal string
+	switch v := value.(type) {
+	case string:
+		strVal = v
+	default:
+		// Non-string values for enum comparison - convert to string for validation
+		strVal = fmt.Sprintf("%v", v)
+	}
+
+	return c.schema.ValidateEnumValue(fieldName, strVal)
+}
+
 // ToSQL converts a comparison operator to SQL
 func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	// Handle chained comparisons (2+ arguments)
@@ -122,7 +152,8 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 		if err != nil {
 			return "", fmt.Errorf("invalid left operand: %v", err)
 		}
-		return c.handleIn(leftSQL, args[1])
+		// Pass the original left arg for enum validation
+		return c.handleIn(leftSQL, args[1], args[0])
 	}
 
 	// Apply type coercion based on schema
@@ -136,10 +167,18 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 	// If left is a field and right is a literal, coerce right based on left's type
 	if leftFieldName != "" && rightFieldName == "" {
 		rightArg = c.coerceValueForComparison(rightArg, leftFieldName)
+		// Validate enum value if left is an enum field
+		if err := c.validateEnumValue(rightArg, leftFieldName); err != nil {
+			return "", err
+		}
 	}
 	// If right is a field and left is a literal, coerce left based on right's type
 	if rightFieldName != "" && leftFieldName == "" {
 		leftArg = c.coerceValueForComparison(leftArg, rightFieldName)
+		// Validate enum value if right is an enum field
+		if err := c.validateEnumValue(leftArg, rightFieldName); err != nil {
+			return "", err
+		}
 	}
 
 	leftSQL, err := c.valueToSQL(leftArg)
@@ -305,7 +344,11 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 }
 
 // handleIn converts in operator to SQL
-func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}) (string, error) {
+// leftOriginal is the original left argument (before SQL conversion) for enum validation
+func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}, leftOriginal interface{}) (string, error) {
+	// Extract field name from left side for enum validation
+	leftFieldName := c.extractFieldNameFromValue(leftOriginal)
+
 	// Check if right side is a variable expression
 	if varExpr, ok := rightValue.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr["var"]; hasVar {
@@ -359,6 +402,15 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}) (s
 	if arr, ok := rightValue.([]interface{}); ok {
 		if len(arr) == 0 {
 			return "", fmt.Errorf("in operator array cannot be empty")
+		}
+
+		// Validate enum values if left side is an enum field
+		if leftFieldName != "" && c.schema != nil && c.schema.IsEnumType(leftFieldName) {
+			for _, item := range arr {
+				if err := c.validateEnumValue(item, leftFieldName); err != nil {
+					return "", err
+				}
+			}
 		}
 
 		// Convert array elements to SQL values
