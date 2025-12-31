@@ -38,3 +38,6 @@ run_tests.sh
 test-cases.md
 PRODUCTION_READINESS.md
 TEST_COVERAGE_SUMMARY.md
+
+# Schema files (may contain sensitive field names)
+schema.json

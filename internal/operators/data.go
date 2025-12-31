@@ -6,11 +6,18 @@ import (
 )
 
 // DataOperator handles data access operators (var, missing, missing_some)
-type DataOperator struct{}
+type DataOperator struct {
+	schema SchemaProvider
+}
 
 // NewDataOperator creates a new data operator
 func NewDataOperator() *DataOperator {
 	return &DataOperator{}
+}
+
+// SetSchema sets the schema provider for field validation
+func (d *DataOperator) SetSchema(schema SchemaProvider) {
+	d.schema = schema
 }
 
 // ToSQL converts a data operator to SQL
@@ -35,6 +42,12 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 
 	// Handle string argument (direct variable name)
 	if varName, ok := args[0].(string); ok {
+		// Validate field against schema if schema is provided
+		if d.schema != nil {
+			if err := d.schema.ValidateField(varName); err != nil {
+				return "", err
+			}
+		}
 		columnName := d.convertVarName(varName)
 		return columnName, nil
 	}
@@ -50,6 +63,12 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 
 		// Check if first element is a string (variable name)
 		if varName, ok := arr[0].(string); ok {
+			// Validate field against schema if schema is provided
+			if d.schema != nil {
+				if err := d.schema.ValidateField(varName); err != nil {
+					return "", err
+				}
+			}
 			columnName := d.convertVarName(varName)
 
 			// If there's a default value, use COALESCE
@@ -81,6 +100,12 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 
 	// Handle single string argument
 	if varName, ok := args[0].(string); ok {
+		// Validate field against schema if schema is provided
+		if d.schema != nil {
+			if err := d.schema.ValidateField(varName); err != nil {
+				return "", err
+			}
+		}
 		columnName := d.convertVarName(varName)
 		return fmt.Sprintf("%s IS NULL", columnName), nil
 	}
@@ -96,6 +121,12 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 			name, ok := varName.(string)
 			if !ok {
 				return "", fmt.Errorf("all variable names in missing must be strings")
+			}
+			// Validate field against schema if schema is provided
+			if d.schema != nil {
+				if err := d.schema.ValidateField(name); err != nil {
+					return "", err
+				}
 			}
 			columnName := d.convertVarName(name)
 			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
@@ -138,6 +169,12 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("all variable names in missing_some must be strings")
 			}
+			// Validate field against schema if schema is provided
+			if d.schema != nil {
+				if err := d.schema.ValidateField(name); err != nil {
+					return "", err
+				}
+			}
 			columnName := d.convertVarName(name)
 			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
 		}
@@ -151,6 +188,12 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 		name, ok := varName.(string)
 		if !ok {
 			return "", fmt.Errorf("all variable names in missing_some must be strings")
+		}
+		// Validate field against schema if schema is provided
+		if d.schema != nil {
+			if err := d.schema.ValidateField(name); err != nil {
+				return "", err
+			}
 		}
 		columnName := d.convertVarName(name)
 		caseStatements = append(caseStatements, fmt.Sprintf("CASE WHEN %s IS NULL THEN 1 ELSE 0 END", columnName))

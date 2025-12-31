@@ -9,6 +9,7 @@ import (
 type LogicalOperator struct {
 	comparisonOp *ComparisonOperator
 	dataOp       *DataOperator
+	schema       SchemaProvider
 }
 
 // NewLogicalOperator creates a new logical operator
@@ -16,6 +17,17 @@ func NewLogicalOperator() *LogicalOperator {
 	return &LogicalOperator{
 		comparisonOp: NewComparisonOperator(),
 		dataOp:       NewDataOperator(),
+	}
+}
+
+// SetSchema sets the schema provider for field validation and type checking
+func (l *LogicalOperator) SetSchema(schema SchemaProvider) {
+	l.schema = schema
+	if l.dataOp != nil {
+		l.dataOp.SetSchema(schema)
+	}
+	if l.comparisonOp != nil {
+		l.comparisonOp.SetSchema(schema)
 	}
 }
 

@@ -18,14 +18,15 @@ type CustomOperatorLookup func(operatorName string) (CustomOperatorHandler, bool
 
 // Parser parses JSON Logic expressions and converts them to SQL WHERE clauses
 type Parser struct {
-	validator          *validator.Validator
-	dataOp             *operators.DataOperator
-	comparisonOp       *operators.ComparisonOperator
-	logicalOp          *operators.LogicalOperator
-	numericOp          *operators.NumericOperator
-	stringOp           *operators.StringOperator
-	arrayOp            *operators.ArrayOperator
-	customOpLookup     CustomOperatorLookup
+	validator      *validator.Validator
+	dataOp         *operators.DataOperator
+	comparisonOp   *operators.ComparisonOperator
+	logicalOp      *operators.LogicalOperator
+	numericOp      *operators.NumericOperator
+	stringOp       *operators.StringOperator
+	arrayOp        *operators.ArrayOperator
+	customOpLookup CustomOperatorLookup
+	schema         operators.SchemaProvider
 }
 
 // NewParser creates a new parser instance
@@ -53,6 +54,21 @@ func (p *Parser) SetCustomOperatorLookup(lookup CustomOperatorLookup) {
 		_, ok := lookup(operatorName)
 		return ok
 	})
+}
+
+// SetSchema sets the schema provider for field validation and type checking
+func (p *Parser) SetSchema(schema operators.SchemaProvider) {
+	p.schema = schema
+	// Set schema on all operators
+	if p.dataOp != nil {
+		p.dataOp.SetSchema(schema)
+	}
+	if p.comparisonOp != nil {
+		p.comparisonOp.SetSchema(schema)
+	}
+	if p.logicalOp != nil {
+		p.logicalOp.SetSchema(schema)
+	}
 }
 
 // Parse converts a JSON Logic expression to SQL WHERE clause
@@ -159,8 +175,12 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 			}
 			return p.logicalOp.ToSQL(operator, processedArgs)
 		}
-		// Wrap non-array argument in array for processing
-		return p.logicalOp.ToSQL(operator, []interface{}{args})
+		// Process non-array argument to handle custom operators before wrapping
+		processedArg, err := p.processArg(args)
+		if err != nil {
+			return "", fmt.Errorf("failed to process %s argument: %v", operator, err)
+		}
+		return p.logicalOp.ToSQL(operator, []interface{}{processedArg})
 
 	// Numeric operators
 	case "+", "-", "*", "/", "%", "max", "min":
