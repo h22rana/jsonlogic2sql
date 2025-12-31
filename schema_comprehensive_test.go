@@ -890,6 +890,211 @@ func TestTypeValidationWithFieldNotInSchema(t *testing.T) {
 	}
 }
 
+// TestEnumTypeSupport tests enum type validation and SQL generation
+func TestEnumTypeSupport(t *testing.T) {
+	schema := NewSchema([]FieldSchema{
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "cancelled"}},
+		{Name: "priority", Type: FieldTypeEnum, AllowedValues: []string{"low", "medium", "high"}},
+		{Name: "name", Type: FieldTypeString},
+	})
+
+	transpiler := NewTranspiler()
+	transpiler.SetSchema(schema)
+
+	t.Run("valid enum comparisons", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			jsonLogic string
+			expected  string
+		}{
+			{
+				name:      "enum equality with valid value",
+				jsonLogic: `{"==": [{"var": "status"}, "active"]}`,
+				expected:  "WHERE status = 'active'",
+			},
+			{
+				name:      "enum inequality with valid value",
+				jsonLogic: `{"!=": [{"var": "status"}, "cancelled"]}`,
+				expected:  "WHERE status != 'cancelled'",
+			},
+			{
+				name:      "enum in array with valid values",
+				jsonLogic: `{"in": [{"var": "status"}, ["active", "pending"]]}`,
+				expected:  "WHERE status IN ('active', 'pending')",
+			},
+			{
+				name:      "enum strict equality",
+				jsonLogic: `{"===": [{"var": "priority"}, "high"]}`,
+				expected:  "WHERE priority = 'high'",
+			},
+			{
+				name:      "enum with null comparison",
+				jsonLogic: `{"==": [{"var": "status"}, null]}`,
+				expected:  "WHERE status IS NULL",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				result, err := transpiler.Transpile(tt.jsonLogic)
+				if err != nil {
+					t.Fatalf("Unexpected error: %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("Expected: %s\nGot: %s", tt.expected, result)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid enum values should error", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			jsonLogic string
+			errorMsg  string
+		}{
+			{
+				name:      "invalid enum value in equality",
+				jsonLogic: `{"==": [{"var": "status"}, "invalid"]}`,
+				errorMsg:  "invalid enum value 'invalid' for field 'status'",
+			},
+			{
+				name:      "invalid enum value in array",
+				jsonLogic: `{"in": [{"var": "status"}, ["active", "invalid"]]}`,
+				errorMsg:  "invalid enum value 'invalid' for field 'status'",
+			},
+			{
+				name:      "all invalid enum values",
+				jsonLogic: `{"in": [{"var": "priority"}, ["urgent", "critical"]]}`,
+				errorMsg:  "invalid enum value 'urgent' for field 'priority'",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				_, err := transpiler.Transpile(tt.jsonLogic)
+				if err == nil {
+					t.Fatal("Expected error but got none")
+				}
+				if !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error containing '%s', got: %v", tt.errorMsg, err)
+				}
+			})
+		}
+	})
+
+	t.Run("non-enum fields should not validate enum values", func(t *testing.T) {
+		// String fields should accept any value, not validate as enum
+		result, err := transpiler.Transpile(`{"==": [{"var": "name"}, "anything"]}`)
+		if err != nil {
+			t.Fatalf("String field should accept any value, got error: %v", err)
+		}
+		if result != "WHERE name = 'anything'" {
+			t.Errorf("Unexpected result: %s", result)
+		}
+	})
+}
+
+// TestEnumSchemaFromJSON tests loading enum schema from JSON
+func TestEnumSchemaFromJSON(t *testing.T) {
+	schemaJSON := `[
+		{"name": "status", "type": "enum", "allowedValues": ["active", "inactive", "deleted"]},
+		{"name": "role", "type": "enum", "allowedValues": ["admin", "user", "guest"]}
+	]`
+
+	schema, err := NewSchemaFromJSON([]byte(schemaJSON))
+	if err != nil {
+		t.Fatalf("Failed to parse schema JSON: %v", err)
+	}
+
+	// Test IsEnumType
+	if !schema.IsEnumType("status") {
+		t.Error("status should be enum type")
+	}
+	if !schema.IsEnumType("role") {
+		t.Error("role should be enum type")
+	}
+
+	// Test GetAllowedValues
+	statusValues := schema.GetAllowedValues("status")
+	if len(statusValues) != 3 {
+		t.Errorf("Expected 3 allowed values for status, got %d", len(statusValues))
+	}
+
+	roleValues := schema.GetAllowedValues("role")
+	expectedRoles := []string{"admin", "user", "guest"}
+	for i, expected := range expectedRoles {
+		if roleValues[i] != expected {
+			t.Errorf("Expected role value '%s', got '%s'", expected, roleValues[i])
+		}
+	}
+
+	// Test ValidateEnumValue
+	if err := schema.ValidateEnumValue("status", "active"); err != nil {
+		t.Errorf("'active' should be valid for status: %v", err)
+	}
+	if err := schema.ValidateEnumValue("status", "invalid"); err == nil {
+		t.Error("'invalid' should not be valid for status")
+	}
+}
+
+// TestEnumWithComplexExpressions tests enum validation in complex nested expressions
+func TestEnumWithComplexExpressions(t *testing.T) {
+	schema := NewSchema([]FieldSchema{
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "cancelled"}},
+		{Name: "amount", Type: FieldTypeInteger},
+	})
+
+	transpiler := NewTranspiler()
+	transpiler.SetSchema(schema)
+
+	tests := []struct {
+		name        string
+		jsonLogic   string
+		expected    string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:      "enum in AND expression",
+			jsonLogic: `{"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 100]}]}`,
+			expected:  "WHERE (status = 'active' AND amount > 100)",
+		},
+		{
+			name:      "enum in OR expression",
+			jsonLogic: `{"or": [{"==": [{"var": "status"}, "pending"]}, {"==": [{"var": "status"}, "active"]}]}`,
+			expected:  "WHERE (status = 'pending' OR status = 'active')",
+		},
+		{
+			name:        "invalid enum in AND expression",
+			jsonLogic:   `{"and": [{"==": [{"var": "status"}, "invalid"]}, {">": [{"var": "amount"}, 100]}]}`,
+			expectError: true,
+			errorMsg:    "invalid enum value 'invalid'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := transpiler.Transpile(tt.jsonLogic)
+			if tt.expectError {
+				if err == nil {
+					t.Fatal("Expected error but got none")
+				}
+				if !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error containing '%s', got: %v", tt.errorMsg, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("Unexpected error: %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("Expected: %s\nGot: %s", tt.expected, result)
+				}
+			}
+		})
+	}
+}
+
 // TestTypeCoercionForComparisons verifies that string literals are coerced to appropriate types
 // based on the field being compared. This ensures proper SQL output like "field >= 50000"
 // instead of "field >= '50000'" when comparing an integer field with a string value.

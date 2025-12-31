@@ -16,4 +16,10 @@ type SchemaProvider interface {
 	IsNumericType(fieldName string) bool
 	// IsBooleanType checks if a field is of boolean type
 	IsBooleanType(fieldName string) bool
+	// IsEnumType checks if a field is of enum type
+	IsEnumType(fieldName string) bool
+	// GetAllowedValues returns the allowed values for an enum field
+	GetAllowedValues(fieldName string) []string
+	// ValidateEnumValue checks if a value is valid for an enum field
+	ValidateEnumValue(fieldName string, value string) error
 }

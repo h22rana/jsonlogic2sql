@@ -352,6 +352,43 @@ fmt.Println(sql) // Output: WHERE STRPOS(name, 'hello') > 0
 - `boolean` - Boolean fields
 - `array` - Array fields
 - `object` - Object/struct fields
+- `enum` - Enum fields with allowed values validation
+
+#### Enum Type Support
+
+Enum fields allow you to define a fixed set of allowed values. The transpiler validates that any value compared against an enum field is in the allowed list.
+
+```go
+// Define schema with enum field
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "status", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"active", "pending", "cancelled"}},
+    {Name: "priority", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"low", "medium", "high"}},
+})
+
+transpiler := jsonlogic2sql.NewTranspiler()
+transpiler.SetSchema(schema)
+
+// Valid enum value - works
+sql, err := transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
+// Output: WHERE status = 'active'
+
+// Valid enum IN array - works
+sql, err = transpiler.Transpile(`{"in": [{"var": "status"}, ["active", "pending"]]}`)
+// Output: WHERE status IN ('active', 'pending')
+
+// Invalid enum value - returns error
+_, err = transpiler.Transpile(`{"==": [{"var": "status"}, "invalid"]}`)
+// Error: invalid enum value 'invalid' for field 'status': allowed values are [active pending cancelled]
+```
+
+**Loading enum schema from JSON:**
+
+```json
+[
+    {"name": "status", "type": "enum", "allowedValues": ["active", "pending", "cancelled"]},
+    {"name": "priority", "type": "enum", "allowedValues": ["low", "medium", "high"]}
+]
+```
 
 #### Schema API Reference
 
@@ -369,6 +406,9 @@ schema.IsArrayType(fieldName string) bool        // Check if field is array type
 schema.IsStringType(fieldName string) bool       // Check if field is string type
 schema.IsNumericType(fieldName string) bool      // Check if field is numeric type
 schema.IsBooleanType(fieldName string) bool      // Check if field is boolean type
+schema.IsEnumType(fieldName string) bool         // Check if field is enum type
+schema.GetAllowedValues(fieldName string) []string // Get allowed values for enum field
+schema.ValidateEnumValue(fieldName, value string) error // Validate enum value
 schema.GetFields() []string                      // Get all field names
 
 // Transpiler schema methods
@@ -1012,8 +1052,9 @@ Schema for field validation with methods:
 Field definition for schema:
 ```go
 type FieldSchema struct {
-    Name string    // Field name (e.g., "order.amount")
-    Type FieldType // Field type (e.g., FieldTypeInteger)
+    Name          string    // Field name (e.g., "order.amount")
+    Type          FieldType // Field type (e.g., FieldTypeInteger)
+    AllowedValues []string  // For enum types: list of valid values (optional)
 }
 ```
 
@@ -1025,6 +1066,7 @@ Field type constants:
 - `FieldTypeBoolean` - Boolean field type
 - `FieldTypeArray` - Array field type
 - `FieldTypeObject` - Object/struct field type
+- `FieldTypeEnum` - Enum field type (requires AllowedValues)
 
 ## Error Handling
 
