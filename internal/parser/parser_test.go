@@ -5,9 +5,9 @@ import (
 )
 
 func TestNewParser(t *testing.T) {
-	p := NewParser()
+	p := NewParser(nil)
 	if p == nil {
-		t.Fatal("NewParser() returned nil")
+		t.Fatal("NewParser(nil) returned nil")
 	}
 	if p.validator == nil {
 		t.Fatal("validator is nil")
@@ -24,7 +24,7 @@ func TestNewParser(t *testing.T) {
 }
 
 func TestParser_Parse(t *testing.T) {
-	p := NewParser()
+	p := NewParser(nil)
 
 	tests := []struct {
 		name     string
@@ -272,7 +272,7 @@ func TestParser_Parse(t *testing.T) {
 }
 
 func TestParser_parseExpression(t *testing.T) {
-	p := NewParser()
+	p := NewParser(nil)
 
 	tests := []struct {
 		name     string
@@ -321,7 +321,7 @@ func TestParser_parseExpression(t *testing.T) {
 }
 
 func TestParser_parseOperator(t *testing.T) {
-	p := NewParser()
+	p := NewParser(nil)
 
 	tests := []struct {
 		name     string
@@ -395,7 +395,7 @@ func TestParser_parseOperator(t *testing.T) {
 }
 
 func TestParser_isPrimitive(t *testing.T) {
-	p := NewParser()
+	p := NewParser(nil)
 
 	tests := []struct {
 		input    interface{}

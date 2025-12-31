@@ -8,30 +8,31 @@ import (
 
 // StringOperator handles string operations like cat, substr
 type StringOperator struct {
+	config *OperatorConfig
 	dataOp *DataOperator
-	schema SchemaProvider
 }
 
-// NewStringOperator creates a new StringOperator instance
-func NewStringOperator() *StringOperator {
+// NewStringOperator creates a new StringOperator instance with optional config
+func NewStringOperator(config *OperatorConfig) *StringOperator {
 	return &StringOperator{
-		dataOp: NewDataOperator(),
+		config: config,
+		dataOp: NewDataOperator(config),
 	}
 }
 
-// SetSchema sets the schema provider for type validation
-func (s *StringOperator) SetSchema(schema SchemaProvider) {
-	s.schema = schema
-	if s.dataOp != nil {
-		s.dataOp.SetSchema(schema)
+// schema returns the schema from config, or nil if not configured
+func (s *StringOperator) schema() SchemaProvider {
+	if s.config == nil {
+		return nil
 	}
+	return s.config.Schema
 }
 
 // validateStringOperand checks if a field used in a string operation is of compatible type
 // Allows string types and numeric types (implicit conversion is common)
 // Rejects array and object types
 func (s *StringOperator) validateStringOperand(value interface{}) error {
-	if s.schema == nil {
+	if s.schema() == nil {
 		return nil // No schema, no validation
 	}
 
@@ -40,18 +41,18 @@ func (s *StringOperator) validateStringOperand(value interface{}) error {
 		return nil // Can't determine field name, skip validation
 	}
 
-	fieldType := s.schema.GetFieldType(fieldName)
+	fieldType := s.schema().GetFieldType(fieldName)
 	if fieldType == "" {
 		return nil // Field not in schema, skip validation (existence checked by DataOperator)
 	}
 
 	// Allow string and numeric types (implicit conversion is common)
-	if s.schema.IsStringType(fieldName) || s.schema.IsNumericType(fieldName) {
+	if s.schema().IsStringType(fieldName) || s.schema().IsNumericType(fieldName) {
 		return nil
 	}
 
 	// Disallow array and object types
-	if s.schema.IsArrayType(fieldName) || fieldType == "object" {
+	if s.schema().IsArrayType(fieldName) || fieldType == "object" {
 		return fmt.Errorf("string operation on incompatible field '%s' (type: %s)", fieldName, fieldType)
 	}
 

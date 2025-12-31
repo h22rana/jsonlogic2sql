@@ -5,7 +5,7 @@ import (
 )
 
 func TestLogicalOperator_ToSQL(t *testing.T) {
-	op := NewLogicalOperator()
+	op := NewLogicalOperator(nil)
 
 	tests := []struct {
 		name     string
@@ -206,7 +206,7 @@ func TestLogicalOperator_ToSQL(t *testing.T) {
 }
 
 func TestLogicalOperator_expressionToSQL(t *testing.T) {
-	op := NewLogicalOperator()
+	op := NewLogicalOperator(nil)
 
 	tests := []struct {
 		name     string
@@ -291,7 +291,7 @@ func TestLogicalOperator_expressionToSQL(t *testing.T) {
 }
 
 func TestLogicalOperator_isPrimitive(t *testing.T) {
-	op := NewLogicalOperator()
+	op := NewLogicalOperator(nil)
 
 	tests := []struct {
 		input    interface{}

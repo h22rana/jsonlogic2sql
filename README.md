@@ -935,7 +935,6 @@ jsonlogic2sql/
 │   ├── operators/            # Operator implementations (includes schema.go)
 │   └── validator/            # Validation logic
 ├── cmd/repl/                 # Interactive REPL
-├── examples/                 # Usage examples
 ├── Makefile                  # Build automation
 └── README.md
 ```
@@ -1011,6 +1010,7 @@ Main transpiler instance with methods:
 #### `TranspilerConfig`
 Configuration options for the transpiler:
 - `UseANSINotEqual bool` - When true uses `<>`, when false uses `!=` (default: true)
+- `Schema *Schema` - Optional schema for field validation (can also be set via `SetSchema()`)
 
 #### `OperatorFunc`
 Function type for simple custom operator implementations:
