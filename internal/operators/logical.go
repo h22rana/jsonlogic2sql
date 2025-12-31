@@ -188,6 +188,13 @@ func (l *LogicalOperator) handleIf(args []interface{}) (string, error) {
 func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 	// Handle primitive values
 	if l.isPrimitive(expr) {
+		// Check if it's a string that's already a SQL expression (from custom operators)
+		if str, ok := expr.(string); ok {
+			if l.isPreProcessedSQL(str) {
+				// It's already SQL, return as-is
+				return str, nil
+			}
+		}
 		return l.dataOp.valueToSQL(expr)
 	}
 
@@ -262,46 +269,6 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 	return "", fmt.Errorf("invalid expression type: %T", expr)
 }
 
-// handleTernary converts ternary operator to SQL CASE WHEN statement
-func (l *LogicalOperator) handleTernary(args []interface{}) (string, error) {
-	if len(args) < 2 {
-		return "", fmt.Errorf("ternary operator requires at least 2 arguments")
-	}
-
-	// For 2 arguments: condition ? true_value : NULL
-	if len(args) == 2 {
-		condition, err := l.expressionToSQL(args[0])
-		if err != nil {
-			return "", fmt.Errorf("invalid condition: %v", err)
-		}
-
-		trueValue, err := l.expressionToSQL(args[1])
-		if err != nil {
-			return "", fmt.Errorf("invalid true value: %v", err)
-		}
-
-		return fmt.Sprintf("CASE WHEN %s THEN %s ELSE NULL END", condition, trueValue), nil
-	}
-
-	// For 3+ arguments: condition ? true_value : false_value
-	condition, err := l.expressionToSQL(args[0])
-	if err != nil {
-		return "", fmt.Errorf("invalid condition: %v", err)
-	}
-
-	trueValue, err := l.expressionToSQL(args[1])
-	if err != nil {
-		return "", fmt.Errorf("invalid true value: %v", err)
-	}
-
-	falseValue, err := l.expressionToSQL(args[2])
-	if err != nil {
-		return "", fmt.Errorf("invalid false value: %v", err)
-	}
-
-	return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, trueValue, falseValue), nil
-}
-
 // processArgs recursively processes arguments to handle complex expressions
 // This converts nested operators (like reduce, filter, etc.) to SQL strings
 func (l *LogicalOperator) processArgs(args []interface{}) ([]interface{}, error) {
@@ -346,4 +313,41 @@ func (l *LogicalOperator) isPrimitive(value interface{}) bool {
 	default:
 		return false
 	}
+}
+
+// isPreProcessedSQL checks if a string is already a SQL expression (from custom operators)
+// rather than a primitive string value that needs to be quoted
+func (l *LogicalOperator) isPreProcessedSQL(str string) bool {
+	// If it's a quoted string (starts and ends with single quotes), it's a literal, not SQL
+	if strings.HasPrefix(str, "'") && strings.HasSuffix(str, "'") {
+		return false
+	}
+
+	// SQL expressions typically contain SQL keywords, operators, or parentheses
+	// Simple heuristics: if it contains SQL keywords or operators, it's likely SQL
+	sqlKeywords := []string{
+		" LIKE ", " AND ", " OR ", " NOT ", " IS NULL", " IS NOT NULL",
+		" = ", " != ", " <> ", " > ", " < ", " >= ", " <= ",
+		" IN ", " CASE ", " WHEN ", " THEN ", " ELSE ", " END ",
+		" COALESCE", " EXISTS ", " SELECT ", " FROM ", " WHERE ",
+		"(", ")", " + ", " - ", " * ", " / ", " % ",
+	}
+
+	upperStr := strings.ToUpper(str)
+	for _, keyword := range sqlKeywords {
+		if strings.Contains(upperStr, strings.ToUpper(keyword)) {
+			return true
+		}
+	}
+
+	// If it contains parentheses, it's likely a SQL expression (function call, subquery, etc.)
+	if strings.Contains(str, "(") || strings.Contains(str, ")") {
+		return true
+	}
+
+	// If it looks like a column name (contains dots or underscores) and has no spaces,
+	// it might be a column reference (but this is handled elsewhere, so be conservative)
+	// For now, only treat as SQL if it has SQL keywords or operators
+
+	return false
 }

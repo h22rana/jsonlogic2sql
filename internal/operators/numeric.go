@@ -190,30 +190,6 @@ func (n *NumericOperator) handleMin(args []interface{}) (string, error) {
 	return fmt.Sprintf("LEAST(%s)", strings.Join(operands, ", ")), nil
 }
 
-// handleBetween converts between operator to SQL
-func (n *NumericOperator) handleBetween(args []interface{}) (string, error) {
-	if len(args) != 3 {
-		return "", fmt.Errorf("between requires exactly 3 arguments")
-	}
-
-	value, err := n.valueToSQL(args[0])
-	if err != nil {
-		return "", fmt.Errorf("invalid between value argument: %v", err)
-	}
-
-	min, err := n.valueToSQL(args[1])
-	if err != nil {
-		return "", fmt.Errorf("invalid between min argument: %v", err)
-	}
-
-	max, err := n.valueToSQL(args[2])
-	if err != nil {
-		return "", fmt.Errorf("invalid between max argument: %v", err)
-	}
-
-	return fmt.Sprintf("(%s BETWEEN %s AND %s)", value, min, max), nil
-}
-
 // valueToSQL converts a value to SQL, handling var expressions and literals
 func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 	// Handle pre-processed SQL strings from the parser

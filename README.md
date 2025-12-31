@@ -5,6 +5,7 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 ## Features
 
 - **Complete JSON Logic Support**: Implements all core JSON Logic operators with 100% test coverage
+- **Custom Operators**: Extensible registry pattern to add custom SQL functions (LENGTH, UPPER, etc.)
 - **ANSI SQL Output**: Generates standard SQL WHERE clauses compatible with most databases
 - **Complex Nested Expressions**: Full support for deeply nested arithmetic and logical operations
 - **Array Operations**: Complete support for all/none/some with proper SQL subqueries
@@ -28,7 +29,6 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 
 ### Logic and Boolean Operations
 - `if` - Conditional expressions
-- `?:` - Ternary operator
 - `==`, `===` - Equality comparison
 - `!=`, `!==` - Inequality comparison
 - `!` - Logical NOT
@@ -38,7 +38,6 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 
 ### Numeric Operations
 - `>`, `>=`, `<`, `<=` - Comparison operators
-- `between` - Check if value is between two numbers
 - `max`, `min` - Maximum/minimum values
 - `+`, `-`, `*`, `/`, `%` - Arithmetic operations
 
@@ -49,13 +48,14 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - `merge` - Merge arrays
 
 ### String Operations
+- `in` - Check if substring is in string
 - `cat` - Concatenate strings
 - `substr` - Substring operations
 
 ## Installation
 
 ```bash
-go get github.com/h22rana/jsonlogic2sql
+go get github.com/h22rana/jsonlogic2sql@latest
 ```
 
 ## Usage
@@ -101,6 +101,130 @@ func main() {
     }
     fmt.Println(sql) // Output: WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 }
+```
+
+### Custom Operators
+
+You can extend the transpiler with custom operators to support additional SQL functions like `LENGTH`, `UPPER`, `LOWER`, etc.
+
+#### Using a Function
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/h22rana/jsonlogic2sql"
+)
+
+func main() {
+    transpiler := jsonlogic2sql.NewTranspiler()
+
+    // Register a custom "length" operator
+    err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+        if len(args) != 1 {
+            return "", fmt.Errorf("length requires exactly 1 argument")
+        }
+        return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+    })
+    if err != nil {
+        panic(err)
+    }
+
+    // Use the custom operator
+    sql, err := transpiler.Transpile(`{"length": [{"var": "email"}]}`)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE LENGTH(email)
+
+    // Use in comparisons
+    sql, err = transpiler.Transpile(`{">": [{"length": [{"var": "email"}]}, 10]}`)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE LENGTH(email) > 10
+}
+```
+
+#### Using a Handler Struct
+
+For more complex operators or those that need state, implement the `OperatorHandler` interface:
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/h22rana/jsonlogic2sql"
+)
+
+// UpperOperator implements the OperatorHandler interface
+type UpperOperator struct{}
+
+func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("upper requires exactly 1 argument")
+    }
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+}
+
+func main() {
+    transpiler := jsonlogic2sql.NewTranspiler()
+
+    // Register the handler
+    err := transpiler.RegisterOperator("upper", &UpperOperator{})
+    if err != nil {
+        panic(err)
+    }
+
+    sql, err := transpiler.Transpile(`{"==": [{"upper": [{"var": "name"}]}, "JOHN"]}`)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE UPPER(name) = 'JOHN'
+}
+```
+
+#### Multiple Custom Operators
+
+You can register multiple custom operators and use them together:
+
+```go
+transpiler := jsonlogic2sql.NewTranspiler()
+
+transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+})
+
+transpiler.RegisterOperatorFunc("upper", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+})
+
+// Use both in a complex expression
+sql, _ := transpiler.Transpile(`{"and": [{">": [{"length": [{"var": "name"}]}, 5]}, {"==": [{"upper": [{"var": "status"}]}, "ACTIVE"]}]}`)
+// Output: WHERE (LENGTH(name) > 5 AND UPPER(status) = 'ACTIVE')
+```
+
+#### Managing Custom Operators
+
+```go
+transpiler := jsonlogic2sql.NewTranspiler()
+
+// Check if an operator is registered
+if transpiler.HasCustomOperator("length") {
+    fmt.Println("length is registered")
+}
+
+// List all custom operators
+operators := transpiler.ListCustomOperators()
+fmt.Println(operators)
+
+// Unregister an operator
+transpiler.UnregisterOperator("length")
+
+// Clear all custom operators
+transpiler.ClearCustomOperators()
 ```
 
 ### Interactive REPL
@@ -322,18 +446,6 @@ WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
 ```
 
-#### Ternary Operator
-```json
-{"?:": [
-  {">": [{"var": "score"}, 80]},
-  "pass",
-  "fail"
-]}
-```
-```sql
-WHERE CASE WHEN score > 80 THEN 'pass' ELSE 'fail' END
-```
-
 ### Numeric Operations
 
 #### Greater Than
@@ -366,14 +478,6 @@ WHERE age < 65
 ```
 ```sql
 WHERE count <= 10
-```
-
-#### Between
-```json
-{"between": [{"var": "age"}, 18, 65]}
-```
-```sql
-WHERE (age BETWEEN 18 AND 65)
 ```
 
 #### Maximum Value
@@ -634,6 +738,8 @@ make lint
 jsonlogic2sql/
 ├── transpiler.go             # Main public API
 ├── transpiler_test.go        # Public API tests
+├── operator.go               # Custom operators registry and types
+├── operator_test.go          # Custom operators tests
 ├── internal/
 │   ├── parser/               # Core parsing logic
 │   ├── operators/            # Operator implementations
@@ -689,13 +795,58 @@ Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
 #### `TranspileFromInterface(logic interface{}) (string, error)`
 Converts any JSON Logic interface{} to a SQL WHERE clause.
 
+#### `NewTranspiler() *Transpiler`
+Creates a new transpiler instance with default configuration.
+
+#### `NewTranspilerWithConfig(config *TranspilerConfig) *Transpiler`
+Creates a new transpiler instance with custom configuration.
+
+#### `NewOperatorRegistry() *OperatorRegistry`
+Creates a new empty operator registry for managing custom operators.
+
 ### Types
 
 #### `Transpiler`
 Main transpiler instance with methods:
-- `Transpile(jsonLogic string) (string, error)`
-- `TranspileFromMap(logic map[string]interface{}) (string, error)`
-- `TranspileFromInterface(logic interface{}) (string, error)`
+- `Transpile(jsonLogic string) (string, error)` - Convert JSON string to SQL
+- `TranspileFromMap(logic map[string]interface{}) (string, error)` - Convert map to SQL
+- `TranspileFromInterface(logic interface{}) (string, error)` - Convert interface to SQL
+- `RegisterOperator(name string, handler OperatorHandler) error` - Register custom operator with handler
+- `RegisterOperatorFunc(name string, fn OperatorFunc) error` - Register custom operator with function
+- `UnregisterOperator(name string) bool` - Remove a custom operator
+- `HasCustomOperator(name string) bool` - Check if operator is registered
+- `ListCustomOperators() []string` - List all custom operator names
+- `ClearCustomOperators()` - Remove all custom operators
+
+#### `TranspilerConfig`
+Configuration options for the transpiler:
+- `UseANSINotEqual bool` - When true uses `<>`, when false uses `!=` (default: true)
+
+#### `OperatorFunc`
+Function type for simple custom operator implementations:
+```go
+type OperatorFunc func(operator string, args []interface{}) (string, error)
+```
+
+#### `OperatorHandler`
+Interface for custom operator implementations that need state:
+```go
+type OperatorHandler interface {
+    ToSQL(operator string, args []interface{}) (string, error)
+}
+```
+
+#### `OperatorRegistry`
+Thread-safe registry for managing custom operators with methods:
+- `Register(operatorName string, handler OperatorHandler)` - Add operator handler
+- `RegisterFunc(operatorName string, fn OperatorFunc)` - Add operator function
+- `Unregister(operatorName string) bool` - Remove an operator
+- `Get(operatorName string) (OperatorHandler, bool)` - Get operator handler
+- `Has(operatorName string) bool` - Check if operator exists
+- `List() []string` - List all operator names
+- `Clear()` - Remove all operators
+- `Clone() *OperatorRegistry` - Create a copy of the registry
+- `Merge(other *OperatorRegistry)` - Merge operators from another registry
 
 ## Error Handling
 
