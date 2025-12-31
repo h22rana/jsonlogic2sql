@@ -7,33 +7,31 @@ import (
 
 // NumericOperator handles numeric operations like +, -, *, /, %, max, min
 type NumericOperator struct {
+	config       *OperatorConfig
 	dataOp       *DataOperator
 	comparisonOp *ComparisonOperator
-	schema       SchemaProvider
 }
 
-// NewNumericOperator creates a new NumericOperator instance
-func NewNumericOperator() *NumericOperator {
+// NewNumericOperator creates a new NumericOperator instance with optional config
+func NewNumericOperator(config *OperatorConfig) *NumericOperator {
 	return &NumericOperator{
-		dataOp:       NewDataOperator(),
-		comparisonOp: NewComparisonOperator(),
+		config:       config,
+		dataOp:       NewDataOperator(config),
+		comparisonOp: NewComparisonOperator(config),
 	}
 }
 
-// SetSchema sets the schema provider for type validation
-func (n *NumericOperator) SetSchema(schema SchemaProvider) {
-	n.schema = schema
-	if n.dataOp != nil {
-		n.dataOp.SetSchema(schema)
+// schema returns the schema from config, or nil if not configured
+func (n *NumericOperator) schema() SchemaProvider {
+	if n.config == nil {
+		return nil
 	}
-	if n.comparisonOp != nil {
-		n.comparisonOp.SetSchema(schema)
-	}
+	return n.config.Schema
 }
 
 // validateNumericOperand checks if a field used in a numeric operation is of numeric type
 func (n *NumericOperator) validateNumericOperand(value interface{}) error {
-	if n.schema == nil {
+	if n.schema() == nil {
 		return nil // No schema, no validation
 	}
 
@@ -42,12 +40,12 @@ func (n *NumericOperator) validateNumericOperand(value interface{}) error {
 		return nil // Can't determine field name, skip validation
 	}
 
-	fieldType := n.schema.GetFieldType(fieldName)
+	fieldType := n.schema().GetFieldType(fieldName)
 	if fieldType == "" {
 		return nil // Field not in schema, skip validation (existence checked by DataOperator)
 	}
 
-	if !n.schema.IsNumericType(fieldName) {
+	if !n.schema().IsNumericType(fieldName) {
 		return fmt.Errorf("numeric operation on non-numeric field '%s' (type: %s)", fieldName, fieldType)
 	}
 
@@ -333,15 +331,15 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 					return n.generateComplexSQL(operator, processedArgs)
 				case "if":
 					// Handle if operator - delegate to logical operator
-					logicalOp := NewLogicalOperator()
+					logicalOp := NewLogicalOperator(n.config)
 					return logicalOp.ToSQL("if", arr)
 				case "and", "or", "!":
 					// Handle logical operators - delegate to logical operator
-					logicalOp := NewLogicalOperator()
+					logicalOp := NewLogicalOperator(n.config)
 					return logicalOp.ToSQL(operator, arr)
 				case "reduce", "filter", "map", "some", "all", "none", "merge":
 					// Handle array operators - delegate to array operator
-					arrayOp := NewArrayOperator()
+					arrayOp := NewArrayOperator(n.config)
 					return arrayOp.ToSQL(operator, arr)
 				default:
 					// For other operators, they should have been pre-processed

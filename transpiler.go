@@ -4,36 +4,37 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/h22rana/jsonlogic2sql/internal/operators"
 	"github.com/h22rana/jsonlogic2sql/internal/parser"
 )
 
 // TranspilerConfig holds configuration options for the transpiler
 type TranspilerConfig struct {
-	UseANSINotEqual bool   // true: <>, false: !=
+	UseANSINotEqual bool    // true: <>, false: !=
 	Schema          *Schema // Optional schema for field validation
 }
 
 // Transpiler provides the main API for converting JSON Logic to SQL WHERE clauses
 type Transpiler struct {
-	parser           *parser.Parser
-	config           *TranspilerConfig
-	customOperators  *OperatorRegistry
-	schema           *Schema
+	parser          *parser.Parser
+	config          *TranspilerConfig
+	operatorConfig  *operators.OperatorConfig
+	customOperators *OperatorRegistry
 }
 
 // SetSchema sets the schema for field validation and type checking
 // This is optional - if not set, no schema validation will be performed
 func (t *Transpiler) SetSchema(schema *Schema) {
-	t.schema = schema
-	if t.parser != nil {
-		t.parser.SetSchema(schema)
-	}
+	t.operatorConfig.Schema = schema
+	// All operators automatically see the new schema through the shared config
 }
 
 // NewTranspiler creates a new transpiler instance
 func NewTranspiler() *Transpiler {
+	opConfig := operators.NewOperatorConfig(nil)
 	t := &Transpiler{
-		parser: parser.NewParser(),
+		parser:         parser.NewParser(opConfig),
+		operatorConfig: opConfig,
 		config: &TranspilerConfig{
 			UseANSINotEqual: true, // Default to ANSI SQL <>
 		},
@@ -45,16 +46,19 @@ func NewTranspiler() *Transpiler {
 
 // NewTranspilerWithConfig creates a new transpiler instance with custom configuration
 func NewTranspilerWithConfig(config *TranspilerConfig) *Transpiler {
+	var opConfig *operators.OperatorConfig
+	if config != nil && config.Schema != nil {
+		opConfig = operators.NewOperatorConfig(config.Schema)
+	} else {
+		opConfig = operators.NewOperatorConfig(nil)
+	}
 	t := &Transpiler{
-		parser:          parser.NewParser(),
+		parser:          parser.NewParser(opConfig),
+		operatorConfig:  opConfig,
 		config:          config,
 		customOperators: NewOperatorRegistry(),
 	}
 	t.setupCustomOperatorLookup()
-	// Set schema if provided
-	if config != nil && config.Schema != nil {
-		t.parser.SetSchema(config.Schema)
-	}
 	return t
 }
 

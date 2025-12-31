@@ -19,6 +19,7 @@ type CustomOperatorLookup func(operatorName string) (CustomOperatorHandler, bool
 // Parser parses JSON Logic expressions and converts them to SQL WHERE clauses
 type Parser struct {
 	validator      *validator.Validator
+	config         *operators.OperatorConfig
 	dataOp         *operators.DataOperator
 	comparisonOp   *operators.ComparisonOperator
 	logicalOp      *operators.LogicalOperator
@@ -26,19 +27,22 @@ type Parser struct {
 	stringOp       *operators.StringOperator
 	arrayOp        *operators.ArrayOperator
 	customOpLookup CustomOperatorLookup
-	schema         operators.SchemaProvider
 }
 
-// NewParser creates a new parser instance
-func NewParser() *Parser {
+// NewParser creates a new parser instance with optional config
+func NewParser(config *operators.OperatorConfig) *Parser {
+	if config == nil {
+		config = operators.NewOperatorConfig(nil)
+	}
 	return &Parser{
 		validator:    validator.NewValidator(),
-		dataOp:       operators.NewDataOperator(),
-		comparisonOp: operators.NewComparisonOperator(),
-		logicalOp:    operators.NewLogicalOperator(),
-		numericOp:    operators.NewNumericOperator(),
-		stringOp:     operators.NewStringOperator(),
-		arrayOp:      operators.NewArrayOperator(),
+		config:       config,
+		dataOp:       operators.NewDataOperator(config),
+		comparisonOp: operators.NewComparisonOperator(config),
+		logicalOp:    operators.NewLogicalOperator(config),
+		numericOp:    operators.NewNumericOperator(config),
+		stringOp:     operators.NewStringOperator(config),
+		arrayOp:      operators.NewArrayOperator(config),
 	}
 }
 
@@ -58,26 +62,8 @@ func (p *Parser) SetCustomOperatorLookup(lookup CustomOperatorLookup) {
 
 // SetSchema sets the schema provider for field validation and type checking
 func (p *Parser) SetSchema(schema operators.SchemaProvider) {
-	p.schema = schema
-	// Set schema on all operators
-	if p.dataOp != nil {
-		p.dataOp.SetSchema(schema)
-	}
-	if p.comparisonOp != nil {
-		p.comparisonOp.SetSchema(schema)
-	}
-	if p.logicalOp != nil {
-		p.logicalOp.SetSchema(schema)
-	}
-	if p.numericOp != nil {
-		p.numericOp.SetSchema(schema)
-	}
-	if p.stringOp != nil {
-		p.stringOp.SetSchema(schema)
-	}
-	if p.arrayOp != nil {
-		p.arrayOp.SetSchema(schema)
-	}
+	p.config.Schema = schema
+	// All operators share the same config, so they automatically see the new schema
 }
 
 // Parse converts a JSON Logic expression to SQL WHERE clause

@@ -8,30 +8,31 @@ import (
 
 // ComparisonOperator handles comparison operators (==, ===, !=, !==, >, >=, <, <=)
 type ComparisonOperator struct {
+	config *OperatorConfig
 	dataOp *DataOperator
-	schema SchemaProvider
 }
 
-// NewComparisonOperator creates a new comparison operator
-func NewComparisonOperator() *ComparisonOperator {
+// NewComparisonOperator creates a new comparison operator with optional config
+func NewComparisonOperator(config *OperatorConfig) *ComparisonOperator {
 	return &ComparisonOperator{
-		dataOp: NewDataOperator(),
+		config: config,
+		dataOp: NewDataOperator(config), // Same config, no propagation needed
 	}
 }
 
-// SetSchema sets the schema provider for field validation and type checking
-func (c *ComparisonOperator) SetSchema(schema SchemaProvider) {
-	c.schema = schema
-	if c.dataOp != nil {
-		c.dataOp.SetSchema(schema)
+// schema returns the schema from config, or nil if not configured
+func (c *ComparisonOperator) schema() SchemaProvider {
+	if c.config == nil {
+		return nil
 	}
+	return c.config.Schema
 }
 
 // validateOrderingOperand checks if a field used in an ordering comparison is of a valid type
 // Only numeric and string types support ordering comparisons (>, >=, <, <=)
 // Rejects array, object, and boolean types
 func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator string) error {
-	if c.schema == nil {
+	if c.schema() == nil {
 		return nil // No schema, no validation
 	}
 
@@ -40,13 +41,13 @@ func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator
 		return nil // Can't determine field name, skip validation
 	}
 
-	fieldType := c.schema.GetFieldType(fieldName)
+	fieldType := c.schema().GetFieldType(fieldName)
 	if fieldType == "" {
 		return nil // Field not in schema, skip validation (existence checked by DataOperator)
 	}
 
 	// Allow numeric and string types for ordering comparisons
-	if c.schema.IsNumericType(fieldName) || c.schema.IsStringType(fieldName) {
+	if c.schema().IsNumericType(fieldName) || c.schema().IsStringType(fieldName) {
 		return nil
 	}
 
@@ -81,12 +82,12 @@ func (c *ComparisonOperator) extractFieldName(varName interface{}) string {
 // If the field is numeric and the value is a string that represents a number, it returns the unquoted number.
 // This ensures proper SQL comparisons like "field >= 50000" instead of "field >= '50000'".
 func (c *ComparisonOperator) coerceValueForComparison(value interface{}, fieldName string) interface{} {
-	if c.schema == nil || fieldName == "" {
+	if c.schema() == nil || fieldName == "" {
 		return value
 	}
 
 	// Only coerce if the field is a numeric type
-	if !c.schema.IsNumericType(fieldName) {
+	if !c.schema().IsNumericType(fieldName) {
 		return value
 	}
 
@@ -108,7 +109,7 @@ func (c *ComparisonOperator) coerceValueForComparison(value interface{}, fieldNa
 // validateEnumValue validates that a value is valid for an enum field.
 // Returns nil if valid or if not an enum field.
 func (c *ComparisonOperator) validateEnumValue(value interface{}, fieldName string) error {
-	if c.schema == nil || fieldName == "" {
+	if c.schema() == nil || fieldName == "" {
 		return nil
 	}
 
@@ -118,7 +119,7 @@ func (c *ComparisonOperator) validateEnumValue(value interface{}, fieldName stri
 	}
 
 	// Only validate if the field is an enum type
-	if !c.schema.IsEnumType(fieldName) {
+	if !c.schema().IsEnumType(fieldName) {
 		return nil
 	}
 
@@ -132,7 +133,7 @@ func (c *ComparisonOperator) validateEnumValue(value interface{}, fieldName stri
 		strVal = fmt.Sprintf("%v", v)
 	}
 
-	return c.schema.ValidateEnumValue(fieldName, strVal)
+	return c.schema().ValidateEnumValue(fieldName, strVal)
 }
 
 // ToSQL converts a comparison operator to SQL
@@ -307,7 +308,7 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 				case "if":
 					// Handle if operator - delegate to logical operator
 					if arr, ok := args.([]interface{}); ok {
-						logicalOp := NewLogicalOperator()
+						logicalOp := NewLogicalOperator(c.config)
 						return logicalOp.ToSQL("if", arr)
 					}
 					return "", fmt.Errorf("if operator requires array arguments")
@@ -316,14 +317,14 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 					// If we see them here, it means they weren't processed correctly
 					// Try to process them directly as a fallback
 					if arr, ok := args.([]interface{}); ok {
-						arrayOp := NewArrayOperator()
+						arrayOp := NewArrayOperator(c.config)
 						return arrayOp.ToSQL(op, arr)
 					}
 					return "", fmt.Errorf("array operator %s requires array arguments", op)
 				case "cat", "substr":
 					// Handle string operators
 					if arr, ok := args.([]interface{}); ok {
-						stringOp := NewStringOperator()
+						stringOp := NewStringOperator(c.config)
 						return stringOp.ToSQL(op, arr)
 					}
 					return "", fmt.Errorf("string operator %s requires array arguments", op)
@@ -376,11 +377,11 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}, le
 			}
 
 			// Use schema to determine type if available
-			if c.schema != nil && fieldName != "" {
-				if c.schema.IsArrayType(fieldName) {
+			if c.schema() != nil && fieldName != "" {
+				if c.schema().IsArrayType(fieldName) {
 					// Array type: use array membership syntax
 					return fmt.Sprintf("%s IN %s", leftSQL, rightSQL), nil
-				} else if c.schema.IsStringType(fieldName) {
+				} else if c.schema().IsStringType(fieldName) {
 					// String type: use string containment syntax
 					return fmt.Sprintf("STRPOS(%s, %s) > 0", rightSQL, leftSQL), nil
 				}
@@ -405,7 +406,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}, le
 		}
 
 		// Validate enum values if left side is an enum field
-		if leftFieldName != "" && c.schema != nil && c.schema.IsEnumType(leftFieldName) {
+		if leftFieldName != "" && c.schema() != nil && c.schema().IsEnumType(leftFieldName) {
 			for _, item := range arr {
 				if err := c.validateEnumValue(item, leftFieldName); err != nil {
 					return "", err

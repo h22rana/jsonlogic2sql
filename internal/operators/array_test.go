@@ -5,7 +5,7 @@ import (
 )
 
 func TestArrayOperator_ToSQL(t *testing.T) {
-	op := NewArrayOperator()
+	op := NewArrayOperator(nil)
 
 	tests := []struct {
 		name     string
@@ -220,7 +220,7 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 }
 
 func TestArrayOperator_valueToSQL(t *testing.T) {
-	op := NewArrayOperator()
+	op := NewArrayOperator(nil)
 
 	tests := []struct {
 		name     string

@@ -7,27 +7,17 @@ import (
 
 // LogicalOperator handles logical operators (and, or, !, !!, if)
 type LogicalOperator struct {
+	config       *OperatorConfig
 	comparisonOp *ComparisonOperator
 	dataOp       *DataOperator
-	schema       SchemaProvider
 }
 
-// NewLogicalOperator creates a new logical operator
-func NewLogicalOperator() *LogicalOperator {
+// NewLogicalOperator creates a new logical operator with optional config
+func NewLogicalOperator(config *OperatorConfig) *LogicalOperator {
 	return &LogicalOperator{
-		comparisonOp: NewComparisonOperator(),
-		dataOp:       NewDataOperator(),
-	}
-}
-
-// SetSchema sets the schema provider for field validation and type checking
-func (l *LogicalOperator) SetSchema(schema SchemaProvider) {
-	l.schema = schema
-	if l.dataOp != nil {
-		l.dataOp.SetSchema(schema)
-	}
-	if l.comparisonOp != nil {
-		l.comparisonOp.SetSchema(schema)
+		config:       config,
+		comparisonOp: NewComparisonOperator(config),
+		dataOp:       NewDataOperator(config),
 	}
 }
 
@@ -256,19 +246,19 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 				return l.ToSQL(operator, []interface{}{args})
 			case "+", "-", "*", "/", "%", "max", "min":
 				if arr, ok := args.([]interface{}); ok {
-					numericOp := NewNumericOperator()
+					numericOp := NewNumericOperator(l.config)
 					return numericOp.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("numeric operator requires array arguments")
 			case "cat", "substr":
 				if arr, ok := args.([]interface{}); ok {
-					stringOp := NewStringOperator()
+					stringOp := NewStringOperator(l.config)
 					return stringOp.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("string operator requires array arguments")
 			case "map", "filter", "reduce", "all", "some", "none", "merge":
 				if arr, ok := args.([]interface{}); ok {
-					arrayOp := NewArrayOperator()
+					arrayOp := NewArrayOperator(l.config)
 					return arrayOp.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("array operator requires array arguments")

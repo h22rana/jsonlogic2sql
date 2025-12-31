@@ -7,52 +7,43 @@ import (
 
 // ArrayOperator handles array operations like map, filter, reduce, all, some, none, merge
 type ArrayOperator struct {
+	config       *OperatorConfig
 	dataOp       *DataOperator
 	comparisonOp *ComparisonOperator
 	logicalOp    *LogicalOperator
 	numericOp    *NumericOperator
-	schema       SchemaProvider
 }
 
-// NewArrayOperator creates a new ArrayOperator instance
-func NewArrayOperator() *ArrayOperator {
+// NewArrayOperator creates a new ArrayOperator instance with optional config
+func NewArrayOperator(config *OperatorConfig) *ArrayOperator {
 	return &ArrayOperator{
-		dataOp:       NewDataOperator(),
-		comparisonOp: NewComparisonOperator(),
+		config:       config,
+		dataOp:       NewDataOperator(config),
+		comparisonOp: NewComparisonOperator(config),
 		logicalOp:    nil, // Will be created lazily
-		numericOp:    NewNumericOperator(),
+		numericOp:    NewNumericOperator(config),
 	}
 }
 
-// SetSchema sets the schema provider for type validation
-func (a *ArrayOperator) SetSchema(schema SchemaProvider) {
-	a.schema = schema
-	if a.dataOp != nil {
-		a.dataOp.SetSchema(schema)
+// schema returns the schema from config, or nil if not configured
+func (a *ArrayOperator) schema() SchemaProvider {
+	if a.config == nil {
+		return nil
 	}
-	if a.comparisonOp != nil {
-		a.comparisonOp.SetSchema(schema)
-	}
-	if a.numericOp != nil {
-		a.numericOp.SetSchema(schema)
-	}
-	// logicalOp is created lazily, schema will be set when it's created
+	return a.config.Schema
 }
 
 // getLogicalOperator returns the logical operator, creating it lazily if needed
 func (a *ArrayOperator) getLogicalOperator() *LogicalOperator {
 	if a.logicalOp == nil {
-		a.logicalOp = NewLogicalOperator()
-		if a.schema != nil {
-			a.logicalOp.SetSchema(a.schema)
-		}
+		a.logicalOp = NewLogicalOperator(a.config) // Config already has schema
 	}
 	return a.logicalOp
 }
 
 // validateArrayOperand checks if a field used in an array operation is of array type
 func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
-	if a.schema == nil {
+	if a.schema() == nil {
 		return nil // No schema, no validation
 	}
 
@@ -66,12 +57,12 @@ func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
 		return nil // Can't determine field name, skip validation
 	}
 
-	fieldType := a.schema.GetFieldType(fieldName)
+	fieldType := a.schema().GetFieldType(fieldName)
 	if fieldType == "" {
 		return nil // Field not in schema, skip validation (existence checked by DataOperator)
 	}
 
-	if !a.schema.IsArrayType(fieldName) {
+	if !a.schema().IsArrayType(fieldName) {
 		return fmt.Errorf("array operation on non-array field '%s' (type: %s)", fieldName, fieldType)
 	}
 

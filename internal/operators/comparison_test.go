@@ -5,7 +5,7 @@ import (
 )
 
 func TestComparisonOperator_ToSQL(t *testing.T) {
-	op := NewComparisonOperator()
+	op := NewComparisonOperator(nil)
 
 	tests := []struct {
 		name     string
@@ -258,7 +258,7 @@ func TestComparisonOperator_ToSQL(t *testing.T) {
 }
 
 func TestComparisonOperator_valueToSQL(t *testing.T) {
-	op := NewComparisonOperator()
+	op := NewComparisonOperator(nil)
 
 	tests := []struct {
 		name     string

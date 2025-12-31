@@ -5,7 +5,7 @@ import (
 )
 
 func TestNumericOperator_ToSQL(t *testing.T) {
-	op := NewNumericOperator()
+	op := NewNumericOperator(nil)
 
 	tests := []struct {
 		name     string
@@ -263,7 +263,7 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 }
 
 func TestNumericOperator_valueToSQL(t *testing.T) {
-	op := NewNumericOperator()
+	op := NewNumericOperator(nil)
 
 	tests := []struct {
 		name     string
