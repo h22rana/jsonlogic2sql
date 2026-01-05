@@ -9,6 +9,19 @@ import (
 	"github.com/h22rana/jsonlogic2sql"
 )
 
+// escapeLikePattern escapes special characters for SQL LIKE patterns.
+// Escapes: single quotes ('), percent (%), and underscore (_)
+// For BigQuery/Spanner, use backslash escaping for LIKE wildcards.
+func escapeLikePattern(pattern string) string {
+	// First escape single quotes (SQL string escaping)
+	pattern = strings.ReplaceAll(pattern, "'", "''")
+	// Then escape LIKE wildcards (backslash escaping for BigQuery/Spanner)
+	pattern = strings.ReplaceAll(pattern, "\\", "\\\\") // Escape existing backslashes first
+	pattern = strings.ReplaceAll(pattern, "%", "\\%")
+	pattern = strings.ReplaceAll(pattern, "_", "\\_")
+	return pattern
+}
+
 func main() {
 	fmt.Println("JSON Logic to SQL Transpiler REPL")
 	fmt.Println("Type ':help' for commands, ':quit' to exit")
@@ -31,7 +44,21 @@ func main() {
 		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
 			pattern = pattern[1 : len(pattern)-1]
 		}
-		return fmt.Sprintf("%s LIKE '%s%%'", column, pattern), nil
+		return fmt.Sprintf("%s LIKE '%s%%'", column, escapeLikePattern(pattern)), nil
+	})
+
+	// !startsWith operator is basically column NOT LIKE 'value%'
+	transpiler.RegisterOperatorFunc("!startsWith", func(op string, args []interface{}) (string, error) {
+		if len(args) != 2 {
+			return "", fmt.Errorf("!startsWith requires exactly 2 arguments")
+		}
+		column := args[0].(string)
+		pattern := args[1].(string)
+		// Extract value from quoted string (e.g., "'T'" -> "T")
+		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
+			pattern = pattern[1 : len(pattern)-1]
+		}
+		return fmt.Sprintf("%s NOT LIKE '%s%%'", column, escapeLikePattern(pattern)), nil
 	})
 
 	// endsWith operator is basically column LIKE '%value'
@@ -45,7 +72,21 @@ func main() {
 		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
 			pattern = pattern[1 : len(pattern)-1]
 		}
-		return fmt.Sprintf("%s LIKE '%%%s'", column, pattern), nil
+		return fmt.Sprintf("%s LIKE '%%%s'", column, escapeLikePattern(pattern)), nil
+	})
+
+	// !endsWith operator is basically column NOT LIKE '%value'
+	transpiler.RegisterOperatorFunc("!endsWith", func(op string, args []interface{}) (string, error) {
+		if len(args) != 2 {
+			return "", fmt.Errorf("!endsWith requires exactly 2 arguments")
+		}
+		column := args[0].(string)
+		pattern := args[1].(string)
+		// Extract value from quoted string (e.g., "'T'" -> "T")
+		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
+			pattern = pattern[1 : len(pattern)-1]
+		}
+		return fmt.Sprintf("%s NOT LIKE '%%%s'", column, escapeLikePattern(pattern)), nil
 	})
 
 	// contains operator is basically column LIKE '%value%'
@@ -111,7 +152,98 @@ func main() {
 		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
 			pattern = pattern[1 : len(pattern)-1]
 		}
-		return fmt.Sprintf("%s LIKE '%%%s%%'", column, pattern), nil
+		return fmt.Sprintf("%s LIKE '%%%s%%'", column, escapeLikePattern(pattern)), nil
+	})
+
+	// !contains operator is basically column NOT LIKE '%value%'
+	transpiler.RegisterOperatorFunc("!contains", func(op string, args []interface{}) (string, error) {
+		if len(args) != 2 {
+			return "", fmt.Errorf("contains requires exactly 2 arguments")
+		}
+
+		var column, pattern string
+		arg0Str, arg0IsStr := args[0].(string)
+		arg1Str, arg1IsStr := args[1].(string)
+
+		// Helper function to extract value from array string representation like "[T]"
+		extractFromArrayString := func(s string) string {
+			// If it's an array representation like "[T]", extract "T"
+			if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+				inner := s[1 : len(s)-1] // Remove "[" and "]"
+				// Remove quotes if present
+				if len(inner) >= 2 && inner[0] == '\'' && inner[len(inner)-1] == '\'' {
+					return inner[1 : len(inner)-1]
+				}
+				return inner
+			}
+			return s
+		}
+
+		if arg0IsStr && arg1IsStr {
+			// Check if either argument is an array string representation
+			if strings.HasPrefix(arg1Str, "[") && strings.HasSuffix(arg1Str, "]") {
+				// Second arg is an array, extract first element
+				column = arg0Str
+				pattern = extractFromArrayString(arg1Str)
+			} else if strings.HasPrefix(arg0Str, "[") && strings.HasSuffix(arg0Str, "]") {
+				// First arg is an array (reversed case)
+				column = arg1Str
+				pattern = extractFromArrayString(arg0Str)
+			} else {
+				// Check if arguments are reversed (pattern first, column second)
+				arg0Quoted := len(arg0Str) >= 2 && arg0Str[0] == '\'' && arg0Str[len(arg0Str)-1] == '\''
+				arg1Quoted := len(arg1Str) >= 2 && arg1Str[0] == '\'' && arg1Str[len(arg1Str)-1] == '\''
+
+				if arg0Quoted && !arg1Quoted {
+					// Reversed: pattern is first, column is second
+					column = arg1Str
+					pattern = arg0Str
+				} else {
+					// Normal: column is first, pattern is second
+					column = arg0Str
+					pattern = arg1Str
+				}
+			}
+		} else {
+			// Default: first is column, second is pattern
+			column = args[0].(string)
+			pattern = args[1].(string)
+			// Check if pattern is an array string and extract value
+			pattern = extractFromArrayString(pattern)
+		}
+
+		// Extract value from quoted string pattern
+		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
+			pattern = pattern[1 : len(pattern)-1]
+		}
+		return fmt.Sprintf("%s NOT LIKE '%%%s%%'", column, escapeLikePattern(pattern)), nil
+	})
+
+	// normalizeNFKC operator is basically NORMALIZE(column, 'NFKC')
+	transpiler.RegisterOperatorFunc("normalizeNFKC", func(op string, args []interface{}) (string, error) {
+		if len(args) != 1 {
+			return "", fmt.Errorf("normalizeNFKC requires exactly 1 argument")
+		}
+		column := args[0].(string)
+		return fmt.Sprintf("NORMALIZE(%s, 'NFKC')", column), nil
+	})
+
+	// toLower operator is basically LOWER(column)
+	transpiler.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
+		if len(args) != 1 {
+			return "", fmt.Errorf("toLower requires exactly 1 argument")
+		}
+		column := args[0].(string)
+		return fmt.Sprintf("LOWER(%s)", column), nil
+	})
+
+	// toUpper operator is basically UPPER(column)
+	transpiler.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
+		if len(args) != 1 {
+			return "", fmt.Errorf("toUpper requires exactly 1 argument")
+		}
+		column := args[0].(string)
+		return fmt.Sprintf("UPPER(%s)", column), nil
 	})
 
 	for {

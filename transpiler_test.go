@@ -770,7 +770,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested string operations",
 			input:    `{"==": [{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}, "John Doe"]}`,
-			expected: "WHERE CONCAT(firstName, ' ', lastName) = John Doe",
+			expected: "WHERE CONCAT(firstName, ' ', lastName) = 'John Doe'",
 			hasError: false,
 		},
 		{
