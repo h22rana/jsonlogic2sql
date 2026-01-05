@@ -277,12 +277,15 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 	}
 
 	// Handle pre-processed SQL strings from the parser
-	// Only treat as pre-processed if it contains SQL keywords or operators
+	// Only treat as pre-processed if it contains SQL function calls or keywords
 	if sqlStr, ok := value.(string); ok {
-		// Check if this looks like a pre-processed SQL string (contains SQL keywords/operators)
-		// This includes strings with spaces, parentheses, or SQL function names
-		if strings.Contains(sqlStr, " ") || strings.Contains(sqlStr, "(") || strings.Contains(sqlStr, ")") ||
-			strings.Contains(sqlStr, "ARRAY_") || strings.Contains(sqlStr, "EXISTS") || strings.Contains(sqlStr, "SELECT") {
+		// Check if this looks like a pre-processed SQL string
+		// Must contain function call pattern (parentheses) or specific SQL keywords
+		// Simple strings with spaces like "SPA WELLNESS" should be quoted as literals
+		hasParentheses := strings.Contains(sqlStr, "(") && strings.Contains(sqlStr, ")")
+		hasSQLKeywords := strings.Contains(sqlStr, "ARRAY_") || strings.Contains(sqlStr, "EXISTS") ||
+			strings.Contains(sqlStr, "SELECT") || strings.Contains(sqlStr, "CASE ")
+		if hasParentheses || hasSQLKeywords {
 			return sqlStr, nil
 		}
 		// Otherwise treat as a regular string literal that needs quoting
