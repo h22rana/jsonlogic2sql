@@ -6,13 +6,13 @@ import (
 	"strings"
 )
 
-// StringOperator handles string operations like cat, substr
+// StringOperator handles string operations like cat, substr.
 type StringOperator struct {
 	config *OperatorConfig
 	dataOp *DataOperator
 }
 
-// NewStringOperator creates a new StringOperator instance with optional config
+// NewStringOperator creates a new StringOperator instance with optional config.
 func NewStringOperator(config *OperatorConfig) *StringOperator {
 	return &StringOperator{
 		config: config,
@@ -20,7 +20,7 @@ func NewStringOperator(config *OperatorConfig) *StringOperator {
 	}
 }
 
-// schema returns the schema from config, or nil if not configured
+// schema returns the schema from config, or nil if not configured.
 func (s *StringOperator) schema() SchemaProvider {
 	if s.config == nil {
 		return nil
@@ -30,7 +30,7 @@ func (s *StringOperator) schema() SchemaProvider {
 
 // validateStringOperand checks if a field used in a string operation is of compatible type
 // Allows string types and numeric types (implicit conversion is common)
-// Rejects array and object types
+// Rejects array and object types.
 func (s *StringOperator) validateStringOperand(value interface{}) error {
 	if s.schema() == nil {
 		return nil // No schema, no validation
@@ -59,7 +59,7 @@ func (s *StringOperator) validateStringOperand(value interface{}) error {
 	return nil
 }
 
-// extractFieldNameFromValue extracts field name from a value that might be a var expression
+// extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (s *StringOperator) extractFieldNameFromValue(value interface{}) string {
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr["var"]; hasVar {
@@ -69,7 +69,7 @@ func (s *StringOperator) extractFieldNameFromValue(value interface{}) string {
 	return ""
 }
 
-// extractFieldName extracts the field name from a var argument
+// extractFieldName extracts the field name from a var argument.
 func (s *StringOperator) extractFieldName(varName interface{}) string {
 	if nameStr, ok := varName.(string); ok {
 		return nameStr
@@ -82,7 +82,7 @@ func (s *StringOperator) extractFieldName(varName interface{}) string {
 	return ""
 }
 
-// ToSQL converts a string operation to SQL
+// ToSQL converts a string operation to SQL.
 func (s *StringOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("string operator %s requires at least one argument", operator)
@@ -98,7 +98,7 @@ func (s *StringOperator) ToSQL(operator string, args []interface{}) (string, err
 	}
 }
 
-// handleConcatenation converts cat operator to SQL
+// handleConcatenation converts cat operator to SQL.
 func (s *StringOperator) handleConcatenation(args []interface{}) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("concatenation requires at least 1 argument")
@@ -115,7 +115,7 @@ func (s *StringOperator) handleConcatenation(args []interface{}) (string, error)
 	for i, arg := range args {
 		operand, err := s.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid concatenation argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid concatenation argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
@@ -124,7 +124,7 @@ func (s *StringOperator) handleConcatenation(args []interface{}) (string, error)
 	return fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), nil
 }
 
-// handleSubstring converts substr operator to SQL
+// handleSubstring converts substr operator to SQL.
 func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 	if len(args) < 2 || len(args) > 3 {
 		return "", fmt.Errorf("substring requires 2 or 3 arguments")
@@ -138,13 +138,13 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 	// First argument: string
 	str, err := s.valueToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid substring string argument: %v", err)
+		return "", fmt.Errorf("invalid substring string argument: %w", err)
 	}
 
 	// Second argument: start position (convert from 0-based to 1-based)
 	start, err := s.valueToSQL(args[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid substring start argument: %v", err)
+		return "", fmt.Errorf("invalid substring start argument: %w", err)
 	}
 
 	// Convert 0-based start to 1-based, handling numeric literals cleanly
@@ -154,7 +154,7 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 	if len(args) == 3 {
 		length, err := s.valueToSQL(args[2])
 		if err != nil {
-			return "", fmt.Errorf("invalid substring length argument: %v", err)
+			return "", fmt.Errorf("invalid substring length argument: %w", err)
 		}
 		return fmt.Sprintf("SUBSTR(%s, %s, %s)", str, startSQL, length), nil
 	}
@@ -163,7 +163,7 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 	return fmt.Sprintf("SUBSTR(%s, %s)", str, startSQL), nil
 }
 
-// valueToSQL converts a value to SQL, handling var expressions, complex expressions, and literals
+// valueToSQL converts a value to SQL, handling var expressions, complex expressions, and literals.
 func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 	// Handle var expressions
 	if expr, ok := value.(map[string]interface{}); ok {
@@ -199,7 +199,7 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 
 // convertStartIndex converts a 0-based start index to 1-based for SQL SUBSTR
 // Handles numeric literals cleanly (e.g., "0" becomes "1", "5" becomes "6")
-// For complex expressions, adds "+ 1" (e.g., "x" becomes "x + 1")
+// For complex expressions, adds "+ 1" (e.g., "x" becomes "x + 1").
 func (s *StringOperator) convertStartIndex(start string) string {
 	// Try to parse as integer for clean conversion
 	if num, err := strconv.Atoi(start); err == nil {
@@ -211,7 +211,7 @@ func (s *StringOperator) convertStartIndex(start string) string {
 	return fmt.Sprintf("(%s + 1)", start)
 }
 
-// processArithmeticExpression handles arithmetic operations within string operations
+// processArithmeticExpression handles arithmetic operations within string operations.
 func (s *StringOperator) processArithmeticExpression(op string, args interface{}) (string, error) {
 	argsSlice, ok := args.([]interface{})
 	if !ok {
@@ -227,7 +227,7 @@ func (s *StringOperator) processArithmeticExpression(op string, args interface{}
 	for i, arg := range argsSlice {
 		operand, err := s.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid arithmetic argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid arithmetic argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
@@ -249,7 +249,7 @@ func (s *StringOperator) processArithmeticExpression(op string, args interface{}
 	}
 }
 
-// processIfExpression handles if/then/else expressions within string operations
+// processIfExpression handles if/then/else expressions within string operations.
 func (s *StringOperator) processIfExpression(args interface{}) (string, error) {
 	argsSlice, ok := args.([]interface{})
 	if !ok {
@@ -270,13 +270,13 @@ func (s *StringOperator) processIfExpression(args interface{}) (string, error) {
 		// Condition
 		condition, err := s.valueToSQL(argsSlice[i])
 		if err != nil {
-			return "", fmt.Errorf("invalid if condition: %v", err)
+			return "", fmt.Errorf("invalid if condition: %w", err)
 		}
 
 		// Then value
 		thenValue, err := s.valueToSQL(argsSlice[i+1])
 		if err != nil {
-			return "", fmt.Errorf("invalid if then value: %v", err)
+			return "", fmt.Errorf("invalid if then value: %w", err)
 		}
 
 		result.WriteString(fmt.Sprintf(" WHEN %s THEN %s", condition, thenValue))
@@ -290,7 +290,7 @@ func (s *StringOperator) processIfExpression(args interface{}) (string, error) {
 			// Last element is the else value
 			elseValue, err := s.valueToSQL(argsSlice[i])
 			if err != nil {
-				return "", fmt.Errorf("invalid if else value: %v", err)
+				return "", fmt.Errorf("invalid if else value: %w", err)
 			}
 			result.WriteString(fmt.Sprintf(" ELSE %s", elseValue))
 			break
@@ -301,7 +301,7 @@ func (s *StringOperator) processIfExpression(args interface{}) (string, error) {
 	return result.String(), nil
 }
 
-// processComparisonExpression handles comparison operations within string operations
+// processComparisonExpression handles comparison operations within string operations.
 func (s *StringOperator) processComparisonExpression(op string, args interface{}) (string, error) {
 	argsSlice, ok := args.([]interface{})
 	if !ok {
@@ -315,12 +315,12 @@ func (s *StringOperator) processComparisonExpression(op string, args interface{}
 	// Convert arguments to SQL
 	left, err := s.valueToSQL(argsSlice[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid comparison left argument: %v", err)
+		return "", fmt.Errorf("invalid comparison left argument: %w", err)
 	}
 
 	right, err := s.valueToSQL(argsSlice[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid comparison right argument: %v", err)
+		return "", fmt.Errorf("invalid comparison right argument: %w", err)
 	}
 
 	// Generate SQL based on operation

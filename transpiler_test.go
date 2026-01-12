@@ -302,7 +302,7 @@ func TestTranspileFromInterface(t *testing.T) {
 	}
 }
 
-// Test all JSON Logic operators comprehensively
+// Test all JSON Logic operators comprehensively.
 func TestAllOperators(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -621,7 +621,7 @@ func TestAllOperators(t *testing.T) {
 	}
 }
 
-// TestComprehensiveNestedExpressions tests deeply nested and complex expressions
+// TestComprehensiveNestedExpressions tests deeply nested and complex expressions.
 func TestComprehensiveNestedExpressions(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -883,7 +883,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 	}
 }
 
-// TestAdditionalEdgeCases tests additional edge cases for comprehensive coverage
+// TestAdditionalEdgeCases tests additional edge cases for comprehensive coverage.
 func TestAdditionalEdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string

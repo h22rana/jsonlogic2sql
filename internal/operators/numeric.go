@@ -5,14 +5,14 @@ import (
 	"strings"
 )
 
-// NumericOperator handles numeric operations like +, -, *, /, %, max, min
+// NumericOperator handles numeric operations like +, -, *, /, %, max, min.
 type NumericOperator struct {
 	config       *OperatorConfig
 	dataOp       *DataOperator
 	comparisonOp *ComparisonOperator
 }
 
-// NewNumericOperator creates a new NumericOperator instance with optional config
+// NewNumericOperator creates a new NumericOperator instance with optional config.
 func NewNumericOperator(config *OperatorConfig) *NumericOperator {
 	return &NumericOperator{
 		config:       config,
@@ -21,7 +21,7 @@ func NewNumericOperator(config *OperatorConfig) *NumericOperator {
 	}
 }
 
-// schema returns the schema from config, or nil if not configured
+// schema returns the schema from config, or nil if not configured.
 func (n *NumericOperator) schema() SchemaProvider {
 	if n.config == nil {
 		return nil
@@ -29,7 +29,7 @@ func (n *NumericOperator) schema() SchemaProvider {
 	return n.config.Schema
 }
 
-// validateNumericOperand checks if a field used in a numeric operation is of numeric type
+// validateNumericOperand checks if a field used in a numeric operation is of numeric type.
 func (n *NumericOperator) validateNumericOperand(value interface{}) error {
 	if n.schema() == nil {
 		return nil // No schema, no validation
@@ -52,7 +52,7 @@ func (n *NumericOperator) validateNumericOperand(value interface{}) error {
 	return nil
 }
 
-// extractFieldNameFromValue extracts field name from a value that might be a var expression
+// extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (n *NumericOperator) extractFieldNameFromValue(value interface{}) string {
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr["var"]; hasVar {
@@ -62,7 +62,7 @@ func (n *NumericOperator) extractFieldNameFromValue(value interface{}) string {
 	return ""
 }
 
-// extractFieldName extracts the field name from a var argument
+// extractFieldName extracts the field name from a var argument.
 func (n *NumericOperator) extractFieldName(varName interface{}) string {
 	if nameStr, ok := varName.(string); ok {
 		return nameStr
@@ -75,7 +75,7 @@ func (n *NumericOperator) extractFieldName(varName interface{}) string {
 	return ""
 }
 
-// ToSQL converts a numeric operation to SQL
+// ToSQL converts a numeric operation to SQL.
 func (n *NumericOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("numeric operator %s requires at least one argument", operator)
@@ -101,7 +101,7 @@ func (n *NumericOperator) ToSQL(operator string, args []interface{}) (string, er
 	}
 }
 
-// handleAddition converts + operator to SQL
+// handleAddition converts + operator to SQL.
 func (n *NumericOperator) handleAddition(args []interface{}) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("addition requires at least 1 argument")
@@ -118,7 +118,7 @@ func (n *NumericOperator) handleAddition(args []interface{}) (string, error) {
 	if len(args) == 1 {
 		operand, err := n.valueToSQL(args[0])
 		if err != nil {
-			return "", fmt.Errorf("invalid unary plus argument: %v", err)
+			return "", fmt.Errorf("invalid unary plus argument: %w", err)
 		}
 		return fmt.Sprintf("CAST(%s AS NUMERIC)", operand), nil
 	}
@@ -127,7 +127,7 @@ func (n *NumericOperator) handleAddition(args []interface{}) (string, error) {
 	for i, arg := range args {
 		operand, err := n.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid addition argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid addition argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
@@ -135,7 +135,7 @@ func (n *NumericOperator) handleAddition(args []interface{}) (string, error) {
 	return fmt.Sprintf("(%s)", strings.Join(operands, " + ")), nil
 }
 
-// handleSubtraction converts - operator to SQL
+// handleSubtraction converts - operator to SQL.
 func (n *NumericOperator) handleSubtraction(args []interface{}) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("subtraction requires at least 1 argument")
@@ -152,7 +152,7 @@ func (n *NumericOperator) handleSubtraction(args []interface{}) (string, error) 
 	if len(args) == 1 {
 		operand, err := n.valueToSQL(args[0])
 		if err != nil {
-			return "", fmt.Errorf("invalid unary minus argument: %v", err)
+			return "", fmt.Errorf("invalid unary minus argument: %w", err)
 		}
 		return fmt.Sprintf("-%s", operand), nil
 	}
@@ -161,7 +161,7 @@ func (n *NumericOperator) handleSubtraction(args []interface{}) (string, error) 
 	for i, arg := range args {
 		operand, err := n.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid subtraction argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid subtraction argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
@@ -169,7 +169,7 @@ func (n *NumericOperator) handleSubtraction(args []interface{}) (string, error) 
 	return fmt.Sprintf("(%s)", strings.Join(operands, " - ")), nil
 }
 
-// handleMultiplication converts * operator to SQL
+// handleMultiplication converts * operator to SQL.
 func (n *NumericOperator) handleMultiplication(args []interface{}) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("multiplication requires at least 2 arguments")
@@ -186,7 +186,7 @@ func (n *NumericOperator) handleMultiplication(args []interface{}) (string, erro
 	for i, arg := range args {
 		operand, err := n.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid multiplication argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid multiplication argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
@@ -194,7 +194,7 @@ func (n *NumericOperator) handleMultiplication(args []interface{}) (string, erro
 	return fmt.Sprintf("(%s)", strings.Join(operands, " * ")), nil
 }
 
-// handleDivision converts / operator to SQL
+// handleDivision converts / operator to SQL.
 func (n *NumericOperator) handleDivision(args []interface{}) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("division requires at least 2 arguments")
@@ -211,7 +211,7 @@ func (n *NumericOperator) handleDivision(args []interface{}) (string, error) {
 	for i, arg := range args {
 		operand, err := n.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid division argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid division argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
@@ -219,7 +219,7 @@ func (n *NumericOperator) handleDivision(args []interface{}) (string, error) {
 	return fmt.Sprintf("(%s)", strings.Join(operands, " / ")), nil
 }
 
-// handleModulo converts % operator to SQL
+// handleModulo converts % operator to SQL.
 func (n *NumericOperator) handleModulo(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("modulo requires exactly 2 arguments")
@@ -234,18 +234,18 @@ func (n *NumericOperator) handleModulo(args []interface{}) (string, error) {
 
 	left, err := n.valueToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid modulo left argument: %v", err)
+		return "", fmt.Errorf("invalid modulo left argument: %w", err)
 	}
 
 	right, err := n.valueToSQL(args[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid modulo right argument: %v", err)
+		return "", fmt.Errorf("invalid modulo right argument: %w", err)
 	}
 
 	return fmt.Sprintf("(%s %% %s)", left, right), nil
 }
 
-// handleMax converts max operator to SQL
+// handleMax converts max operator to SQL.
 func (n *NumericOperator) handleMax(args []interface{}) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("max requires at least 2 arguments")
@@ -262,7 +262,7 @@ func (n *NumericOperator) handleMax(args []interface{}) (string, error) {
 	for i, arg := range args {
 		operand, err := n.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid max argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid max argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
@@ -270,7 +270,7 @@ func (n *NumericOperator) handleMax(args []interface{}) (string, error) {
 	return fmt.Sprintf("GREATEST(%s)", strings.Join(operands, ", ")), nil
 }
 
-// handleMin converts min operator to SQL
+// handleMin converts min operator to SQL.
 func (n *NumericOperator) handleMin(args []interface{}) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("min requires at least 2 arguments")
@@ -287,7 +287,7 @@ func (n *NumericOperator) handleMin(args []interface{}) (string, error) {
 	for i, arg := range args {
 		operand, err := n.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid min argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid min argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
@@ -295,7 +295,7 @@ func (n *NumericOperator) handleMin(args []interface{}) (string, error) {
 	return fmt.Sprintf("LEAST(%s)", strings.Join(operands, ", ")), nil
 }
 
-// valueToSQL converts a value to SQL, handling var expressions and literals
+// valueToSQL converts a value to SQL, handling var expressions and literals.
 func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 	// Handle pre-processed SQL strings from the parser
 	if sqlStr, ok := value.(string); ok {
@@ -353,7 +353,7 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 	return n.dataOp.valueToSQL(value)
 }
 
-// processComplexArgs recursively processes arguments for complex expressions
+// processComplexArgs recursively processes arguments for complex expressions.
 func (n *NumericOperator) processComplexArgs(args []interface{}) ([]string, error) {
 	processed := make([]string, len(args))
 
@@ -369,7 +369,7 @@ func (n *NumericOperator) processComplexArgs(args []interface{}) ([]string, erro
 }
 
 // processComplexArgsForComparison processes arguments for comparison operators
-// Returns []interface{} instead of []string to match comparison operator's expectations
+// Returns []interface{} instead of []string to match comparison operator's expectations.
 func (n *NumericOperator) processComplexArgsForComparison(args []interface{}) ([]interface{}, error) {
 	processed := make([]interface{}, len(args))
 
@@ -384,7 +384,7 @@ func (n *NumericOperator) processComplexArgsForComparison(args []interface{}) ([
 	return processed, nil
 }
 
-// generateComplexSQL generates SQL for complex expressions
+// generateComplexSQL generates SQL for complex expressions.
 func (n *NumericOperator) generateComplexSQL(operator string, args []string) (string, error) {
 	switch operator {
 	case "+":

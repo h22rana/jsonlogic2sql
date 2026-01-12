@@ -7,7 +7,7 @@ import (
 )
 
 // setupTestTranspiler creates a transpiler with custom operators registered
-// similar to how the REPL does it
+// similar to how the REPL does it.
 func setupTestTranspiler() *Transpiler {
 	transpiler := NewTranspiler()
 
@@ -95,7 +95,7 @@ func setupTestTranspiler() *Transpiler {
 	return transpiler
 }
 
-// TestSchemaValidationComprehensive tests schema validation with various edge cases
+// TestSchemaValidationComprehensive tests schema validation with various edge cases.
 func TestSchemaValidationComprehensive(t *testing.T) {
 	// Load schema from JSON with generic field names
 	schemaJSON := `[
@@ -176,7 +176,7 @@ func TestSchemaValidationComprehensive(t *testing.T) {
 	}
 }
 
-// TestSchemaTypeAwareBehavior tests the type-aware "in" operator behavior
+// TestSchemaTypeAwareBehavior tests the type-aware "in" operator behavior.
 func TestSchemaTypeAwareBehavior(t *testing.T) {
 	schema := NewSchema([]FieldSchema{
 		{Name: "tags", Type: FieldTypeArray},
@@ -222,7 +222,7 @@ func TestSchemaTypeAwareBehavior(t *testing.T) {
 	}
 }
 
-// TestCustomOperatorsStartsWithEndsWithContains tests the custom operators
+// TestCustomOperatorsStartsWithEndsWithContains tests the custom operators.
 func TestCustomOperatorsStartsWithEndsWithContains(t *testing.T) {
 	transpiler := setupTestTranspiler()
 
@@ -310,7 +310,7 @@ func TestNegationOfCustomOperators(t *testing.T) {
 	}
 }
 
-// TestComplexNestedExpressions tests the complex nested expressions
+// TestComplexNestedExpressions tests the complex nested expressions.
 func TestComplexNestedExpressions(t *testing.T) {
 	transpiler := setupTestTranspiler()
 
@@ -366,7 +366,7 @@ func TestComplexNestedExpressions(t *testing.T) {
 	}
 }
 
-// TestSchemaWithCustomOperators tests schema validation with custom operators
+// TestSchemaWithCustomOperators tests schema validation with custom operators.
 func TestSchemaWithCustomOperators(t *testing.T) {
 	schemaJSON := `[
 		{"name": "request.params.input_mode", "type": "string"},
@@ -426,7 +426,7 @@ func TestSchemaWithCustomOperators(t *testing.T) {
 	}
 }
 
-// TestSchemaBackwardCompatibility tests that the transpiler works without schema
+// TestSchemaBackwardCompatibility tests that the transpiler works without schema.
 func TestSchemaBackwardCompatibility(t *testing.T) {
 	transpiler := setupTestTranspiler()
 	// No schema set - should accept any field
@@ -461,7 +461,7 @@ func TestSchemaBackwardCompatibility(t *testing.T) {
 	}
 }
 
-// TestSchemaFromFileExample tests loading schema from file (requires a test schema file)
+// TestSchemaFromFileExample tests loading schema from file (requires a test schema file).
 func TestSchemaFromFileExample(t *testing.T) {
 	// Create a test schema JSON for this test
 	testSchemaJSON := `[
@@ -499,7 +499,7 @@ func TestSchemaFromFileExample(t *testing.T) {
 	}
 }
 
-// TestInOperatorWithSchemaIntegration tests the IN operator behavior with schema-based type detection
+// TestInOperatorWithSchemaIntegration tests the IN operator behavior with schema-based type detection.
 func TestInOperatorWithSchemaIntegration(t *testing.T) {
 	schema := NewSchema([]FieldSchema{
 		{Name: "user.roles", Type: FieldTypeArray},
@@ -545,7 +545,7 @@ func TestInOperatorWithSchemaIntegration(t *testing.T) {
 	}
 }
 
-// TestEdgeCasesWithSchema tests various edge cases
+// TestEdgeCasesWithSchema tests various edge cases.
 func TestEdgeCasesWithSchema(t *testing.T) {
 	schema := NewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
@@ -595,7 +595,7 @@ func TestEdgeCasesWithSchema(t *testing.T) {
 	}
 }
 
-// TestTypeAwareOperators tests type validation across all operators
+// TestTypeAwareOperators tests type validation across all operators.
 func TestTypeAwareOperators(t *testing.T) {
 	// Create a schema with various field types
 	schema := NewSchema([]FieldSchema{
@@ -834,7 +834,7 @@ func TestTypeAwareOperators(t *testing.T) {
 	}
 }
 
-// TestTypeValidationWithoutSchema verifies that validation is skipped without schema
+// TestTypeValidationWithoutSchema verifies that validation is skipped without schema.
 func TestTypeValidationWithoutSchema(t *testing.T) {
 	transpiler := NewTranspiler()
 	// No schema set - all operations should pass
@@ -871,7 +871,7 @@ func TestTypeValidationWithoutSchema(t *testing.T) {
 	}
 }
 
-// TestTypeValidationWithFieldNotInSchema verifies that fields not in schema pass validation
+// TestTypeValidationWithFieldNotInSchema verifies that fields not in schema pass validation.
 func TestTypeValidationWithFieldNotInSchema(t *testing.T) {
 	schema := NewSchema([]FieldSchema{
 		{Name: "known_field", Type: FieldTypeInteger},
@@ -890,10 +890,10 @@ func TestTypeValidationWithFieldNotInSchema(t *testing.T) {
 	}
 }
 
-// TestEnumTypeSupport tests enum type validation and SQL generation
+// TestEnumTypeSupport tests enum type validation and SQL generation.
 func TestEnumTypeSupport(t *testing.T) {
 	schema := NewSchema([]FieldSchema{
-		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "cancelled"}},
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "canceled"}},
 		{Name: "priority", Type: FieldTypeEnum, AllowedValues: []string{"low", "medium", "high"}},
 		{Name: "name", Type: FieldTypeString},
 	})
@@ -914,8 +914,8 @@ func TestEnumTypeSupport(t *testing.T) {
 			},
 			{
 				name:      "enum inequality with valid value",
-				jsonLogic: `{"!=": [{"var": "status"}, "cancelled"]}`,
-				expected:  "WHERE status != 'cancelled'",
+				jsonLogic: `{"!=": [{"var": "status"}, "canceled"]}`,
+				expected:  "WHERE status != 'canceled'",
 			},
 			{
 				name:      "enum in array with valid values",
@@ -995,7 +995,7 @@ func TestEnumTypeSupport(t *testing.T) {
 	})
 }
 
-// TestEnumSchemaFromJSON tests loading enum schema from JSON
+// TestEnumSchemaFromJSON tests loading enum schema from JSON.
 func TestEnumSchemaFromJSON(t *testing.T) {
 	schemaJSON := `[
 		{"name": "status", "type": "enum", "allowedValues": ["active", "inactive", "deleted"]},
@@ -1038,10 +1038,10 @@ func TestEnumSchemaFromJSON(t *testing.T) {
 	}
 }
 
-// TestEnumWithComplexExpressions tests enum validation in complex nested expressions
+// TestEnumWithComplexExpressions tests enum validation in complex nested expressions.
 func TestEnumWithComplexExpressions(t *testing.T) {
 	schema := NewSchema([]FieldSchema{
-		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "cancelled"}},
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "canceled"}},
 		{Name: "amount", Type: FieldTypeInteger},
 	})
 

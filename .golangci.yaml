@@ -1,0 +1,154 @@
+version: "2"
+run:
+  # Concurrently run upto 4
+  concurrency: 4
+  # Issue exit code
+  issues-exit-code: 1
+  # Lint tests
+  tests: true
+  # Lint timeout
+  timeout: 5m
+linters:
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - dogsled
+    - dupl
+    - durationcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - forcetypeassert
+    - goconst
+    - godot
+    - goprintffuncname
+    - gosec
+    - interfacebloat
+    - misspell
+    - nakedret
+    - nilerr
+    - nilnil
+    - nolintlint
+    - prealloc
+    - predeclared
+    - promlinter
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+  settings:
+    dupl:
+      threshold: 150
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+    misspell:
+      locale: US
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
+    promlinter:
+      strict: true
+    revive:
+      rules:
+        - name: blank-imports
+          disabled: true
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+          disabled: true
+        - name: var-declaration
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+    staticcheck:
+      checks:
+        - all
+        - '-ST1000' # ignore: staticcheck: ST1000: this check is unnecessarily verbose
+        - '-QF1008' # ignore: staticcheck: QF1008: this check is too noisy in practice
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - bodyclose
+          - dupl
+          - forcetypeassert
+          - goconst
+          - ireturn
+        path: _test\.go
+      - linters:
+          - dupl
+          - goconst
+        path: internal/operators/
+      - linters:
+          - dupl
+          - forcetypeassert
+        path: cmd/repl/
+      - linters:
+          - revive
+          - errcheck
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      module-path: github.com/kouzoh/merpay-aml-manager-tool
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - github.com/kouzoh/merpay-aml-manager-tool
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

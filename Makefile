@@ -1,6 +1,4 @@
-# JSON Logic to SQL Transpiler Makefile
-
-.PHONY: build test test-verbose lint run clean help
+.PHONY: build test test-verbose lint lint/fix run clean help
 
 # Default target
 all: test build
@@ -26,10 +24,13 @@ test-verbose:
 lint:
 	@echo "Running linter..."
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run; \
+		golangci-lint run $(args) && go list ./...; \
 	else \
-		echo "golangci-lint not found. Install it with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
+		echo "golangci-lint not found. Install it with: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0"; \
 	fi
+
+lint/fix:
+	@make lint args='--fix -v' cons_args='-v'
 
 # Run the REPL
 run: build

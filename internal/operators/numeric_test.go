@@ -231,7 +231,6 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 			hasError: true,
 		},
 
-
 		// Unsupported operator
 		{
 			name:     "unsupported operator",

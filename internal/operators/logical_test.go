@@ -100,7 +100,6 @@ func TestLogicalOperator_ToSQL(t *testing.T) {
 			hasError: true,
 		},
 
-
 		// if operator tests
 		{
 			name:     "if with condition and then",

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// ArrayOperator handles array operations like map, filter, reduce, all, some, none, merge
+// ArrayOperator handles array operations like map, filter, reduce, all, some, none, merge.
 type ArrayOperator struct {
 	config       *OperatorConfig
 	dataOp       *DataOperator
@@ -14,7 +14,7 @@ type ArrayOperator struct {
 	numericOp    *NumericOperator
 }
 
-// NewArrayOperator creates a new ArrayOperator instance with optional config
+// NewArrayOperator creates a new ArrayOperator instance with optional config.
 func NewArrayOperator(config *OperatorConfig) *ArrayOperator {
 	return &ArrayOperator{
 		config:       config,
@@ -25,7 +25,7 @@ func NewArrayOperator(config *OperatorConfig) *ArrayOperator {
 	}
 }
 
-// schema returns the schema from config, or nil if not configured
+// schema returns the schema from config, or nil if not configured.
 func (a *ArrayOperator) schema() SchemaProvider {
 	if a.config == nil {
 		return nil
@@ -33,7 +33,7 @@ func (a *ArrayOperator) schema() SchemaProvider {
 	return a.config.Schema
 }
 
-// getLogicalOperator returns the logical operator, creating it lazily if needed
+// getLogicalOperator returns the logical operator, creating it lazily if needed.
 func (a *ArrayOperator) getLogicalOperator() *LogicalOperator {
 	if a.logicalOp == nil {
 		a.logicalOp = NewLogicalOperator(a.config) // Config already has schema
@@ -41,7 +41,7 @@ func (a *ArrayOperator) getLogicalOperator() *LogicalOperator {
 	return a.logicalOp
 }
 
-// validateArrayOperand checks if a field used in an array operation is of array type
+// validateArrayOperand checks if a field used in an array operation is of array type.
 func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
 	if a.schema() == nil {
 		return nil // No schema, no validation
@@ -69,7 +69,7 @@ func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
 	return nil
 }
 
-// extractFieldNameFromValue extracts field name from a value that might be a var expression
+// extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (a *ArrayOperator) extractFieldNameFromValue(value interface{}) string {
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr["var"]; hasVar {
@@ -79,7 +79,7 @@ func (a *ArrayOperator) extractFieldNameFromValue(value interface{}) string {
 	return ""
 }
 
-// extractFieldName extracts the field name from a var argument
+// extractFieldName extracts the field name from a var argument.
 func (a *ArrayOperator) extractFieldName(varName interface{}) string {
 	if nameStr, ok := varName.(string); ok {
 		return nameStr
@@ -92,7 +92,7 @@ func (a *ArrayOperator) extractFieldName(varName interface{}) string {
 	return ""
 }
 
-// ToSQL converts an array operation to SQL
+// ToSQL converts an array operation to SQL.
 func (a *ArrayOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("array operator %s requires at least one argument", operator)
@@ -134,7 +134,7 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid map array argument: %v", err)
+		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
 
 	// Second argument: transformation expression
@@ -159,7 +159,7 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid filter array argument: %v", err)
+		return "", fmt.Errorf("invalid filter array argument: %w", err)
 	}
 
 	// Second argument: condition expression
@@ -183,13 +183,13 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid reduce array argument: %v", err)
+		return "", fmt.Errorf("invalid reduce array argument: %w", err)
 	}
 
 	// Second argument: initial value
 	initial, err := a.valueToSQL(args[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid reduce initial argument: %v", err)
+		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
 	}
 
 	// Third argument: reduction expression
@@ -198,7 +198,7 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 }
 
 // handleAll converts all operator to SQL
-// This checks if all elements in an array satisfy a condition
+// This checks if all elements in an array satisfy a condition.
 func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("all requires exactly 2 arguments")
@@ -212,13 +212,13 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid all array argument: %v", err)
+		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
 
 	// Second argument: condition expression
 	condition, err := a.expressionToSQL(args[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid all condition argument: %v", err)
+		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
 
 	// Use standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE NOT (condition))
@@ -228,7 +228,7 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 }
 
 // handleSome converts some operator to SQL
-// This checks if some elements in an array satisfy a condition
+// This checks if some elements in an array satisfy a condition.
 func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("some requires exactly 2 arguments")
@@ -242,13 +242,13 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid some array argument: %v", err)
+		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
 
 	// Second argument: condition expression
 	condition, err := a.expressionToSQL(args[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid some condition argument: %v", err)
+		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
 
 	// Use standard SQL: EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
@@ -257,7 +257,7 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 }
 
 // handleNone converts none operator to SQL
-// This checks if no elements in an array satisfy a condition
+// This checks if no elements in an array satisfy a condition.
 func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("none requires exactly 2 arguments")
@@ -271,13 +271,13 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	// First argument: array
 	array, err := a.valueToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid none array argument: %v", err)
+		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
 
 	// Second argument: condition expression
 	condition, err := a.expressionToSQL(args[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid none condition argument: %v", err)
+		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
 
 	// Use standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
@@ -286,7 +286,7 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 }
 
 // handleMerge converts merge operator to SQL
-// This merges multiple arrays into one
+// This merges multiple arrays into one.
 func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("merge requires at least 1 argument")
@@ -304,7 +304,7 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 	for i, arg := range args {
 		array, err := a.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid merge array argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid merge array argument %d: %w", i, err)
 		}
 		arrays[i] = array
 	}
@@ -313,7 +313,7 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 	return fmt.Sprintf("ARRAY_CONCAT(%s)", strings.Join(arrays, ", ")), nil
 }
 
-// valueToSQL converts a value to SQL, handling var expressions, arrays, and literals
+// valueToSQL converts a value to SQL, handling var expressions, arrays, and literals.
 func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
 	// Handle complex expressions (operators)
 	if expr, ok := value.(map[string]interface{}); ok {
@@ -332,7 +332,7 @@ func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
 		for i, elem := range arr {
 			elementSQL, err := a.dataOp.valueToSQL(elem)
 			if err != nil {
-				return "", fmt.Errorf("invalid array element %d: %v", i, err)
+				return "", fmt.Errorf("invalid array element %d: %w", i, err)
 			}
 			elements[i] = elementSQL
 		}
@@ -343,7 +343,7 @@ func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
 	return a.dataOp.valueToSQL(value)
 }
 
-// expressionToSQL converts a JSON Logic expression to SQL
+// expressionToSQL converts a JSON Logic expression to SQL.
 func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 	// Handle primitive values
 	if a.isPrimitive(expr) {
@@ -392,7 +392,7 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 }
 
 // replaceElementReference replaces element references in conditions
-// For now, this is a simple implementation that assumes the condition uses a variable
+// For now, this is a simple implementation that assumes the condition uses a variable.
 func (a *ArrayOperator) replaceElementReference(condition, elementName string) string {
 	// Replace variable references in the condition with the element name
 	// This handles cases where {"var": "item"} should become "elem"
@@ -401,7 +401,7 @@ func (a *ArrayOperator) replaceElementReference(condition, elementName string) s
 	return strings.ReplaceAll(condition, "item", elementName)
 }
 
-// isPrimitive checks if a value is a primitive type
+// isPrimitive checks if a value is a primitive type.
 func (a *ArrayOperator) isPrimitive(value interface{}) bool {
 	switch value.(type) {
 	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:

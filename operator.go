@@ -38,7 +38,7 @@ type OperatorHandler interface {
 	ToSQL(operator string, args []interface{}) (string, error)
 }
 
-// funcHandler wraps an OperatorFunc to implement OperatorHandler
+// funcHandler wraps an OperatorFunc to implement OperatorHandler.
 type funcHandler struct {
 	fn OperatorFunc
 }

@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-// ValidationError represents a validation error with context
+// ValidationError represents a validation error with context.
 type ValidationError struct {
 	Operator string
 	Message  string
@@ -18,16 +18,16 @@ func (e ValidationError) Error() string {
 	return fmt.Sprintf("validation error: %s", e.Message)
 }
 
-// CustomOperatorChecker is a function that checks if a custom operator exists
+// CustomOperatorChecker is a function that checks if a custom operator exists.
 type CustomOperatorChecker func(operatorName string) bool
 
-// Validator validates JSON Logic expressions
+// Validator validates JSON Logic expressions.
 type Validator struct {
 	supportedOperators    map[string]OperatorSpec
 	customOperatorChecker CustomOperatorChecker
 }
 
-// OperatorSpec defines the specification for an operator
+// OperatorSpec defines the specification for an operator.
 type OperatorSpec struct {
 	Name        string
 	MinArgs     int
@@ -36,9 +36,10 @@ type OperatorSpec struct {
 	Description string
 }
 
-// ArgType represents the expected type of an argument
+// ArgType represents the expected type of an argument.
 type ArgType int
 
+// Argument types for operator validation.
 const (
 	AnyType ArgType = iota
 	NumberType
@@ -49,7 +50,7 @@ const (
 	VariableType
 )
 
-// NewValidator creates a new validator with all supported operators
+// NewValidator creates a new validator with all supported operators.
 func NewValidator() *Validator {
 	return &Validator{
 		supportedOperators: getSupportedOperators(),
@@ -62,12 +63,12 @@ func (v *Validator) SetCustomOperatorChecker(checker CustomOperatorChecker) {
 	v.customOperatorChecker = checker
 }
 
-// Validate validates a JSON Logic expression
+// Validate validates a JSON Logic expression.
 func (v *Validator) Validate(logic interface{}) error {
 	return v.validateRecursive(logic, "")
 }
 
-// validateRecursive recursively validates JSON Logic expressions
+// validateRecursive recursively validates JSON Logic expressions.
 func (v *Validator) validateRecursive(logic interface{}, path string) error {
 	// Handle primitive values (literals) including null
 	if v.isPrimitive(logic) {
@@ -90,7 +91,7 @@ func (v *Validator) validateRecursive(logic interface{}, path string) error {
 	}
 }
 
-// validateArray validates an array expression
+// validateArray validates an array expression.
 func (v *Validator) validateArray(arr []interface{}, path string) error {
 	// Empty arrays are not allowed in SQL context
 	if len(arr) == 0 {
@@ -110,7 +111,7 @@ func (v *Validator) validateArray(arr []interface{}, path string) error {
 	return nil
 }
 
-// validateObject validates an object expression (operator)
+// validateObject validates an object expression (operator).
 func (v *Validator) validateObject(obj map[string]interface{}, path string) error {
 	if len(obj) != 1 {
 		return ValidationError{
@@ -164,7 +165,7 @@ func (v *Validator) validateCustomOperatorArgs(args interface{}, path string) er
 	return v.validateRecursive(args, path)
 }
 
-// validateOperatorArgs validates the arguments for a specific operator
+// validateOperatorArgs validates the arguments for a specific operator.
 func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec OperatorSpec, path string) error {
 	// Handle different argument structures
 	switch operator {
@@ -209,7 +210,7 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 	}
 }
 
-// validateMissingOperator validates missing and missing_some operators
+// validateMissingOperator validates missing and missing_some operators.
 func (v *Validator) validateMissingOperator(operator string, args interface{}, path string) error {
 	switch operator {
 	case "missing":
@@ -289,7 +290,7 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 	return nil
 }
 
-// validateStandardOperator validates standard operators with array arguments
+// validateStandardOperator validates standard operators with array arguments.
 func (v *Validator) validateStandardOperator(operator string, args interface{}, spec OperatorSpec, path string) error {
 	// Special handling for unary operators (! and !!) - they can accept non-array arguments
 	if operator == "!" || operator == "!!" {
@@ -347,7 +348,7 @@ func (v *Validator) validateStandardOperator(operator string, args interface{}, 
 	return nil
 }
 
-// validateArgType validates that an argument matches the expected type
+// validateArgType validates that an argument matches the expected type.
 func (v *Validator) validateArgType(arg interface{}, expectedType ArgType, path string) error {
 	switch expectedType {
 	case AnyType:
@@ -387,12 +388,15 @@ func (v *Validator) validateArgType(arg interface{}, expectedType ArgType, path 
 				Path:    path,
 			}
 		}
+	case VariableType:
+		// Variable type - validated separately through var operator.
+		return nil
 	}
 
 	return nil
 }
 
-// Helper methods for type checking
+// Helper methods for type checking.
 func (v *Validator) isPrimitive(value interface{}) bool {
 	return v.isNumber(value) || v.isString(value) || v.isBoolean(value) || value == nil
 }
@@ -425,7 +429,7 @@ func (v *Validator) isObject(value interface{}) bool {
 	return ok
 }
 
-// getSupportedOperators returns the map of supported operators with their specifications
+// getSupportedOperators returns the map of supported operators with their specifications.
 func getSupportedOperators() map[string]OperatorSpec {
 	return map[string]OperatorSpec{
 		// Data access operators
@@ -651,7 +655,7 @@ func getSupportedOperators() map[string]OperatorSpec {
 	}
 }
 
-// GetSupportedOperators returns a list of all supported operators
+// GetSupportedOperators returns a list of all supported operators.
 func (v *Validator) GetSupportedOperators() []string {
 	operators := make([]string, 0, len(v.supportedOperators))
 	for op := range v.supportedOperators {
@@ -660,7 +664,7 @@ func (v *Validator) GetSupportedOperators() []string {
 	return operators
 }
 
-// IsOperatorSupported checks if an operator is supported
+// IsOperatorSupported checks if an operator is supported.
 func (v *Validator) IsOperatorSupported(operator string) bool {
 	_, exists := v.supportedOperators[operator]
 	return exists

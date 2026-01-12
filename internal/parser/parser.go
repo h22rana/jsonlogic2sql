@@ -16,7 +16,7 @@ type CustomOperatorHandler interface {
 // CustomOperatorLookup is a function type for looking up custom operators.
 type CustomOperatorLookup func(operatorName string) (CustomOperatorHandler, bool)
 
-// Parser parses JSON Logic expressions and converts them to SQL WHERE clauses
+// Parser parses JSON Logic expressions and converts them to SQL WHERE clauses.
 type Parser struct {
 	validator      *validator.Validator
 	config         *operators.OperatorConfig
@@ -29,7 +29,7 @@ type Parser struct {
 	customOpLookup CustomOperatorLookup
 }
 
-// NewParser creates a new parser instance with optional config
+// NewParser creates a new parser instance with optional config.
 func NewParser(config *operators.OperatorConfig) *Parser {
 	if config == nil {
 		config = operators.NewOperatorConfig(nil)
@@ -60,30 +60,30 @@ func (p *Parser) SetCustomOperatorLookup(lookup CustomOperatorLookup) {
 	})
 }
 
-// SetSchema sets the schema provider for field validation and type checking
+// SetSchema sets the schema provider for field validation and type checking.
 func (p *Parser) SetSchema(schema operators.SchemaProvider) {
 	p.config.Schema = schema
 	// All operators share the same config, so they automatically see the new schema
 }
 
-// Parse converts a JSON Logic expression to SQL WHERE clause
+// Parse converts a JSON Logic expression to SQL WHERE clause.
 func (p *Parser) Parse(logic interface{}) (string, error) {
 	// First validate the expression
 	if err := p.validator.Validate(logic); err != nil {
-		return "", fmt.Errorf("validation error: %v", err)
+		return "", fmt.Errorf("validation error: %w", err)
 	}
 
 	// Parse the expression
 	sql, err := p.parseExpression(logic)
 	if err != nil {
-		return "", fmt.Errorf("parse error: %v", err)
+		return "", fmt.Errorf("parse error: %w", err)
 	}
 
 	// Wrap in WHERE clause
 	return fmt.Sprintf("WHERE %s", sql), nil
 }
 
-// parseExpression recursively parses JSON Logic expressions
+// parseExpression recursively parses JSON Logic expressions.
 func (p *Parser) parseExpression(expr interface{}) (string, error) {
 	// Handle primitive values (should not happen in normal JSON Logic, but handle gracefully)
 	if p.isPrimitive(expr) {
@@ -109,7 +109,7 @@ func (p *Parser) parseExpression(expr interface{}) (string, error) {
 	return "", fmt.Errorf("invalid expression type: %T", expr)
 }
 
-// parseOperator parses a specific operator
+// parseOperator parses a specific operator.
 func (p *Parser) parseOperator(operator string, args interface{}) (string, error) {
 	// Check for custom operators first
 	if p.customOpLookup != nil {
@@ -117,7 +117,7 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 			// Process the arguments for the custom operator
 			processedArgs, err := p.processCustomOperatorArgs(args)
 			if err != nil {
-				return "", fmt.Errorf("failed to process custom operator arguments: %v", err)
+				return "", fmt.Errorf("failed to process custom operator arguments: %w", err)
 			}
 			return handler.ToSQL(operator, processedArgs)
 		}
@@ -143,7 +143,7 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 			// Process arguments to handle complex expressions
 			processedArgs, err := p.processArgs(arr)
 			if err != nil {
-				return "", fmt.Errorf("failed to process comparison arguments: %v", err)
+				return "", fmt.Errorf("failed to process comparison arguments: %w", err)
 			}
 			return p.comparisonOp.ToSQL(operator, processedArgs)
 		}
@@ -155,7 +155,7 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 			// Process arguments to handle custom operators in nested expressions
 			processedArgs, err := p.processArgs(arr)
 			if err != nil {
-				return "", fmt.Errorf("failed to process %s arguments: %v", operator, err)
+				return "", fmt.Errorf("failed to process %s arguments: %w", operator, err)
 			}
 			return p.logicalOp.ToSQL(operator, processedArgs)
 		}
@@ -166,14 +166,14 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 			// Process arguments to handle custom operators
 			processedArgs, err := p.processArgs(arr)
 			if err != nil {
-				return "", fmt.Errorf("failed to process %s arguments: %v", operator, err)
+				return "", fmt.Errorf("failed to process %s arguments: %w", operator, err)
 			}
 			return p.logicalOp.ToSQL(operator, processedArgs)
 		}
 		// Process non-array argument to handle custom operators before wrapping
 		processedArg, err := p.processArg(args)
 		if err != nil {
-			return "", fmt.Errorf("failed to process %s argument: %v", operator, err)
+			return "", fmt.Errorf("failed to process %s argument: %w", operator, err)
 		}
 		return p.logicalOp.ToSQL(operator, []interface{}{processedArg})
 
@@ -183,7 +183,7 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 			// Process arguments to handle complex expressions
 			processedArgs, err := p.processArgs(arr)
 			if err != nil {
-				return "", fmt.Errorf("failed to process numeric arguments: %v", err)
+				return "", fmt.Errorf("failed to process numeric arguments: %w", err)
 			}
 			return p.numericOp.ToSQL(operator, processedArgs)
 		}
@@ -209,7 +209,7 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 	}
 }
 
-// isBuiltInOperator checks if an operator is a built-in operator
+// isBuiltInOperator checks if an operator is a built-in operator.
 func (p *Parser) isBuiltInOperator(operator string) bool {
 	builtInOps := map[string]bool{
 		// Data access
@@ -248,7 +248,7 @@ func (p *Parser) processArgs(args []interface{}) ([]interface{}, error) {
 	return processed, nil
 }
 
-// processArg processes a single argument, recursively handling custom operators
+// processArg processes a single argument, recursively handling custom operators.
 func (p *Parser) processArg(arg interface{}) (interface{}, error) {
 	// If it's a complex expression (map with single key)
 	if exprMap, ok := arg.(map[string]interface{}); ok {
@@ -283,7 +283,7 @@ func (p *Parser) processArg(arg interface{}) (interface{}, error) {
 	return arg, nil
 }
 
-// processOpArgs processes operator arguments (can be array or single value)
+// processOpArgs processes operator arguments (can be array or single value).
 func (p *Parser) processOpArgs(opArgs interface{}) (interface{}, error) {
 	if arr, ok := opArgs.([]interface{}); ok {
 		return p.processArgs(arr)
@@ -354,7 +354,7 @@ func (p *Parser) primitiveToSQL(value interface{}) interface{} {
 	}
 }
 
-// isPrimitive checks if a value is a primitive type
+// isPrimitive checks if a value is a primitive type.
 func (p *Parser) isPrimitive(value interface{}) bool {
 	switch value.(type) {
 	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:

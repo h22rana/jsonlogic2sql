@@ -5,17 +5,17 @@ import (
 	"strings"
 )
 
-// DataOperator handles data access operators (var, missing, missing_some)
+// DataOperator handles data access operators (var, missing, missing_some).
 type DataOperator struct {
 	config *OperatorConfig
 }
 
-// NewDataOperator creates a new data operator with optional config
+// NewDataOperator creates a new data operator with optional config.
 func NewDataOperator(config *OperatorConfig) *DataOperator {
 	return &DataOperator{config: config}
 }
 
-// schema returns the schema from config, or nil if not configured
+// schema returns the schema from config, or nil if not configured.
 func (d *DataOperator) schema() SchemaProvider {
 	if d.config == nil {
 		return nil
@@ -23,7 +23,7 @@ func (d *DataOperator) schema() SchemaProvider {
 	return d.config.Schema
 }
 
-// ToSQL converts a data operator to SQL
+// ToSQL converts a data operator to SQL.
 func (d *DataOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	switch operator {
 	case "var":
@@ -37,7 +37,7 @@ func (d *DataOperator) ToSQL(operator string, args []interface{}) (string, error
 	}
 }
 
-// handleVar converts var operator to SQL
+// handleVar converts var operator to SQL.
 func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("var operator requires at least 1 argument")
@@ -79,7 +79,7 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 				defaultValue := arr[1]
 				defaultSQL, err := d.valueToSQL(defaultValue)
 				if err != nil {
-					return "", fmt.Errorf("invalid default value: %v", err)
+					return "", fmt.Errorf("invalid default value: %w", err)
 				}
 				return fmt.Sprintf("COALESCE(%s, %s)", columnName, defaultSQL), nil
 			}
@@ -95,7 +95,7 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 	return "", fmt.Errorf("var operator requires string, number, or array argument")
 }
 
-// handleMissing converts missing operator to SQL
+// handleMissing converts missing operator to SQL.
 func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 	if len(args) != 1 {
 		return "", fmt.Errorf("missing operator requires exactly 1 argument")
@@ -142,7 +142,7 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 	return "", fmt.Errorf("missing operator argument must be a string or array of strings")
 }
 
-// handleMissingSome converts missing_some operator to SQL
+// handleMissingSome converts missing_some operator to SQL.
 func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("missing_some operator requires exactly 2 arguments")
@@ -208,14 +208,14 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 }
 
 // convertVarName converts a JSON Logic variable name to SQL column name
-// Preserves dot notation for nested properties: "user.verified" -> "user.verified"
+// Preserves dot notation for nested properties: "user.verified" -> "user.verified".
 func (d *DataOperator) convertVarName(varName string) string {
 	// Keep the original dot notation as-is for nested properties
 	// This allows for proper JSON column access in databases that support it
 	return varName
 }
 
-// getNumber extracts a number from an interface{} and returns it as float64
+// getNumber extracts a number from an interface{} and returns it as float64.
 func (d *DataOperator) getNumber(value interface{}) (float64, error) {
 	switch v := value.(type) {
 	case float64:
@@ -247,7 +247,7 @@ func (d *DataOperator) getNumber(value interface{}) (float64, error) {
 	}
 }
 
-// valueToSQL converts a Go value to SQL literal
+// valueToSQL converts a Go value to SQL literal.
 func (d *DataOperator) valueToSQL(value interface{}) (string, error) {
 	switch v := value.(type) {
 	case string:

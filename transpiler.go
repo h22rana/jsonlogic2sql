@@ -8,13 +8,13 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/parser"
 )
 
-// TranspilerConfig holds configuration options for the transpiler
+// TranspilerConfig holds configuration options for the transpiler.
 type TranspilerConfig struct {
 	UseANSINotEqual bool    // true: <>, false: !=
 	Schema          *Schema // Optional schema for field validation
 }
 
-// Transpiler provides the main API for converting JSON Logic to SQL WHERE clauses
+// Transpiler provides the main API for converting JSON Logic to SQL WHERE clauses.
 type Transpiler struct {
 	parser          *parser.Parser
 	config          *TranspilerConfig
@@ -23,13 +23,13 @@ type Transpiler struct {
 }
 
 // SetSchema sets the schema for field validation and type checking
-// This is optional - if not set, no schema validation will be performed
+// This is optional - if not set, no schema validation will be performed.
 func (t *Transpiler) SetSchema(schema *Schema) {
 	t.operatorConfig.Schema = schema
 	// All operators automatically see the new schema through the shared config
 }
 
-// NewTranspiler creates a new transpiler instance
+// NewTranspiler creates a new transpiler instance.
 func NewTranspiler() *Transpiler {
 	opConfig := operators.NewOperatorConfig(nil)
 	t := &Transpiler{
@@ -44,7 +44,7 @@ func NewTranspiler() *Transpiler {
 	return t
 }
 
-// NewTranspilerWithConfig creates a new transpiler instance with custom configuration
+// NewTranspilerWithConfig creates a new transpiler instance with custom configuration.
 func NewTranspilerWithConfig(config *TranspilerConfig) *Transpiler {
 	var opConfig *operators.OperatorConfig
 	if config != nil && config.Schema != nil {
@@ -62,7 +62,7 @@ func NewTranspilerWithConfig(config *TranspilerConfig) *Transpiler {
 	return t
 }
 
-// setupCustomOperatorLookup configures the parser to use our custom operator registry
+// setupCustomOperatorLookup configures the parser to use our custom operator registry.
 func (t *Transpiler) setupCustomOperatorLookup() {
 	t.parser.SetCustomOperatorLookup(func(operatorName string) (parser.CustomOperatorHandler, bool) {
 		handler, ok := t.customOperators.Get(operatorName)
@@ -136,41 +136,41 @@ func (t *Transpiler) ClearCustomOperators() {
 	t.customOperators.Clear()
 }
 
-// Transpile converts a JSON Logic string to a SQL WHERE clause
+// Transpile converts a JSON Logic string to a SQL WHERE clause.
 func (t *Transpiler) Transpile(jsonLogic string) (string, error) {
 	var logic interface{}
 	if err := json.Unmarshal([]byte(jsonLogic), &logic); err != nil {
-		return "", fmt.Errorf("invalid JSON: %v", err)
+		return "", fmt.Errorf("invalid JSON: %w", err)
 	}
 
 	return t.parser.Parse(logic)
 }
 
-// TranspileFromMap converts a pre-parsed JSON Logic map to a SQL WHERE clause
+// TranspileFromMap converts a pre-parsed JSON Logic map to a SQL WHERE clause.
 func (t *Transpiler) TranspileFromMap(logic map[string]interface{}) (string, error) {
 	return t.parser.Parse(logic)
 }
 
-// TranspileFromInterface converts any JSON Logic interface{} to a SQL WHERE clause
+// TranspileFromInterface converts any JSON Logic interface{} to a SQL WHERE clause.
 func (t *Transpiler) TranspileFromInterface(logic interface{}) (string, error) {
 	return t.parser.Parse(logic)
 }
 
 // Convenience functions for direct usage without creating a Transpiler instance
 
-// Transpile converts a JSON Logic string to a SQL WHERE clause
+// Transpile converts a JSON Logic string to a SQL WHERE clause.
 func Transpile(jsonLogic string) (string, error) {
 	t := NewTranspiler()
 	return t.Transpile(jsonLogic)
 }
 
-// TranspileFromMap converts a pre-parsed JSON Logic map to a SQL WHERE clause
+// TranspileFromMap converts a pre-parsed JSON Logic map to a SQL WHERE clause.
 func TranspileFromMap(logic map[string]interface{}) (string, error) {
 	t := NewTranspiler()
 	return t.TranspileFromMap(logic)
 }
 
-// TranspileFromInterface converts any JSON Logic interface{} to a SQL WHERE clause
+// TranspileFromInterface converts any JSON Logic interface{} to a SQL WHERE clause.
 func TranspileFromInterface(logic interface{}) (string, error) {
 	t := NewTranspiler()
 	return t.TranspileFromInterface(logic)

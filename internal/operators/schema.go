@@ -1,6 +1,6 @@
 package operators
 
-// SchemaProvider provides schema information for field validation and type checking
+// SchemaProvider provides schema information for field validation and type checking.
 type SchemaProvider interface {
 	// HasField checks if a field exists in the schema
 	HasField(fieldName string) bool
@@ -21,5 +21,5 @@ type SchemaProvider interface {
 	// GetAllowedValues returns the allowed values for an enum field
 	GetAllowedValues(fieldName string) []string
 	// ValidateEnumValue checks if a value is valid for an enum field
-	ValidateEnumValue(fieldName string, value string) error
+	ValidateEnumValue(fieldName, value string) error
 }

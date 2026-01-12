@@ -231,7 +231,6 @@ func TestParser_Parse(t *testing.T) {
 			hasError: false,
 		},
 
-
 		// Array operations
 		{
 			name: "merge operation",

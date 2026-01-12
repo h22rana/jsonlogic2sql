@@ -6,13 +6,13 @@ import (
 	"strings"
 )
 
-// ComparisonOperator handles comparison operators (==, ===, !=, !==, >, >=, <, <=)
+// ComparisonOperator handles comparison operators (==, ===, !=, !==, >, >=, <, <=).
 type ComparisonOperator struct {
 	config *OperatorConfig
 	dataOp *DataOperator
 }
 
-// NewComparisonOperator creates a new comparison operator with optional config
+// NewComparisonOperator creates a new comparison operator with optional config.
 func NewComparisonOperator(config *OperatorConfig) *ComparisonOperator {
 	return &ComparisonOperator{
 		config: config,
@@ -20,7 +20,7 @@ func NewComparisonOperator(config *OperatorConfig) *ComparisonOperator {
 	}
 }
 
-// schema returns the schema from config, or nil if not configured
+// schema returns the schema from config, or nil if not configured.
 func (c *ComparisonOperator) schema() SchemaProvider {
 	if c.config == nil {
 		return nil
@@ -30,7 +30,7 @@ func (c *ComparisonOperator) schema() SchemaProvider {
 
 // validateOrderingOperand checks if a field used in an ordering comparison is of a valid type
 // Only numeric and string types support ordering comparisons (>, >=, <, <=)
-// Rejects array, object, and boolean types
+// Rejects array, object, and boolean types.
 func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator string) error {
 	if c.schema() == nil {
 		return nil // No schema, no validation
@@ -55,7 +55,7 @@ func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator
 	return fmt.Errorf("ordering comparison '%s' on incompatible field '%s' (type: %s)", operator, fieldName, fieldType)
 }
 
-// extractFieldNameFromValue extracts field name from a value that might be a var expression
+// extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (c *ComparisonOperator) extractFieldNameFromValue(value interface{}) string {
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr["var"]; hasVar {
@@ -65,7 +65,7 @@ func (c *ComparisonOperator) extractFieldNameFromValue(value interface{}) string
 	return ""
 }
 
-// extractFieldName extracts the field name from a var argument
+// extractFieldName extracts the field name from a var argument.
 func (c *ComparisonOperator) extractFieldName(varName interface{}) string {
 	if nameStr, ok := varName.(string); ok {
 		return nameStr
@@ -136,7 +136,7 @@ func (c *ComparisonOperator) validateEnumValue(value interface{}, fieldName stri
 	return c.schema().ValidateEnumValue(fieldName, strVal)
 }
 
-// ToSQL converts a comparison operator to SQL
+// ToSQL converts a comparison operator to SQL.
 func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	// Handle chained comparisons (2+ arguments)
 	if len(args) >= 2 && (operator == "<" || operator == "<=" || operator == ">" || operator == ">=") {
@@ -151,7 +151,7 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 	if operator == "in" {
 		leftSQL, err := c.valueToSQL(args[0])
 		if err != nil {
-			return "", fmt.Errorf("invalid left operand: %v", err)
+			return "", fmt.Errorf("invalid left operand: %w", err)
 		}
 		// Pass the original left arg for enum validation
 		return c.handleIn(leftSQL, args[1], args[0])
@@ -184,12 +184,12 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 
 	leftSQL, err := c.valueToSQL(leftArg)
 	if err != nil {
-		return "", fmt.Errorf("invalid left operand: %v", err)
+		return "", fmt.Errorf("invalid left operand: %w", err)
 	}
 
 	rightSQL, err := c.valueToSQL(rightArg)
 	if err != nil {
-		return "", fmt.Errorf("invalid right operand: %v", err)
+		return "", fmt.Errorf("invalid right operand: %w", err)
 	}
 
 	// Handle NULL comparisons - use IS NULL/IS NOT NULL instead of = NULL/!= NULL
@@ -259,7 +259,7 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 	}
 }
 
-// valueToSQL converts a value to SQL, handling both literals and var expressions
+// valueToSQL converts a value to SQL, handling both literals and var expressions.
 func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 	// Check if it's a var expression
 	if varExpr, ok := value.(map[string]interface{}); ok {
@@ -348,8 +348,8 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 }
 
 // handleIn converts in operator to SQL
-// leftOriginal is the original left argument (before SQL conversion) for enum validation
-func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}, leftOriginal interface{}) (string, error) {
+// leftOriginal is the original left argument (before SQL conversion) for enum validation.
+func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal interface{}) (string, error) {
 	// Extract field name from left side for enum validation
 	leftFieldName := c.extractFieldNameFromValue(leftOriginal)
 
@@ -366,7 +366,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}, le
 			// - If variable is a STRING column: STRPOS(column, 'value') > 0 (string containment)
 			rightSQL, err := c.dataOp.ToSQL("var", []interface{}{varName})
 			if err != nil {
-				return "", fmt.Errorf("invalid variable in IN operator: %v", err)
+				return "", fmt.Errorf("invalid variable in IN operator: %w", err)
 			}
 
 			// Extract field name from varName (handle both string and array cases)
@@ -422,7 +422,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}, le
 		for _, item := range arr {
 			valueSQL, err := c.dataOp.valueToSQL(item)
 			if err != nil {
-				return "", fmt.Errorf("invalid array element: %v", err)
+				return "", fmt.Errorf("invalid array element: %w", err)
 			}
 			values = append(values, valueSQL)
 		}
@@ -435,7 +435,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}, le
 		// Use POSITION function for string containment: POSITION(left IN right) > 0
 		rightSQL, err := c.dataOp.valueToSQL(str)
 		if err != nil {
-			return "", fmt.Errorf("invalid string in IN operator: %v", err)
+			return "", fmt.Errorf("invalid string in IN operator: %w", err)
 		}
 		return fmt.Sprintf("POSITION(%s IN %s) > 0", leftSQL, rightSQL), nil
 	}
@@ -445,7 +445,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}, le
 		// Convert number to string for containment check
 		rightSQL, err := c.dataOp.valueToSQL(num)
 		if err != nil {
-			return "", fmt.Errorf("invalid number in IN operator: %v", err)
+			return "", fmt.Errorf("invalid number in IN operator: %w", err)
 		}
 		return fmt.Sprintf("POSITION(%s IN %s) > 0", leftSQL, rightSQL), nil
 	}
@@ -455,7 +455,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue interface{}, le
 
 // handleChainedComparison handles chained comparisons like {"<": [10, {"var": "x"}, 20, 30]}
 // For 2 args: generates "a < b"
-// For 3+ args: generates "(a < b AND b < c AND c < d)"
+// For 3+ args: generates "(a < b AND b < c AND c < d)".
 func (c *ComparisonOperator) handleChainedComparison(operator string, args []interface{}) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("chained comparison requires at least 2 arguments")
@@ -495,7 +495,7 @@ func (c *ComparisonOperator) handleChainedComparison(operator string, args []int
 	for i, arg := range coercedArgs {
 		argSQL, err := c.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid argument %d: %w", i, err)
 		}
 		sqlArgs = append(sqlArgs, argSQL)
 	}
@@ -515,7 +515,7 @@ func (c *ComparisonOperator) handleChainedComparison(operator string, args []int
 	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND ")), nil
 }
 
-// processArithmeticExpression handles arithmetic operations within comparison operations
+// processArithmeticExpression handles arithmetic operations within comparison operations.
 func (c *ComparisonOperator) processArithmeticExpression(op string, args interface{}) (string, error) {
 	argsSlice, ok := args.([]interface{})
 	if !ok {
@@ -531,7 +531,7 @@ func (c *ComparisonOperator) processArithmeticExpression(op string, args interfa
 	for i, arg := range argsSlice {
 		operand, err := c.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid arithmetic argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid arithmetic argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
@@ -553,7 +553,7 @@ func (c *ComparisonOperator) processArithmeticExpression(op string, args interfa
 	}
 }
 
-// processComparisonExpression handles comparison operations within comparison operations
+// processComparisonExpression handles comparison operations within comparison operations.
 func (c *ComparisonOperator) processComparisonExpression(op string, args interface{}) (string, error) {
 	argsSlice, ok := args.([]interface{})
 	if !ok {
@@ -567,12 +567,12 @@ func (c *ComparisonOperator) processComparisonExpression(op string, args interfa
 	// Convert arguments to SQL
 	left, err := c.valueToSQL(argsSlice[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid comparison left argument: %v", err)
+		return "", fmt.Errorf("invalid comparison left argument: %w", err)
 	}
 
 	right, err := c.valueToSQL(argsSlice[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid comparison right argument: %v", err)
+		return "", fmt.Errorf("invalid comparison right argument: %w", err)
 	}
 
 	// Generate SQL based on operation
@@ -598,7 +598,7 @@ func (c *ComparisonOperator) processComparisonExpression(op string, args interfa
 	}
 }
 
-// processMinMaxExpression handles min/max operations within comparison operations
+// processMinMaxExpression handles min/max operations within comparison operations.
 func (c *ComparisonOperator) processMinMaxExpression(op string, args interface{}) (string, error) {
 	argsSlice, ok := args.([]interface{})
 	if !ok {
@@ -614,7 +614,7 @@ func (c *ComparisonOperator) processMinMaxExpression(op string, args interface{}
 	for i, arg := range argsSlice {
 		operand, err := c.valueToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid min/max argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid min/max argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}

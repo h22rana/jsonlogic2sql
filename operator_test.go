@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// LengthOperator implements OperatorHandler for LENGTH SQL function
+// LengthOperator implements OperatorHandler for LENGTH SQL function.
 type LengthOperator struct{}
 
 func (l *LengthOperator) ToSQL(operator string, args []interface{}) (string, error) {
@@ -15,7 +15,7 @@ func (l *LengthOperator) ToSQL(operator string, args []interface{}) (string, err
 	return fmt.Sprintf("LENGTH(%s)", args[0]), nil
 }
 
-// UpperOperator implements OperatorHandler for UPPER SQL function
+// UpperOperator implements OperatorHandler for UPPER SQL function.
 type UpperOperator struct{}
 
 func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, error) {
@@ -25,7 +25,7 @@ func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, erro
 	return fmt.Sprintf("UPPER(%s)", args[0]), nil
 }
 
-// ConcatWithSeparatorOperator joins arguments with a separator
+// ConcatWithSeparatorOperator joins arguments with a separator.
 type ConcatWithSeparatorOperator struct {
 	Separator string
 }

@@ -5,14 +5,14 @@ import (
 	"strings"
 )
 
-// LogicalOperator handles logical operators (and, or, !, !!, if)
+// LogicalOperator handles logical operators (and, or, !, !!, if).
 type LogicalOperator struct {
 	config       *OperatorConfig
 	comparisonOp *ComparisonOperator
 	dataOp       *DataOperator
 }
 
-// NewLogicalOperator creates a new logical operator with optional config
+// NewLogicalOperator creates a new logical operator with optional config.
 func NewLogicalOperator(config *OperatorConfig) *LogicalOperator {
 	return &LogicalOperator{
 		config:       config,
@@ -21,7 +21,7 @@ func NewLogicalOperator(config *OperatorConfig) *LogicalOperator {
 	}
 }
 
-// ToSQL converts a logical operator to SQL
+// ToSQL converts a logical operator to SQL.
 func (l *LogicalOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	switch operator {
 	case "and":
@@ -39,7 +39,7 @@ func (l *LogicalOperator) ToSQL(operator string, args []interface{}) (string, er
 	}
 }
 
-// handleAnd converts and operator to SQL
+// handleAnd converts and operator to SQL.
 func (l *LogicalOperator) handleAnd(args []interface{}) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("and operator requires at least 1 argument")
@@ -49,7 +49,7 @@ func (l *LogicalOperator) handleAnd(args []interface{}) (string, error) {
 	for i, arg := range args {
 		condition, err := l.expressionToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid and argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid and argument %d: %w", i, err)
 		}
 		conditions = append(conditions, condition)
 	}
@@ -61,7 +61,7 @@ func (l *LogicalOperator) handleAnd(args []interface{}) (string, error) {
 	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND ")), nil
 }
 
-// handleOr converts or operator to SQL
+// handleOr converts or operator to SQL.
 func (l *LogicalOperator) handleOr(args []interface{}) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("or operator requires at least 1 argument")
@@ -71,7 +71,7 @@ func (l *LogicalOperator) handleOr(args []interface{}) (string, error) {
 	for i, arg := range args {
 		condition, err := l.expressionToSQL(arg)
 		if err != nil {
-			return "", fmt.Errorf("invalid or argument %d: %v", i, err)
+			return "", fmt.Errorf("invalid or argument %d: %w", i, err)
 		}
 		conditions = append(conditions, condition)
 	}
@@ -83,7 +83,7 @@ func (l *LogicalOperator) handleOr(args []interface{}) (string, error) {
 	return fmt.Sprintf("(%s)", strings.Join(conditions, " OR ")), nil
 }
 
-// handleNot converts ! operator to SQL
+// handleNot converts ! operator to SQL.
 func (l *LogicalOperator) handleNot(args []interface{}) (string, error) {
 	if len(args) != 1 {
 		return "", fmt.Errorf("! operator requires exactly 1 argument")
@@ -91,13 +91,13 @@ func (l *LogicalOperator) handleNot(args []interface{}) (string, error) {
 
 	condition, err := l.expressionToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid ! argument: %v", err)
+		return "", fmt.Errorf("invalid ! argument: %w", err)
 	}
 
 	return fmt.Sprintf("NOT (%s)", condition), nil
 }
 
-// handleDoubleNot converts !! operator to SQL (boolean conversion)
+// handleDoubleNot converts !! operator to SQL (boolean conversion).
 func (l *LogicalOperator) handleDoubleNot(args []interface{}) (string, error) {
 	if len(args) != 1 {
 		return "", fmt.Errorf("!! operator requires exactly 1 argument")
@@ -116,7 +116,7 @@ func (l *LogicalOperator) handleDoubleNot(args []interface{}) (string, error) {
 
 	condition, err := l.expressionToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid !! argument: %v", err)
+		return "", fmt.Errorf("invalid !! argument: %w", err)
 	}
 
 	// !! converts to boolean - check for non-null/truthy values
@@ -125,7 +125,7 @@ func (l *LogicalOperator) handleDoubleNot(args []interface{}) (string, error) {
 		condition, condition, condition, condition), nil
 }
 
-// handleIf converts if operator to SQL
+// handleIf converts if operator to SQL.
 func (l *LogicalOperator) handleIf(args []interface{}) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("if requires at least 2 arguments")
@@ -140,12 +140,12 @@ func (l *LogicalOperator) handleIf(args []interface{}) (string, error) {
 		for i := 0; i < len(args)-1; i += 2 {
 			condition, err := l.expressionToSQL(args[i])
 			if err != nil {
-				return "", fmt.Errorf("invalid if condition %d: %v", i/2, err)
+				return "", fmt.Errorf("invalid if condition %d: %w", i/2, err)
 			}
 
 			value, err := l.expressionToSQL(args[i+1])
 			if err != nil {
-				return "", fmt.Errorf("invalid if value %d: %v", i/2, err)
+				return "", fmt.Errorf("invalid if value %d: %w", i/2, err)
 			}
 
 			caseParts = append(caseParts, fmt.Sprintf("WHEN %s THEN %s", condition, value))
@@ -154,7 +154,7 @@ func (l *LogicalOperator) handleIf(args []interface{}) (string, error) {
 		// Handle final else value
 		elseValue, err := l.expressionToSQL(args[len(args)-1])
 		if err != nil {
-			return "", fmt.Errorf("invalid if else value: %v", err)
+			return "", fmt.Errorf("invalid if else value: %w", err)
 		}
 
 		return fmt.Sprintf("CASE %s ELSE %s END", strings.Join(caseParts, " "), elseValue), nil
@@ -164,20 +164,20 @@ func (l *LogicalOperator) handleIf(args []interface{}) (string, error) {
 	// Convert condition
 	condition, err := l.expressionToSQL(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid if condition: %v", err)
+		return "", fmt.Errorf("invalid if condition: %w", err)
 	}
 
 	// Convert then value
 	thenValue, err := l.expressionToSQL(args[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid if then value: %v", err)
+		return "", fmt.Errorf("invalid if then value: %w", err)
 	}
 
 	// Handle else value (optional)
 	if len(args) == 3 {
 		elseValue, err := l.expressionToSQL(args[2])
 		if err != nil {
-			return "", fmt.Errorf("invalid if else value: %v", err)
+			return "", fmt.Errorf("invalid if else value: %w", err)
 		}
 		return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, thenValue, elseValue), nil
 	}
@@ -186,7 +186,7 @@ func (l *LogicalOperator) handleIf(args []interface{}) (string, error) {
 	return fmt.Sprintf("CASE WHEN %s THEN %s ELSE NULL END", condition, thenValue), nil
 }
 
-// expressionToSQL converts any expression to SQL
+// expressionToSQL converts any expression to SQL.
 func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 	// Handle primitive values
 	if l.isPrimitive(expr) {
@@ -227,7 +227,7 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 					// Process arguments to handle complex nested expressions
 					processedArgs, err := l.processArgs(arr)
 					if err != nil {
-						return "", fmt.Errorf("failed to process comparison arguments: %v", err)
+						return "", fmt.Errorf("failed to process comparison arguments: %w", err)
 					}
 					return l.comparisonOp.ToSQL(operator, processedArgs)
 				}
@@ -272,7 +272,7 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 }
 
 // processArgs recursively processes arguments to handle complex expressions
-// This converts nested operators (like reduce, filter, etc.) to SQL strings
+// This converts nested operators (like reduce, filter, etc.) to SQL strings.
 func (l *LogicalOperator) processArgs(args []interface{}) ([]interface{}, error) {
 	processed := make([]interface{}, len(args))
 
@@ -286,7 +286,7 @@ func (l *LogicalOperator) processArgs(args []interface{}) ([]interface{}, error)
 						// It's a complex expression, convert it to SQL
 						sql, err := l.expressionToSQL(arg)
 						if err != nil {
-							return nil, fmt.Errorf("invalid argument %d: %v", i, err)
+							return nil, fmt.Errorf("invalid argument %d: %w", i, err)
 						}
 						// Store the SQL as a string for the operator to use
 						processed[i] = sql
@@ -305,7 +305,7 @@ func (l *LogicalOperator) processArgs(args []interface{}) ([]interface{}, error)
 	return processed, nil
 }
 
-// isPrimitive checks if a value is a primitive type
+// isPrimitive checks if a value is a primitive type.
 func (l *LogicalOperator) isPrimitive(value interface{}) bool {
 	switch value.(type) {
 	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
@@ -318,7 +318,7 @@ func (l *LogicalOperator) isPrimitive(value interface{}) bool {
 }
 
 // isPreProcessedSQL checks if a string is already a SQL expression (from custom operators)
-// rather than a primitive string value that needs to be quoted
+// rather than a primitive string value that needs to be quoted.
 func (l *LogicalOperator) isPreProcessedSQL(str string) bool {
 	// If it's a quoted string (starts and ends with single quotes), it's a literal, not SQL
 	if strings.HasPrefix(str, "'") && strings.HasSuffix(str, "'") {
