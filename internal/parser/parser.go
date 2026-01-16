@@ -1,9 +1,11 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
+	tperrors "github.com/h22rana/jsonlogic2sql/internal/errors"
 	"github.com/h22rana/jsonlogic2sql/internal/operators"
 	"github.com/h22rana/jsonlogic2sql/internal/validator"
 )
@@ -73,13 +75,13 @@ func (p *Parser) SetSchema(schema operators.SchemaProvider) {
 func (p *Parser) Parse(logic interface{}) (string, error) {
 	// First validate the expression
 	if err := p.validator.Validate(logic); err != nil {
-		return "", fmt.Errorf("validation error: %w", err)
+		return "", tperrors.NewValidationError(err)
 	}
 
-	// Parse the expression
-	sql, err := p.parseExpression(logic)
+	// Parse the expression with root path
+	sql, err := p.parseExpression(logic, "$")
 	if err != nil {
-		return "", fmt.Errorf("parse error: %w", err)
+		return "", err // TranspileError already contains full context
 	}
 
 	// Wrap in WHERE clause
@@ -87,42 +89,66 @@ func (p *Parser) Parse(logic interface{}) (string, error) {
 }
 
 // parseExpression recursively parses JSON Logic expressions.
-func (p *Parser) parseExpression(expr interface{}) (string, error) {
+// path is the JSONPath to the current expression for error reporting.
+func (p *Parser) parseExpression(expr interface{}, path string) (string, error) {
 	// Handle primitive values (should not happen in normal JSON Logic, but handle gracefully)
 	if p.isPrimitive(expr) {
-		return "", fmt.Errorf("primitive values not supported in WHERE clauses")
+		return "", tperrors.NewPrimitiveNotAllowed(path)
 	}
 
 	// Handle arrays (should not happen in normal JSON Logic, but handle gracefully)
 	if _, ok := expr.([]interface{}); ok {
-		return "", fmt.Errorf("arrays not supported in WHERE clauses")
+		return "", tperrors.NewArrayNotAllowed(path)
 	}
 
 	// Handle objects (operators)
 	if obj, ok := expr.(map[string]interface{}); ok {
 		if len(obj) != 1 {
-			return "", fmt.Errorf("operator object must have exactly one key")
+			return "", tperrors.NewMultipleKeys(path)
 		}
 
 		for operator, args := range obj {
-			return p.parseOperator(operator, args)
+			operatorPath := tperrors.BuildPath(path, operator, -1)
+			return p.parseOperator(operator, args, operatorPath)
 		}
 	}
 
-	return "", fmt.Errorf("invalid expression type: %T", expr)
+	return "", tperrors.New(tperrors.ErrInvalidExpression, "", path,
+		fmt.Sprintf("invalid expression type: %T", expr))
+}
+
+// wrapOperatorError wraps an operator error with TranspileError if it isn't already.
+func (p *Parser) wrapOperatorError(operator, path string, err error) error {
+	if err == nil {
+		return nil
+	}
+	// Check if it's already a TranspileError
+	var tpErr *tperrors.TranspileError
+	if errors.As(err, &tpErr) {
+		return err
+	}
+	// Wrap with appropriate error code based on error message
+	return tperrors.Wrap(tperrors.ErrInvalidArgument, operator, path, "operator error", err)
 }
 
 // parseOperator parses a specific operator.
-func (p *Parser) parseOperator(operator string, args interface{}) (string, error) {
+// path is the JSONPath to this operator for error reporting.
+func (p *Parser) parseOperator(operator string, args interface{}, path string) (string, error) {
 	// Check for custom operators first
 	if p.customOpLookup != nil {
 		if handler, ok := p.customOpLookup(operator); ok {
 			// Process the arguments for the custom operator
-			processedArgs, err := p.processCustomOperatorArgs(args)
+			processedArgs, err := p.processCustomOperatorArgs(args, path)
 			if err != nil {
-				return "", fmt.Errorf("failed to process custom operator arguments: %w", err)
+				return "", tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
+					"failed to process custom operator arguments", err)
 			}
-			return handler.ToSQL(operator, processedArgs)
+			sql, err := handler.ToSQL(operator, processedArgs)
+			if err != nil {
+				return "", tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
+					"custom operator failed", err)
+			}
+			return sql, nil
 		}
 	}
 
@@ -130,85 +156,95 @@ func (p *Parser) parseOperator(operator string, args interface{}) (string, error
 	switch operator {
 	// Data access operators
 	case "var":
-		return p.dataOp.ToSQL(operator, []interface{}{args})
+		sql, err := p.dataOp.ToSQL(operator, []interface{}{args})
+		return sql, p.wrapOperatorError(operator, path, err)
 	case "missing":
 		// missing takes a single string argument, wrap it in an array
-		return p.dataOp.ToSQL(operator, []interface{}{args})
+		sql, err := p.dataOp.ToSQL(operator, []interface{}{args})
+		return sql, p.wrapOperatorError(operator, path, err)
 	case "missing_some":
 		if arr, ok := args.([]interface{}); ok {
-			return p.dataOp.ToSQL(operator, arr)
+			sql, err := p.dataOp.ToSQL(operator, arr)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
-		return "", fmt.Errorf("missing_some operator requires array arguments")
+		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// Comparison operators
 	case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
 		if arr, ok := args.([]interface{}); ok {
 			// Process arguments to handle complex expressions
-			processedArgs, err := p.processArgs(arr)
+			processedArgs, err := p.processArgs(arr, path)
 			if err != nil {
-				return "", fmt.Errorf("failed to process comparison arguments: %w", err)
+				return "", err // processArgs already returns TranspileError
 			}
-			return p.comparisonOp.ToSQL(operator, processedArgs)
+			sql, err := p.comparisonOp.ToSQL(operator, processedArgs)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
-		return "", fmt.Errorf("comparison operator requires array arguments")
+		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// Logical operators
 	case "and", "or", "if":
 		if arr, ok := args.([]interface{}); ok {
 			// Process arguments to handle custom operators in nested expressions
-			processedArgs, err := p.processArgs(arr)
+			processedArgs, err := p.processArgs(arr, path)
 			if err != nil {
-				return "", fmt.Errorf("failed to process %s arguments: %w", operator, err)
+				return "", err
 			}
-			return p.logicalOp.ToSQL(operator, processedArgs)
+			sql, err := p.logicalOp.ToSQL(operator, processedArgs)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
-		return "", fmt.Errorf("%s operator requires array arguments", operator)
+		return "", tperrors.NewOperatorRequiresArray(operator, path)
 	case "!", "!!":
 		// These unary operators can accept both array and non-array arguments
 		if arr, ok := args.([]interface{}); ok {
 			// Process arguments to handle custom operators
-			processedArgs, err := p.processArgs(arr)
+			processedArgs, err := p.processArgs(arr, path)
 			if err != nil {
-				return "", fmt.Errorf("failed to process %s arguments: %w", operator, err)
+				return "", err
 			}
-			return p.logicalOp.ToSQL(operator, processedArgs)
+			sql, err := p.logicalOp.ToSQL(operator, processedArgs)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
 		// Process non-array argument to handle custom operators before wrapping
-		processedArg, err := p.processArg(args)
+		processedArg, err := p.processArg(args, path, 0)
 		if err != nil {
-			return "", fmt.Errorf("failed to process %s argument: %w", operator, err)
+			return "", err
 		}
-		return p.logicalOp.ToSQL(operator, []interface{}{processedArg})
+		sql, err := p.logicalOp.ToSQL(operator, []interface{}{processedArg})
+		return sql, p.wrapOperatorError(operator, path, err)
 
 	// Numeric operators
 	case "+", "-", "*", "/", "%", "max", "min":
 		if arr, ok := args.([]interface{}); ok {
 			// Process arguments to handle complex expressions
-			processedArgs, err := p.processArgs(arr)
+			processedArgs, err := p.processArgs(arr, path)
 			if err != nil {
-				return "", fmt.Errorf("failed to process numeric arguments: %w", err)
+				return "", err
 			}
-			return p.numericOp.ToSQL(operator, processedArgs)
+			sql, err := p.numericOp.ToSQL(operator, processedArgs)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
-		return "", fmt.Errorf("numeric operator requires array arguments")
+		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// Array operators
 	case "map", "filter", "reduce", "all", "some", "none", "merge":
 		if arr, ok := args.([]interface{}); ok {
-			return p.arrayOp.ToSQL(operator, arr)
+			sql, err := p.arrayOp.ToSQL(operator, arr)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
-		return "", fmt.Errorf("array operator requires array arguments")
+		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// String operators
 	case "cat", "substr":
 		if arr, ok := args.([]interface{}); ok {
-			return p.stringOp.ToSQL(operator, arr)
+			sql, err := p.stringOp.ToSQL(operator, arr)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
-		return "", fmt.Errorf("string operator requires array arguments")
+		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// All operators are now supported
 	default:
-		return "", fmt.Errorf("unsupported operator: %s", operator)
+		return "", tperrors.NewUnsupportedOperator(operator, path)
 	}
 }
 
@@ -237,11 +273,12 @@ func (p *Parser) isBuiltInOperator(operator string) bool {
 // processArgs recursively processes arguments to handle custom operators at any nesting level.
 // It converts custom operators to SQL while preserving the structure of built-in operators
 // but with their nested custom operators already processed.
-func (p *Parser) processArgs(args []interface{}) ([]interface{}, error) {
+// path is the JSONPath to the parent operator.
+func (p *Parser) processArgs(args []interface{}, path string) ([]interface{}, error) {
 	processed := make([]interface{}, len(args))
 
 	for i, arg := range args {
-		processedArg, err := p.processArg(arg)
+		processedArg, err := p.processArg(arg, path, i)
 		if err != nil {
 			return nil, err
 		}
@@ -253,15 +290,20 @@ func (p *Parser) processArgs(args []interface{}) ([]interface{}, error) {
 
 // processArg processes a single argument, recursively handling custom operators.
 // Returns ProcessedValue when SQL is generated, otherwise returns the original type.
-func (p *Parser) processArg(arg interface{}) (interface{}, error) {
+// path is the JSONPath to the parent, index is the argument index.
+func (p *Parser) processArg(arg interface{}, path string, index int) (interface{}, error) {
+	argPath := tperrors.BuildArrayPath(path, index)
+
 	// If it's a complex expression (map with single key)
 	if exprMap, ok := arg.(map[string]interface{}); ok {
 		if len(exprMap) == 1 {
 			for operator, opArgs := range exprMap {
+				operatorPath := tperrors.BuildPath(path, operator, index)
+
 				// Check if it's a custom operator (not built-in)
 				if !p.isBuiltInOperator(operator) {
 					// It's a custom operator, parse it to SQL
-					sql, err := p.parseOperator(operator, opArgs)
+					sql, err := p.parseOperator(operator, opArgs, operatorPath)
 					if err != nil {
 						return nil, err
 					}
@@ -271,7 +313,7 @@ func (p *Parser) processArg(arg interface{}) (interface{}, error) {
 
 				// It's a built-in operator - recursively process its arguments
 				// to handle any nested custom operators
-				processedOpArgs, err := p.processOpArgs(opArgs)
+				processedOpArgs, err := p.processOpArgs(opArgs, operatorPath)
 				if err != nil {
 					return nil, err
 				}
@@ -285,7 +327,7 @@ func (p *Parser) processArg(arg interface{}) (interface{}, error) {
 
 	// Arrays need recursive processing too
 	if arr, ok := arg.([]interface{}); ok {
-		return p.processArgs(arr)
+		return p.processArgs(arr, argPath)
 	}
 
 	// Primitives - keep as is
@@ -293,22 +335,25 @@ func (p *Parser) processArg(arg interface{}) (interface{}, error) {
 }
 
 // processOpArgs processes operator arguments (can be array or single value).
-func (p *Parser) processOpArgs(opArgs interface{}) (interface{}, error) {
+// path is the JSONPath to the operator.
+func (p *Parser) processOpArgs(opArgs interface{}, path string) (interface{}, error) {
 	if arr, ok := opArgs.([]interface{}); ok {
-		return p.processArgs(arr)
+		return p.processArgs(arr, path)
 	}
 	// Single argument
-	return p.processArg(opArgs)
+	return p.processArg(opArgs, path, 0)
 }
 
 // processCustomOperatorArgs processes arguments for custom operators.
 // It converts all expressions (including var) to their SQL representation.
-func (p *Parser) processCustomOperatorArgs(args interface{}) ([]interface{}, error) {
+// path is the JSONPath to the custom operator.
+func (p *Parser) processCustomOperatorArgs(args interface{}, path string) ([]interface{}, error) {
 	// Handle array arguments
 	if arr, ok := args.([]interface{}); ok {
 		processed := make([]interface{}, len(arr))
 		for i, arg := range arr {
-			sql, err := p.processArgToSQL(arg)
+			argPath := tperrors.BuildArrayPath(path, i)
+			sql, err := p.processArgToSQL(arg, argPath)
 			if err != nil {
 				return nil, err
 			}
@@ -318,7 +363,7 @@ func (p *Parser) processCustomOperatorArgs(args interface{}) ([]interface{}, err
 	}
 
 	// Handle single argument (wrap in array)
-	sql, err := p.processArgToSQL(args)
+	sql, err := p.processArgToSQL(args, path)
 	if err != nil {
 		return nil, err
 	}
@@ -326,13 +371,15 @@ func (p *Parser) processCustomOperatorArgs(args interface{}) ([]interface{}, err
 }
 
 // processArgToSQL converts a single argument to its SQL representation.
-func (p *Parser) processArgToSQL(arg interface{}) (interface{}, error) {
+// path is the JSONPath to this argument.
+func (p *Parser) processArgToSQL(arg interface{}, path string) (interface{}, error) {
 	// Handle complex expressions (maps)
 	if exprMap, ok := arg.(map[string]interface{}); ok {
 		if len(exprMap) == 1 {
 			for operator, opArgs := range exprMap {
+				operatorPath := tperrors.BuildPath(path, operator, -1)
 				// Parse any expression (including var)
-				sql, err := p.parseOperator(operator, opArgs)
+				sql, err := p.parseOperator(operator, opArgs, operatorPath)
 				if err != nil {
 					return nil, err
 				}

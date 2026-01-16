@@ -20,6 +20,7 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - **Proper NULL Handling**: Uses IS NULL/IS NOT NULL for null comparisons (SQL standard)
 - **Nested If in Concatenation**: Full support for conditional expressions inside string concatenation
 - **Strict Validation**: Comprehensive validation with detailed error messages
+- **Structured Errors**: Error codes, JSONPath locations, and programmatic error handling via `AsTranspileError()` and `IsErrorCode()`
 - **Library & CLI**: Both programmatic API and interactive REPL
 - **Type Safety**: Full Go type safety with proper error handling
 
@@ -1215,24 +1216,122 @@ Field type constants:
 - `FieldTypeObject` - Object/struct field type
 - `FieldTypeEnum` - Enum field type (requires AllowedValues)
 
+#### `TranspileError`
+Structured error type returned by transpilation operations:
+```go
+type TranspileError struct {
+    Code     ErrorCode   // Error code (e.g., ErrUnsupportedOperator)
+    Operator string      // The operator that caused the error
+    Path     string      // JSONPath to the error location
+    Message  string      // Human-readable error message
+    Cause    error       // Underlying error (if any)
+}
+```
+
+Methods:
+- `Error() string` - Returns formatted error message with code and path
+- `Unwrap() error` - Returns the underlying cause for errors.Unwrap support
+
+#### `ErrorCode`
+Error code type with categories:
+- **E001-E099**: Structural/validation errors
+- **E100-E199**: Operator-specific errors
+- **E200-E299**: Type/schema errors
+- **E300-E399**: Argument errors
+
+#### Helper Functions
+- `AsTranspileError(err error) (*TranspileError, bool)` - Extract TranspileError from error chain
+- `IsErrorCode(err error, code ErrorCode) bool` - Check if error has specific code
+
 ## Error Handling
 
-The library provides detailed error messages for:
+The library provides structured errors with error codes for programmatic error handling. All errors are wrapped in a `TranspileError` type that includes:
 
-- Invalid JSON syntax
-- Unsupported operators
-- Incorrect argument counts
-- Type mismatches
-- Validation errors
+- **Code**: A unique error code (e.g., `E100`, `E302`)
+- **Operator**: The operator that caused the error
+- **Path**: JSONPath to the error location (e.g., `$.and[0].>`)
+- **Message**: Human-readable description
+- **Cause**: The underlying error (if any)
 
-Example error handling:
+### Error Codes
+
+| Category | Code Range | Examples |
+|----------|------------|----------|
+| Structural/Validation | E001-E099 | `ErrInvalidExpression`, `ErrValidation`, `ErrInvalidJSON` |
+| Operator-specific | E100-E199 | `ErrUnsupportedOperator`, `ErrOperatorRequiresArray`, `ErrCustomOperatorFailed` |
+| Type/Schema | E200-E299 | `ErrTypeMismatch`, `ErrFieldNotInSchema`, `ErrInvalidEnumValue` |
+| Argument | E300-E399 | `ErrInsufficientArgs`, `ErrTooManyArgs`, `ErrInvalidArgument` |
+
+### Programmatic Error Handling
 
 ```go
-sql, err := jsonlogic2sql.Transpile(`{"unsupported": [1, 2]}`)
+sql, err := transpiler.Transpile(jsonLogic)
 if err != nil {
-    fmt.Printf("Error: %v\n", err)
-    // Output: Error: parse error: unsupported operator: unsupported
+    // Method 1: Use helper function
+    if tpErr, ok := jsonlogic2sql.AsTranspileError(err); ok {
+        fmt.Printf("Error code: %s\n", tpErr.Code)    // e.g., "E100"
+        fmt.Printf("Path: %s\n", tpErr.Path)          // e.g., "$.and[0].unknown"
+        fmt.Printf("Operator: %s\n", tpErr.Operator)  // e.g., "unknown"
+        fmt.Printf("Message: %s\n", tpErr.Message)    // Human-readable message
+    }
+
+    // Method 2: Check specific error code
+    if jsonlogic2sql.IsErrorCode(err, jsonlogic2sql.ErrUnsupportedOperator) {
+        // Handle unsupported operator specifically
+    }
+
+    // Method 3: Use standard errors.As
+    var tpErr *jsonlogic2sql.TranspileError
+    if errors.As(err, &tpErr) {
+        switch tpErr.Code {
+        case jsonlogic2sql.ErrInvalidJSON:
+            // Handle invalid JSON
+        case jsonlogic2sql.ErrValidation:
+            // Handle validation error
+        case jsonlogic2sql.ErrFieldNotInSchema:
+            // Handle unknown field
+        }
+    }
 }
+```
+
+### Example Error Output
+
+```
+Error: [E100] at $.and.unknown[0] (operator: unknown): unsupported operator: unknown
+Error: [E007]: invalid JSON: invalid character 'i' looking for beginning of object key string
+Error: [E302] at $.var (operator: var): operator error: field 'bad.field' is not defined in schema
+```
+
+### Available Error Codes
+
+```go
+// Structural/validation errors
+jsonlogic2sql.ErrInvalidExpression   // E001
+jsonlogic2sql.ErrEmptyArray          // E002
+jsonlogic2sql.ErrMultipleKeys        // E003
+jsonlogic2sql.ErrPrimitiveNotAllowed // E004
+jsonlogic2sql.ErrArrayNotAllowed     // E005
+jsonlogic2sql.ErrValidation          // E006
+jsonlogic2sql.ErrInvalidJSON         // E007
+
+// Operator-specific errors
+jsonlogic2sql.ErrUnsupportedOperator   // E100
+jsonlogic2sql.ErrOperatorRequiresArray // E101
+jsonlogic2sql.ErrCustomOperatorFailed  // E102
+
+// Type/schema errors
+jsonlogic2sql.ErrTypeMismatch     // E200
+jsonlogic2sql.ErrFieldNotInSchema // E201
+jsonlogic2sql.ErrInvalidFieldType // E202
+jsonlogic2sql.ErrInvalidEnumValue // E203
+
+// Argument errors
+jsonlogic2sql.ErrInsufficientArgs    // E300
+jsonlogic2sql.ErrTooManyArgs         // E301
+jsonlogic2sql.ErrInvalidArgument     // E302
+jsonlogic2sql.ErrInvalidArgType      // E303
+jsonlogic2sql.ErrInvalidDefaultValue // E304
 ```
 
 ## License

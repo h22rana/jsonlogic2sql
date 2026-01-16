@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
+	tperrors "github.com/h22rana/jsonlogic2sql/internal/errors"
 	"github.com/h22rana/jsonlogic2sql/internal/operators"
 	"github.com/h22rana/jsonlogic2sql/internal/parser"
 )
@@ -213,7 +214,7 @@ func (t *Transpiler) ClearCustomOperators() {
 func (t *Transpiler) Transpile(jsonLogic string) (string, error) {
 	var logic interface{}
 	if err := json.Unmarshal([]byte(jsonLogic), &logic); err != nil {
-		return "", fmt.Errorf("invalid JSON: %w", err)
+		return "", tperrors.NewInvalidJSON(err)
 	}
 
 	return t.parser.Parse(logic)
