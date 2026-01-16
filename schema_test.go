@@ -81,7 +81,10 @@ func TestSchemaWithTranspiler(t *testing.T) {
 	})
 
 	// Create transpiler with schema
-	transpiler := NewTranspiler()
+	transpiler, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("NewTranspiler() returned error: %v", err)
+	}
 	transpiler.SetSchema(schema)
 
 	// Test valid field
@@ -108,7 +111,10 @@ func TestSchemaInOperator(t *testing.T) {
 		{Name: "description", Type: FieldTypeString},
 	})
 
-	transpiler := NewTranspiler()
+	transpiler, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("NewTranspiler() returned error: %v", err)
+	}
 	transpiler.SetSchema(schema)
 
 	// Test in operator with array field (right side is variable)
@@ -147,7 +153,10 @@ func TestSchemaInOperator(t *testing.T) {
 
 func TestSchemaOptional(t *testing.T) {
 	// Test that transpiler works without schema (backward compatibility)
-	transpiler := NewTranspiler()
+	transpiler, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("NewTranspiler() returned error: %v", err)
+	}
 
 	result, err := transpiler.Transpile(`{"==": [{"var": "any_field"}, 100]}`)
 	if err != nil {

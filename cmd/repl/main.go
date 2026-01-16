@@ -88,9 +88,14 @@ func main() {
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
-	transpiler := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
+	transpiler, err := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
+		Dialect:         jsonlogic2sql.DialectBigQuery,
 		UseANSINotEqual: true,
 	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create transpiler: %v\n", err)
+		os.Exit(1)
+	}
 
 	// startsWith operator is basically column LIKE 'value%'.
 	// args[0] is the column name (SQL), args[1] is the pattern (already quoted SQL string).

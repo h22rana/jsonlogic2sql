@@ -5,7 +5,10 @@ import (
 )
 
 func TestNewTranspiler(t *testing.T) {
-	tr := NewTranspiler()
+	tr, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("NewTranspiler() returned error: %v", err)
+	}
 	if tr == nil {
 		t.Fatal("NewTranspiler() returned nil")
 	}
@@ -15,7 +18,7 @@ func TestNewTranspiler(t *testing.T) {
 }
 
 func TestTranspiler_Transpile(t *testing.T) {
-	tr := NewTranspiler()
+	tr, _ := NewTranspiler(DialectBigQuery)
 
 	tests := []struct {
 		name     string
@@ -100,7 +103,7 @@ func TestTranspiler_Transpile(t *testing.T) {
 }
 
 func TestTranspiler_TranspileFromMap(t *testing.T) {
-	tr := NewTranspiler()
+	tr, _ := NewTranspiler(DialectBigQuery)
 
 	tests := []struct {
 		name     string
@@ -149,7 +152,7 @@ func TestTranspiler_TranspileFromMap(t *testing.T) {
 }
 
 func TestTranspiler_TranspileFromInterface(t *testing.T) {
-	tr := NewTranspiler()
+	tr, _ := NewTranspiler(DialectBigQuery)
 
 	tests := []struct {
 		name     string
@@ -214,7 +217,7 @@ func TestTranspile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Transpile(tt.input)
+			result, err := Transpile(DialectBigQuery, tt.input)
 
 			if tt.hasError {
 				if err == nil {
@@ -249,7 +252,7 @@ func TestTranspileFromMap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := TranspileFromMap(tt.input)
+			result, err := TranspileFromMap(DialectBigQuery, tt.input)
 
 			if tt.hasError {
 				if err == nil {
@@ -284,7 +287,7 @@ func TestTranspileFromInterface(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := TranspileFromInterface(tt.input)
+			result, err := TranspileFromInterface(DialectBigQuery, tt.input)
 
 			if tt.hasError {
 				if err == nil {
@@ -603,7 +606,7 @@ func TestAllOperators(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Transpile(tt.input)
+			result, err := Transpile(DialectBigQuery, tt.input)
 
 			if tt.hasError {
 				if err == nil {
@@ -865,7 +868,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Transpile(tt.input)
+			result, err := Transpile(DialectBigQuery, tt.input)
 
 			if tt.hasError {
 				if err == nil {
@@ -1112,7 +1115,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Transpile(tt.input)
+			result, err := Transpile(DialectBigQuery, tt.input)
 
 			if tt.hasError {
 				if err == nil {
