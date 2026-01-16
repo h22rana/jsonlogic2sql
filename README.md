@@ -1009,7 +1009,7 @@ Main transpiler instance with methods:
 
 #### `TranspilerConfig`
 Configuration options for the transpiler:
-- `UseANSINotEqual bool` - When true uses `<>`, when false uses `!=` (default: true)
+- `Dialect Dialect` - Required: target SQL dialect (`DialectBigQuery` or `DialectSpanner`)
 - `Schema *Schema` - Optional schema for field validation (can also be set via `SetSchema()`)
 
 #### `OperatorFunc`

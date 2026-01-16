@@ -89,8 +89,7 @@ func main() {
 
 	scanner := bufio.NewScanner(os.Stdin)
 	transpiler, err := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
-		Dialect:         jsonlogic2sql.DialectBigQuery,
-		UseANSINotEqual: true,
+		Dialect: jsonlogic2sql.DialectBigQuery,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create transpiler: %v\n", err)

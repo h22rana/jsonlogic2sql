@@ -20,9 +20,8 @@ type Dialect = dialect.Dialect
 
 // TranspilerConfig holds configuration options for the transpiler.
 type TranspilerConfig struct {
-	Dialect         Dialect // Required: target SQL dialect
-	UseANSINotEqual bool    // true: <>, false: !=
-	Schema          *Schema // Optional schema for field validation
+	Dialect Dialect // Required: target SQL dialect
+	Schema  *Schema // Optional schema for field validation
 }
 
 // Transpiler provides the main API for converting JSON Logic to SQL WHERE clauses.
@@ -52,8 +51,7 @@ func NewTranspiler(d Dialect) (*Transpiler, error) {
 		parser:         parser.NewParser(opConfig),
 		operatorConfig: opConfig,
 		config: &TranspilerConfig{
-			Dialect:         d,
-			UseANSINotEqual: true, // Default to ANSI SQL <>
+			Dialect: d,
 		},
 		customOperators: NewOperatorRegistry(),
 	}
