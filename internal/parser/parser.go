@@ -249,6 +249,7 @@ func (p *Parser) processArgs(args []interface{}) ([]interface{}, error) {
 }
 
 // processArg processes a single argument, recursively handling custom operators.
+// Returns ProcessedValue when SQL is generated, otherwise returns the original type.
 func (p *Parser) processArg(arg interface{}) (interface{}, error) {
 	// If it's a complex expression (map with single key)
 	if exprMap, ok := arg.(map[string]interface{}); ok {
@@ -257,7 +258,12 @@ func (p *Parser) processArg(arg interface{}) (interface{}, error) {
 				// Check if it's a custom operator (not built-in)
 				if !p.isBuiltInOperator(operator) {
 					// It's a custom operator, parse it to SQL
-					return p.parseOperator(operator, opArgs)
+					sql, err := p.parseOperator(operator, opArgs)
+					if err != nil {
+						return nil, err
+					}
+					// Wrap in ProcessedValue to mark as SQL
+					return operators.SQLResult(sql), nil
 				}
 
 				// It's a built-in operator - recursively process its arguments

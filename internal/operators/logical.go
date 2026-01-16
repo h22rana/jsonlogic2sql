@@ -188,15 +188,17 @@ func (l *LogicalOperator) handleIf(args []interface{}) (string, error) {
 
 // expressionToSQL converts any expression to SQL.
 func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
+	// Check if it's a ProcessedValue (pre-processed SQL from parser)
+	if pv, ok := expr.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return pv.Value, nil
+		}
+		// It's a literal, quote it
+		return l.dataOp.valueToSQL(pv.Value)
+	}
+
 	// Handle primitive values
 	if l.isPrimitive(expr) {
-		// Check if it's a string that's already a SQL expression (from custom operators)
-		if str, ok := expr.(string); ok {
-			if l.isPreProcessedSQL(str) {
-				// It's already SQL, return as-is
-				return str, nil
-			}
-		}
 		return l.dataOp.valueToSQL(expr)
 	}
 
@@ -315,41 +317,4 @@ func (l *LogicalOperator) isPrimitive(value interface{}) bool {
 	default:
 		return false
 	}
-}
-
-// isPreProcessedSQL checks if a string is already a SQL expression (from custom operators)
-// rather than a primitive string value that needs to be quoted.
-func (l *LogicalOperator) isPreProcessedSQL(str string) bool {
-	// If it's a quoted string (starts and ends with single quotes), it's a literal, not SQL
-	if strings.HasPrefix(str, "'") && strings.HasSuffix(str, "'") {
-		return false
-	}
-
-	// SQL expressions typically contain SQL keywords, operators, or parentheses
-	// Simple heuristics: if it contains SQL keywords or operators, it's likely SQL
-	sqlKeywords := []string{
-		" LIKE ", " AND ", " OR ", " NOT ", " IS NULL", " IS NOT NULL",
-		" = ", " != ", " <> ", " > ", " < ", " >= ", " <= ",
-		" IN ", " CASE ", " WHEN ", " THEN ", " ELSE ", " END ",
-		" COALESCE", " EXISTS ", " SELECT ", " FROM ", " WHERE ",
-		"(", ")", " + ", " - ", " * ", " / ", " % ",
-	}
-
-	upperStr := strings.ToUpper(str)
-	for _, keyword := range sqlKeywords {
-		if strings.Contains(upperStr, strings.ToUpper(keyword)) {
-			return true
-		}
-	}
-
-	// If it contains parentheses, it's likely a SQL expression (function call, subquery, etc.)
-	if strings.Contains(str, "(") || strings.Contains(str, ")") {
-		return true
-	}
-
-	// If it looks like a column name (contains dots or underscores) and has no spaces,
-	// it might be a column reference (but this is handled elsewhere, so be conservative)
-	// For now, only treat as SQL if it has SQL keywords or operators
-
-	return false
 }

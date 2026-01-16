@@ -1046,6 +1046,68 @@ func TestAdditionalEdgeCases(t *testing.T) {
 			expected: "WHERE (FALSE AND NULL AND 0 AND '')",
 			hasError: false,
 		},
+
+		// Type tagging edge cases - strings with SQL keywords should be quoted as literals
+		{
+			name:     "string with AND keyword should be quoted",
+			input:    `{"==": [{"var": "name"}, "JOHN AND JANE"]}`,
+			expected: "WHERE name = 'JOHN AND JANE'",
+			hasError: false,
+		},
+		{
+			name:     "string with OR keyword should be quoted",
+			input:    `{"==": [{"var": "status"}, "PASS OR FAIL"]}`,
+			expected: "WHERE status = 'PASS OR FAIL'",
+			hasError: false,
+		},
+		{
+			name:     "string with parentheses should be quoted",
+			input:    `{"==": [{"var": "desc"}, "Item (Large)"]}`,
+			expected: "WHERE desc = 'Item (Large)'",
+			hasError: false,
+		},
+		{
+			name:     "string with LIKE keyword should be quoted",
+			input:    `{"==": [{"var": "phrase"}, "I LIKE PIZZA"]}`,
+			expected: "WHERE phrase = 'I LIKE PIZZA'",
+			hasError: false,
+		},
+		{
+			name:     "string with SELECT keyword should be quoted",
+			input:    `{"==": [{"var": "action"}, "SELECT ITEM"]}`,
+			expected: "WHERE action = 'SELECT ITEM'",
+			hasError: false,
+		},
+		{
+			name:     "string with CASE keyword should be quoted",
+			input:    `{"==": [{"var": "product"}, "PHONE CASE"]}`,
+			expected: "WHERE product = 'PHONE CASE'",
+			hasError: false,
+		},
+		{
+			name:     "Japanese with SQL-like parentheses should be quoted",
+			input:    `{"==": [{"var": "shop"}, "SPA(スパ)"]}`,
+			expected: "WHERE shop = 'SPA(スパ)'",
+			hasError: false,
+		},
+		{
+			name:     "string with equals sign should be quoted",
+			input:    `{"==": [{"var": "formula"}, "x = y + z"]}`,
+			expected: "WHERE formula = 'x = y + z'",
+			hasError: false,
+		},
+		{
+			name:     "string with greater than sign should be quoted",
+			input:    `{"==": [{"var": "comparison"}, "A > B"]}`,
+			expected: "WHERE comparison = 'A > B'",
+			hasError: false,
+		},
+		{
+			name:     "string with IN keyword should be quoted",
+			input:    `{"==": [{"var": "location"}, "STORE IN MALL"]}`,
+			expected: "WHERE location = 'STORE IN MALL'",
+			hasError: false,
+		},
 	}
 
 	for _, tt := range tests {

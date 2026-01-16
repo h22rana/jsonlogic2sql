@@ -261,6 +261,15 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 
 // valueToSQL converts a value to SQL, handling both literals and var expressions.
 func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
+	// Check if it's a ProcessedValue (pre-processed SQL from parser)
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return pv.Value, nil
+		}
+		// It's a literal, quote it
+		return c.dataOp.valueToSQL(pv.Value)
+	}
+
 	// Check if it's a var expression
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if len(varExpr) == 1 {
@@ -274,22 +283,6 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 				}
 			}
 		}
-	}
-
-	// Handle pre-processed SQL strings from the parser
-	// Only treat as pre-processed if it contains SQL function calls or keywords
-	if sqlStr, ok := value.(string); ok {
-		// Check if this looks like a pre-processed SQL string
-		// Must contain function call pattern (parentheses) or specific SQL keywords
-		// Simple strings with spaces like "SPA WELLNESS" should be quoted as literals
-		hasParentheses := strings.Contains(sqlStr, "(") && strings.Contains(sqlStr, ")")
-		hasSQLKeywords := strings.Contains(sqlStr, "ARRAY_") || strings.Contains(sqlStr, "EXISTS") ||
-			strings.Contains(sqlStr, "SELECT") || strings.Contains(sqlStr, "CASE ")
-		if hasParentheses || hasSQLKeywords {
-			return sqlStr, nil
-		}
-		// Otherwise treat as a regular string literal that needs quoting
-		return c.dataOp.valueToSQL(value)
 	}
 
 	// Handle complex expressions (arithmetic, comparisons, etc.)
