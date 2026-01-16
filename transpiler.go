@@ -140,6 +140,56 @@ func (t *Transpiler) RegisterOperatorFunc(name string, fn OperatorFunc) error {
 	return nil
 }
 
+// RegisterDialectAwareOperator registers a dialect-aware custom operator handler.
+// Use this when your operator needs to generate different SQL based on the target dialect.
+// Returns an error if the operator name conflicts with a built-in operator.
+//
+// Example:
+//
+//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+//	transpiler.RegisterDialectAwareOperator("now", &CurrentTimeOperator{})
+//	sql, _ := transpiler.Transpile(`{"now": []}`)
+//	// BigQuery: WHERE CURRENT_TIMESTAMP()
+//	// Spanner: WHERE CURRENT_TIMESTAMP()
+func (t *Transpiler) RegisterDialectAwareOperator(name string, handler DialectAwareOperatorHandler) error {
+	if err := validateOperatorName(name); err != nil {
+		return err
+	}
+	// Wrap in a handler that implements OperatorHandler for registry storage
+	wrapper := &dialectAwareHandlerWrapper{handler: handler, dialect: t.config.Dialect}
+	t.customOperators.Register(name, wrapper)
+	return nil
+}
+
+// RegisterDialectAwareOperatorFunc registers a dialect-aware custom operator function.
+// Use this for operators that need to generate different SQL based on the target dialect.
+// Returns an error if the operator name conflicts with a built-in operator.
+//
+// Example:
+//
+//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+//	transpiler.RegisterDialectAwareOperatorFunc("now", func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+//	    switch dialect {
+//	    case jsonlogic2sql.DialectBigQuery:
+//	        return "CURRENT_TIMESTAMP()", nil
+//	    case jsonlogic2sql.DialectSpanner:
+//	        return "CURRENT_TIMESTAMP()", nil
+//	    default:
+//	        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+//	    }
+//	})
+func (t *Transpiler) RegisterDialectAwareOperatorFunc(name string, fn DialectAwareOperatorFunc) error {
+	if err := validateOperatorName(name); err != nil {
+		return err
+	}
+	// Wrap the function with the dialect so ToSQL works correctly
+	dialect := t.config.Dialect
+	t.customOperators.RegisterFunc(name, func(op string, args []interface{}) (string, error) {
+		return fn(op, args, dialect)
+	})
+	return nil
+}
+
 // UnregisterOperator removes a custom operator from the transpiler.
 // Returns true if the operator was found and removed, false otherwise.
 func (t *Transpiler) UnregisterOperator(name string) bool {

@@ -20,6 +20,23 @@ import (
 //	}
 type OperatorFunc func(operator string, args []interface{}) (string, error)
 
+// DialectAwareOperatorFunc is a function type for dialect-aware custom operator implementations.
+// It receives the operator name, arguments, and the target SQL dialect.
+//
+// Example:
+//
+//	nowOp := func(operator string, args []interface{}, dialect Dialect) (string, error) {
+//	    switch dialect {
+//	    case DialectBigQuery:
+//	        return "CURRENT_TIMESTAMP()", nil
+//	    case DialectSpanner:
+//	        return "CURRENT_TIMESTAMP()", nil
+//	    default:
+//	        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+//	    }
+//	}
+type DialectAwareOperatorFunc func(operator string, args []interface{}, dialect Dialect) (string, error)
+
 // OperatorHandler is an interface for custom operator implementations.
 // Implement this interface for more complex operators that need state.
 //
@@ -38,6 +55,29 @@ type OperatorHandler interface {
 	ToSQL(operator string, args []interface{}) (string, error)
 }
 
+// DialectAwareOperatorHandler is an interface for dialect-aware custom operator implementations.
+// Implement this interface when your operator needs to generate different SQL for different dialects.
+//
+// Example:
+//
+//	type CurrentTimeOperator struct{}
+//
+//	func (c *CurrentTimeOperator) ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error) {
+//	    switch dialect {
+//	    case DialectBigQuery:
+//	        return "CURRENT_TIMESTAMP()", nil
+//	    case DialectSpanner:
+//	        return "CURRENT_TIMESTAMP()", nil
+//	    default:
+//	        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+//	    }
+//	}
+type DialectAwareOperatorHandler interface {
+	// ToSQLWithDialect converts the operator and its arguments to SQL for the specified dialect.
+	// The args slice contains the SQL representations of each argument.
+	ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error)
+}
+
 // funcHandler wraps an OperatorFunc to implement OperatorHandler.
 type funcHandler struct {
 	fn OperatorFunc
@@ -45,6 +85,32 @@ type funcHandler struct {
 
 func (f *funcHandler) ToSQL(operator string, args []interface{}) (string, error) {
 	return f.fn(operator, args)
+}
+
+// dialectAwareFuncHandler wraps a DialectAwareOperatorFunc to implement both OperatorHandler and DialectAwareOperatorHandler.
+type dialectAwareFuncHandler struct {
+	fn DialectAwareOperatorFunc
+}
+
+// ToSQL implements OperatorHandler but returns an error indicating dialect is required.
+// This allows the handler to be stored in the registry while being identifiable as dialect-aware.
+func (d *dialectAwareFuncHandler) ToSQL(operator string, args []interface{}) (string, error) {
+	return "", fmt.Errorf("operator %s requires dialect - use ToSQLWithDialect instead", operator)
+}
+
+func (d *dialectAwareFuncHandler) ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error) {
+	return d.fn(operator, args, dialect)
+}
+
+// dialectAwareHandlerWrapper wraps a DialectAwareOperatorHandler to implement OperatorHandler.
+// It stores the dialect from the transpiler config and uses it when ToSQL is called.
+type dialectAwareHandlerWrapper struct {
+	handler DialectAwareOperatorHandler
+	dialect Dialect
+}
+
+func (w *dialectAwareHandlerWrapper) ToSQL(operator string, args []interface{}) (string, error) {
+	return w.handler.ToSQLWithDialect(operator, args, w.dialect)
 }
 
 // OperatorRegistry manages custom operator registrations.
@@ -85,6 +151,19 @@ func (r *OperatorRegistry) Register(operatorName string, handler OperatorHandler
 //	})
 func (r *OperatorRegistry) RegisterFunc(operatorName string, fn OperatorFunc) {
 	r.Register(operatorName, &funcHandler{fn: fn})
+}
+
+// RegisterDialectAwareFunc adds a dialect-aware custom operator function to the registry.
+// Use this for operators that need to generate different SQL based on the target dialect.
+//
+// Example:
+//
+//	registry := NewOperatorRegistry()
+//	registry.RegisterDialectAwareFunc("now", func(op string, args []interface{}, dialect Dialect) (string, error) {
+//	    return "CURRENT_TIMESTAMP()", nil
+//	})
+func (r *OperatorRegistry) RegisterDialectAwareFunc(operatorName string, fn DialectAwareOperatorFunc) {
+	r.Register(operatorName, &dialectAwareFuncHandler{fn: fn})
 }
 
 // Unregister removes a custom operator from the registry.
