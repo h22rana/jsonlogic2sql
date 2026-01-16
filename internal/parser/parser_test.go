@@ -301,7 +301,7 @@ func TestParser_parseExpression(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := p.parseExpression(tt.input)
+			result, err := p.parseExpression(tt.input, "$")
 
 			if tt.hasError {
 				if err == nil {
@@ -375,7 +375,7 @@ func TestParser_parseOperator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := p.parseOperator(tt.operator, tt.args)
+			result, err := p.parseOperator(tt.operator, tt.args, "$")
 
 			if tt.hasError {
 				if err == nil {
