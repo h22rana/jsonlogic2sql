@@ -293,6 +293,41 @@ transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 transpiler.RegisterDialectAwareOperator("safeDivide", &SafeDivideOperator{})
 ```
 
+#### Complex Multi-Condition Example
+
+Here's a realistic example combining `safeDivide` with other operators:
+
+**JSON Logic:**
+```json
+{
+  "and": [
+    {">": [{"safeDivide": [{"var": "revenue"}, {"var": "cost"}]}, 1.5]},
+    {"in": [{"var": "status"}, ["active", "pending"]]},
+    {"or": [
+      {"startsWith": [{"var": "region"}, "US"]},
+      {">=": [{"var": "priority"}, 5]}
+    ]},
+    {"contains": [{"var": "category"}, "premium"]}
+  ]
+}
+```
+
+**BigQuery Output:**
+```sql
+WHERE (SAFE_DIVIDE(revenue, cost) > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+```
+
+**Spanner Output:**
+```sql
+WHERE (CASE WHEN cost = 0 THEN NULL ELSE revenue / cost END > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+```
+
+This example filters records where:
+- Profit margin (revenue/cost) is greater than 1.5x (using safe division)
+- Status is either "active" or "pending"
+- Either the region starts with "US" OR priority is 5 or higher
+- Category contains "premium"
+
 ### Schema/Metadata Validation
 
 You can optionally provide a schema to enforce strict field validation. When a schema is set, the transpiler will only accept fields defined in the schema and will return errors for undefined fields.
