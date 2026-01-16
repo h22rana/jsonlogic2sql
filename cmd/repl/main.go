@@ -214,6 +214,93 @@ func main() {
 		return fmt.Sprintf("UPPER(%s)", column), nil
 	})
 
+	// ========================================================================
+	// Dialect-Aware Custom Operators
+	// ========================================================================
+	// These operators demonstrate how to register operators that generate
+	// different SQL based on the target dialect (BigQuery vs Spanner).
+
+	// currentTimestamp operator returns the current timestamp.
+	// BigQuery: CURRENT_TIMESTAMP()
+	// Spanner: CURRENT_TIMESTAMP()
+	// Example: {"==": [{"currentTimestamp": []}, {"var": "created_at"}]}
+	_ = transpiler.RegisterDialectAwareOperatorFunc("currentTimestamp",
+		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+			if len(args) != 0 {
+				return "", fmt.Errorf("currentTimestamp takes no arguments")
+			}
+			switch dialect {
+			case jsonlogic2sql.DialectBigQuery:
+				return "CURRENT_TIMESTAMP()", nil
+			case jsonlogic2sql.DialectSpanner:
+				return "CURRENT_TIMESTAMP()", nil
+			default:
+				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+			}
+		})
+
+	// dateDiff operator calculates the difference between two dates.
+	// BigQuery: DATE_DIFF(date1, date2, DAY)
+	// Spanner: DATE_DIFF(date1, date2, DAY)
+	// Example: {">": [{"dateDiff": [{"var": "end_date"}, {"var": "start_date"}]}, 30]}
+	_ = transpiler.RegisterDialectAwareOperatorFunc("dateDiff",
+		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+			if len(args) != 2 {
+				return "", fmt.Errorf("dateDiff requires exactly 2 arguments")
+			}
+			date1 := args[0].(string)
+			date2 := args[1].(string)
+			switch dialect {
+			case jsonlogic2sql.DialectBigQuery:
+				return fmt.Sprintf("DATE_DIFF(%s, %s, DAY)", date1, date2), nil
+			case jsonlogic2sql.DialectSpanner:
+				return fmt.Sprintf("DATE_DIFF(%s, %s, DAY)", date1, date2), nil
+			default:
+				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+			}
+		})
+
+	// arrayLength operator returns the length of an array.
+	// BigQuery: ARRAY_LENGTH(array)
+	// Spanner: ARRAY_LENGTH(array)
+	// Example: {">": [{"arrayLength": [{"var": "tags"}]}, 0]}
+	_ = transpiler.RegisterDialectAwareOperatorFunc("arrayLength",
+		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+			if len(args) != 1 {
+				return "", fmt.Errorf("arrayLength requires exactly 1 argument")
+			}
+			arr := args[0].(string)
+			switch dialect {
+			case jsonlogic2sql.DialectBigQuery:
+				return fmt.Sprintf("ARRAY_LENGTH(%s)", arr), nil
+			case jsonlogic2sql.DialectSpanner:
+				return fmt.Sprintf("ARRAY_LENGTH(%s)", arr), nil
+			default:
+				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+			}
+		})
+
+	// regexpContains operator checks if a string matches a regex pattern.
+	// BigQuery: REGEXP_CONTAINS(string, pattern)
+	// Spanner: REGEXP_CONTAINS(string, pattern)
+	// Example: {"regexpContains": [{"var": "email"}, "^[a-z]+@example\\.com$"]}
+	_ = transpiler.RegisterDialectAwareOperatorFunc("regexpContains",
+		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+			if len(args) != 2 {
+				return "", fmt.Errorf("regexpContains requires exactly 2 arguments")
+			}
+			str := args[0].(string)
+			pattern := args[1].(string)
+			switch dialect {
+			case jsonlogic2sql.DialectBigQuery:
+				return fmt.Sprintf("REGEXP_CONTAINS(%s, r%s)", str, pattern), nil
+			case jsonlogic2sql.DialectSpanner:
+				return fmt.Sprintf("REGEXP_CONTAINS(%s, %s)", str, pattern), nil
+			default:
+				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+			}
+		})
+
 	for {
 		fmt.Print("jsonlogic> ")
 		if !scanner.Scan() {

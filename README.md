@@ -5,7 +5,9 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 ## Features
 
 - **Complete JSON Logic Support**: Implements all core JSON Logic operators with 100% test coverage
+- **SQL Dialect Support**: Target BigQuery or Spanner with dialect-specific SQL generation
 - **Custom Operators**: Extensible registry pattern to add custom SQL functions (LENGTH, UPPER, etc.)
+- **Dialect-Aware Custom Operators**: Register operators that generate different SQL per dialect
 - **Schema/Metadata Validation**: Optional field schema to enforce strict column validation and type-aware SQL generation
 - **ANSI SQL Output**: Generates standard SQL WHERE clauses compatible with most databases
 - **Complex Nested Expressions**: Full support for deeply nested arithmetic and logical operations
@@ -72,16 +74,19 @@ import (
 )
 
 func main() {
-    // Simple usage
-    sql, err := jsonlogic2sql.Transpile(`{">": [{"var": "amount"}, 1000]}`)
+    // Simple usage with dialect (required)
+    sql, err := jsonlogic2sql.Transpile(jsonlogic2sql.DialectBigQuery, `{">": [{"var": "amount"}, 1000]}`)
     if err != nil {
         panic(err)
     }
     fmt.Println(sql) // Output: WHERE amount > 1000
 
     // Using the transpiler instance
-    transpiler := jsonlogic2sql.NewTranspiler()
-    
+    transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    if err != nil {
+        panic(err)
+    }
+
     // From JSON string
     sql, err = transpiler.Transpile(`{"and": [{"==": [{"var": "status"}, "pending"]}, {">": [{"var": "amount"}, 5000]}]}`)
     if err != nil {
@@ -119,7 +124,7 @@ import (
 )
 
 func main() {
-    transpiler := jsonlogic2sql.NewTranspiler()
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
     // Register a custom "length" operator
     err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
@@ -171,7 +176,7 @@ func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, erro
 }
 
 func main() {
-    transpiler := jsonlogic2sql.NewTranspiler()
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
     // Register the handler
     err := transpiler.RegisterOperator("upper", &UpperOperator{})
@@ -192,7 +197,7 @@ func main() {
 You can register multiple custom operators and use them together:
 
 ```go
-transpiler := jsonlogic2sql.NewTranspiler()
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
 transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
     return fmt.Sprintf("LENGTH(%s)", args[0]), nil
@@ -210,7 +215,7 @@ sql, _ := transpiler.Transpile(`{"and": [{">": [{"length": [{"var": "name"}]}, 5
 #### Managing Custom Operators
 
 ```go
-transpiler := jsonlogic2sql.NewTranspiler()
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
 // Check if an operator is registered
 if transpiler.HasCustomOperator("length") {
@@ -226,6 +231,57 @@ transpiler.UnregisterOperator("length")
 
 // Clear all custom operators
 transpiler.ClearCustomOperators()
+```
+
+#### Dialect-Aware Custom Operators
+
+For operators that generate different SQL based on the target dialect, use the dialect-aware registration methods:
+
+```go
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+// Register a dialect-aware operator using a function
+transpiler.RegisterDialectAwareOperatorFunc("regexpContains",
+    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+        if len(args) != 2 {
+            return "", fmt.Errorf("regexpContains requires exactly 2 arguments")
+        }
+        str := args[0].(string)
+        pattern := args[1].(string)
+        switch dialect {
+        case jsonlogic2sql.DialectBigQuery:
+            // BigQuery uses r prefix for raw strings in regex
+            return fmt.Sprintf("REGEXP_CONTAINS(%s, r%s)", str, pattern), nil
+        case jsonlogic2sql.DialectSpanner:
+            return fmt.Sprintf("REGEXP_CONTAINS(%s, %s)", str, pattern), nil
+        default:
+            return "", fmt.Errorf("unsupported dialect: %v", dialect)
+        }
+    })
+
+sql, _ := transpiler.Transpile(`{"regexpContains": [{"var": "email"}, "^[a-z]+@example\\.com$"]}`)
+// BigQuery: WHERE REGEXP_CONTAINS(email, r'^[a-z]+@example\.com$')
+// Spanner:  WHERE REGEXP_CONTAINS(email, '^[a-z]+@example\.com$')
+```
+
+You can also use a handler struct for more complex dialect-aware operators:
+
+```go
+type CurrentTimeOperator struct{}
+
+func (c *CurrentTimeOperator) ToSQLWithDialect(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery:
+        return "CURRENT_TIMESTAMP()", nil
+    case jsonlogic2sql.DialectSpanner:
+        return "CURRENT_TIMESTAMP()", nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %v", dialect)
+    }
+}
+
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler.RegisterDialectAwareOperator("now", &CurrentTimeOperator{})
 ```
 
 ### Schema/Metadata Validation
@@ -251,7 +307,7 @@ func main() {
         {Name: "user.roles", Type: jsonlogic2sql.FieldTypeArray},
     })
 
-    transpiler := jsonlogic2sql.NewTranspiler()
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
     transpiler.SetSchema(schema)
 
     // Valid field - works
@@ -314,7 +370,7 @@ schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "name", Type: jsonlogic2sql.FieldTypeString},
 })
 
-transpiler := jsonlogic2sql.NewTranspiler()
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 transpiler.SetSchema(schema)
 
 // Valid: numeric operation on integer field
@@ -365,7 +421,7 @@ schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "priority", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"low", "medium", "high"}},
 })
 
-transpiler := jsonlogic2sql.NewTranspiler()
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 transpiler.SetSchema(schema)
 
 // Valid enum value - works
@@ -984,11 +1040,11 @@ Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
 #### `TranspileFromInterface(logic interface{}) (string, error)`
 Converts any JSON Logic interface{} to a SQL WHERE clause.
 
-#### `NewTranspiler() *Transpiler`
-Creates a new transpiler instance with default configuration.
+#### `NewTranspiler(dialect Dialect) (*Transpiler, error)`
+Creates a new transpiler instance with the specified dialect. Dialect is required - use `DialectBigQuery` or `DialectSpanner`.
 
-#### `NewTranspilerWithConfig(config *TranspilerConfig) *Transpiler`
-Creates a new transpiler instance with custom configuration.
+#### `NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error)`
+Creates a new transpiler instance with custom configuration. `Config.Dialect` is required.
 
 #### `NewOperatorRegistry() *OperatorRegistry`
 Creates a new empty operator registry for managing custom operators.
@@ -1000,8 +1056,12 @@ Main transpiler instance with methods:
 - `Transpile(jsonLogic string) (string, error)` - Convert JSON string to SQL
 - `TranspileFromMap(logic map[string]interface{}) (string, error)` - Convert map to SQL
 - `TranspileFromInterface(logic interface{}) (string, error)` - Convert interface to SQL
+- `GetDialect() Dialect` - Get the configured dialect
+- `SetSchema(schema *Schema)` - Set schema for field validation
 - `RegisterOperator(name string, handler OperatorHandler) error` - Register custom operator with handler
 - `RegisterOperatorFunc(name string, fn OperatorFunc) error` - Register custom operator with function
+- `RegisterDialectAwareOperator(name string, handler DialectAwareOperatorHandler) error` - Register dialect-aware operator
+- `RegisterDialectAwareOperatorFunc(name string, fn DialectAwareOperatorFunc) error` - Register dialect-aware function
 - `UnregisterOperator(name string) bool` - Remove a custom operator
 - `HasCustomOperator(name string) bool` - Check if operator is registered
 - `ListCustomOperators() []string` - List all custom operator names
@@ -1025,6 +1085,25 @@ type OperatorHandler interface {
     ToSQL(operator string, args []interface{}) (string, error)
 }
 ```
+
+#### `DialectAwareOperatorFunc`
+Function type for dialect-aware custom operator implementations:
+```go
+type DialectAwareOperatorFunc func(operator string, args []interface{}, dialect Dialect) (string, error)
+```
+
+#### `DialectAwareOperatorHandler`
+Interface for dialect-aware custom operator implementations:
+```go
+type DialectAwareOperatorHandler interface {
+    ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error)
+}
+```
+
+#### `Dialect`
+SQL dialect type with constants:
+- `DialectBigQuery` - Google BigQuery SQL dialect
+- `DialectSpanner` - Google Cloud Spanner SQL dialect
 
 #### `OperatorRegistry`
 Thread-safe registry for managing custom operators with methods:
