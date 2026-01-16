@@ -41,3 +41,6 @@ TEST_COVERAGE_SUMMARY.md
 
 # Schema files (may contain sensitive field names)
 schema.json
+
+# Claude Code local memory
+CLAUDE.md

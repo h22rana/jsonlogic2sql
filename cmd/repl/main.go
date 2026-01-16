@@ -178,6 +178,20 @@ func main() {
 		return fmt.Sprintf("NORMALIZE(%s, 'NFKC')", column), nil
 	})
 
+	// normalizeWaveDash operator converts wave dash variants to ASCII tilde
+	// U+301C (〜) wave dash → ~
+	// U+FF5E (～) fullwidth tilde → ~
+	// SQL: REGEXP_REPLACE(column, '[〜～]', '~')
+	//nolint:errcheck // RegisterOperatorFunc only errors on invalid operator names, which are constants here
+	transpiler.RegisterOperatorFunc("normalizeWaveDash", func(_ string, args []interface{}) (string, error) {
+		if len(args) != 1 {
+			return "", fmt.Errorf("normalizeWaveDash requires exactly 1 argument")
+		}
+		column := args[0].(string)
+		// REGEXP_REPLACE to convert both wave dash (U+301C) and fullwidth tilde (U+FF5E) to ASCII tilde
+		return fmt.Sprintf("REGEXP_REPLACE(%s, '[〜～]', '~')", column), nil
+	})
+
 	// toLower operator is basically LOWER(column).
 	_ = transpiler.RegisterOperatorFunc("toLower", func(_ string, args []interface{}) (string, error) {
 		if len(args) != 1 {
