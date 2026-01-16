@@ -235,53 +235,62 @@ transpiler.ClearCustomOperators()
 
 #### Dialect-Aware Custom Operators
 
-For operators that generate different SQL based on the target dialect, use the dialect-aware registration methods:
+For operators that generate different SQL based on the target dialect, use the dialect-aware registration methods. This is useful when SQL syntax differs between BigQuery and Spanner:
 
 ```go
 transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
-// Register a dialect-aware operator using a function
-transpiler.RegisterDialectAwareOperatorFunc("regexpContains",
+// safeDivide: Division that returns NULL on division by zero
+// This demonstrates a real dialect difference:
+// - BigQuery has built-in SAFE_DIVIDE function
+// - Spanner requires a CASE expression
+transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
     func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
         if len(args) != 2 {
-            return "", fmt.Errorf("regexpContains requires exactly 2 arguments")
+            return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
         }
-        str := args[0].(string)
-        pattern := args[1].(string)
+        numerator := args[0].(string)
+        denominator := args[1].(string)
         switch dialect {
         case jsonlogic2sql.DialectBigQuery:
-            // BigQuery uses r prefix for raw strings in regex
-            return fmt.Sprintf("REGEXP_CONTAINS(%s, r%s)", str, pattern), nil
+            // BigQuery has built-in SAFE_DIVIDE that returns NULL on division by zero
+            return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
         case jsonlogic2sql.DialectSpanner:
-            return fmt.Sprintf("REGEXP_CONTAINS(%s, %s)", str, pattern), nil
+            // Spanner doesn't have SAFE_DIVIDE, use CASE expression
+            return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", denominator, numerator, denominator), nil
         default:
             return "", fmt.Errorf("unsupported dialect: %v", dialect)
         }
     })
 
-sql, _ := transpiler.Transpile(`{"regexpContains": [{"var": "email"}, "^[a-z]+@example\\.com$"]}`)
-// BigQuery: WHERE REGEXP_CONTAINS(email, r'^[a-z]+@example\.com$')
-// Spanner:  WHERE REGEXP_CONTAINS(email, '^[a-z]+@example\.com$')
+sql, _ := transpiler.Transpile(`{"safeDivide": [{"var": "total"}, {"var": "count"}]}`)
+// BigQuery: WHERE SAFE_DIVIDE(total, count)
+// Spanner:  WHERE CASE WHEN count = 0 THEN NULL ELSE total / count END
 ```
 
-You can also use a handler struct for more complex dialect-aware operators:
+You can also use a handler struct for dialect-aware operators:
 
 ```go
-type CurrentTimeOperator struct{}
+type SafeDivideOperator struct{}
 
-func (c *CurrentTimeOperator) ToSQLWithDialect(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+func (s *SafeDivideOperator) ToSQLWithDialect(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+    }
+    numerator := args[0].(string)
+    denominator := args[1].(string)
     switch dialect {
     case jsonlogic2sql.DialectBigQuery:
-        return "CURRENT_TIMESTAMP()", nil
+        return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
     case jsonlogic2sql.DialectSpanner:
-        return "CURRENT_TIMESTAMP()", nil
+        return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", denominator, numerator, denominator), nil
     default:
         return "", fmt.Errorf("unsupported dialect: %v", dialect)
     }
 }
 
 transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
-transpiler.RegisterDialectAwareOperator("now", &CurrentTimeOperator{})
+transpiler.RegisterDialectAwareOperator("safeDivide", &SafeDivideOperator{})
 ```
 
 ### Schema/Metadata Validation

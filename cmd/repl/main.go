@@ -301,6 +301,30 @@ func main() {
 			}
 		})
 
+	// safeDivide operator performs division that returns NULL on division by zero.
+	// This demonstrates a real dialect difference:
+	// BigQuery: SAFE_DIVIDE(numerator, denominator) - built-in function
+	// Spanner: CASE WHEN denominator = 0 THEN NULL ELSE numerator / denominator END
+	// Example: {"safeDivide": [{"var": "total"}, {"var": "count"}]}
+	_ = transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
+		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+			if len(args) != 2 {
+				return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+			}
+			numerator := args[0].(string)
+			denominator := args[1].(string)
+			switch dialect {
+			case jsonlogic2sql.DialectBigQuery:
+				// BigQuery has built-in SAFE_DIVIDE that returns NULL on division by zero
+				return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+			case jsonlogic2sql.DialectSpanner:
+				// Spanner doesn't have SAFE_DIVIDE, use CASE expression
+				return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", denominator, numerator, denominator), nil
+			default:
+				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+			}
+		})
+
 	for {
 		fmt.Print("jsonlogic> ")
 		if !scanner.Scan() {
