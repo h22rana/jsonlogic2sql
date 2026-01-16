@@ -515,6 +515,24 @@ func (c *ComparisonOperator) processArithmeticExpression(op string, args interfa
 		return "", fmt.Errorf("arithmetic operation requires array of arguments")
 	}
 
+	// Handle unary minus (negation) - single argument case
+	if op == "-" && len(argsSlice) == 1 {
+		operand, err := c.valueToSQL(argsSlice[0])
+		if err != nil {
+			return "", fmt.Errorf("invalid unary minus argument: %w", err)
+		}
+		return fmt.Sprintf("(-%s)", operand), nil
+	}
+
+	// Handle unary plus (cast to number) - single argument case
+	if op == "+" && len(argsSlice) == 1 {
+		operand, err := c.valueToSQL(argsSlice[0])
+		if err != nil {
+			return "", fmt.Errorf("invalid unary plus argument: %w", err)
+		}
+		return fmt.Sprintf("CAST(%s AS NUMERIC)", operand), nil
+	}
+
 	if len(argsSlice) < 2 {
 		return "", fmt.Errorf("arithmetic operation requires at least 2 arguments")
 	}

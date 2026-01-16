@@ -2,10 +2,13 @@ package operators
 
 import (
 	"testing"
+
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
 
 func TestArrayOperator_ToSQL(t *testing.T) {
-	op := NewArrayOperator(nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	op := NewArrayOperator(config)
 
 	tests := []struct {
 		name     string
@@ -19,14 +22,14 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 			name:     "map with array and expression",
 			operator: "map",
 			args:     []interface{}{[]interface{}{1, 2, 3}, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "item"}, 1}}},
-			expected: "ARRAY_MAP([1 2 3], transformation_placeholder)",
+			expected: "ARRAY(SELECT (elem + 1) FROM UNNEST([1 2 3]) AS elem)",
 			hasError: false,
 		},
 		{
 			name:     "map with var array",
 			operator: "map",
 			args:     []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"*": []interface{}{map[string]interface{}{"var": "item"}, 2}}},
-			expected: "ARRAY_MAP(numbers, transformation_placeholder)",
+			expected: "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
 			hasError: false,
 		},
 		{
@@ -42,14 +45,14 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 			name:     "filter with array and condition",
 			operator: "filter",
 			args:     []interface{}{[]interface{}{1, 2, 3, 4, 5}, map[string]interface{}{">": []interface{}{map[string]interface{}{"var": "item"}, 2}}},
-			expected: "ARRAY_FILTER([1 2 3 4 5], condition_placeholder)",
+			expected: "ARRAY(SELECT elem FROM UNNEST([1 2 3 4 5]) AS elem WHERE elem > 2)",
 			hasError: false,
 		},
 		{
 			name:     "filter with var array",
 			operator: "filter",
 			args:     []interface{}{map[string]interface{}{"var": "scores"}, map[string]interface{}{">=": []interface{}{map[string]interface{}{"var": "item"}, 70}}},
-			expected: "ARRAY_FILTER(scores, condition_placeholder)",
+			expected: "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem >= 70)",
 			hasError: false,
 		},
 		{
@@ -60,19 +63,19 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 			hasError: true,
 		},
 
-		// Reduce tests
+		// Reduce tests - using SUM aggregate optimization for {"+": [accumulator, current]} pattern
 		{
-			name:     "reduce with array, initial, and expression",
+			name:     "reduce with array, initial, and expression (sum pattern)",
 			operator: "reduce",
-			args:     []interface{}{[]interface{}{1, 2, 3, 4}, 0, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "accumulator"}, map[string]interface{}{"var": "item"}}}},
-			expected: "ARRAY_REDUCE([1 2 3 4], 0, reduction_placeholder)",
+			args:     []interface{}{[]interface{}{1, 2, 3, 4}, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "accumulator"}, map[string]interface{}{"var": "current"}}}, 0},
+			expected: "0 + COALESCE((SELECT SUM(elem) FROM UNNEST([1 2 3 4]) AS elem), 0)",
 			hasError: false,
 		},
 		{
-			name:     "reduce with var array",
+			name:     "reduce with var array (general pattern)",
 			operator: "reduce",
-			args:     []interface{}{map[string]interface{}{"var": "numbers"}, 1, map[string]interface{}{"*": []interface{}{map[string]interface{}{"var": "accumulator"}, map[string]interface{}{"var": "item"}}}},
-			expected: "ARRAY_REDUCE(numbers, 1, reduction_placeholder)",
+			args:     []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"*": []interface{}{map[string]interface{}{"var": "accumulator"}, map[string]interface{}{"var": "current"}}}, 1},
+			expected: "(SELECT (1 * current) FROM UNNEST(numbers) AS elem)",
 			hasError: false,
 		},
 		{
@@ -219,6 +222,228 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 	}
 }
 
+// TestArrayOperator_DialectSupport tests map, filter, and reduce operators for both BigQuery and Spanner dialects.
+func TestArrayOperator_DialectSupport(t *testing.T) {
+	dialects := []struct {
+		name    string
+		dialect dialect.Dialect
+	}{
+		{"BigQuery", dialect.DialectBigQuery},
+		{"Spanner", dialect.DialectSpanner},
+	}
+
+	for _, d := range dialects {
+		t.Run(d.name, func(t *testing.T) {
+			config := NewOperatorConfig(d.dialect, nil)
+			op := NewArrayOperator(config)
+
+			tests := []struct {
+				name     string
+				operator string
+				args     []any
+				expected string
+				hasError bool
+			}{
+				// Map tests
+				{
+					name:     "map with literal array",
+					operator: "map",
+					args:     []any{[]any{1, 2, 3}, map[string]any{"+": []any{map[string]any{"var": "item"}, 1}}},
+					expected: "ARRAY(SELECT (elem + 1) FROM UNNEST([1 2 3]) AS elem)",
+					hasError: false,
+				},
+				{
+					name:     "map with var array",
+					operator: "map",
+					args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": "item"}, 2}}},
+					expected: "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
+					hasError: false,
+				},
+				{
+					name:     "map with complex transformation",
+					operator: "map",
+					args:     []any{map[string]any{"var": "prices"}, map[string]any{"-": []any{map[string]any{"var": "item"}, 10}}},
+					expected: "ARRAY(SELECT (elem - 10) FROM UNNEST(prices) AS elem)",
+					hasError: false,
+				},
+
+				// Filter tests
+				{
+					name:     "filter with literal array",
+					operator: "filter",
+					args:     []any{[]any{1, 2, 3, 4, 5}, map[string]any{">": []any{map[string]any{"var": "item"}, 2}}},
+					expected: "ARRAY(SELECT elem FROM UNNEST([1 2 3 4 5]) AS elem WHERE elem > 2)",
+					hasError: false,
+				},
+				{
+					name:     "filter with var array",
+					operator: "filter",
+					args:     []any{map[string]any{"var": "scores"}, map[string]any{">=": []any{map[string]any{"var": "item"}, 70}}},
+					expected: "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem >= 70)",
+					hasError: false,
+				},
+				{
+					name:     "filter with equality condition",
+					operator: "filter",
+					args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "active"}}},
+					expected: "ARRAY(SELECT elem FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+					hasError: false,
+				},
+
+				// Reduce tests - SUM pattern optimization
+				{
+					name:     "reduce with SUM pattern",
+					operator: "reduce",
+					args:     []any{[]any{1, 2, 3, 4}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 0},
+					expected: "0 + COALESCE((SELECT SUM(elem) FROM UNNEST([1 2 3 4]) AS elem), 0)",
+					hasError: false,
+				},
+				{
+					name:     "reduce with SUM pattern and var array",
+					operator: "reduce",
+					args:     []any{map[string]any{"var": "numbers"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 0},
+					expected: "0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
+					hasError: false,
+				},
+				{
+					name:     "reduce with MIN pattern",
+					operator: "reduce",
+					args:     []any{map[string]any{"var": "values"}, map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 999999},
+					expected: "999999 + COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 0)",
+					hasError: false,
+				},
+				{
+					name:     "reduce with MAX pattern",
+					operator: "reduce",
+					args:     []any{map[string]any{"var": "values"}, map[string]any{"max": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 0},
+					expected: "0 + COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0)",
+					hasError: false,
+				},
+				{
+					name:     "reduce with general pattern (multiplication)",
+					operator: "reduce",
+					args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 1},
+					expected: "(SELECT (1 * current) FROM UNNEST(numbers) AS elem)",
+					hasError: false,
+				},
+				{
+					name:     "reduce with non-zero initial value",
+					operator: "reduce",
+					args:     []any{[]any{10, 20, 30}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 100},
+					expected: "100 + COALESCE((SELECT SUM(elem) FROM UNNEST([10 20 30]) AS elem), 0)",
+					hasError: false,
+				},
+
+				// All tests
+				{
+					name:     "all with condition",
+					operator: "all",
+					args:     []any{map[string]any{"var": "ages"}, map[string]any{">=": []any{map[string]any{"var": "item"}, 18}}},
+					expected: "NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))",
+					hasError: false,
+				},
+
+				// Some tests
+				{
+					name:     "some with condition",
+					operator: "some",
+					args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "active"}}},
+					expected: "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+					hasError: false,
+				},
+
+				// None tests
+				{
+					name:     "none with condition",
+					operator: "none",
+					args:     []any{map[string]any{"var": "values"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "invalid"}}},
+					expected: "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
+					hasError: false,
+				},
+
+				// Merge tests
+				{
+					name:     "merge arrays",
+					operator: "merge",
+					args:     []any{map[string]any{"var": "array1"}, map[string]any{"var": "array2"}},
+					expected: "ARRAY_CONCAT(array1, array2)",
+					hasError: false,
+				},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					result, err := op.ToSQL(tt.operator, tt.args)
+					if tt.hasError {
+						if err == nil {
+							t.Errorf("[%s] Expected error but got none", d.name)
+						}
+						return
+					}
+					if err != nil {
+						t.Errorf("[%s] Unexpected error: %v", d.name, err)
+						return
+					}
+					if result != tt.expected {
+						t.Errorf("[%s] Expected %s, got %s", d.name, tt.expected, result)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestArrayOperator_DialectValidation tests that array operators properly validate dialect configuration.
+func TestArrayOperator_DialectValidation(t *testing.T) {
+	operators := []string{"map", "filter", "reduce", "all", "some", "none", "merge"}
+
+	t.Run("unspecified dialect returns error", func(t *testing.T) {
+		config := NewOperatorConfig(dialect.DialectUnspecified, nil)
+		op := NewArrayOperator(config)
+
+		for _, operator := range operators {
+			var args []any
+			switch operator {
+			case "map", "filter", "all", "some", "none":
+				args = []any{map[string]any{"var": "arr"}, map[string]any{"var": "item"}}
+			case "reduce":
+				args = []any{map[string]any{"var": "arr"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 0}
+			case "merge":
+				args = []any{map[string]any{"var": "arr1"}, map[string]any{"var": "arr2"}}
+			}
+
+			_, err := op.ToSQL(operator, args)
+			if err == nil {
+				t.Errorf("Expected error for operator %s with unspecified dialect, got none", operator)
+			}
+		}
+	})
+
+	t.Run("BigQuery dialect succeeds", func(t *testing.T) {
+		config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		op := NewArrayOperator(config)
+
+		// Test map as representative
+		args := []any{map[string]any{"var": "arr"}, map[string]any{"+": []any{map[string]any{"var": "item"}, 1}}}
+		_, err := op.ToSQL("map", args)
+		if err != nil {
+			t.Errorf("Unexpected error for BigQuery dialect: %v", err)
+		}
+	})
+
+	t.Run("Spanner dialect succeeds", func(t *testing.T) {
+		config := NewOperatorConfig(dialect.DialectSpanner, nil)
+		op := NewArrayOperator(config)
+
+		// Test map as representative
+		args := []any{map[string]any{"var": "arr"}, map[string]any{"+": []any{map[string]any{"var": "item"}, 1}}}
+		_, err := op.ToSQL("map", args)
+		if err != nil {
+			t.Errorf("Unexpected error for Spanner dialect: %v", err)
+		}
+	})
+}
+
 func TestArrayOperator_valueToSQL(t *testing.T) {
 	op := NewArrayOperator(nil)
 
@@ -275,6 +500,282 @@ func TestArrayOperator_valueToSQL(t *testing.T) {
 			}
 			if result != tt.expected {
 				t.Errorf("Expected %s, got %s", tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestArrayOperator_EdgeCases tests complex and edge case scenarios for array operators.
+func TestArrayOperator_EdgeCases(t *testing.T) {
+	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	op := NewArrayOperator(config)
+
+	tests := []struct {
+		name     string
+		operator string
+		args     []any
+		expected string
+		hasError bool
+	}{
+		// Map with complex conditions
+		{
+			name:     "map with if-else condition",
+			operator: "map",
+			args: []any{
+				map[string]any{"var": "items"},
+				map[string]any{
+					"if": []any{
+						map[string]any{">": []any{map[string]any{"var": "item"}, 10}},
+						"high",
+						"low",
+					},
+				},
+			},
+			expected: "ARRAY(SELECT CASE WHEN elem > 10 THEN 'high' ELSE 'low' END FROM UNNEST(items) AS elem)",
+			hasError: false,
+		},
+		{
+			name:     "map with nested arithmetic",
+			operator: "map",
+			args: []any{
+				map[string]any{"var": "prices"},
+				map[string]any{
+					"+": []any{
+						map[string]any{"*": []any{map[string]any{"var": "item"}, 1.1}},
+						5,
+					},
+				},
+			},
+			expected: "ARRAY(SELECT ((elem * 1.1) + 5) FROM UNNEST(prices) AS elem)",
+			hasError: false,
+		},
+		{
+			name:     "map with unary minus",
+			operator: "map",
+			args: []any{
+				map[string]any{"var": "numbers"},
+				map[string]any{"-": []any{map[string]any{"var": "item"}}},
+			},
+			expected: "ARRAY(SELECT (-elem) FROM UNNEST(numbers) AS elem)",
+			hasError: false,
+		},
+
+		// Filter with complex logical conditions
+		{
+			name:     "filter with AND condition",
+			operator: "filter",
+			args: []any{
+				map[string]any{"var": "items"},
+				map[string]any{
+					"and": []any{
+						map[string]any{">": []any{map[string]any{"var": "item"}, 5}},
+						map[string]any{"<": []any{map[string]any{"var": "item"}, 100}},
+					},
+				},
+			},
+			expected: "ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE (elem > 5 AND elem < 100))",
+			hasError: false,
+		},
+		{
+			name:     "filter with OR condition",
+			operator: "filter",
+			args: []any{
+				map[string]any{"var": "statuses"},
+				map[string]any{
+					"or": []any{
+						map[string]any{"==": []any{map[string]any{"var": "item"}, "active"}},
+						map[string]any{"==": []any{map[string]any{"var": "item"}, "pending"}},
+					},
+				},
+			},
+			expected: "ARRAY(SELECT elem FROM UNNEST(statuses) AS elem WHERE (elem = 'active' OR elem = 'pending'))",
+			hasError: false,
+		},
+		{
+			name:     "filter with NOT condition",
+			operator: "filter",
+			args: []any{
+				map[string]any{"var": "values"},
+				map[string]any{
+					"!": []any{
+						map[string]any{"==": []any{map[string]any{"var": "item"}, 0}},
+					},
+				},
+			},
+			expected: "ARRAY(SELECT elem FROM UNNEST(values) AS elem WHERE NOT (elem = 0))",
+			hasError: false,
+		},
+		{
+			name:     "filter with nested AND/OR",
+			operator: "filter",
+			args: []any{
+				map[string]any{"var": "items"},
+				map[string]any{
+					"and": []any{
+						map[string]any{">": []any{map[string]any{"var": "item"}, 0}},
+						map[string]any{
+							"or": []any{
+								map[string]any{"<": []any{map[string]any{"var": "item"}, 10}},
+								map[string]any{">": []any{map[string]any{"var": "item"}, 100}},
+							},
+						},
+					},
+				},
+			},
+			expected: "ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE (elem > 0 AND (elem < 10 OR elem > 100)))",
+			hasError: false,
+		},
+
+		// Reduce with different aggregate patterns
+		{
+			name:     "reduce with MAX pattern",
+			operator: "reduce",
+			args: []any{
+				map[string]any{"var": "values"},
+				map[string]any{"max": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
+				0,
+			},
+			expected: "0 + COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0)",
+			hasError: false,
+		},
+		{
+			name:     "reduce with MIN pattern",
+			operator: "reduce",
+			args: []any{
+				map[string]any{"var": "values"},
+				map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
+				999999,
+			},
+			expected: "999999 + COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 0)",
+			hasError: false,
+		},
+		{
+			name:     "reduce with subtraction (general pattern)",
+			operator: "reduce",
+			args: []any{
+				map[string]any{"var": "numbers"},
+				map[string]any{"-": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
+				100,
+			},
+			expected: "(SELECT (100 - current) FROM UNNEST(numbers) AS elem)",
+			hasError: false,
+		},
+		{
+			name:     "reduce with division (general pattern)",
+			operator: "reduce",
+			args: []any{
+				map[string]any{"var": "numbers"},
+				map[string]any{"/": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
+				1000,
+			},
+			expected: "(SELECT (1000 / current) FROM UNNEST(numbers) AS elem)",
+			hasError: false,
+		},
+
+		// All/Some/None with complex conditions
+		{
+			name:     "all with AND condition",
+			operator: "all",
+			args: []any{
+				map[string]any{"var": "scores"},
+				map[string]any{
+					"and": []any{
+						map[string]any{">=": []any{map[string]any{"var": "item"}, 0}},
+						map[string]any{"<=": []any{map[string]any{"var": "item"}, 100}},
+					},
+				},
+			},
+			expected: "NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT ((elem >= 0 AND elem <= 100)))",
+			hasError: false,
+		},
+		{
+			name:     "some with OR condition",
+			operator: "some",
+			args: []any{
+				map[string]any{"var": "flags"},
+				map[string]any{
+					"or": []any{
+						map[string]any{"==": []any{map[string]any{"var": "item"}, true}},
+						map[string]any{"==": []any{map[string]any{"var": "item"}, 1}},
+					},
+				},
+			},
+			expected: "EXISTS (SELECT 1 FROM UNNEST(flags) AS elem WHERE (elem = TRUE OR elem = 1))",
+			hasError: false,
+		},
+		{
+			name:     "none with comparison chain",
+			operator: "none",
+			args: []any{
+				map[string]any{"var": "temperatures"},
+				map[string]any{
+					"and": []any{
+						map[string]any{">": []any{map[string]any{"var": "item"}, 40}},
+						map[string]any{"<": []any{map[string]any{"var": "item"}, 50}},
+					},
+				},
+			},
+			expected: "NOT EXISTS (SELECT 1 FROM UNNEST(temperatures) AS elem WHERE (elem > 40 AND elem < 50))",
+			hasError: false,
+		},
+
+		// Nested array operations
+		{
+			name:     "nested map inside filter result",
+			operator: "map",
+			args: []any{
+				map[string]any{
+					"filter": []any{
+						map[string]any{"var": "numbers"},
+						map[string]any{">": []any{map[string]any{"var": "item"}, 0}},
+					},
+				},
+				map[string]any{"*": []any{map[string]any{"var": "item"}, 2}},
+			},
+			expected: "ARRAY(SELECT (elem * 2) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(numbers) AS elem WHERE elem > 0)) AS elem)",
+			hasError: false,
+		},
+
+		// Merge with mixed arrays
+		{
+			name:     "merge with literal and var arrays",
+			operator: "merge",
+			args: []any{
+				[]any{1, 2, 3},
+				map[string]any{"var": "moreNumbers"},
+			},
+			expected: "ARRAY_CONCAT([1 2 3], moreNumbers)",
+			hasError: false,
+		},
+		{
+			name:     "merge with four arrays",
+			operator: "merge",
+			args: []any{
+				map[string]any{"var": "a"},
+				map[string]any{"var": "b"},
+				map[string]any{"var": "c"},
+				map[string]any{"var": "d"},
+			},
+			expected: "ARRAY_CONCAT(a, b, c, d)",
+			hasError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := op.ToSQL(tt.operator, tt.args)
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+			if result != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, result)
 			}
 		})
 	}

@@ -5,7 +5,9 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 ## Features
 
 - **Complete JSON Logic Support**: Implements all core JSON Logic operators with 100% test coverage
+- **SQL Dialect Support**: Target BigQuery or Spanner with dialect-specific SQL generation
 - **Custom Operators**: Extensible registry pattern to add custom SQL functions (LENGTH, UPPER, etc.)
+- **Dialect-Aware Custom Operators**: Register operators that generate different SQL per dialect
 - **Schema/Metadata Validation**: Optional field schema to enforce strict column validation and type-aware SQL generation
 - **ANSI SQL Output**: Generates standard SQL WHERE clauses compatible with most databases
 - **Complex Nested Expressions**: Full support for deeply nested arithmetic and logical operations
@@ -53,6 +55,30 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - `cat` - Concatenate strings
 - `substr` - Substring operations
 
+## Supported SQL Dialects
+
+All default JSON Logic operators are supported for both BigQuery and Spanner dialects. The library generates appropriate SQL syntax for each dialect.
+
+| Operator Category | Operators | BigQuery | Spanner |
+|-------------------|-----------|:--------:|:-------:|
+| **Data Access** | `var`, `missing`, `missing_some` | ✓ | ✓ |
+| **Comparison** | `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`, `<=` | ✓ | ✓ |
+| **Logical** | `and`, `or`, `!`, `!!`, `if` | ✓ | ✓ |
+| **Numeric** | `+`, `-`, `*`, `/`, `%`, `max`, `min` | ✓ | ✓ |
+| **Array** | `in`, `map`, `filter`, `reduce`, `all`, `some`, `none`, `merge` | ✓ | ✓ |
+| **String** | `in`, `cat`, `substr` | ✓ | ✓ |
+
+### Dialect-Specific SQL Generation
+
+While all operators are supported for both dialects, some custom operators may generate different SQL. For example, the `safeDivide` custom operator (shown in the examples) generates:
+
+| Dialect | SQL Output |
+|---------|------------|
+| BigQuery | `SAFE_DIVIDE(a, b)` |
+| Spanner | `CASE WHEN b = 0 THEN NULL ELSE a / b END` |
+
+See [Dialect-Aware Custom Operators](#dialect-aware-custom-operators) for details on creating operators with dialect-specific behavior.
+
 ## Installation
 
 ```bash
@@ -72,16 +98,19 @@ import (
 )
 
 func main() {
-    // Simple usage
-    sql, err := jsonlogic2sql.Transpile(`{">": [{"var": "amount"}, 1000]}`)
+    // Simple usage with dialect (required)
+    sql, err := jsonlogic2sql.Transpile(jsonlogic2sql.DialectBigQuery, `{">": [{"var": "amount"}, 1000]}`)
     if err != nil {
         panic(err)
     }
     fmt.Println(sql) // Output: WHERE amount > 1000
 
     // Using the transpiler instance
-    transpiler := jsonlogic2sql.NewTranspiler()
-    
+    transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    if err != nil {
+        panic(err)
+    }
+
     // From JSON string
     sql, err = transpiler.Transpile(`{"and": [{"==": [{"var": "status"}, "pending"]}, {">": [{"var": "amount"}, 5000]}]}`)
     if err != nil {
@@ -119,7 +148,7 @@ import (
 )
 
 func main() {
-    transpiler := jsonlogic2sql.NewTranspiler()
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
     // Register a custom "length" operator
     err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
@@ -171,7 +200,7 @@ func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, erro
 }
 
 func main() {
-    transpiler := jsonlogic2sql.NewTranspiler()
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
     // Register the handler
     err := transpiler.RegisterOperator("upper", &UpperOperator{})
@@ -192,7 +221,7 @@ func main() {
 You can register multiple custom operators and use them together:
 
 ```go
-transpiler := jsonlogic2sql.NewTranspiler()
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
 transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
     return fmt.Sprintf("LENGTH(%s)", args[0]), nil
@@ -210,7 +239,7 @@ sql, _ := transpiler.Transpile(`{"and": [{">": [{"length": [{"var": "name"}]}, 5
 #### Managing Custom Operators
 
 ```go
-transpiler := jsonlogic2sql.NewTranspiler()
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
 // Check if an operator is registered
 if transpiler.HasCustomOperator("length") {
@@ -227,6 +256,101 @@ transpiler.UnregisterOperator("length")
 // Clear all custom operators
 transpiler.ClearCustomOperators()
 ```
+
+#### Dialect-Aware Custom Operators
+
+For operators that generate different SQL based on the target dialect, use the dialect-aware registration methods. This is useful when SQL syntax differs between BigQuery and Spanner:
+
+```go
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+// safeDivide: Division that returns NULL on division by zero
+// This demonstrates a real dialect difference:
+// - BigQuery has built-in SAFE_DIVIDE function
+// - Spanner requires a CASE expression
+transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
+    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+        if len(args) != 2 {
+            return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+        }
+        numerator := args[0].(string)
+        denominator := args[1].(string)
+        switch dialect {
+        case jsonlogic2sql.DialectBigQuery:
+            // BigQuery has built-in SAFE_DIVIDE that returns NULL on division by zero
+            return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+        case jsonlogic2sql.DialectSpanner:
+            // Spanner doesn't have SAFE_DIVIDE, use CASE expression
+            return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", denominator, numerator, denominator), nil
+        default:
+            return "", fmt.Errorf("unsupported dialect: %v", dialect)
+        }
+    })
+
+sql, _ := transpiler.Transpile(`{"safeDivide": [{"var": "total"}, {"var": "count"}]}`)
+// BigQuery: WHERE SAFE_DIVIDE(total, count)
+// Spanner:  WHERE CASE WHEN count = 0 THEN NULL ELSE total / count END
+```
+
+You can also use a handler struct for dialect-aware operators:
+
+```go
+type SafeDivideOperator struct{}
+
+func (s *SafeDivideOperator) ToSQLWithDialect(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+    }
+    numerator := args[0].(string)
+    denominator := args[1].(string)
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery:
+        return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+    case jsonlogic2sql.DialectSpanner:
+        return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", denominator, numerator, denominator), nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %v", dialect)
+    }
+}
+
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler.RegisterDialectAwareOperator("safeDivide", &SafeDivideOperator{})
+```
+
+#### Complex Multi-Condition Example
+
+Here's a realistic example combining `safeDivide` with other operators:
+
+**JSON Logic:**
+```json
+{
+  "and": [
+    {">": [{"safeDivide": [{"var": "revenue"}, {"var": "cost"}]}, 1.5]},
+    {"in": [{"var": "status"}, ["active", "pending"]]},
+    {"or": [
+      {"startsWith": [{"var": "region"}, "US"]},
+      {">=": [{"var": "priority"}, 5]}
+    ]},
+    {"contains": [{"var": "category"}, "premium"]}
+  ]
+}
+```
+
+**BigQuery Output:**
+```sql
+WHERE (SAFE_DIVIDE(revenue, cost) > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+```
+
+**Spanner Output:**
+```sql
+WHERE (CASE WHEN cost = 0 THEN NULL ELSE revenue / cost END > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+```
+
+This example filters records where:
+- Profit margin (revenue/cost) is greater than 1.5x (using safe division)
+- Status is either "active" or "pending"
+- Either the region starts with "US" OR priority is 5 or higher
+- Category contains "premium"
 
 ### Schema/Metadata Validation
 
@@ -251,7 +375,7 @@ func main() {
         {Name: "user.roles", Type: jsonlogic2sql.FieldTypeArray},
     })
 
-    transpiler := jsonlogic2sql.NewTranspiler()
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
     transpiler.SetSchema(schema)
 
     // Valid field - works
@@ -314,7 +438,7 @@ schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "name", Type: jsonlogic2sql.FieldTypeString},
 })
 
-transpiler := jsonlogic2sql.NewTranspiler()
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 transpiler.SetSchema(schema)
 
 // Valid: numeric operation on integer field
@@ -365,7 +489,7 @@ schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "priority", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"low", "medium", "high"}},
 })
 
-transpiler := jsonlogic2sql.NewTranspiler()
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 transpiler.SetSchema(schema)
 
 // Valid enum value - works
@@ -763,7 +887,7 @@ WHERE POSITION('hello' IN 'hello world') > 0
 {"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
 ```
 ```sql
-WHERE ARRAY_MAP(numbers, transformation_placeholder)
+WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
 ```
 
 #### Filter Array
@@ -771,15 +895,15 @@ WHERE ARRAY_MAP(numbers, transformation_placeholder)
 {"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
 ```
 ```sql
-WHERE ARRAY_FILTER(scores, condition_placeholder)
+WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 ```
 
-#### Reduce Array
+#### Reduce Array (SUM pattern)
 ```json
-{"reduce": [{"var": "numbers"}, 0, {"+": [{"var": "accumulator"}, {"var": "item"}]}]}
+{"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}
 ```
 ```sql
-WHERE ARRAY_REDUCE(numbers, 0, reduction_placeholder)
+WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
 ```
 
 #### All Elements Satisfy Condition
@@ -984,11 +1108,11 @@ Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
 #### `TranspileFromInterface(logic interface{}) (string, error)`
 Converts any JSON Logic interface{} to a SQL WHERE clause.
 
-#### `NewTranspiler() *Transpiler`
-Creates a new transpiler instance with default configuration.
+#### `NewTranspiler(dialect Dialect) (*Transpiler, error)`
+Creates a new transpiler instance with the specified dialect. Dialect is required - use `DialectBigQuery` or `DialectSpanner`.
 
-#### `NewTranspilerWithConfig(config *TranspilerConfig) *Transpiler`
-Creates a new transpiler instance with custom configuration.
+#### `NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error)`
+Creates a new transpiler instance with custom configuration. `Config.Dialect` is required.
 
 #### `NewOperatorRegistry() *OperatorRegistry`
 Creates a new empty operator registry for managing custom operators.
@@ -1000,8 +1124,12 @@ Main transpiler instance with methods:
 - `Transpile(jsonLogic string) (string, error)` - Convert JSON string to SQL
 - `TranspileFromMap(logic map[string]interface{}) (string, error)` - Convert map to SQL
 - `TranspileFromInterface(logic interface{}) (string, error)` - Convert interface to SQL
+- `GetDialect() Dialect` - Get the configured dialect
+- `SetSchema(schema *Schema)` - Set schema for field validation
 - `RegisterOperator(name string, handler OperatorHandler) error` - Register custom operator with handler
 - `RegisterOperatorFunc(name string, fn OperatorFunc) error` - Register custom operator with function
+- `RegisterDialectAwareOperator(name string, handler DialectAwareOperatorHandler) error` - Register dialect-aware operator
+- `RegisterDialectAwareOperatorFunc(name string, fn DialectAwareOperatorFunc) error` - Register dialect-aware function
 - `UnregisterOperator(name string) bool` - Remove a custom operator
 - `HasCustomOperator(name string) bool` - Check if operator is registered
 - `ListCustomOperators() []string` - List all custom operator names
@@ -1009,7 +1137,7 @@ Main transpiler instance with methods:
 
 #### `TranspilerConfig`
 Configuration options for the transpiler:
-- `UseANSINotEqual bool` - When true uses `<>`, when false uses `!=` (default: true)
+- `Dialect Dialect` - Required: target SQL dialect (`DialectBigQuery` or `DialectSpanner`)
 - `Schema *Schema` - Optional schema for field validation (can also be set via `SetSchema()`)
 
 #### `OperatorFunc`
@@ -1025,6 +1153,25 @@ type OperatorHandler interface {
     ToSQL(operator string, args []interface{}) (string, error)
 }
 ```
+
+#### `DialectAwareOperatorFunc`
+Function type for dialect-aware custom operator implementations:
+```go
+type DialectAwareOperatorFunc func(operator string, args []interface{}, dialect Dialect) (string, error)
+```
+
+#### `DialectAwareOperatorHandler`
+Interface for dialect-aware custom operator implementations:
+```go
+type DialectAwareOperatorHandler interface {
+    ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error)
+}
+```
+
+#### `Dialect`
+SQL dialect type with constants:
+- `DialectBigQuery` - Google BigQuery SQL dialect
+- `DialectSpanner` - Google Cloud Spanner SQL dialect
 
 #### `OperatorRegistry`
 Thread-safe registry for managing custom operators with methods:

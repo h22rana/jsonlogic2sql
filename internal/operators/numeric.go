@@ -148,13 +148,13 @@ func (n *NumericOperator) handleSubtraction(args []interface{}) (string, error) 
 		}
 	}
 
-	// Handle unary minus (negation)
+	// Handle unary minus (negation) - wrap in parentheses for safety in nested expressions
 	if len(args) == 1 {
 		operand, err := n.valueToSQL(args[0])
 		if err != nil {
 			return "", fmt.Errorf("invalid unary minus argument: %w", err)
 		}
-		return fmt.Sprintf("-%s", operand), nil
+		return fmt.Sprintf("(-%s)", operand), nil
 	}
 
 	operands := make([]string, len(args))
@@ -393,8 +393,12 @@ func (n *NumericOperator) generateComplexSQL(operator string, args []string) (st
 		}
 		return fmt.Sprintf("(%s)", strings.Join(args, " + ")), nil
 	case "-":
+		if len(args) == 1 {
+			// Unary minus (negation) - wrap in parentheses for safety in nested expressions
+			return fmt.Sprintf("(-%s)", args[0]), nil
+		}
 		if len(args) < 2 {
-			return "", fmt.Errorf("subtraction requires at least 2 arguments")
+			return "", fmt.Errorf("subtraction requires at least 1 argument")
 		}
 		return fmt.Sprintf("(%s)", strings.Join(args, " - ")), nil
 	case "*":

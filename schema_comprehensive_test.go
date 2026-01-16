@@ -9,7 +9,7 @@ import (
 // setupTestTranspiler creates a transpiler with custom operators registered
 // similar to how the REPL does it.
 func setupTestTranspiler() *Transpiler {
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 
 	// startsWith operator: column LIKE 'value%'
 	transpiler.RegisterOperatorFunc("startsWith", func(op string, args []interface{}) (string, error) {
@@ -156,7 +156,7 @@ func TestSchemaValidationComprehensive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			transpiler := NewTranspiler()
+			transpiler, _ := NewTranspiler(DialectBigQuery)
 			transpiler.SetSchema(schema)
 
 			result, err := transpiler.Transpile(tt.jsonLogic)
@@ -184,7 +184,7 @@ func TestSchemaTypeAwareBehavior(t *testing.T) {
 		{Name: "status", Type: FieldTypeString},
 	})
 
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -507,7 +507,7 @@ func TestInOperatorWithSchemaIntegration(t *testing.T) {
 		{Name: "status", Type: FieldTypeString},
 	})
 
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -553,7 +553,7 @@ func TestEdgeCasesWithSchema(t *testing.T) {
 		{Name: "active", Type: FieldTypeBoolean},
 	})
 
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -610,7 +610,7 @@ func TestTypeAwareOperators(t *testing.T) {
 		{Name: "metadata", Type: FieldTypeObject},
 	})
 
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -836,7 +836,7 @@ func TestTypeAwareOperators(t *testing.T) {
 
 // TestTypeValidationWithoutSchema verifies that validation is skipped without schema.
 func TestTypeValidationWithoutSchema(t *testing.T) {
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 	// No schema set - all operations should pass
 
 	tests := []struct {
@@ -877,7 +877,7 @@ func TestTypeValidationWithFieldNotInSchema(t *testing.T) {
 		{Name: "known_field", Type: FieldTypeInteger},
 	})
 
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	// Field not in schema should pass validation (existence is checked separately)
@@ -898,7 +898,7 @@ func TestEnumTypeSupport(t *testing.T) {
 		{Name: "name", Type: FieldTypeString},
 	})
 
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	t.Run("valid enum comparisons", func(t *testing.T) {
@@ -1045,7 +1045,7 @@ func TestEnumWithComplexExpressions(t *testing.T) {
 		{Name: "amount", Type: FieldTypeInteger},
 	})
 
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -1106,7 +1106,7 @@ func TestTypeCoercionForComparisons(t *testing.T) {
 		{Name: "active", Type: FieldTypeBoolean},
 	})
 
-	transpiler := NewTranspiler()
+	transpiler, _ := NewTranspiler(DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {

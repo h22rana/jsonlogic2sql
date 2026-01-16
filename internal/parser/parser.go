@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 	"github.com/h22rana/jsonlogic2sql/internal/operators"
 	"github.com/h22rana/jsonlogic2sql/internal/validator"
 )
@@ -29,10 +30,12 @@ type Parser struct {
 	customOpLookup CustomOperatorLookup
 }
 
-// NewParser creates a new parser instance with optional config.
+// NewParser creates a new parser instance with config.
+// Config must not be nil and must have a valid dialect set.
 func NewParser(config *operators.OperatorConfig) *Parser {
 	if config == nil {
-		config = operators.NewOperatorConfig(nil)
+		// Default to BigQuery for backward compatibility in internal usage
+		config = operators.NewOperatorConfig(dialect.DialectBigQuery, nil)
 	}
 	return &Parser{
 		validator:    validator.NewValidator(),
