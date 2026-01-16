@@ -94,7 +94,7 @@ type dialectAwareFuncHandler struct {
 
 // ToSQL implements OperatorHandler but returns an error indicating dialect is required.
 // This allows the handler to be stored in the registry while being identifiable as dialect-aware.
-func (d *dialectAwareFuncHandler) ToSQL(operator string, args []interface{}) (string, error) {
+func (d *dialectAwareFuncHandler) ToSQL(operator string, _ []interface{}) (string, error) {
 	return "", fmt.Errorf("operator %s requires dialect - use ToSQLWithDialect instead", operator)
 }
 

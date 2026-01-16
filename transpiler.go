@@ -9,7 +9,7 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/parser"
 )
 
-// Re-export dialect constants for public API
+// Re-export dialect constants for public API.
 const (
 	DialectBigQuery = dialect.DialectBigQuery
 	DialectSpanner  = dialect.DialectSpanner
