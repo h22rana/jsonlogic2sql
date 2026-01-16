@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
@@ -116,6 +117,20 @@ func (p *Parser) parseExpression(expr interface{}, path string) (string, error) 
 		fmt.Sprintf("invalid expression type: %T", expr))
 }
 
+// wrapOperatorError wraps an operator error with TranspileError if it isn't already.
+func (p *Parser) wrapOperatorError(operator, path string, err error) error {
+	if err == nil {
+		return nil
+	}
+	// Check if it's already a TranspileError
+	var tpErr *tperrors.TranspileError
+	if errors.As(err, &tpErr) {
+		return err
+	}
+	// Wrap with appropriate error code based on error message
+	return tperrors.Wrap(tperrors.ErrInvalidArgument, operator, path, "operator error", err)
+}
+
 // parseOperator parses a specific operator.
 // path is the JSONPath to this operator for error reporting.
 func (p *Parser) parseOperator(operator string, args interface{}, path string) (string, error) {
@@ -141,13 +156,16 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 	switch operator {
 	// Data access operators
 	case "var":
-		return p.dataOp.ToSQL(operator, []interface{}{args})
+		sql, err := p.dataOp.ToSQL(operator, []interface{}{args})
+		return sql, p.wrapOperatorError(operator, path, err)
 	case "missing":
 		// missing takes a single string argument, wrap it in an array
-		return p.dataOp.ToSQL(operator, []interface{}{args})
+		sql, err := p.dataOp.ToSQL(operator, []interface{}{args})
+		return sql, p.wrapOperatorError(operator, path, err)
 	case "missing_some":
 		if arr, ok := args.([]interface{}); ok {
-			return p.dataOp.ToSQL(operator, arr)
+			sql, err := p.dataOp.ToSQL(operator, arr)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
@@ -159,7 +177,8 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 			if err != nil {
 				return "", err // processArgs already returns TranspileError
 			}
-			return p.comparisonOp.ToSQL(operator, processedArgs)
+			sql, err := p.comparisonOp.ToSQL(operator, processedArgs)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
@@ -171,7 +190,8 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 			if err != nil {
 				return "", err
 			}
-			return p.logicalOp.ToSQL(operator, processedArgs)
+			sql, err := p.logicalOp.ToSQL(operator, processedArgs)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
 	case "!", "!!":
@@ -182,14 +202,16 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 			if err != nil {
 				return "", err
 			}
-			return p.logicalOp.ToSQL(operator, processedArgs)
+			sql, err := p.logicalOp.ToSQL(operator, processedArgs)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
 		// Process non-array argument to handle custom operators before wrapping
 		processedArg, err := p.processArg(args, path, 0)
 		if err != nil {
 			return "", err
 		}
-		return p.logicalOp.ToSQL(operator, []interface{}{processedArg})
+		sql, err := p.logicalOp.ToSQL(operator, []interface{}{processedArg})
+		return sql, p.wrapOperatorError(operator, path, err)
 
 	// Numeric operators
 	case "+", "-", "*", "/", "%", "max", "min":
@@ -199,21 +221,24 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 			if err != nil {
 				return "", err
 			}
-			return p.numericOp.ToSQL(operator, processedArgs)
+			sql, err := p.numericOp.ToSQL(operator, processedArgs)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// Array operators
 	case "map", "filter", "reduce", "all", "some", "none", "merge":
 		if arr, ok := args.([]interface{}); ok {
-			return p.arrayOp.ToSQL(operator, arr)
+			sql, err := p.arrayOp.ToSQL(operator, arr)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// String operators
 	case "cat", "substr":
 		if arr, ok := args.([]interface{}); ok {
-			return p.stringOp.ToSQL(operator, arr)
+			sql, err := p.stringOp.ToSQL(operator, arr)
+			return sql, p.wrapOperatorError(operator, path, err)
 		}
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
