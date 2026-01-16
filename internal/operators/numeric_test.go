@@ -77,7 +77,14 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 			name:     "unary minus (negation)",
 			operator: "-",
 			args:     []interface{}{10},
-			expected: "-10",
+			expected: "(-10)",
+			hasError: false,
+		},
+		{
+			name:     "unary minus with var",
+			operator: "-",
+			args:     []interface{}{map[string]interface{}{"var": "value"}},
+			expected: "(-value)",
 			hasError: false,
 		},
 
@@ -299,6 +306,25 @@ func TestNumericOperator_valueToSQL(t *testing.T) {
 			input:    map[string]interface{}{"other": "value"},
 			expected: "",
 			hasError: true,
+		},
+		// Nested expression tests
+		{
+			name:     "nested unary minus",
+			input:    map[string]interface{}{"-": []interface{}{map[string]interface{}{"var": "x"}}},
+			expected: "(-x)",
+			hasError: false,
+		},
+		{
+			name:     "nested addition",
+			input:    map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "a"}, 5}},
+			expected: "(a + 5)",
+			hasError: false,
+		},
+		{
+			name:     "multiplication with nested unary minus",
+			input:    map[string]interface{}{"*": []interface{}{2, map[string]interface{}{"-": []interface{}{map[string]interface{}{"var": "x"}}}}},
+			expected: "(2 * (-x))",
+			hasError: false,
 		},
 	}
 
