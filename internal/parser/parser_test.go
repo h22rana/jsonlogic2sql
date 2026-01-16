@@ -245,7 +245,7 @@ func TestParser_Parse(t *testing.T) {
 			input: map[string]interface{}{
 				"map": []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "item"}, 1}}},
 			},
-			expected: "WHERE ARRAY_MAP(numbers, transformation_placeholder)",
+			expected: "WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)",
 			hasError: false,
 		},
 	}

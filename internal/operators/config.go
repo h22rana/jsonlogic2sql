@@ -1,6 +1,10 @@
 package operators
 
-import "github.com/h22rana/jsonlogic2sql/internal/dialect"
+import (
+	"fmt"
+
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
+)
 
 // OperatorConfig holds shared configuration for all operators.
 // By using a shared config object, all operators automatically see
@@ -29,4 +33,29 @@ func (c *OperatorConfig) GetDialect() dialect.Dialect {
 		return dialect.DialectUnspecified
 	}
 	return c.Dialect
+}
+
+// ValidateDialect checks if the configured dialect is supported.
+// Returns an error for unsupported or unspecified dialects.
+// This should be called by operators to ensure dialect compatibility.
+func (c *OperatorConfig) ValidateDialect(operator string) error {
+	d := c.GetDialect()
+	switch d {
+	case dialect.DialectBigQuery, dialect.DialectSpanner:
+		return nil // Supported dialects
+	case dialect.DialectUnspecified:
+		return fmt.Errorf("operator '%s': dialect not specified", operator)
+	default:
+		return fmt.Errorf("operator '%s' not supported for dialect: %s", operator, d)
+	}
+}
+
+// IsBigQuery returns true if the dialect is BigQuery.
+func (c *OperatorConfig) IsBigQuery() bool {
+	return c.GetDialect() == dialect.DialectBigQuery
+}
+
+// IsSpanner returns true if the dialect is Spanner.
+func (c *OperatorConfig) IsSpanner() bool {
+	return c.GetDialect() == dialect.DialectSpanner
 }

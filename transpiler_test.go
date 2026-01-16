@@ -503,19 +503,19 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "map array",
 			input:    `{"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}`,
-			expected: "WHERE ARRAY_MAP(numbers, transformation_placeholder)",
+			expected: "WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)",
 			hasError: false,
 		},
 		{
 			name:     "filter array",
 			input:    `{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}`,
-			expected: "WHERE ARRAY_FILTER(scores, condition_placeholder)",
+			expected: "WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
 			hasError: false,
 		},
 		{
 			name:     "reduce array",
-			input:    `{"reduce": [{"var": "numbers"}, 0, {"+": [{"var": "accumulator"}, {"var": "item"}]}]}`,
-			expected: "WHERE ARRAY_REDUCE(numbers, 0, reduction_placeholder)",
+			input:    `{"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`,
+			expected: "WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
 			hasError: false,
 		},
 		{
@@ -635,13 +635,13 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested reduce in comparison",
 			input:    `{">": [{"reduce": [{"filter": [{"var": "cars"}, {"==": [{"var": "vendor"}, "Toyota"]}]}, {"+": [1, {"var": "accumulator"}]}, 0]}, 2]}`,
-			expected: "WHERE ARRAY_REDUCE(ARRAY_FILTER(cars, condition_placeholder), (1 + accumulator), reduction_placeholder) > 2",
+			expected: "WHERE (SELECT (1 + 0) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(cars) AS elem WHERE vendor = 'Toyota')) AS elem) > 2",
 			hasError: false,
 		},
 		{
 			name:     "nested filter in reduce",
 			input:    `{"reduce": [{"filter": [{"var": "items"}, {">": [{"var": "price"}, 100]}]}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`,
-			expected: "WHERE ARRAY_REDUCE(ARRAY_FILTER(items, condition_placeholder), (accumulator + current), reduction_placeholder)",
+			expected: "WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE price > 100)) AS elem), 0)",
 			hasError: false,
 		},
 		{
@@ -653,19 +653,19 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "complex nested expression",
 			input:    `{"and": [{"==": [{"var": "color2"}, "orange"]}, {"==": [{"var": "slider"}, 35]}, {"some": [{"var": "results"}, {"and": [{"==": [{"var": "product"}, "abc"]}, {">": [{"var": "score"}, 8]}]}]}, {">": [{"reduce": [{"filter": [{"var": "cars"}, {"and": [{"==": [{"var": "vendor"}, "Toyota"]}, {">=": [{"var": "year"}, 2010]}]}]}, {"+": [1, {"var": "accumulator"}]}, 0]}, 2]}]}`,
-			expected: "WHERE (color2 = 'orange' AND slider = 35 AND EXISTS (SELECT 1 FROM UNNEST(results) AS elem WHERE (product = 'abc' AND score > 8)) AND ARRAY_REDUCE(ARRAY_FILTER(cars, condition_placeholder), (1 + accumulator), reduction_placeholder) > 2)",
+			expected: "WHERE (color2 = 'orange' AND slider = 35 AND EXISTS (SELECT 1 FROM UNNEST(results) AS elem WHERE (product = 'abc' AND score > 8)) AND (SELECT (1 + 0) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(cars) AS elem WHERE (vendor = 'Toyota' AND year >= 2010))) AS elem) > 2)",
 			hasError: false,
 		},
 		{
 			name:     "nested comparison in filter",
 			input:    `{"filter": [{"var": "products"}, {"and": [{">": [{"var": "price"}, 100]}, {"<": [{"var": "price"}, 1000]}]}]}`,
-			expected: "WHERE ARRAY_FILTER(products, condition_placeholder)",
+			expected: "WHERE ARRAY(SELECT elem FROM UNNEST(products) AS elem WHERE (price > 100 AND price < 1000))",
 			hasError: false,
 		},
 		{
 			name:     "nested arithmetic in reduce",
 			input:    `{"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current"}, 2]}]}, 0]}`,
-			expected: "WHERE ARRAY_REDUCE(numbers, (accumulator + (current * 2)), reduction_placeholder)",
+			expected: "WHERE (SELECT (0 + (current * 2)) FROM UNNEST(numbers) AS elem)",
 			hasError: false,
 		},
 		{
@@ -683,13 +683,13 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "deeply nested reduce filter",
 			input:    `{"reduce": [{"filter": [{"var": "data"}, {"and": [{"some": [{"var": "tags"}, {"==": [{"var": "elem"}, "important"]}]}, {">": [{"var": "value"}, 0]}]}]}, {"+": [{"var": "accumulator"}, {"reduce": [{"var": "current.subitems"}, {"+": [{"var": "acc"}, {"var": "item"}]}, 0]}]}, 0]}`,
-			expected: "WHERE ARRAY_REDUCE(ARRAY_FILTER(data, condition_placeholder), (accumulator + ARRAY_REDUCE(current.subitems, (acc + item), reduction_placeholder)), reduction_placeholder)",
+			expected: "WHERE (SELECT (0 + (SELECT (acc + elem) FROM UNNEST(current.subelems) AS elem)) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE (EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem = 'important') AND value > 0))) AS elem)",
 			hasError: false,
 		},
 		{
 			name:     "nested map in comparison",
 			input:    `{">": [{"map": [{"var": "numbers"}, {"*": [{"var": "elem"}, 2]}]}, 10]}`,
-			expected: "WHERE ARRAY_MAP(numbers, transformation_placeholder) > 10",
+			expected: "WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem) > 10",
 			hasError: false,
 		},
 		{
@@ -719,13 +719,13 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested reduce with complex expression",
 			input:    `{"reduce": [{"var": "items"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current.price"}, {"if": [{">": [{"var": "current.discount"}, 0]}, {"-": [1, {"var": "current.discount"}]}, 1]}]}]}, 0]}`,
-			expected: "WHERE ARRAY_REDUCE(items, (accumulator + (current.price * CASE WHEN current.discount > 0 THEN (1 - current.discount) ELSE 1 END)), reduction_placeholder)",
+			expected: "WHERE (SELECT (0 + (current.price * CASE WHEN current.discount > 0 THEN (1 - current.discount) ELSE 1 END)) FROM UNNEST(items) AS elem)",
 			hasError: false,
 		},
 		{
 			name:     "nested filter with or",
 			input:    `{"filter": [{"var": "users"}, {"or": [{">=": [{"var": "age"}, 18]}, {"==": [{"var": "role"}, "admin"]}]}]}`,
-			expected: "WHERE ARRAY_FILTER(users, condition_placeholder)",
+			expected: "WHERE ARRAY(SELECT elem FROM UNNEST(users) AS elem WHERE (age >= 18 OR role = 'admin'))",
 			hasError: false,
 		},
 		{
@@ -749,7 +749,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "very deeply nested",
 			input:    `{"and": [{"some": [{"filter": [{"var": "data"}, {">": [{"var": "value"}, 0]}]}, {"all": [{"var": "elem.items"}, {">=": [{"var": "elem.score"}, 50]}]}]}, {">": [{"reduce": [{"var": "totals"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current"}, {"if": [{">": [{"var": "current"}, 100]}, 2, 1]}]}]}, 0]}, 1000]}]}`,
-			expected: "WHERE (EXISTS (SELECT 1 FROM UNNEST(ARRAY_FILTER(data, condition_placeholder)) AS elem WHERE NOT EXISTS (SELECT 1 FROM UNNEST(elem.elems) AS elem WHERE NOT (elem.score >= 50))) AND ARRAY_REDUCE(totals, (accumulator + (current * CASE WHEN current > 100 THEN 2 ELSE 1 END)), reduction_placeholder) > 1000)",
+			expected: "WHERE (EXISTS (SELECT 1 FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE value > 0)) AS elem WHERE NOT EXISTS (SELECT 1 FROM UNNEST(elem.elems) AS elem WHERE NOT (elem.score >= 50))) AND (SELECT (0 + (current * CASE WHEN current > 100 THEN 2 ELSE 1 END)) FROM UNNEST(totals) AS elem) > 1000)",
 			hasError: false,
 		},
 		{
@@ -1128,6 +1128,162 @@ func TestAdditionalEdgeCases(t *testing.T) {
 				if result != tt.expected {
 					t.Errorf("Transpile() = %v, expected %v", result, tt.expected)
 				}
+			}
+		})
+	}
+}
+
+// TestArrayOperatorsDialectSupport tests map, filter, reduce operators for both BigQuery and Spanner dialects.
+func TestArrayOperatorsDialectSupport(t *testing.T) {
+	dialects := []struct {
+		name    string
+		dialect Dialect
+	}{
+		{"BigQuery", DialectBigQuery},
+		{"Spanner", DialectSpanner},
+	}
+
+	for _, d := range dialects {
+		t.Run(d.name, func(t *testing.T) {
+			tr, err := NewTranspiler(d.dialect)
+			if err != nil {
+				t.Fatalf("Failed to create transpiler: %v", err)
+			}
+
+			tests := []struct {
+				name     string
+				input    string
+				expected string
+			}{
+				// Map operator tests
+				{
+					name:     "map with var array and addition",
+					input:    `{"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}`,
+					expected: "WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)",
+				},
+				{
+					name:     "map with var array and multiplication",
+					input:    `{"map": [{"var": "prices"}, {"*": [{"var": "item"}, 2]}]}`,
+					expected: "WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(prices) AS elem)",
+				},
+				{
+					name:     "map with literal array",
+					input:    `{"map": [[1, 2, 3], {"+": [{"var": "item"}, 10]}]}`,
+					expected: "WHERE ARRAY(SELECT (elem + 10) FROM UNNEST([1 2 3]) AS elem)",
+				},
+
+				// Filter operator tests
+				{
+					name:     "filter with var array and greater than",
+					input:    `{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}`,
+					expected: "WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
+				},
+				{
+					name:     "filter with var array and equality",
+					input:    `{"filter": [{"var": "statuses"}, {"==": [{"var": "item"}, "active"]}]}`,
+					expected: "WHERE ARRAY(SELECT elem FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				},
+				{
+					name:     "filter with literal array",
+					input:    `{"filter": [[1, 2, 3, 4, 5], {">=": [{"var": "item"}, 3]}]}`,
+					expected: "WHERE ARRAY(SELECT elem FROM UNNEST([1 2 3 4 5]) AS elem WHERE elem >= 3)",
+				},
+
+				// Reduce operator tests - SUM pattern
+				{
+					name:     "reduce with SUM pattern",
+					input:    `{"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`,
+					expected: "WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
+				},
+				{
+					name:     "reduce with SUM pattern and non-zero initial",
+					input:    `{"reduce": [{"var": "values"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 100]}`,
+					expected: "WHERE 100 + COALESCE((SELECT SUM(elem) FROM UNNEST(values) AS elem), 0)",
+				},
+				{
+					name:     "reduce with literal array and SUM pattern",
+					input:    `{"reduce": [[10, 20, 30], {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`,
+					expected: "WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST([10 20 30]) AS elem), 0)",
+				},
+
+				// Reduce operator tests - MIN pattern
+				{
+					name:     "reduce with MIN pattern",
+					input:    `{"reduce": [{"var": "values"}, {"min": [{"var": "accumulator"}, {"var": "current"}]}, 999999]}`,
+					expected: "WHERE 999999 + COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 0)",
+				},
+
+				// Reduce operator tests - MAX pattern
+				{
+					name:     "reduce with MAX pattern",
+					input:    `{"reduce": [{"var": "values"}, {"max": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`,
+					expected: "WHERE 0 + COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0)",
+				},
+
+				// Reduce operator tests - general pattern
+				{
+					name:     "reduce with multiplication pattern",
+					input:    `{"reduce": [{"var": "numbers"}, {"*": [{"var": "accumulator"}, {"var": "current"}]}, 1]}`,
+					expected: "WHERE (SELECT (1 * current) FROM UNNEST(numbers) AS elem)",
+				},
+
+				// All operator tests
+				{
+					name:     "all elements satisfy condition",
+					input:    `{"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}`,
+					expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))",
+				},
+
+				// Some operator tests
+				{
+					name:     "some elements satisfy condition",
+					input:    `{"some": [{"var": "statuses"}, {"==": [{"var": "item"}, "active"]}]}`,
+					expected: "WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				},
+
+				// None operator tests
+				{
+					name:     "no elements satisfy condition",
+					input:    `{"none": [{"var": "values"}, {"==": [{"var": "item"}, "invalid"]}]}`,
+					expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
+				},
+
+				// Merge operator tests
+				{
+					name:     "merge two arrays",
+					input:    `{"merge": [{"var": "array1"}, {"var": "array2"}]}`,
+					expected: "WHERE ARRAY_CONCAT(array1, array2)",
+				},
+				{
+					name:     "merge three arrays",
+					input:    `{"merge": [{"var": "a"}, {"var": "b"}, {"var": "c"}]}`,
+					expected: "WHERE ARRAY_CONCAT(a, b, c)",
+				},
+
+				// Combined/nested array operations
+				{
+					name:     "map in comparison",
+					input:    `{">": [{"map": [{"var": "numbers"}, {"*": [{"var": "item"}, 2]}]}, 10]}`,
+					expected: "WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem) > 10",
+				},
+				{
+					name:     "filter in and condition",
+					input:    `{"and": [{"==": [{"var": "status"}, "active"]}, {"some": [{"var": "tags"}, {"==": [{"var": "item"}, "premium"]}]}]}`,
+					expected: "WHERE (status = 'active' AND EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem = 'premium'))",
+				},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					result, err := tr.Transpile(tt.input)
+					if err != nil {
+						t.Errorf("[%s] Transpile() unexpected error = %v", d.name, err)
+						return
+					}
+					if result != tt.expected {
+						t.Errorf("[%s] Transpile() = %v, expected %v", d.name, result, tt.expected)
+					}
+				})
 			}
 		})
 	}

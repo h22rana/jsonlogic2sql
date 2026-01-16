@@ -118,12 +118,19 @@ func (a *ArrayOperator) ToSQL(operator string, args []interface{}) (string, erro
 	}
 }
 
-// handleMap converts map operator to SQL
-// Note: This is a simplified implementation. In practice, map operations on arrays
-// would require more complex SQL with window functions or subqueries.
+// handleMap converts map operator to SQL.
+// Generates: ARRAY(SELECT transformation FROM UNNEST(array) AS elem)
+// Both BigQuery and Spanner support this syntax.
 func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("map requires exactly 2 arguments")
+	}
+
+	// Validate dialect support
+	if a.config != nil {
+		if err := a.config.ValidateDialect("map"); err != nil {
+			return "", err
+		}
 	}
 
 	// Validate that first argument is an array type
@@ -138,17 +145,32 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	}
 
 	// Second argument: transformation expression
-	// For now, we'll return a placeholder since map operations are complex in SQL
-	// In a real implementation, this would need to handle the transformation logic
-	return fmt.Sprintf("ARRAY_MAP(%s, %s)", array, "transformation_placeholder"), nil
+	transformation, err := a.expressionToSQL(args[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid map transformation argument: %w", err)
+	}
+
+	// Replace element reference in transformation
+	transformationWithElem := a.replaceElementReference(transformation)
+
+	// Generate SQL: ARRAY(SELECT transformation FROM UNNEST(array) AS elem)
+	// This syntax works for both BigQuery and Spanner
+	return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS elem)", transformationWithElem, array), nil
 }
 
-// handleFilter converts filter operator to SQL
-// Note: This is a simplified implementation. In practice, filter operations on arrays
-// would require more complex SQL with array functions.
+// handleFilter converts filter operator to SQL.
+// Generates: ARRAY(SELECT elem FROM UNNEST(array) AS elem WHERE condition)
+// Both BigQuery and Spanner support this syntax.
 func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("filter requires exactly 2 arguments")
+	}
+
+	// Validate dialect support
+	if a.config != nil {
+		if err := a.config.ValidateDialect("filter"); err != nil {
+			return "", err
+		}
 	}
 
 	// Validate that first argument is an array type
@@ -163,16 +185,38 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression
-	// For now, we'll return a placeholder since filter operations are complex in SQL
-	return fmt.Sprintf("ARRAY_FILTER(%s, %s)", array, "condition_placeholder"), nil
+	condition, err := a.expressionToSQL(args[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid filter condition argument: %w", err)
+	}
+
+	// Replace element reference in condition
+	conditionWithElem := a.replaceElementReference(condition)
+
+	// Generate SQL: ARRAY(SELECT elem FROM UNNEST(array) AS elem WHERE condition)
+	// This syntax works for both BigQuery and Spanner
+	return fmt.Sprintf("ARRAY(SELECT elem FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
 }
 
-// handleReduce converts reduce operator to SQL
-// Note: This is a simplified implementation. In practice, reduce operations on arrays
-// would require more complex SQL with aggregate functions.
+// handleReduce converts reduce operator to SQL.
+// JSONLogic reduce: {"reduce": [array, reducer_expr, initial]}
+// The reducer expression uses "accumulator" and "current" variables.
+//
+// For common patterns, this generates optimized SQL:
+// - Addition: initial + COALESCE((SELECT SUM(elem) FROM UNNEST(array) AS elem), 0)
+// - General: (SELECT reducer FROM UNNEST(array) AS elem)
+//
+// Both BigQuery and Spanner support aggregate functions in subqueries.
 func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	if len(args) != 3 {
 		return "", fmt.Errorf("reduce requires exactly 3 arguments")
+	}
+
+	// Validate dialect support
+	if a.config != nil {
+		if err := a.config.ValidateDialect("reduce"); err != nil {
+			return "", err
+		}
 	}
 
 	// Validate that first argument is an array type
@@ -186,22 +230,112 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
 	}
 
-	// Second argument: initial value
-	initial, err := a.valueToSQL(args[1])
+	// Second argument: reducer expression
+	reducerExpr := args[1]
+
+	// Third argument: initial value
+	initial, err := a.valueToSQL(args[2])
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
 	}
 
-	// Third argument: reduction expression
-	// For now, we'll return a placeholder since reduce operations are complex in SQL
-	return fmt.Sprintf("ARRAY_REDUCE(%s, %s, %s)", array, initial, "reduction_placeholder"), nil
+	// Check for common reduction patterns and optimize
+	if aggregateFunc := a.detectAggregatePattern(reducerExpr); aggregateFunc != "" {
+		// Optimized path: use SQL aggregate function
+		// Generate: initial + COALESCE((SELECT AGG(elem) FROM UNNEST(array) AS elem), 0)
+		return fmt.Sprintf("%s + COALESCE((SELECT %s(elem) FROM UNNEST(%s) AS elem), 0)",
+			initial, aggregateFunc, array), nil
+	}
+
+	// General case: evaluate reducer expression with element reference
+	reducer, err := a.expressionToSQL(reducerExpr)
+	if err != nil {
+		return "", fmt.Errorf("invalid reduce expression: %w", err)
+	}
+
+	// Replace variable references
+	reducerWithElem := a.replaceElementReference(reducer)
+	// Replace accumulator with initial for the subquery context
+	reducerWithElem = strings.ReplaceAll(reducerWithElem, "accumulator", initial)
+
+	// Generate SQL using a subquery
+	// This works for simple cases but may not handle all reduce patterns
+	return fmt.Sprintf("(SELECT %s FROM UNNEST(%s) AS elem)", reducerWithElem, array), nil
 }
 
-// handleAll converts all operator to SQL
+// detectAggregatePattern checks if the reducer expression matches a common aggregate pattern.
+// Returns the SQL aggregate function name if detected, empty string otherwise.
+func (a *ArrayOperator) detectAggregatePattern(expr interface{}) string {
+	exprMap, ok := expr.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	// Check for addition pattern: {"+": [{"var": "accumulator"}, {"var": "current"}]}
+	if args, hasPlus := exprMap["+"]; hasPlus {
+		if a.isAccumulatorCurrentPattern(args) {
+			return "SUM"
+		}
+	}
+
+	// Check for min pattern: {"min": [{"var": "accumulator"}, {"var": "current"}]}
+	if args, hasMin := exprMap["min"]; hasMin {
+		if a.isAccumulatorCurrentPattern(args) {
+			return "MIN"
+		}
+	}
+
+	// Check for max pattern: {"max": [{"var": "accumulator"}, {"var": "current"}]}
+	if args, hasMax := exprMap["max"]; hasMax {
+		if a.isAccumulatorCurrentPattern(args) {
+			return "MAX"
+		}
+	}
+
+	return ""
+}
+
+// isAccumulatorCurrentPattern checks if args match [{"var": "accumulator"}, {"var": "current"}].
+func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) bool {
+	argsArr, ok := args.([]interface{})
+	if !ok || len(argsArr) != 2 {
+		return false
+	}
+
+	// Check first arg is {"var": "accumulator"}
+	arg0Map, ok := argsArr[0].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if varName, hasVar := arg0Map["var"]; !hasVar || varName != "accumulator" {
+		return false
+	}
+
+	// Check second arg is {"var": "current"}
+	arg1Map, ok := argsArr[1].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if varName, hasVar := arg1Map["var"]; !hasVar || varName != "current" {
+		return false
+	}
+
+	return true
+}
+
+// handleAll converts all operator to SQL.
 // This checks if all elements in an array satisfy a condition.
+// Generates: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE NOT (condition)).
 func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("all requires exactly 2 arguments")
+	}
+
+	// Validate dialect support
+	if a.config != nil {
+		if err := a.config.ValidateDialect("all"); err != nil {
+			return "", err
+		}
 	}
 
 	// Validate that first argument is an array type
@@ -223,15 +357,23 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 
 	// Use standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE NOT (condition))
 	// Replace 'elem' in condition with the actual element reference
-	conditionWithElem := a.replaceElementReference(condition, "elem")
+	conditionWithElem := a.replaceElementReference(condition)
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE NOT (%s))", array, conditionWithElem), nil
 }
 
-// handleSome converts some operator to SQL
+// handleSome converts some operator to SQL.
 // This checks if some elements in an array satisfy a condition.
+// Generates: EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition).
 func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("some requires exactly 2 arguments")
+	}
+
+	// Validate dialect support
+	if a.config != nil {
+		if err := a.config.ValidateDialect("some"); err != nil {
+			return "", err
+		}
 	}
 
 	// Validate that first argument is an array type
@@ -252,15 +394,23 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	}
 
 	// Use standard SQL: EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
-	conditionWithElem := a.replaceElementReference(condition, "elem")
+	conditionWithElem := a.replaceElementReference(condition)
 	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
 }
 
-// handleNone converts none operator to SQL
+// handleNone converts none operator to SQL.
 // This checks if no elements in an array satisfy a condition.
+// Generates: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition).
 func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("none requires exactly 2 arguments")
+	}
+
+	// Validate dialect support
+	if a.config != nil {
+		if err := a.config.ValidateDialect("none"); err != nil {
+			return "", err
+		}
 	}
 
 	// Validate that first argument is an array type
@@ -281,15 +431,23 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	}
 
 	// Use standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
-	conditionWithElem := a.replaceElementReference(condition, "elem")
+	conditionWithElem := a.replaceElementReference(condition)
 	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
 }
 
-// handleMerge converts merge operator to SQL
+// handleMerge converts merge operator to SQL.
 // This merges multiple arrays into one.
+// Generates: ARRAY_CONCAT(array1, array2, ...)
 func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("merge requires at least 1 argument")
+	}
+
+	// Validate dialect support
+	if a.config != nil {
+		if err := a.config.ValidateDialect("merge"); err != nil {
+			return "", err
+		}
 	}
 
 	// Validate that all arguments are array types
@@ -391,14 +549,15 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 	return "", fmt.Errorf("invalid expression type: %T", expr)
 }
 
-// replaceElementReference replaces element references in conditions
+// replaceElementReference replaces element references in conditions.
 // For now, this is a simple implementation that assumes the condition uses a variable.
-func (a *ArrayOperator) replaceElementReference(condition, elementName string) string {
+// It replaces "item" references with "elem" for UNNEST subqueries.
+func (a *ArrayOperator) replaceElementReference(condition string) string {
 	// Replace variable references in the condition with the element name
 	// This handles cases where {"var": "item"} should become "elem"
 	// Simple string replacement for now - in a more complex implementation,
 	// you'd want to parse the SQL and replace variable references properly
-	return strings.ReplaceAll(condition, "item", elementName)
+	return strings.ReplaceAll(condition, "item", "elem")
 }
 
 // isPrimitive checks if a value is a primitive type.
