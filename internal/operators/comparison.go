@@ -530,7 +530,7 @@ func (c *ComparisonOperator) processArithmeticExpression(op string, args interfa
 		if err != nil {
 			return "", fmt.Errorf("invalid unary plus argument: %w", err)
 		}
-		return operand, nil
+		return fmt.Sprintf("CAST(%s AS NUMERIC)", operand), nil
 	}
 
 	if len(argsSlice) < 2 {
