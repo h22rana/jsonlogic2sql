@@ -119,8 +119,7 @@ func (a *ArrayOperator) ToSQL(operator string, args []interface{}) (string, erro
 }
 
 // handleMap converts map operator to SQL.
-// Generates: ARRAY(SELECT transformation FROM UNNEST(array) AS elem)
-// Both BigQuery and Spanner support this syntax.
+// Generates: ARRAY(SELECT transformation FROM UNNEST(array) AS elem).
 func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("map requires exactly 2 arguments")
@@ -153,14 +152,11 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	// Replace element reference in transformation
 	transformationWithElem := a.replaceElementReference(transformation)
 
-	// Generate SQL: ARRAY(SELECT transformation FROM UNNEST(array) AS elem)
-	// This syntax works for both BigQuery and Spanner
 	return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS elem)", transformationWithElem, array), nil
 }
 
 // handleFilter converts filter operator to SQL.
-// Generates: ARRAY(SELECT elem FROM UNNEST(array) AS elem WHERE condition)
-// Both BigQuery and Spanner support this syntax.
+// Generates: ARRAY(SELECT elem FROM UNNEST(array) AS elem WHERE condition).
 func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("filter requires exactly 2 arguments")
@@ -193,20 +189,16 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	// Replace element reference in condition
 	conditionWithElem := a.replaceElementReference(condition)
 
-	// Generate SQL: ARRAY(SELECT elem FROM UNNEST(array) AS elem WHERE condition)
-	// This syntax works for both BigQuery and Spanner
 	return fmt.Sprintf("ARRAY(SELECT elem FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
 }
 
 // handleReduce converts reduce operator to SQL.
-// JSONLogic reduce: {"reduce": [array, reducer_expr, initial]}
+// JSONLogic reduce: {"reduce": [array, reducer_expr, initial]}.
 // The reducer expression uses "accumulator" and "current" variables.
 //
 // For common patterns, this generates optimized SQL:
-// - Addition: initial + COALESCE((SELECT SUM(elem) FROM UNNEST(array) AS elem), 0)
-// - General: (SELECT reducer FROM UNNEST(array) AS elem)
-//
-// Both BigQuery and Spanner support aggregate functions in subqueries.
+// - Addition: initial + COALESCE((SELECT SUM(elem) FROM UNNEST(array) AS elem), 0).
+// - General: (SELECT reducer FROM UNNEST(array) AS elem).
 func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	if len(args) != 3 {
 		return "", fmt.Errorf("reduce requires exactly 3 arguments")

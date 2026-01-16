@@ -504,3 +504,279 @@ func TestArrayOperator_valueToSQL(t *testing.T) {
 		})
 	}
 }
+
+// TestArrayOperator_EdgeCases tests complex and edge case scenarios for array operators.
+func TestArrayOperator_EdgeCases(t *testing.T) {
+	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	op := NewArrayOperator(config)
+
+	tests := []struct {
+		name     string
+		operator string
+		args     []any
+		expected string
+		hasError bool
+	}{
+		// Map with complex conditions
+		{
+			name:     "map with if-else condition",
+			operator: "map",
+			args: []any{
+				map[string]any{"var": "items"},
+				map[string]any{
+					"if": []any{
+						map[string]any{">": []any{map[string]any{"var": "item"}, 10}},
+						"high",
+						"low",
+					},
+				},
+			},
+			expected: "ARRAY(SELECT CASE WHEN elem > 10 THEN 'high' ELSE 'low' END FROM UNNEST(items) AS elem)",
+			hasError: false,
+		},
+		{
+			name:     "map with nested arithmetic",
+			operator: "map",
+			args: []any{
+				map[string]any{"var": "prices"},
+				map[string]any{
+					"+": []any{
+						map[string]any{"*": []any{map[string]any{"var": "item"}, 1.1}},
+						5,
+					},
+				},
+			},
+			expected: "ARRAY(SELECT ((elem * 1.1) + 5) FROM UNNEST(prices) AS elem)",
+			hasError: false,
+		},
+		{
+			name:     "map with unary minus",
+			operator: "map",
+			args: []any{
+				map[string]any{"var": "numbers"},
+				map[string]any{"-": []any{map[string]any{"var": "item"}}},
+			},
+			expected: "ARRAY(SELECT (-elem) FROM UNNEST(numbers) AS elem)",
+			hasError: false,
+		},
+
+		// Filter with complex logical conditions
+		{
+			name:     "filter with AND condition",
+			operator: "filter",
+			args: []any{
+				map[string]any{"var": "items"},
+				map[string]any{
+					"and": []any{
+						map[string]any{">": []any{map[string]any{"var": "item"}, 5}},
+						map[string]any{"<": []any{map[string]any{"var": "item"}, 100}},
+					},
+				},
+			},
+			expected: "ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE (elem > 5 AND elem < 100))",
+			hasError: false,
+		},
+		{
+			name:     "filter with OR condition",
+			operator: "filter",
+			args: []any{
+				map[string]any{"var": "statuses"},
+				map[string]any{
+					"or": []any{
+						map[string]any{"==": []any{map[string]any{"var": "item"}, "active"}},
+						map[string]any{"==": []any{map[string]any{"var": "item"}, "pending"}},
+					},
+				},
+			},
+			expected: "ARRAY(SELECT elem FROM UNNEST(statuses) AS elem WHERE (elem = 'active' OR elem = 'pending'))",
+			hasError: false,
+		},
+		{
+			name:     "filter with NOT condition",
+			operator: "filter",
+			args: []any{
+				map[string]any{"var": "values"},
+				map[string]any{
+					"!": []any{
+						map[string]any{"==": []any{map[string]any{"var": "item"}, 0}},
+					},
+				},
+			},
+			expected: "ARRAY(SELECT elem FROM UNNEST(values) AS elem WHERE NOT (elem = 0))",
+			hasError: false,
+		},
+		{
+			name:     "filter with nested AND/OR",
+			operator: "filter",
+			args: []any{
+				map[string]any{"var": "items"},
+				map[string]any{
+					"and": []any{
+						map[string]any{">": []any{map[string]any{"var": "item"}, 0}},
+						map[string]any{
+							"or": []any{
+								map[string]any{"<": []any{map[string]any{"var": "item"}, 10}},
+								map[string]any{">": []any{map[string]any{"var": "item"}, 100}},
+							},
+						},
+					},
+				},
+			},
+			expected: "ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE (elem > 0 AND (elem < 10 OR elem > 100)))",
+			hasError: false,
+		},
+
+		// Reduce with different aggregate patterns
+		{
+			name:     "reduce with MAX pattern",
+			operator: "reduce",
+			args: []any{
+				map[string]any{"var": "values"},
+				map[string]any{"max": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
+				0,
+			},
+			expected: "0 + COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0)",
+			hasError: false,
+		},
+		{
+			name:     "reduce with MIN pattern",
+			operator: "reduce",
+			args: []any{
+				map[string]any{"var": "values"},
+				map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
+				999999,
+			},
+			expected: "999999 + COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 0)",
+			hasError: false,
+		},
+		{
+			name:     "reduce with subtraction (general pattern)",
+			operator: "reduce",
+			args: []any{
+				map[string]any{"var": "numbers"},
+				map[string]any{"-": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
+				100,
+			},
+			expected: "(SELECT (100 - current) FROM UNNEST(numbers) AS elem)",
+			hasError: false,
+		},
+		{
+			name:     "reduce with division (general pattern)",
+			operator: "reduce",
+			args: []any{
+				map[string]any{"var": "numbers"},
+				map[string]any{"/": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
+				1000,
+			},
+			expected: "(SELECT (1000 / current) FROM UNNEST(numbers) AS elem)",
+			hasError: false,
+		},
+
+		// All/Some/None with complex conditions
+		{
+			name:     "all with AND condition",
+			operator: "all",
+			args: []any{
+				map[string]any{"var": "scores"},
+				map[string]any{
+					"and": []any{
+						map[string]any{">=": []any{map[string]any{"var": "item"}, 0}},
+						map[string]any{"<=": []any{map[string]any{"var": "item"}, 100}},
+					},
+				},
+			},
+			expected: "NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT ((elem >= 0 AND elem <= 100)))",
+			hasError: false,
+		},
+		{
+			name:     "some with OR condition",
+			operator: "some",
+			args: []any{
+				map[string]any{"var": "flags"},
+				map[string]any{
+					"or": []any{
+						map[string]any{"==": []any{map[string]any{"var": "item"}, true}},
+						map[string]any{"==": []any{map[string]any{"var": "item"}, 1}},
+					},
+				},
+			},
+			expected: "EXISTS (SELECT 1 FROM UNNEST(flags) AS elem WHERE (elem = TRUE OR elem = 1))",
+			hasError: false,
+		},
+		{
+			name:     "none with comparison chain",
+			operator: "none",
+			args: []any{
+				map[string]any{"var": "temperatures"},
+				map[string]any{
+					"and": []any{
+						map[string]any{">": []any{map[string]any{"var": "item"}, 40}},
+						map[string]any{"<": []any{map[string]any{"var": "item"}, 50}},
+					},
+				},
+			},
+			expected: "NOT EXISTS (SELECT 1 FROM UNNEST(temperatures) AS elem WHERE (elem > 40 AND elem < 50))",
+			hasError: false,
+		},
+
+		// Nested array operations
+		{
+			name:     "nested map inside filter result",
+			operator: "map",
+			args: []any{
+				map[string]any{
+					"filter": []any{
+						map[string]any{"var": "numbers"},
+						map[string]any{">": []any{map[string]any{"var": "item"}, 0}},
+					},
+				},
+				map[string]any{"*": []any{map[string]any{"var": "item"}, 2}},
+			},
+			expected: "ARRAY(SELECT (elem * 2) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(numbers) AS elem WHERE elem > 0)) AS elem)",
+			hasError: false,
+		},
+
+		// Merge with mixed arrays
+		{
+			name:     "merge with literal and var arrays",
+			operator: "merge",
+			args: []any{
+				[]any{1, 2, 3},
+				map[string]any{"var": "moreNumbers"},
+			},
+			expected: "ARRAY_CONCAT([1 2 3], moreNumbers)",
+			hasError: false,
+		},
+		{
+			name:     "merge with four arrays",
+			operator: "merge",
+			args: []any{
+				map[string]any{"var": "a"},
+				map[string]any{"var": "b"},
+				map[string]any{"var": "c"},
+				map[string]any{"var": "d"},
+			},
+			expected: "ARRAY_CONCAT(a, b, c, d)",
+			hasError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := op.ToSQL(tt.operator, tt.args)
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+			if result != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, result)
+			}
+		})
+	}
+}

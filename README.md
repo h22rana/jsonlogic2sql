@@ -55,6 +55,30 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - `cat` - Concatenate strings
 - `substr` - Substring operations
 
+## Supported SQL Dialects
+
+All default JSON Logic operators are supported for both BigQuery and Spanner dialects. The library generates appropriate SQL syntax for each dialect.
+
+| Operator Category | Operators | BigQuery | Spanner |
+|-------------------|-----------|:--------:|:-------:|
+| **Data Access** | `var`, `missing`, `missing_some` | ✓ | ✓ |
+| **Comparison** | `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`, `<=` | ✓ | ✓ |
+| **Logical** | `and`, `or`, `!`, `!!`, `if` | ✓ | ✓ |
+| **Numeric** | `+`, `-`, `*`, `/`, `%`, `max`, `min` | ✓ | ✓ |
+| **Array** | `in`, `map`, `filter`, `reduce`, `all`, `some`, `none`, `merge` | ✓ | ✓ |
+| **String** | `in`, `cat`, `substr` | ✓ | ✓ |
+
+### Dialect-Specific SQL Generation
+
+While all operators are supported for both dialects, some custom operators may generate different SQL. For example, the `safeDivide` custom operator (shown in the examples) generates:
+
+| Dialect | SQL Output |
+|---------|------------|
+| BigQuery | `SAFE_DIVIDE(a, b)` |
+| Spanner | `CASE WHEN b = 0 THEN NULL ELSE a / b END` |
+
+See [Dialect-Aware Custom Operators](#dialect-aware-custom-operators) for details on creating operators with dialect-specific behavior.
+
 ## Installation
 
 ```bash
@@ -863,7 +887,7 @@ WHERE POSITION('hello' IN 'hello world') > 0
 {"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
 ```
 ```sql
-WHERE ARRAY_MAP(numbers, transformation_placeholder)
+WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
 ```
 
 #### Filter Array
@@ -871,15 +895,15 @@ WHERE ARRAY_MAP(numbers, transformation_placeholder)
 {"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
 ```
 ```sql
-WHERE ARRAY_FILTER(scores, condition_placeholder)
+WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 ```
 
-#### Reduce Array
+#### Reduce Array (SUM pattern)
 ```json
-{"reduce": [{"var": "numbers"}, 0, {"+": [{"var": "accumulator"}, {"var": "item"}]}]}
+{"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}
 ```
 ```sql
-WHERE ARRAY_REDUCE(numbers, 0, reduction_placeholder)
+WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
 ```
 
 #### All Elements Satisfy Condition
