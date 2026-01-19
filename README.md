@@ -58,27 +58,27 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 
 ## Supported SQL Dialects
 
-All default JSON Logic operators are supported for BigQuery, Spanner, and PostgreSQL dialects. The library generates appropriate SQL syntax for each dialect.
+All default JSON Logic operators are supported for BigQuery, Spanner, PostgreSQL, and DuckDB dialects. The library generates appropriate SQL syntax for each dialect.
 
-| Operator Category | Operators | BigQuery | Spanner | PostgreSQL |
-|-------------------|-----------|:--------:|:-------:|:----------:|
-| **Data Access** | `var`, `missing`, `missing_some` | ✓ | ✓ | ✓ |
-| **Comparison** | `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`, `<=` | ✓ | ✓ | ✓ |
-| **Logical** | `and`, `or`, `!`, `!!`, `if` | ✓ | ✓ | ✓ |
-| **Numeric** | `+`, `-`, `*`, `/`, `%`, `max`, `min` | ✓ | ✓ | ✓ |
-| **Array** | `in`, `map`, `filter`, `reduce`, `all`, `some`, `none`, `merge` | ✓ | ✓ | ✓ |
-| **String** | `in`, `cat`, `substr` | ✓ | ✓ | ✓ |
+| Operator Category | Operators | BigQuery | Spanner | PostgreSQL | DuckDB |
+|-------------------|-----------|:--------:|:-------:|:----------:|:------:|
+| **Data Access** | `var`, `missing`, `missing_some` | ✓ | ✓ | ✓ | ✓ |
+| **Comparison** | `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`, `<=` | ✓ | ✓ | ✓ | ✓ |
+| **Logical** | `and`, `or`, `!`, `!!`, `if` | ✓ | ✓ | ✓ | ✓ |
+| **Numeric** | `+`, `-`, `*`, `/`, `%`, `max`, `min` | ✓ | ✓ | ✓ | ✓ |
+| **Array** | `in`, `map`, `filter`, `reduce`, `all`, `some`, `none`, `merge` | ✓ | ✓ | ✓ | ✓ |
+| **String** | `in`, `cat`, `substr` | ✓ | ✓ | ✓ | ✓ |
 
 ### Dialect-Specific SQL Generation
 
 While all operators are supported for all dialects, some operators generate different SQL based on the target dialect. For example:
 
-| Operator | BigQuery | Spanner | PostgreSQL |
-|----------|----------|---------|------------|
-| `merge` (arrays) | `ARRAY_CONCAT(a, b)` | `ARRAY_CONCAT(a, b)` | `(a \|\| b)` |
-| `safeDivide` (custom) | `SAFE_DIVIDE(a, b)` | `CASE WHEN b = 0 ...` | `CASE WHEN b = 0 ...` |
-| `arrayLength` (custom) | `ARRAY_LENGTH(arr)` | `ARRAY_LENGTH(arr)` | `CARDINALITY(arr)` |
-| `regexpContains` (custom) | `REGEXP_CONTAINS(s, r'p')` | `REGEXP_CONTAINS(s, 'p')` | `s ~ 'p'` |
+| Operator | BigQuery | Spanner | PostgreSQL | DuckDB |
+|----------|----------|---------|------------|--------|
+| `merge` (arrays) | `ARRAY_CONCAT(a, b)` | `ARRAY_CONCAT(a, b)` | `(a \|\| b)` | `ARRAY_CONCAT(a, b)` |
+| `safeDivide` (custom) | `SAFE_DIVIDE(a, b)` | `CASE WHEN b = 0 ...` | `CASE WHEN b = 0 ...` | `CASE WHEN b = 0 ...` |
+| `arrayLength` (custom) | `ARRAY_LENGTH(arr)` | `ARRAY_LENGTH(arr)` | `CARDINALITY(arr)` | `ARRAY_LENGTH(arr)` |
+| `regexpContains` (custom) | `REGEXP_CONTAINS(s, r'p')` | `REGEXP_CONTAINS(s, 'p')` | `s ~ 'p'` | `regexp_matches(s, 'p')` |
 
 See [Dialect-Aware Custom Operators](#dialect-aware-custom-operators) for details on creating operators with dialect-specific behavior.
 
@@ -1112,7 +1112,7 @@ Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
 Converts any JSON Logic interface{} to a SQL WHERE clause.
 
 #### `NewTranspiler(dialect Dialect) (*Transpiler, error)`
-Creates a new transpiler instance with the specified dialect. Dialect is required - use `DialectBigQuery`, `DialectSpanner`, or `DialectPostgreSQL`.
+Creates a new transpiler instance with the specified dialect. Dialect is required - use `DialectBigQuery`, `DialectSpanner`, `DialectPostgreSQL`, or `DialectDuckDB`.
 
 #### `NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error)`
 Creates a new transpiler instance with custom configuration. `Config.Dialect` is required.
@@ -1140,7 +1140,7 @@ Main transpiler instance with methods:
 
 #### `TranspilerConfig`
 Configuration options for the transpiler:
-- `Dialect Dialect` - Required: target SQL dialect (`DialectBigQuery`, `DialectSpanner`, or `DialectPostgreSQL`)
+- `Dialect Dialect` - Required: target SQL dialect (`DialectBigQuery`, `DialectSpanner`, `DialectPostgreSQL`, or `DialectDuckDB`)
 - `Schema *Schema` - Optional schema for field validation (can also be set via `SetSchema()`)
 
 #### `OperatorFunc`
@@ -1176,6 +1176,7 @@ SQL dialect type with constants:
 - `DialectBigQuery` - Google BigQuery SQL dialect
 - `DialectSpanner` - Google Cloud Spanner SQL dialect
 - `DialectPostgreSQL` - PostgreSQL SQL dialect
+- `DialectDuckDB` - DuckDB SQL dialect
 
 #### `OperatorRegistry`
 Thread-safe registry for managing custom operators with methods:
