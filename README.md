@@ -1111,6 +1111,15 @@ Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
 #### `TranspileFromInterface(logic interface{}) (string, error)`
 Converts any JSON Logic interface{} to a SQL WHERE clause.
 
+#### `TranspileCondition(jsonLogic string) (string, error)`
+Converts a JSON Logic string to a SQL condition **without** the WHERE keyword. Useful when embedding conditions in larger queries.
+
+#### `TranspileConditionFromMap(logic map[string]interface{}) (string, error)`
+Converts a pre-parsed JSON Logic map to a SQL condition without the WHERE keyword.
+
+#### `TranspileConditionFromInterface(logic interface{}) (string, error)`
+Converts any JSON Logic interface{} to a SQL condition without the WHERE keyword.
+
 #### `NewTranspiler(dialect Dialect) (*Transpiler, error)`
 Creates a new transpiler instance with the specified dialect. Dialect is required - use `DialectBigQuery`, `DialectSpanner`, `DialectPostgreSQL`, or `DialectDuckDB`.
 
@@ -1124,9 +1133,12 @@ Creates a new empty operator registry for managing custom operators.
 
 #### `Transpiler`
 Main transpiler instance with methods:
-- `Transpile(jsonLogic string) (string, error)` - Convert JSON string to SQL
-- `TranspileFromMap(logic map[string]interface{}) (string, error)` - Convert map to SQL
-- `TranspileFromInterface(logic interface{}) (string, error)` - Convert interface to SQL
+- `Transpile(jsonLogic string) (string, error)` - Convert JSON string to SQL with WHERE
+- `TranspileFromMap(logic map[string]interface{}) (string, error)` - Convert map to SQL with WHERE
+- `TranspileFromInterface(logic interface{}) (string, error)` - Convert interface to SQL with WHERE
+- `TranspileCondition(jsonLogic string) (string, error)` - Convert JSON string to SQL without WHERE
+- `TranspileConditionFromMap(logic map[string]interface{}) (string, error)` - Convert map to SQL without WHERE
+- `TranspileConditionFromInterface(logic interface{}) (string, error)` - Convert interface to SQL without WHERE
 - `GetDialect() Dialect` - Get the configured dialect
 - `SetSchema(schema *Schema)` - Set schema for field validation
 - `RegisterOperator(name string, handler OperatorHandler) error` - Register custom operator with handler

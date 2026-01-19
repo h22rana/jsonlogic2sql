@@ -1361,3 +1361,114 @@ func TestMergeOperatorDialectSpecific(t *testing.T) {
 		})
 	}
 }
+
+// TestTranspileCondition tests the TranspileCondition method that returns SQL without WHERE keyword.
+func TestTranspileCondition(t *testing.T) {
+	tr, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("Failed to create transpiler: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple comparison without WHERE",
+			input:    `{">": [{"var": "amount"}, 1000]}`,
+			expected: "amount > 1000",
+		},
+		{
+			name:     "and operation without WHERE",
+			input:    `{"and": [{"==": [{"var": "status"}, "pending"]}, {">": [{"var": "amount"}, 5000]}]}`,
+			expected: "(status = 'pending' AND amount > 5000)",
+		},
+		{
+			name:     "complex nested condition without WHERE",
+			input:    `{"or": [{">=": [{"var": "failedAttempts"}, 5]}, {"in": [{"var": "country"}, ["CN", "RU"]]}]}`,
+			expected: "(failedAttempts >= 5 OR country IN ('CN', 'RU'))",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tr.TranspileCondition(tt.input)
+			if err != nil {
+				t.Errorf("TranspileCondition() unexpected error = %v", err)
+				return
+			}
+			if result != tt.expected {
+				t.Errorf("TranspileCondition() = %q, expected %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestTranspileConditionFromMap tests the TranspileConditionFromMap method.
+func TestTranspileConditionFromMap(t *testing.T) {
+	tr, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("Failed to create transpiler: %v", err)
+	}
+
+	logic := map[string]interface{}{
+		">": []interface{}{
+			map[string]interface{}{"var": "amount"},
+			1000,
+		},
+	}
+
+	result, err := tr.TranspileConditionFromMap(logic)
+	if err != nil {
+		t.Errorf("TranspileConditionFromMap() unexpected error = %v", err)
+		return
+	}
+
+	expected := "amount > 1000"
+	if result != expected {
+		t.Errorf("TranspileConditionFromMap() = %q, expected %q", result, expected)
+	}
+}
+
+// TestTranspileConditionConvenienceFunction tests the standalone TranspileCondition function.
+func TestTranspileConditionConvenienceFunction(t *testing.T) {
+	result, err := TranspileCondition(DialectBigQuery, `{"==": [{"var": "status"}, "active"]}`)
+	if err != nil {
+		t.Errorf("TranspileCondition() unexpected error = %v", err)
+		return
+	}
+
+	expected := "status = 'active'"
+	if result != expected {
+		t.Errorf("TranspileCondition() = %q, expected %q", result, expected)
+	}
+}
+
+// TestTranspileVsTranspileCondition verifies the difference between Transpile and TranspileCondition.
+func TestTranspileVsTranspileCondition(t *testing.T) {
+	tr, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("Failed to create transpiler: %v", err)
+	}
+
+	input := `{">": [{"var": "amount"}, 1000]}`
+
+	// Transpile should include WHERE
+	withWhere, err := tr.Transpile(input)
+	if err != nil {
+		t.Fatalf("Transpile() error: %v", err)
+	}
+	if withWhere != "WHERE amount > 1000" {
+		t.Errorf("Transpile() = %q, expected %q", withWhere, "WHERE amount > 1000")
+	}
+
+	// TranspileCondition should NOT include WHERE
+	withoutWhere, err := tr.TranspileCondition(input)
+	if err != nil {
+		t.Fatalf("TranspileCondition() error: %v", err)
+	}
+	if withoutWhere != "amount > 1000" {
+		t.Errorf("TranspileCondition() = %q, expected %q", withoutWhere, "amount > 1000")
+	}
+}

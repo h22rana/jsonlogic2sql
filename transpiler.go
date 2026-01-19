@@ -232,6 +232,27 @@ func (t *Transpiler) TranspileFromInterface(logic interface{}) (string, error) {
 	return t.parser.Parse(logic)
 }
 
+// TranspileCondition converts a JSON Logic string to a SQL condition without the WHERE keyword.
+// This is useful when you need to embed the condition in a larger query.
+func (t *Transpiler) TranspileCondition(jsonLogic string) (string, error) {
+	var logic interface{}
+	if err := json.Unmarshal([]byte(jsonLogic), &logic); err != nil {
+		return "", tperrors.NewInvalidJSON(err)
+	}
+
+	return t.parser.ParseCondition(logic)
+}
+
+// TranspileConditionFromMap converts a pre-parsed JSON Logic map to a SQL condition without the WHERE keyword.
+func (t *Transpiler) TranspileConditionFromMap(logic map[string]interface{}) (string, error) {
+	return t.parser.ParseCondition(logic)
+}
+
+// TranspileConditionFromInterface converts any JSON Logic interface{} to a SQL condition without the WHERE keyword.
+func (t *Transpiler) TranspileConditionFromInterface(logic interface{}) (string, error) {
+	return t.parser.ParseCondition(logic)
+}
+
 // Convenience functions for direct usage without creating a Transpiler instance
 
 // Transpile converts a JSON Logic string to a SQL WHERE clause.
@@ -262,4 +283,34 @@ func TranspileFromInterface(d Dialect, logic interface{}) (string, error) {
 		return "", err
 	}
 	return t.TranspileFromInterface(logic)
+}
+
+// TranspileCondition converts a JSON Logic string to a SQL condition without the WHERE keyword.
+// Dialect is required - use DialectBigQuery, DialectSpanner, DialectPostgreSQL, or DialectDuckDB.
+func TranspileCondition(d Dialect, jsonLogic string) (string, error) {
+	t, err := NewTranspiler(d)
+	if err != nil {
+		return "", err
+	}
+	return t.TranspileCondition(jsonLogic)
+}
+
+// TranspileConditionFromMap converts a pre-parsed JSON Logic map to a SQL condition without the WHERE keyword.
+// Dialect is required - use DialectBigQuery, DialectSpanner, DialectPostgreSQL, or DialectDuckDB.
+func TranspileConditionFromMap(d Dialect, logic map[string]interface{}) (string, error) {
+	t, err := NewTranspiler(d)
+	if err != nil {
+		return "", err
+	}
+	return t.TranspileConditionFromMap(logic)
+}
+
+// TranspileConditionFromInterface converts any JSON Logic interface{} to a SQL condition without the WHERE keyword.
+// Dialect is required - use DialectBigQuery, DialectSpanner, DialectPostgreSQL, or DialectDuckDB.
+func TranspileConditionFromInterface(d Dialect, logic interface{}) (string, error) {
+	t, err := NewTranspiler(d)
+	if err != nil {
+		return "", err
+	}
+	return t.TranspileConditionFromInterface(logic)
 }
