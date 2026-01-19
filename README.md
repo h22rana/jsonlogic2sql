@@ -1,6 +1,6 @@
 # JSON Logic to SQL Transpiler
 
-A Go library that converts JSON Logic expressions into SQL WHERE clauses. This library provides a clean, type-safe API for transforming JSON Logic rules into ANSI SQL that can be used in database queries.
+A Go library that converts JSON Logic expressions into SQL WHERE clauses. This library provides a clean, type-safe API for transforming JSON Logic rules into SQL with support for multiple SQL dialects.
 
 ## Features
 
@@ -9,7 +9,7 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - **Custom Operators**: Extensible registry pattern to add custom SQL functions (LENGTH, UPPER, etc.)
 - **Dialect-Aware Custom Operators**: Register operators that generate different SQL per dialect
 - **Schema/Metadata Validation**: Optional field schema to enforce strict column validation and type-aware SQL generation
-- **ANSI SQL Output**: Generates standard SQL WHERE clauses compatible with most databases
+- **Dialect-Specific SQL**: Generates optimized SQL with proper syntax for each supported dialect
 - **Complex Nested Expressions**: Full support for deeply nested arithmetic and logical operations
 - **Array Operations**: Complete support for all/none/some with proper SQL subqueries
 - **String Operations**: String containment, concatenation, and substring operations
@@ -58,25 +58,27 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 
 ## Supported SQL Dialects
 
-All default JSON Logic operators are supported for both BigQuery and Spanner dialects. The library generates appropriate SQL syntax for each dialect.
+All default JSON Logic operators are supported for BigQuery, Spanner, and PostgreSQL dialects. The library generates appropriate SQL syntax for each dialect.
 
-| Operator Category | Operators | BigQuery | Spanner |
-|-------------------|-----------|:--------:|:-------:|
-| **Data Access** | `var`, `missing`, `missing_some` | ✓ | ✓ |
-| **Comparison** | `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`, `<=` | ✓ | ✓ |
-| **Logical** | `and`, `or`, `!`, `!!`, `if` | ✓ | ✓ |
-| **Numeric** | `+`, `-`, `*`, `/`, `%`, `max`, `min` | ✓ | ✓ |
-| **Array** | `in`, `map`, `filter`, `reduce`, `all`, `some`, `none`, `merge` | ✓ | ✓ |
-| **String** | `in`, `cat`, `substr` | ✓ | ✓ |
+| Operator Category | Operators | BigQuery | Spanner | PostgreSQL |
+|-------------------|-----------|:--------:|:-------:|:----------:|
+| **Data Access** | `var`, `missing`, `missing_some` | ✓ | ✓ | ✓ |
+| **Comparison** | `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`, `<=` | ✓ | ✓ | ✓ |
+| **Logical** | `and`, `or`, `!`, `!!`, `if` | ✓ | ✓ | ✓ |
+| **Numeric** | `+`, `-`, `*`, `/`, `%`, `max`, `min` | ✓ | ✓ | ✓ |
+| **Array** | `in`, `map`, `filter`, `reduce`, `all`, `some`, `none`, `merge` | ✓ | ✓ | ✓ |
+| **String** | `in`, `cat`, `substr` | ✓ | ✓ | ✓ |
 
 ### Dialect-Specific SQL Generation
 
-While all operators are supported for both dialects, some custom operators may generate different SQL. For example, the `safeDivide` custom operator (shown in the examples) generates:
+While all operators are supported for all dialects, some operators generate different SQL based on the target dialect. For example:
 
-| Dialect | SQL Output |
-|---------|------------|
-| BigQuery | `SAFE_DIVIDE(a, b)` |
-| Spanner | `CASE WHEN b = 0 THEN NULL ELSE a / b END` |
+| Operator | BigQuery | Spanner | PostgreSQL |
+|----------|----------|---------|------------|
+| `merge` (arrays) | `ARRAY_CONCAT(a, b)` | `ARRAY_CONCAT(a, b)` | `(a \|\| b)` |
+| `safeDivide` (custom) | `SAFE_DIVIDE(a, b)` | `CASE WHEN b = 0 ...` | `CASE WHEN b = 0 ...` |
+| `arrayLength` (custom) | `ARRAY_LENGTH(arr)` | `ARRAY_LENGTH(arr)` | `CARDINALITY(arr)` |
+| `regexpContains` (custom) | `REGEXP_CONTAINS(s, r'p')` | `REGEXP_CONTAINS(s, 'p')` | `s ~ 'p'` |
 
 See [Dialect-Aware Custom Operators](#dialect-aware-custom-operators) for details on creating operators with dialect-specific behavior.
 
@@ -1110,7 +1112,7 @@ Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
 Converts any JSON Logic interface{} to a SQL WHERE clause.
 
 #### `NewTranspiler(dialect Dialect) (*Transpiler, error)`
-Creates a new transpiler instance with the specified dialect. Dialect is required - use `DialectBigQuery` or `DialectSpanner`.
+Creates a new transpiler instance with the specified dialect. Dialect is required - use `DialectBigQuery`, `DialectSpanner`, or `DialectPostgreSQL`.
 
 #### `NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error)`
 Creates a new transpiler instance with custom configuration. `Config.Dialect` is required.
@@ -1138,7 +1140,7 @@ Main transpiler instance with methods:
 
 #### `TranspilerConfig`
 Configuration options for the transpiler:
-- `Dialect Dialect` - Required: target SQL dialect (`DialectBigQuery` or `DialectSpanner`)
+- `Dialect Dialect` - Required: target SQL dialect (`DialectBigQuery`, `DialectSpanner`, or `DialectPostgreSQL`)
 - `Schema *Schema` - Optional schema for field validation (can also be set via `SetSchema()`)
 
 #### `OperatorFunc`
@@ -1173,6 +1175,7 @@ type DialectAwareOperatorHandler interface {
 SQL dialect type with constants:
 - `DialectBigQuery` - Google BigQuery SQL dialect
 - `DialectSpanner` - Google Cloud Spanner SQL dialect
+- `DialectPostgreSQL` - PostgreSQL SQL dialect
 
 #### `OperatorRegistry`
 Thread-safe registry for managing custom operators with methods:
