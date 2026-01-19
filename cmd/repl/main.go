@@ -218,13 +218,14 @@ func main() {
 	// Dialect-Aware Custom Operators
 	// ========================================================================
 	// These operators demonstrate how to register operators that generate
-	// different SQL based on the target dialect (BigQuery, Spanner, PostgreSQL, or DuckDB).
+	// different SQL based on the target dialect (BigQuery, Spanner, PostgreSQL, DuckDB, or ClickHouse).
 
 	// currentTimestamp operator returns the current timestamp.
 	// BigQuery: CURRENT_TIMESTAMP()
 	// Spanner: CURRENT_TIMESTAMP()
 	// PostgreSQL: CURRENT_TIMESTAMP
-	// DuckDB: current_timestamp
+	// DuckDB: CURRENT_TIMESTAMP
+	// ClickHouse: now()
 	// Example: {"==": [{"currentTimestamp": []}, {"var": "created_at"}]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("currentTimestamp",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -236,6 +237,8 @@ func main() {
 				return "CURRENT_TIMESTAMP()", nil
 			case jsonlogic2sql.DialectPostgreSQL, jsonlogic2sql.DialectDuckDB:
 				return "CURRENT_TIMESTAMP", nil
+			case jsonlogic2sql.DialectClickHouse:
+				return "now()", nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
@@ -246,6 +249,7 @@ func main() {
 	// Spanner: DATE_DIFF(date1, date2, DAY)
 	// PostgreSQL: (date1 - date2) -- returns integer days
 	// DuckDB: date_diff('day', date2, date1) -- note: part first, then dates
+	// ClickHouse: dateDiff('day', date2, date1) -- same as DuckDB
 	// Example: {">": [{"dateDiff": [{"var": "end_date"}, {"var": "start_date"}]}, 30]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("dateDiff",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -260,9 +264,9 @@ func main() {
 			case jsonlogic2sql.DialectPostgreSQL:
 				// PostgreSQL: subtracting dates returns integer days
 				return fmt.Sprintf("(%s - %s)", date1, date2), nil
-			case jsonlogic2sql.DialectDuckDB:
-				// DuckDB: date_diff('part', start, end) - note different argument order
-				return fmt.Sprintf("date_diff('day', %s, %s)", date2, date1), nil
+			case jsonlogic2sql.DialectDuckDB, jsonlogic2sql.DialectClickHouse:
+				// DuckDB/ClickHouse: dateDiff('part', start, end) - note different argument order
+				return fmt.Sprintf("dateDiff('day', %s, %s)", date2, date1), nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
@@ -272,7 +276,8 @@ func main() {
 	// BigQuery: ARRAY_LENGTH(array)
 	// Spanner: ARRAY_LENGTH(array)
 	// PostgreSQL: CARDINALITY(array)
-	// DuckDB: array_length(array) or len(array)
+	// DuckDB: ARRAY_LENGTH(array)
+	// ClickHouse: length(array)
 	// Example: {">": [{"arrayLength": [{"var": "tags"}]}, 0]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("arrayLength",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -285,6 +290,8 @@ func main() {
 				return fmt.Sprintf("ARRAY_LENGTH(%s)", arr), nil
 			case jsonlogic2sql.DialectPostgreSQL:
 				return fmt.Sprintf("CARDINALITY(%s)", arr), nil
+			case jsonlogic2sql.DialectClickHouse:
+				return fmt.Sprintf("length(%s)", arr), nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
@@ -295,6 +302,7 @@ func main() {
 	// Spanner: REGEXP_CONTAINS(string, pattern)
 	// PostgreSQL: string ~ pattern
 	// DuckDB: regexp_matches(string, pattern)
+	// ClickHouse: match(string, pattern)
 	// Example: {"regexpContains": [{"var": "email"}, "^[a-z]+@example\\.com$"]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("regexpContains",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -312,6 +320,8 @@ func main() {
 				return fmt.Sprintf("%s ~ %s", str, pattern), nil
 			case jsonlogic2sql.DialectDuckDB:
 				return fmt.Sprintf("regexp_matches(%s, %s)", str, pattern), nil
+			case jsonlogic2sql.DialectClickHouse:
+				return fmt.Sprintf("match(%s, %s)", str, pattern), nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
@@ -323,6 +333,7 @@ func main() {
 	// Spanner: CASE WHEN denominator = 0 THEN NULL ELSE numerator / denominator END
 	// PostgreSQL: CASE WHEN denominator = 0 THEN NULL ELSE numerator / denominator END
 	// DuckDB: CASE WHEN denominator = 0 THEN NULL ELSE numerator / denominator END
+	// ClickHouse: if(denominator = 0, NULL, numerator / denominator)
 	// Example: {"safeDivide": [{"var": "total"}, {"var": "count"}]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -338,6 +349,9 @@ func main() {
 			case jsonlogic2sql.DialectSpanner, jsonlogic2sql.DialectPostgreSQL, jsonlogic2sql.DialectDuckDB:
 				// Spanner, PostgreSQL, and DuckDB don't have SAFE_DIVIDE, use CASE expression
 				return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", denominator, numerator, denominator), nil
+			case jsonlogic2sql.DialectClickHouse:
+				// ClickHouse uses if() function for conditional expressions
+				return fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
