@@ -16,6 +16,9 @@ const (
 
 	// DialectSpanner targets Google Cloud Spanner SQL syntax.
 	DialectSpanner
+
+	// DialectPostgreSQL targets PostgreSQL SQL syntax.
+	DialectPostgreSQL
 )
 
 // String returns the string representation of the dialect.
@@ -25,6 +28,8 @@ func (d Dialect) String() string {
 		return "BigQuery"
 	case DialectSpanner:
 		return "Spanner"
+	case DialectPostgreSQL:
+		return "PostgreSQL"
 	case DialectUnspecified:
 		return "Unspecified"
 	default:
@@ -34,13 +39,13 @@ func (d Dialect) String() string {
 
 // IsValid returns true if the dialect is a valid, specified dialect.
 func (d Dialect) IsValid() bool {
-	return d == DialectBigQuery || d == DialectSpanner
+	return d == DialectBigQuery || d == DialectSpanner || d == DialectPostgreSQL
 }
 
 // Validate returns an error if the dialect is not valid.
 func (d Dialect) Validate() error {
 	if d == DialectUnspecified {
-		return fmt.Errorf("dialect not specified: must set Dialect in TranspilerConfig (use DialectBigQuery or DialectSpanner)")
+		return fmt.Errorf("dialect not specified: must set Dialect in TranspilerConfig (use DialectBigQuery, DialectSpanner, or DialectPostgreSQL)")
 	}
 	if !d.IsValid() {
 		return fmt.Errorf("unsupported dialect: %s", d.String())

@@ -222,7 +222,7 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 	}
 }
 
-// TestArrayOperator_DialectSupport tests map, filter, and reduce operators for both BigQuery and Spanner dialects.
+// TestArrayOperator_DialectSupport tests map, filter, and reduce operators for BigQuery, Spanner, and PostgreSQL dialects.
 func TestArrayOperator_DialectSupport(t *testing.T) {
 	dialects := []struct {
 		name    string
@@ -230,6 +230,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 	}{
 		{"BigQuery", dialect.DialectBigQuery},
 		{"Spanner", dialect.DialectSpanner},
+		{"PostgreSQL", dialect.DialectPostgreSQL},
 	}
 
 	for _, d := range dialects {
@@ -361,14 +362,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					hasError: false,
 				},
 
-				// Merge tests
-				{
-					name:     "merge arrays",
-					operator: "merge",
-					args:     []any{map[string]any{"var": "array1"}, map[string]any{"var": "array2"}},
-					expected: "ARRAY_CONCAT(array1, array2)",
-					hasError: false,
-				},
+				// Note: merge tests are in TestArrayOperator_MergeDialectSpecific due to dialect-specific output
 			}
 
 			for _, tt := range tests {
@@ -388,6 +382,85 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 						t.Errorf("[%s] Expected %s, got %s", d.name, tt.expected, result)
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestArrayOperator_MergeDialectSpecific tests the merge operator with dialect-specific output.
+// BigQuery/Spanner use ARRAY_CONCAT, PostgreSQL uses || operator.
+func TestArrayOperator_MergeDialectSpecific(t *testing.T) {
+	tests := []struct {
+		name     string
+		dialect  dialect.Dialect
+		args     []any
+		expected string
+	}{
+		// BigQuery tests
+		{
+			name:     "BigQuery merge two arrays",
+			dialect:  dialect.DialectBigQuery,
+			args:     []any{map[string]any{"var": "array1"}, map[string]any{"var": "array2"}},
+			expected: "ARRAY_CONCAT(array1, array2)",
+		},
+		{
+			name:     "BigQuery merge three arrays",
+			dialect:  dialect.DialectBigQuery,
+			args:     []any{map[string]any{"var": "a"}, map[string]any{"var": "b"}, map[string]any{"var": "c"}},
+			expected: "ARRAY_CONCAT(a, b, c)",
+		},
+		{
+			name:     "BigQuery merge single array",
+			dialect:  dialect.DialectBigQuery,
+			args:     []any{map[string]any{"var": "arr"}},
+			expected: "ARRAY_CONCAT(arr)",
+		},
+		// Spanner tests
+		{
+			name:     "Spanner merge two arrays",
+			dialect:  dialect.DialectSpanner,
+			args:     []any{map[string]any{"var": "array1"}, map[string]any{"var": "array2"}},
+			expected: "ARRAY_CONCAT(array1, array2)",
+		},
+		{
+			name:     "Spanner merge three arrays",
+			dialect:  dialect.DialectSpanner,
+			args:     []any{map[string]any{"var": "a"}, map[string]any{"var": "b"}, map[string]any{"var": "c"}},
+			expected: "ARRAY_CONCAT(a, b, c)",
+		},
+		// PostgreSQL tests - uses || operator
+		{
+			name:     "PostgreSQL merge two arrays",
+			dialect:  dialect.DialectPostgreSQL,
+			args:     []any{map[string]any{"var": "array1"}, map[string]any{"var": "array2"}},
+			expected: "(array1 || array2)",
+		},
+		{
+			name:     "PostgreSQL merge three arrays",
+			dialect:  dialect.DialectPostgreSQL,
+			args:     []any{map[string]any{"var": "a"}, map[string]any{"var": "b"}, map[string]any{"var": "c"}},
+			expected: "(a || b || c)",
+		},
+		{
+			name:     "PostgreSQL merge single array",
+			dialect:  dialect.DialectPostgreSQL,
+			args:     []any{map[string]any{"var": "arr"}},
+			expected: "arr",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := NewOperatorConfig(tt.dialect, nil)
+			op := NewArrayOperator(config)
+
+			result, err := op.ToSQL("merge", tt.args)
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+			if result != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
 		})
 	}

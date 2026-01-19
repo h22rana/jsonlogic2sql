@@ -218,11 +218,12 @@ func main() {
 	// Dialect-Aware Custom Operators
 	// ========================================================================
 	// These operators demonstrate how to register operators that generate
-	// different SQL based on the target dialect (BigQuery vs Spanner).
+	// different SQL based on the target dialect (BigQuery, Spanner, or PostgreSQL).
 
 	// currentTimestamp operator returns the current timestamp.
 	// BigQuery: CURRENT_TIMESTAMP()
 	// Spanner: CURRENT_TIMESTAMP()
+	// PostgreSQL: CURRENT_TIMESTAMP
 	// Example: {"==": [{"currentTimestamp": []}, {"var": "created_at"}]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("currentTimestamp",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -230,18 +231,19 @@ func main() {
 				return "", fmt.Errorf("currentTimestamp takes no arguments")
 			}
 			switch dialect {
-			case jsonlogic2sql.DialectBigQuery:
+			case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner:
 				return "CURRENT_TIMESTAMP()", nil
-			case jsonlogic2sql.DialectSpanner:
-				return "CURRENT_TIMESTAMP()", nil
+			case jsonlogic2sql.DialectPostgreSQL:
+				return "CURRENT_TIMESTAMP", nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
 		})
 
-	// dateDiff operator calculates the difference between two dates.
+	// dateDiff operator calculates the difference between two dates (in days).
 	// BigQuery: DATE_DIFF(date1, date2, DAY)
 	// Spanner: DATE_DIFF(date1, date2, DAY)
+	// PostgreSQL: (date1 - date2) -- returns integer days
 	// Example: {">": [{"dateDiff": [{"var": "end_date"}, {"var": "start_date"}]}, 30]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("dateDiff",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -251,10 +253,11 @@ func main() {
 			date1 := args[0].(string)
 			date2 := args[1].(string)
 			switch dialect {
-			case jsonlogic2sql.DialectBigQuery:
+			case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner:
 				return fmt.Sprintf("DATE_DIFF(%s, %s, DAY)", date1, date2), nil
-			case jsonlogic2sql.DialectSpanner:
-				return fmt.Sprintf("DATE_DIFF(%s, %s, DAY)", date1, date2), nil
+			case jsonlogic2sql.DialectPostgreSQL:
+				// PostgreSQL: subtracting dates returns integer days
+				return fmt.Sprintf("(%s - %s)", date1, date2), nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
@@ -263,6 +266,7 @@ func main() {
 	// arrayLength operator returns the length of an array.
 	// BigQuery: ARRAY_LENGTH(array)
 	// Spanner: ARRAY_LENGTH(array)
+	// PostgreSQL: CARDINALITY(array)
 	// Example: {">": [{"arrayLength": [{"var": "tags"}]}, 0]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("arrayLength",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -271,10 +275,10 @@ func main() {
 			}
 			arr := args[0].(string)
 			switch dialect {
-			case jsonlogic2sql.DialectBigQuery:
+			case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner:
 				return fmt.Sprintf("ARRAY_LENGTH(%s)", arr), nil
-			case jsonlogic2sql.DialectSpanner:
-				return fmt.Sprintf("ARRAY_LENGTH(%s)", arr), nil
+			case jsonlogic2sql.DialectPostgreSQL:
+				return fmt.Sprintf("CARDINALITY(%s)", arr), nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
@@ -283,6 +287,7 @@ func main() {
 	// regexpContains operator checks if a string matches a regex pattern.
 	// BigQuery: REGEXP_CONTAINS(string, pattern)
 	// Spanner: REGEXP_CONTAINS(string, pattern)
+	// PostgreSQL: string ~ pattern
 	// Example: {"regexpContains": [{"var": "email"}, "^[a-z]+@example\\.com$"]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("regexpContains",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -296,6 +301,8 @@ func main() {
 				return fmt.Sprintf("REGEXP_CONTAINS(%s, r%s)", str, pattern), nil
 			case jsonlogic2sql.DialectSpanner:
 				return fmt.Sprintf("REGEXP_CONTAINS(%s, %s)", str, pattern), nil
+			case jsonlogic2sql.DialectPostgreSQL:
+				return fmt.Sprintf("%s ~ %s", str, pattern), nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
@@ -305,6 +312,7 @@ func main() {
 	// This demonstrates a real dialect difference:
 	// BigQuery: SAFE_DIVIDE(numerator, denominator) - built-in function
 	// Spanner: CASE WHEN denominator = 0 THEN NULL ELSE numerator / denominator END
+	// PostgreSQL: CASE WHEN denominator = 0 THEN NULL ELSE numerator / denominator END
 	// Example: {"safeDivide": [{"var": "total"}, {"var": "count"}]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
 		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
@@ -317,8 +325,8 @@ func main() {
 			case jsonlogic2sql.DialectBigQuery:
 				// BigQuery has built-in SAFE_DIVIDE that returns NULL on division by zero
 				return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
-			case jsonlogic2sql.DialectSpanner:
-				// Spanner doesn't have SAFE_DIVIDE, use CASE expression
+			case jsonlogic2sql.DialectSpanner, jsonlogic2sql.DialectPostgreSQL:
+				// Spanner and PostgreSQL don't have SAFE_DIVIDE, use CASE expression
 				return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", denominator, numerator, denominator), nil
 			default:
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)

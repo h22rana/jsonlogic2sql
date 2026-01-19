@@ -12,8 +12,9 @@ import (
 
 // Re-export dialect constants for public API.
 const (
-	DialectBigQuery = dialect.DialectBigQuery
-	DialectSpanner  = dialect.DialectSpanner
+	DialectBigQuery   = dialect.DialectBigQuery
+	DialectSpanner    = dialect.DialectSpanner
+	DialectPostgreSQL = dialect.DialectPostgreSQL
 )
 
 // Dialect is the type for SQL dialect selection.
@@ -41,7 +42,7 @@ func (t *Transpiler) SetSchema(schema *Schema) {
 }
 
 // NewTranspiler creates a new transpiler instance with the specified dialect.
-// Dialect is required - use DialectBigQuery or DialectSpanner.
+// Dialect is required - use DialectBigQuery, DialectSpanner, or DialectPostgreSQL.
 func NewTranspiler(d Dialect) (*Transpiler, error) {
 	if err := d.Validate(); err != nil {
 		return nil, err

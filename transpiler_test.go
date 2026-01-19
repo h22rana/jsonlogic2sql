@@ -1141,6 +1141,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 	}{
 		{"BigQuery", DialectBigQuery},
 		{"Spanner", DialectSpanner},
+		{"PostgreSQL", DialectPostgreSQL},
 	}
 
 	for _, d := range dialects {
@@ -1248,17 +1249,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 					expected: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
 				},
 
-				// Merge operator tests
-				{
-					name:     "merge two arrays",
-					input:    `{"merge": [{"var": "array1"}, {"var": "array2"}]}`,
-					expected: "WHERE ARRAY_CONCAT(array1, array2)",
-				},
-				{
-					name:     "merge three arrays",
-					input:    `{"merge": [{"var": "a"}, {"var": "b"}, {"var": "c"}]}`,
-					expected: "WHERE ARRAY_CONCAT(a, b, c)",
-				},
+				// Note: merge tests are in TestMergeOperatorDialectSpecific due to dialect-specific output
 
 				// Combined/nested array operations
 				{
@@ -1284,6 +1275,74 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 						t.Errorf("[%s] Transpile() = %v, expected %v", d.name, result, tt.expected)
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestMergeOperatorDialectSpecific tests the merge operator with dialect-specific SQL output.
+func TestMergeOperatorDialectSpecific(t *testing.T) {
+	tests := []struct {
+		name     string
+		dialect  Dialect
+		input    string
+		expected string
+	}{
+		// BigQuery
+		{
+			name:     "BigQuery merge two arrays",
+			dialect:  DialectBigQuery,
+			input:    `{"merge": [{"var": "arr1"}, {"var": "arr2"}]}`,
+			expected: "WHERE ARRAY_CONCAT(arr1, arr2)",
+		},
+		{
+			name:     "BigQuery merge three arrays",
+			dialect:  DialectBigQuery,
+			input:    `{"merge": [{"var": "a"}, {"var": "b"}, {"var": "c"}]}`,
+			expected: "WHERE ARRAY_CONCAT(a, b, c)",
+		},
+		// Spanner
+		{
+			name:     "Spanner merge two arrays",
+			dialect:  DialectSpanner,
+			input:    `{"merge": [{"var": "arr1"}, {"var": "arr2"}]}`,
+			expected: "WHERE ARRAY_CONCAT(arr1, arr2)",
+		},
+		// PostgreSQL - uses || operator
+		{
+			name:     "PostgreSQL merge two arrays",
+			dialect:  DialectPostgreSQL,
+			input:    `{"merge": [{"var": "arr1"}, {"var": "arr2"}]}`,
+			expected: "WHERE (arr1 || arr2)",
+		},
+		{
+			name:     "PostgreSQL merge three arrays",
+			dialect:  DialectPostgreSQL,
+			input:    `{"merge": [{"var": "a"}, {"var": "b"}, {"var": "c"}]}`,
+			expected: "WHERE (a || b || c)",
+		},
+		{
+			name:     "PostgreSQL merge single array",
+			dialect:  DialectPostgreSQL,
+			input:    `{"merge": [{"var": "arr"}]}`,
+			expected: "WHERE arr",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr, err := NewTranspiler(tt.dialect)
+			if err != nil {
+				t.Fatalf("Failed to create transpiler: %v", err)
+			}
+
+			result, err := tr.Transpile(tt.input)
+			if err != nil {
+				t.Errorf("Transpile() unexpected error = %v", err)
+				return
+			}
+			if result != tt.expected {
+				t.Errorf("Transpile() = %q, expected %q", result, tt.expected)
 			}
 		})
 	}

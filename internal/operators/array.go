@@ -3,6 +3,8 @@ package operators
 import (
 	"fmt"
 	"strings"
+
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
 
 // ArrayOperator handles array operations like map, filter, reduce, all, some, none, merge.
@@ -429,7 +431,8 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 
 // handleMerge converts merge operator to SQL.
 // This merges multiple arrays into one.
-// Generates: ARRAY_CONCAT(array1, array2, ...)
+// BigQuery/Spanner: ARRAY_CONCAT(array1, array2, ...)
+// PostgreSQL: array1 || array2 || ...
 func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 	if len(args) < 1 {
 		return "", fmt.Errorf("merge requires at least 1 argument")
@@ -459,8 +462,27 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 		arrays[i] = array
 	}
 
-	// Use ARRAY_CONCAT or similar function to merge arrays
-	return fmt.Sprintf("ARRAY_CONCAT(%s)", strings.Join(arrays, ", ")), nil
+	// Generate SQL based on dialect
+	d := dialect.DialectUnspecified
+	if a.config != nil {
+		d = a.config.GetDialect()
+	}
+
+	switch d {
+	case dialect.DialectPostgreSQL:
+		// PostgreSQL: Use || operator for array concatenation
+		if len(arrays) == 1 {
+			return arrays[0], nil
+		}
+		return fmt.Sprintf("(%s)", strings.Join(arrays, " || ")), nil
+	case dialect.DialectBigQuery, dialect.DialectSpanner:
+		// BigQuery/Spanner: Use ARRAY_CONCAT function
+		return fmt.Sprintf("ARRAY_CONCAT(%s)", strings.Join(arrays, ", ")), nil
+	case dialect.DialectUnspecified:
+		return "", fmt.Errorf("merge: dialect not specified")
+	default:
+		return "", fmt.Errorf("merge: unsupported dialect %s", d)
+	}
 }
 
 // valueToSQL converts a value to SQL, handling var expressions, arrays, and literals.
