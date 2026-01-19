@@ -1472,3 +1472,409 @@ func TestTranspileVsTranspileCondition(t *testing.T) {
 		t.Errorf("TranspileCondition() = %q, expected %q", withoutWhere, "amount > 1000")
 	}
 }
+
+func TestNewTranspilerWithConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    *TranspilerConfig
+		wantError bool
+	}{
+		{
+			name:      "BigQuery dialect",
+			config:    &TranspilerConfig{Dialect: DialectBigQuery},
+			wantError: false,
+		},
+		{
+			name:      "Spanner dialect",
+			config:    &TranspilerConfig{Dialect: DialectSpanner},
+			wantError: false,
+		},
+		{
+			name:      "PostgreSQL dialect",
+			config:    &TranspilerConfig{Dialect: DialectPostgreSQL},
+			wantError: false,
+		},
+		{
+			name:      "DuckDB dialect",
+			config:    &TranspilerConfig{Dialect: DialectDuckDB},
+			wantError: false,
+		},
+		{
+			name:      "ClickHouse dialect",
+			config:    &TranspilerConfig{Dialect: DialectClickHouse},
+			wantError: false,
+		},
+		{
+			name:      "unspecified dialect",
+			config:    &TranspilerConfig{},
+			wantError: true,
+		},
+		{
+			name:      "nil config",
+			config:    nil,
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(tt.config)
+			if tt.wantError {
+				if err == nil {
+					t.Error("NewTranspilerWithConfig() expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("NewTranspilerWithConfig() unexpected error: %v", err)
+				}
+				if tr == nil {
+					t.Error("NewTranspilerWithConfig() returned nil transpiler")
+				}
+			}
+		})
+	}
+}
+
+func TestNewTranspilerWithConfig_WithSchema(t *testing.T) {
+	schema := NewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeInteger},
+		{Name: "status", Type: FieldTypeString},
+	})
+
+	config := &TranspilerConfig{
+		Dialect: DialectBigQuery,
+		Schema:  schema,
+	}
+
+	tr, err := NewTranspilerWithConfig(config)
+	if err != nil {
+		t.Fatalf("NewTranspilerWithConfig() unexpected error: %v", err)
+	}
+
+	// Valid field should work
+	result, err := tr.Transpile(`{">": [{"var": "amount"}, 100]}`)
+	if err != nil {
+		t.Errorf("Transpile() unexpected error: %v", err)
+	}
+	if result != "WHERE amount > 100" {
+		t.Errorf("Transpile() = %q, want %q", result, "WHERE amount > 100")
+	}
+
+	// Invalid field should error
+	_, err = tr.Transpile(`{">": [{"var": "invalid_field"}, 100]}`)
+	if err == nil {
+		t.Error("Transpile() should error for invalid field when schema is set")
+	}
+}
+
+func TestTranspiler_GetDialect(t *testing.T) {
+	tests := []struct {
+		name    string
+		dialect Dialect
+	}{
+		{"BigQuery", DialectBigQuery},
+		{"Spanner", DialectSpanner},
+		{"PostgreSQL", DialectPostgreSQL},
+		{"DuckDB", DialectDuckDB},
+		{"ClickHouse", DialectClickHouse},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr, err := NewTranspiler(tt.dialect)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error: %v", err)
+			}
+
+			if tr.GetDialect() != tt.dialect {
+				t.Errorf("GetDialect() = %v, want %v", tr.GetDialect(), tt.dialect)
+			}
+		})
+	}
+}
+
+func TestTranspiler_TranspileConditionFromInterface(t *testing.T) {
+	tr, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("NewTranspiler() error: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected string
+		hasError bool
+	}{
+		{
+			name: "simple comparison",
+			input: map[string]interface{}{
+				">": []interface{}{
+					map[string]interface{}{"var": "amount"},
+					1000,
+				},
+			},
+			expected: "amount > 1000",
+			hasError: false,
+		},
+		{
+			name: "equality",
+			input: map[string]interface{}{
+				"==": []interface{}{
+					map[string]interface{}{"var": "status"},
+					"active",
+				},
+			},
+			expected: "status = 'active'",
+			hasError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tr.TranspileConditionFromInterface(tt.input)
+			if tt.hasError {
+				if err == nil {
+					t.Error("TranspileConditionFromInterface() expected error")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("TranspileConditionFromInterface() unexpected error: %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("TranspileConditionFromInterface() = %q, want %q", result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+// DialectAwareTestOperator implements DialectAwareOperatorHandler for testing.
+type DialectAwareTestOperator struct{}
+
+func (d *DialectAwareTestOperator) ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error) {
+	if len(args) != 1 {
+		return "", nil
+	}
+	switch dialect {
+	case DialectBigQuery:
+		return "BIGQUERY_" + args[0].(string), nil
+	case DialectSpanner:
+		return "SPANNER_" + args[0].(string), nil
+	default:
+		return "DEFAULT_" + args[0].(string), nil
+	}
+}
+
+func TestTranspiler_RegisterDialectAwareOperator(t *testing.T) {
+	tr, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("NewTranspiler() error: %v", err)
+	}
+
+	err = tr.RegisterDialectAwareOperator("testOp", &DialectAwareTestOperator{})
+	if err != nil {
+		t.Fatalf("RegisterDialectAwareOperator() error: %v", err)
+	}
+
+	// Verify operator is registered
+	if !tr.HasCustomOperator("testOp") {
+		t.Error("testOp should be registered")
+	}
+
+	// Test that it works
+	result, err := tr.Transpile(`{"testOp": [{"var": "field"}]}`)
+	if err != nil {
+		t.Errorf("Transpile() unexpected error: %v", err)
+	}
+	if result != "WHERE BIGQUERY_field" {
+		t.Errorf("Transpile() = %q, want %q", result, "WHERE BIGQUERY_field")
+	}
+}
+
+// TestPackageLevel_TranspileConditionFromMap tests the package-level TranspileConditionFromMap function.
+func TestPackageLevel_TranspileConditionFromMap(t *testing.T) {
+	tests := []struct {
+		name     string
+		dialect  Dialect
+		logic    map[string]interface{}
+		expected string
+		hasError bool
+	}{
+		{
+			name:    "simple comparison BigQuery",
+			dialect: DialectBigQuery,
+			logic: map[string]interface{}{
+				">": []interface{}{
+					map[string]interface{}{"var": "amount"},
+					float64(100),
+				},
+			},
+			expected: "amount > 100",
+			hasError: false,
+		},
+		{
+			name:    "simple comparison Spanner",
+			dialect: DialectSpanner,
+			logic: map[string]interface{}{
+				"==": []interface{}{
+					map[string]interface{}{"var": "status"},
+					"active",
+				},
+			},
+			expected: "status = 'active'",
+			hasError: false,
+		},
+		{
+			name:    "simple comparison PostgreSQL",
+			dialect: DialectPostgreSQL,
+			logic: map[string]interface{}{
+				"<": []interface{}{
+					map[string]interface{}{"var": "count"},
+					float64(50),
+				},
+			},
+			expected: "count < 50",
+			hasError: false,
+		},
+		{
+			name:    "simple comparison DuckDB",
+			dialect: DialectDuckDB,
+			logic: map[string]interface{}{
+				">=": []interface{}{
+					map[string]interface{}{"var": "value"},
+					float64(10),
+				},
+			},
+			expected: "value >= 10",
+			hasError: false,
+		},
+		{
+			name:    "simple comparison ClickHouse",
+			dialect: DialectClickHouse,
+			logic: map[string]interface{}{
+				"<=": []interface{}{
+					map[string]interface{}{"var": "score"},
+					float64(75),
+				},
+			},
+			expected: "score <= 75",
+			hasError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := TranspileConditionFromMap(tt.dialect, tt.logic)
+			if tt.hasError {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("TranspileConditionFromMap() = %q, want %q", result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+// TestPackageLevel_TranspileConditionFromInterface tests the package-level TranspileConditionFromInterface function.
+func TestPackageLevel_TranspileConditionFromInterface(t *testing.T) {
+	tests := []struct {
+		name     string
+		dialect  Dialect
+		logic    interface{}
+		expected string
+		hasError bool
+	}{
+		{
+			name:    "from map interface BigQuery",
+			dialect: DialectBigQuery,
+			logic: map[string]interface{}{
+				"!=": []interface{}{
+					map[string]interface{}{"var": "type"},
+					"unknown",
+				},
+			},
+			expected: "type != 'unknown'",
+			hasError: false,
+		},
+		{
+			name:    "from map interface Spanner",
+			dialect: DialectSpanner,
+			logic: map[string]interface{}{
+				"and": []interface{}{
+					map[string]interface{}{
+						">": []interface{}{
+							map[string]interface{}{"var": "a"},
+							float64(1),
+						},
+					},
+					map[string]interface{}{
+						"<": []interface{}{
+							map[string]interface{}{"var": "b"},
+							float64(10),
+						},
+					},
+				},
+			},
+			expected: "(a > 1 AND b < 10)",
+			hasError: false,
+		},
+		{
+			name:    "from map interface DuckDB",
+			dialect: DialectDuckDB,
+			logic: map[string]interface{}{
+				"or": []interface{}{
+					map[string]interface{}{
+						"==": []interface{}{
+							map[string]interface{}{"var": "x"},
+							float64(0),
+						},
+					},
+					map[string]interface{}{
+						"==": []interface{}{
+							map[string]interface{}{"var": "y"},
+							float64(0),
+						},
+					},
+				},
+			},
+			expected: "(x = 0 OR y = 0)",
+			hasError: false,
+		},
+		{
+			name:    "from map interface ClickHouse",
+			dialect: DialectClickHouse,
+			logic: map[string]interface{}{
+				"in": []interface{}{
+					map[string]interface{}{"var": "status"},
+					[]interface{}{"a", "b", "c"},
+				},
+			},
+			expected: "status IN ('a', 'b', 'c')",
+			hasError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := TranspileConditionFromInterface(tt.dialect, tt.logic)
+			if tt.hasError {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("TranspileConditionFromInterface() = %q, want %q", result, tt.expected)
+				}
+			}
+		})
+	}
+}

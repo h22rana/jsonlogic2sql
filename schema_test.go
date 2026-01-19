@@ -1,6 +1,8 @@
 package jsonlogic2sql
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -165,5 +167,137 @@ func TestSchemaOptional(t *testing.T) {
 	expected := "WHERE any_field = 100"
 	if result != expected {
 		t.Errorf("Transpile() = %q, want %q", result, expected)
+	}
+}
+
+func TestSchemaFromFile(t *testing.T) {
+	// Create a temporary file with schema JSON
+	tempDir := t.TempDir()
+	schemaFile := filepath.Join(tempDir, "schema.json")
+
+	schemaJSON := `[
+		{"name": "user.name", "type": "string"},
+		{"name": "user.age", "type": "integer"},
+		{"name": "user.active", "type": "boolean"}
+	]`
+
+	err := os.WriteFile(schemaFile, []byte(schemaJSON), 0o600)
+	if err != nil {
+		t.Fatalf("Failed to create temp schema file: %v", err)
+	}
+
+	schema, err := NewSchemaFromFile(schemaFile)
+	if err != nil {
+		t.Fatalf("NewSchemaFromFile() failed: %v", err)
+	}
+
+	// Verify fields
+	if !schema.HasField("user.name") {
+		t.Error("user.name should exist in schema")
+	}
+	if !schema.HasField("user.age") {
+		t.Error("user.age should exist in schema")
+	}
+	if !schema.HasField("user.active") {
+		t.Error("user.active should exist in schema")
+	}
+
+	// Verify types
+	if !schema.IsStringType("user.name") {
+		t.Error("user.name should be string type")
+	}
+	if !schema.IsNumericType("user.age") {
+		t.Error("user.age should be numeric type")
+	}
+	if !schema.IsBooleanType("user.active") {
+		t.Error("user.active should be boolean type")
+	}
+}
+
+func TestSchemaFromFile_NotFound(t *testing.T) {
+	_, err := NewSchemaFromFile("/nonexistent/path/schema.json")
+	if err == nil {
+		t.Error("NewSchemaFromFile() should return error for non-existent file")
+	}
+}
+
+func TestSchemaGetFields(t *testing.T) {
+	schema := NewSchema([]FieldSchema{
+		{Name: "field1", Type: FieldTypeString},
+		{Name: "field2", Type: FieldTypeInteger},
+		{Name: "field3", Type: FieldTypeBoolean},
+	})
+
+	fields := schema.GetFields()
+
+	if len(fields) != 3 {
+		t.Errorf("GetFields() returned %d fields, want 3", len(fields))
+	}
+
+	// Check that all fields are present (order may vary)
+	fieldMap := make(map[string]bool)
+	for _, f := range fields {
+		fieldMap[f] = true
+	}
+
+	if !fieldMap["field1"] {
+		t.Error("field1 should be in GetFields() result")
+	}
+	if !fieldMap["field2"] {
+		t.Error("field2 should be in GetFields() result")
+	}
+	if !fieldMap["field3"] {
+		t.Error("field3 should be in GetFields() result")
+	}
+}
+
+func TestSchemaIsBooleanType(t *testing.T) {
+	schema := NewSchema([]FieldSchema{
+		{Name: "is_active", Type: FieldTypeBoolean},
+		{Name: "name", Type: FieldTypeString},
+		{Name: "count", Type: FieldTypeInteger},
+	})
+
+	tests := []struct {
+		field    string
+		expected bool
+	}{
+		{"is_active", true},
+		{"name", false},
+		{"count", false},
+		{"nonexistent", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			if schema.IsBooleanType(tt.field) != tt.expected {
+				t.Errorf("IsBooleanType(%q) = %v, want %v", tt.field, schema.IsBooleanType(tt.field), tt.expected)
+			}
+		})
+	}
+}
+
+func TestSchemaGetAllowedValues(t *testing.T) {
+	schema := NewSchema([]FieldSchema{
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "closed"}},
+		{Name: "name", Type: FieldTypeString},
+	})
+
+	// Enum field should return allowed values
+	values := schema.GetAllowedValues("status")
+	if len(values) != 3 {
+		t.Errorf("GetAllowedValues(status) returned %d values, want 3", len(values))
+	}
+
+	// Non-enum field should return nil
+	values = schema.GetAllowedValues("name")
+	if values != nil {
+		t.Errorf("GetAllowedValues(name) should return nil for non-enum field")
+	}
+
+	// Non-existent field should return nil
+	values = schema.GetAllowedValues("nonexistent")
+	if values != nil {
+		t.Errorf("GetAllowedValues(nonexistent) should return nil for non-existent field")
 	}
 }

@@ -457,6 +457,203 @@ func TestCustomOperatorEdgeCases(t *testing.T) {
 	})
 }
 
+// Test dialectAwareFuncHandler directly.
+func TestDialectAwareFuncHandler(t *testing.T) {
+	t.Run("ToSQL returns error requiring dialect", func(t *testing.T) {
+		handler := &dialectAwareFuncHandler{
+			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
+				return "TEST()", nil
+			},
+		}
+
+		_, err := handler.ToSQL("test_op", []interface{}{"arg1"})
+		if err == nil {
+			t.Error("expected error from ToSQL on dialectAwareFuncHandler")
+		}
+		expectedMsg := "operator test_op requires dialect - use ToSQLWithDialect instead"
+		if err.Error() != expectedMsg {
+			t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("ToSQLWithDialect delegates to wrapped function", func(t *testing.T) {
+		handler := &dialectAwareFuncHandler{
+			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
+				return fmt.Sprintf("DIALECT_%s(%s)", dialect.String(), args[0]), nil
+			},
+		}
+
+		result, err := handler.ToSQLWithDialect("test_op", []interface{}{"col"}, DialectBigQuery)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "DIALECT_BigQuery(col)"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("ToSQLWithDialect with multiple dialects", func(t *testing.T) {
+		handler := &dialectAwareFuncHandler{
+			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
+				switch dialect {
+				case DialectBigQuery:
+					return "BQ_FUNC()", nil
+				case DialectSpanner:
+					return "SPANNER_FUNC()", nil
+				case DialectPostgreSQL:
+					return "PG_FUNC()", nil
+				case DialectDuckDB:
+					return "DUCKDB_FUNC()", nil
+				case DialectClickHouse:
+					return "CH_FUNC()", nil
+				default:
+					return "", fmt.Errorf("unsupported dialect: %s", dialect)
+				}
+			},
+		}
+
+		tests := []struct {
+			dialect  Dialect
+			expected string
+		}{
+			{DialectBigQuery, "BQ_FUNC()"},
+			{DialectSpanner, "SPANNER_FUNC()"},
+			{DialectPostgreSQL, "PG_FUNC()"},
+			{DialectDuckDB, "DUCKDB_FUNC()"},
+			{DialectClickHouse, "CH_FUNC()"},
+		}
+
+		for _, tt := range tests {
+			result, err := handler.ToSQLWithDialect("test_op", nil, tt.dialect)
+			if err != nil {
+				t.Fatalf("dialect %s: unexpected error: %v", tt.dialect, err)
+			}
+			if result != tt.expected {
+				t.Errorf("dialect %s: expected %q, got %q", tt.dialect, tt.expected, result)
+			}
+		}
+	})
+
+	t.Run("ToSQLWithDialect passes error from wrapped function", func(t *testing.T) {
+		handler := &dialectAwareFuncHandler{
+			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
+				return "", fmt.Errorf("custom error from function")
+			},
+		}
+
+		_, err := handler.ToSQLWithDialect("test_op", nil, DialectBigQuery)
+		if err == nil {
+			t.Error("expected error from wrapped function")
+		}
+		if err.Error() != "custom error from function" {
+			t.Errorf("expected 'custom error from function', got %q", err.Error())
+		}
+	})
+}
+
+// DialectAwareTestHandler implements DialectAwareOperatorHandler for testing.
+type DialectAwareTestHandler struct {
+	prefix string
+}
+
+func (d *DialectAwareTestHandler) ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error) {
+	return fmt.Sprintf("%s_%s(%s)", d.prefix, dialect.String(), args[0]), nil
+}
+
+// Test dialectAwareHandlerWrapper directly.
+func TestDialectAwareHandlerWrapper(t *testing.T) {
+	t.Run("ToSQL uses stored dialect", func(t *testing.T) {
+		handler := &DialectAwareTestHandler{prefix: "TEST"}
+		wrapper := &dialectAwareHandlerWrapper{
+			handler: handler,
+			dialect: DialectBigQuery,
+		}
+
+		result, err := wrapper.ToSQL("my_op", []interface{}{"column"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "TEST_BigQuery(column)"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("ToSQL with different dialects", func(t *testing.T) {
+		handler := &DialectAwareTestHandler{prefix: "FUNC"}
+
+		tests := []struct {
+			dialect  Dialect
+			expected string
+		}{
+			{DialectBigQuery, "FUNC_BigQuery(arg)"},
+			{DialectSpanner, "FUNC_Spanner(arg)"},
+			{DialectPostgreSQL, "FUNC_PostgreSQL(arg)"},
+			{DialectDuckDB, "FUNC_DuckDB(arg)"},
+			{DialectClickHouse, "FUNC_ClickHouse(arg)"},
+		}
+
+		for _, tt := range tests {
+			wrapper := &dialectAwareHandlerWrapper{
+				handler: handler,
+				dialect: tt.dialect,
+			}
+
+			result, err := wrapper.ToSQL("op", []interface{}{"arg"})
+			if err != nil {
+				t.Fatalf("dialect %s: unexpected error: %v", tt.dialect, err)
+			}
+			if result != tt.expected {
+				t.Errorf("dialect %s: expected %q, got %q", tt.dialect, tt.expected, result)
+			}
+		}
+	})
+}
+
+// Test RegisterDialectAwareFunc method on OperatorRegistry.
+func TestOperatorRegistry_RegisterDialectAwareFunc(t *testing.T) {
+	t.Run("register and retrieve dialect-aware function", func(t *testing.T) {
+		registry := NewOperatorRegistry()
+		registry.RegisterDialectAwareFunc("now", func(op string, args []interface{}, dialect Dialect) (string, error) {
+			return fmt.Sprintf("NOW_%s()", dialect.String()), nil
+		})
+
+		handler, ok := registry.Get("now")
+		if !ok {
+			t.Fatal("expected to find 'now' operator")
+		}
+
+		// Check it implements DialectAwareOperatorHandler
+		dialectHandler, ok := handler.(DialectAwareOperatorHandler)
+		if !ok {
+			t.Fatal("expected handler to implement DialectAwareOperatorHandler")
+		}
+
+		result, err := dialectHandler.ToSQLWithDialect("now", nil, DialectPostgreSQL)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "NOW_PostgreSQL()"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("ToSQL on dialect-aware func returns error", func(t *testing.T) {
+		registry := NewOperatorRegistry()
+		registry.RegisterDialectAwareFunc("custom", func(op string, args []interface{}, dialect Dialect) (string, error) {
+			return "CUSTOM()", nil
+		})
+
+		handler, _ := registry.Get("custom")
+		_, err := handler.ToSQL("custom", nil)
+		if err == nil {
+			t.Error("expected error from ToSQL on dialect-aware handler")
+		}
+	})
+}
+
 func TestDialectAwareOperators(t *testing.T) {
 	t.Run("RegisterDialectAwareOperatorFunc with BigQuery", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)

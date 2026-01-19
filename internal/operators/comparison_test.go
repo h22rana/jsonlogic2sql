@@ -2,6 +2,8 @@ package operators
 
 import (
 	"testing"
+
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
 
 func TestComparisonOperator_ToSQL(t *testing.T) {
@@ -324,6 +326,386 @@ func TestComparisonOperator_valueToSQL(t *testing.T) {
 				}
 				if result != tt.expected {
 					t.Errorf("valueToSQL() = %v, expected %v", result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+func TestComparisonOperator_strposFunc(t *testing.T) {
+	tests := []struct {
+		name     string
+		dialect  dialect.Dialect
+		haystack string
+		needle   string
+		expected string
+	}{
+		{
+			name:     "BigQuery dialect",
+			dialect:  dialect.DialectBigQuery,
+			haystack: "description",
+			needle:   "'test'",
+			expected: "STRPOS(description, 'test')",
+		},
+		{
+			name:     "Spanner dialect",
+			dialect:  dialect.DialectSpanner,
+			haystack: "description",
+			needle:   "'test'",
+			expected: "STRPOS(description, 'test')",
+		},
+		{
+			name:     "DuckDB dialect",
+			dialect:  dialect.DialectDuckDB,
+			haystack: "description",
+			needle:   "'test'",
+			expected: "STRPOS(description, 'test')",
+		},
+		{
+			name:     "PostgreSQL dialect",
+			dialect:  dialect.DialectPostgreSQL,
+			haystack: "description",
+			needle:   "'test'",
+			expected: "POSITION('test' IN description)",
+		},
+		{
+			name:     "ClickHouse dialect",
+			dialect:  dialect.DialectClickHouse,
+			haystack: "description",
+			needle:   "'test'",
+			expected: "position(description, 'test')",
+		},
+		{
+			name:     "Unspecified dialect defaults to STRPOS",
+			dialect:  dialect.DialectUnspecified,
+			haystack: "col",
+			needle:   "'val'",
+			expected: "STRPOS(col, 'val')",
+		},
+		{
+			name:     "nil config defaults to STRPOS",
+			dialect:  dialect.DialectUnspecified,
+			haystack: "field",
+			needle:   "'search'",
+			expected: "STRPOS(field, 'search')",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var config *OperatorConfig
+			if tt.name != "nil config defaults to STRPOS" {
+				config = NewOperatorConfig(tt.dialect, nil)
+			}
+			op := NewComparisonOperator(config)
+			result := op.strposFunc(tt.haystack, tt.needle)
+			if result != tt.expected {
+				t.Errorf("strposFunc() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestComparisonOperator_processArithmeticExpression(t *testing.T) {
+	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	op := NewComparisonOperator(config)
+
+	tests := []struct {
+		name     string
+		operator string
+		args     interface{}
+		expected string
+		hasError bool
+	}{
+		{
+			name:     "addition",
+			operator: "+",
+			args:     []interface{}{1, 2},
+			expected: "(1 + 2)",
+			hasError: false,
+		},
+		{
+			name:     "subtraction",
+			operator: "-",
+			args:     []interface{}{5, 3},
+			expected: "(5 - 3)",
+			hasError: false,
+		},
+		{
+			name:     "multiplication",
+			operator: "*",
+			args:     []interface{}{2, 4},
+			expected: "(2 * 4)",
+			hasError: false,
+		},
+		{
+			name:     "division",
+			operator: "/",
+			args:     []interface{}{10, 2},
+			expected: "(10 / 2)",
+			hasError: false,
+		},
+		{
+			name:     "modulo",
+			operator: "%",
+			args:     []interface{}{7, 3},
+			expected: "(7 % 3)",
+			hasError: false,
+		},
+		{
+			name:     "unary minus (negation)",
+			operator: "-",
+			args:     []interface{}{42},
+			expected: "(-42)",
+			hasError: false,
+		},
+		{
+			name:     "unary plus (cast to number)",
+			operator: "+",
+			args:     []interface{}{"42"},
+			expected: "CAST('42' AS NUMERIC)",
+			hasError: false,
+		},
+		{
+			name:     "multiple operands addition",
+			operator: "+",
+			args:     []interface{}{1, 2, 3},
+			expected: "(1 + 2 + 3)",
+			hasError: false,
+		},
+		{
+			name:     "unsupported operator",
+			operator: "^",
+			args:     []interface{}{2, 3},
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "non-array args",
+			operator: "+",
+			args:     "invalid",
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "insufficient args for binary op",
+			operator: "*",
+			args:     []interface{}{5},
+			expected: "",
+			hasError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := op.processArithmeticExpression(tt.operator, tt.args)
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("processArithmeticExpression() expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("processArithmeticExpression() unexpected error = %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("processArithmeticExpression() = %v, want %v", result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+func TestComparisonOperator_processComparisonExpression(t *testing.T) {
+	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	op := NewComparisonOperator(config)
+
+	tests := []struct {
+		name     string
+		operator string
+		args     interface{}
+		expected string
+		hasError bool
+	}{
+		{
+			name:     "greater than",
+			operator: ">",
+			args:     []interface{}{5, 3},
+			expected: "(5 > 3)",
+			hasError: false,
+		},
+		{
+			name:     "greater than or equal",
+			operator: ">=",
+			args:     []interface{}{5, 5},
+			expected: "(5 >= 5)",
+			hasError: false,
+		},
+		{
+			name:     "less than",
+			operator: "<",
+			args:     []interface{}{3, 5},
+			expected: "(3 < 5)",
+			hasError: false,
+		},
+		{
+			name:     "less than or equal",
+			operator: "<=",
+			args:     []interface{}{3, 3},
+			expected: "(3 <= 3)",
+			hasError: false,
+		},
+		{
+			name:     "equality",
+			operator: "==",
+			args:     []interface{}{1, 1},
+			expected: "(1 = 1)",
+			hasError: false,
+		},
+		{
+			name:     "strict equality",
+			operator: "===",
+			args:     []interface{}{1, 1},
+			expected: "(1 = 1)",
+			hasError: false,
+		},
+		{
+			name:     "inequality",
+			operator: "!=",
+			args:     []interface{}{1, 2},
+			expected: "(1 != 2)",
+			hasError: false,
+		},
+		{
+			name:     "strict inequality",
+			operator: "!==",
+			args:     []interface{}{1, 2},
+			expected: "(1 <> 2)",
+			hasError: false,
+		},
+		{
+			name:     "unsupported comparison",
+			operator: "<>",
+			args:     []interface{}{1, 2},
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "non-array args",
+			operator: ">",
+			args:     "invalid",
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "wrong number of args",
+			operator: ">",
+			args:     []interface{}{1, 2, 3},
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "single arg (insufficient)",
+			operator: ">",
+			args:     []interface{}{1},
+			expected: "",
+			hasError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := op.processComparisonExpression(tt.operator, tt.args)
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("processComparisonExpression() expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("processComparisonExpression() unexpected error = %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("processComparisonExpression() = %v, want %v", result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+func TestComparisonOperator_processMinMaxExpression(t *testing.T) {
+	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	op := NewComparisonOperator(config)
+
+	tests := []struct {
+		name     string
+		operator string
+		args     interface{}
+		expected string
+		hasError bool
+	}{
+		{
+			name:     "max with two args",
+			operator: "max",
+			args:     []interface{}{5, 10},
+			expected: "GREATEST(5, 10)",
+			hasError: false,
+		},
+		{
+			name:     "max with three args",
+			operator: "max",
+			args:     []interface{}{5, 10, 15},
+			expected: "GREATEST(5, 10, 15)",
+			hasError: false,
+		},
+		{
+			name:     "min with two args",
+			operator: "min",
+			args:     []interface{}{5, 10},
+			expected: "LEAST(5, 10)",
+			hasError: false,
+		},
+		{
+			name:     "min with three args",
+			operator: "min",
+			args:     []interface{}{5, 10, 3},
+			expected: "LEAST(5, 10, 3)",
+			hasError: false,
+		},
+		{
+			name:     "unsupported min/max operator",
+			operator: "avg",
+			args:     []interface{}{1, 2},
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "non-array args",
+			operator: "max",
+			args:     "invalid",
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "insufficient args",
+			operator: "max",
+			args:     []interface{}{5},
+			expected: "",
+			hasError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := op.processMinMaxExpression(tt.operator, tt.args)
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("processMinMaxExpression() expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("processMinMaxExpression() unexpected error = %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("processMinMaxExpression() = %v, want %v", result, tt.expected)
 				}
 			}
 		})
