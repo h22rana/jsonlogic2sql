@@ -13,6 +13,7 @@ func TestDialect_String(t *testing.T) {
 		{DialectSpanner, "Spanner"},
 		{DialectPostgreSQL, "PostgreSQL"},
 		{DialectDuckDB, "DuckDB"},
+		{DialectClickHouse, "ClickHouse"},
 		{DialectUnspecified, "Unspecified"},
 		{Dialect(999), "Unknown(999)"},
 	}
@@ -36,6 +37,7 @@ func TestDialect_IsValid(t *testing.T) {
 		{"Spanner is valid", DialectSpanner, true},
 		{"PostgreSQL is valid", DialectPostgreSQL, true},
 		{"DuckDB is valid", DialectDuckDB, true},
+		{"ClickHouse is valid", DialectClickHouse, true},
 		{"Unspecified is not valid", DialectUnspecified, false},
 		{"Unknown dialect is not valid", Dialect(999), false},
 	}
@@ -59,6 +61,7 @@ func TestDialect_Validate(t *testing.T) {
 		{"Spanner validates", DialectSpanner, false},
 		{"PostgreSQL validates", DialectPostgreSQL, false},
 		{"DuckDB validates", DialectDuckDB, false},
+		{"ClickHouse validates", DialectClickHouse, false},
 		{"Unspecified returns error", DialectUnspecified, true},
 		{"Unknown dialect returns error", Dialect(999), true},
 	}

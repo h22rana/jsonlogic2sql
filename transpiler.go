@@ -16,6 +16,7 @@ const (
 	DialectSpanner    = dialect.DialectSpanner
 	DialectPostgreSQL = dialect.DialectPostgreSQL
 	DialectDuckDB     = dialect.DialectDuckDB
+	DialectClickHouse = dialect.DialectClickHouse
 )
 
 // Dialect is the type for SQL dialect selection.
