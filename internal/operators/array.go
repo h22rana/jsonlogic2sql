@@ -475,8 +475,8 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 			return arrays[0], nil
 		}
 		return fmt.Sprintf("(%s)", strings.Join(arrays, " || ")), nil
-	case dialect.DialectBigQuery, dialect.DialectSpanner:
-		// BigQuery/Spanner: Use ARRAY_CONCAT function
+	case dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectDuckDB:
+		// BigQuery/Spanner/DuckDB: Use ARRAY_CONCAT function
 		return fmt.Sprintf("ARRAY_CONCAT(%s)", strings.Join(arrays, ", ")), nil
 	case dialect.DialectUnspecified:
 		return "", fmt.Errorf("merge: dialect not specified")

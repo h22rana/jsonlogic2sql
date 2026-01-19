@@ -41,7 +41,7 @@ func (c *OperatorConfig) GetDialect() dialect.Dialect {
 func (c *OperatorConfig) ValidateDialect(operator string) error {
 	d := c.GetDialect()
 	switch d {
-	case dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL:
+	case dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
 		return nil // Supported dialects
 	case dialect.DialectUnspecified:
 		return fmt.Errorf("operator '%s': dialect not specified", operator)
@@ -63,4 +63,9 @@ func (c *OperatorConfig) IsSpanner() bool {
 // IsPostgreSQL returns true if the dialect is PostgreSQL.
 func (c *OperatorConfig) IsPostgreSQL() bool {
 	return c.GetDialect() == dialect.DialectPostgreSQL
+}
+
+// IsDuckDB returns true if the dialect is DuckDB.
+func (c *OperatorConfig) IsDuckDB() bool {
+	return c.GetDialect() == dialect.DialectDuckDB
 }

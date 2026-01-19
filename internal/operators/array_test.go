@@ -222,7 +222,7 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 	}
 }
 
-// TestArrayOperator_DialectSupport tests map, filter, and reduce operators for BigQuery, Spanner, and PostgreSQL dialects.
+// TestArrayOperator_DialectSupport tests map, filter, and reduce operators for BigQuery, Spanner, PostgreSQL, and DuckDB dialects.
 func TestArrayOperator_DialectSupport(t *testing.T) {
 	dialects := []struct {
 		name    string
@@ -231,6 +231,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 		{"BigQuery", dialect.DialectBigQuery},
 		{"Spanner", dialect.DialectSpanner},
 		{"PostgreSQL", dialect.DialectPostgreSQL},
+		{"DuckDB", dialect.DialectDuckDB},
 	}
 
 	for _, d := range dialects {
@@ -388,7 +389,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 }
 
 // TestArrayOperator_MergeDialectSpecific tests the merge operator with dialect-specific output.
-// BigQuery/Spanner use ARRAY_CONCAT, PostgreSQL uses || operator.
+// BigQuery/Spanner/DuckDB use ARRAY_CONCAT, PostgreSQL uses || operator.
 func TestArrayOperator_MergeDialectSpecific(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -446,6 +447,25 @@ func TestArrayOperator_MergeDialectSpecific(t *testing.T) {
 			dialect:  dialect.DialectPostgreSQL,
 			args:     []any{map[string]any{"var": "arr"}},
 			expected: "arr",
+		},
+		// DuckDB tests - uses ARRAY_CONCAT like BigQuery/Spanner
+		{
+			name:     "DuckDB merge two arrays",
+			dialect:  dialect.DialectDuckDB,
+			args:     []any{map[string]any{"var": "array1"}, map[string]any{"var": "array2"}},
+			expected: "ARRAY_CONCAT(array1, array2)",
+		},
+		{
+			name:     "DuckDB merge three arrays",
+			dialect:  dialect.DialectDuckDB,
+			args:     []any{map[string]any{"var": "a"}, map[string]any{"var": "b"}, map[string]any{"var": "c"}},
+			expected: "ARRAY_CONCAT(a, b, c)",
+		},
+		{
+			name:     "DuckDB merge single array",
+			dialect:  dialect.DialectDuckDB,
+			args:     []any{map[string]any{"var": "arr"}},
+			expected: "ARRAY_CONCAT(arr)",
 		},
 	}
 
