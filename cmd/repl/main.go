@@ -82,23 +82,179 @@ func parseContainsArgs(args []interface{}) (column, pattern string) {
 	return column, pattern
 }
 
+// dialects defines the available SQL dialects with their display names.
+var dialects = []struct {
+	dialect jsonlogic2sql.Dialect
+	name    string
+}{
+	{jsonlogic2sql.DialectBigQuery, "BigQuery"},
+	{jsonlogic2sql.DialectSpanner, "Spanner"},
+	{jsonlogic2sql.DialectPostgreSQL, "PostgreSQL"},
+	{jsonlogic2sql.DialectDuckDB, "DuckDB"},
+	{jsonlogic2sql.DialectClickHouse, "ClickHouse"},
+}
+
+// currentDialect holds the currently selected dialect.
+var currentDialect jsonlogic2sql.Dialect
+
+// selectDialect prompts the user to select a SQL dialect.
+func selectDialect(scanner *bufio.Scanner) jsonlogic2sql.Dialect {
+	fmt.Println("Select SQL dialect:")
+	for i, d := range dialects {
+		fmt.Printf("  %d. %s\n", i+1, d.name)
+	}
+	fmt.Print("\nEnter choice [1-5] (default: 1 for BigQuery): ")
+
+	if !scanner.Scan() {
+		return jsonlogic2sql.DialectBigQuery
+	}
+
+	input := strings.TrimSpace(scanner.Text())
+	if input == "" {
+		return jsonlogic2sql.DialectBigQuery
+	}
+
+	var choice int
+	if _, err := fmt.Sscanf(input, "%d", &choice); err != nil || choice < 1 || choice > len(dialects) {
+		fmt.Println("Invalid choice, defaulting to BigQuery")
+		return jsonlogic2sql.DialectBigQuery
+	}
+
+	return dialects[choice-1].dialect
+}
+
+// getDialectName returns the display name for a dialect.
+func getDialectName(d jsonlogic2sql.Dialect) string {
+	for _, dialect := range dialects {
+		if dialect.dialect == d {
+			return dialect.name
+		}
+	}
+	return "Unknown"
+}
+
 func main() {
 	fmt.Println("JSON Logic to SQL Transpiler REPL")
-	fmt.Println("Type ':help' for commands, ':quit' to exit")
+	fmt.Println("==================================")
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
+
+	// Prompt user to select dialect
+	currentDialect = selectDialect(scanner)
+	fmt.Printf("\nUsing %s dialect\n", getDialectName(currentDialect))
+	fmt.Println("Type ':help' for commands, ':quit' to exit")
+	fmt.Println()
+
 	transpiler, err := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
-		Dialect: jsonlogic2sql.DialectBigQuery,
+		Dialect: currentDialect,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create transpiler: %v\n", err)
 		os.Exit(1)
 	}
 
+	// Register all custom operators
+	registerCustomOperators(transpiler)
+
+	for {
+		fmt.Printf("[%s] jsonlogic> ", getDialectName(currentDialect))
+		if !scanner.Scan() {
+			break
+		}
+
+		input := strings.TrimSpace(scanner.Text())
+
+		// Handle empty input
+		if input == "" {
+			continue
+		}
+
+		// Handle commands
+		if strings.HasPrefix(input, ":") {
+			newTranspiler := handleCommand(input, transpiler, scanner)
+			if newTranspiler != nil {
+				transpiler = newTranspiler
+			}
+			continue
+		}
+
+		// Process JSON Logic input
+		result, err := transpiler.Transpile(input)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+		} else {
+			fmt.Printf("SQL: %s\n", result)
+		}
+		fmt.Println()
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func handleCommand(input string, _ *jsonlogic2sql.Transpiler, scanner *bufio.Scanner) *jsonlogic2sql.Transpiler {
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return nil
+	}
+
+	command := parts[0]
+
+	switch command {
+	case ":help":
+		showHelp()
+	case ":examples":
+		showExamples()
+	case ":dialect":
+		return handleDialectChange(scanner)
+	case ":quit", ":exit":
+		fmt.Println("Goodbye!")
+		os.Exit(0)
+	case ":clear":
+		// Clear screen (works on most terminals)
+		fmt.Print("\033[2J\033[H")
+	default:
+		fmt.Printf("Unknown command: %s\n", command)
+		fmt.Println("Type ':help' for available commands")
+	}
+	return nil
+}
+
+// handleDialectChange handles the :dialect command to switch SQL dialects.
+func handleDialectChange(scanner *bufio.Scanner) *jsonlogic2sql.Transpiler {
+	fmt.Println()
+	newDialect := selectDialect(scanner)
+	currentDialect = newDialect
+
+	transpiler, err := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
+		Dialect: currentDialect,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create transpiler: %v\n", err)
+		return nil
+	}
+
+	// Re-register all custom operators for the new transpiler
+	registerCustomOperators(transpiler)
+
+	fmt.Printf("\nSwitched to %s dialect\n\n", getDialectName(currentDialect))
+	return transpiler
+}
+
+// registerCustomOperators registers all custom operators for the REPL.
+//
+//nolint:funlen // This function registers many operators and is long by design.
+func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
+	// ========================================================================
+	// Basic String Pattern Matching Operators
+	// ========================================================================
+
 	// startsWith operator is basically column LIKE 'value%'.
 	// args[0] is the column name (SQL), args[1] is the pattern (already quoted SQL string).
-	_ = transpiler.RegisterOperatorFunc("startsWith", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("startsWith", func(_ string, args []any) (string, error) {
 		if len(args) != 2 {
 			return "", fmt.Errorf("startsWith requires exactly 2 arguments")
 		}
@@ -112,7 +268,7 @@ func main() {
 	})
 
 	// !startsWith operator is basically column NOT LIKE 'value%'.
-	_ = transpiler.RegisterOperatorFunc("!startsWith", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("!startsWith", func(_ string, args []any) (string, error) {
 		if len(args) != 2 {
 			return "", fmt.Errorf("!startsWith requires exactly 2 arguments")
 		}
@@ -126,7 +282,7 @@ func main() {
 	})
 
 	// endsWith operator is basically column LIKE '%value'.
-	_ = transpiler.RegisterOperatorFunc("endsWith", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("endsWith", func(_ string, args []any) (string, error) {
 		if len(args) != 2 {
 			return "", fmt.Errorf("endsWith requires exactly 2 arguments")
 		}
@@ -140,7 +296,7 @@ func main() {
 	})
 
 	// !endsWith operator is basically column NOT LIKE '%value'.
-	_ = transpiler.RegisterOperatorFunc("!endsWith", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("!endsWith", func(_ string, args []any) (string, error) {
 		if len(args) != 2 {
 			return "", fmt.Errorf("!endsWith requires exactly 2 arguments")
 		}
@@ -156,7 +312,7 @@ func main() {
 	// contains operator is basically column LIKE '%value%'.
 	// Supports: {"contains": [{"var": "field"}, "T"]} or {"contains": [{"var": "field"}, ["T"]]}.
 	// Also handles reversed: {"contains": ["T", {"var": "field"}]}.
-	_ = transpiler.RegisterOperatorFunc("contains", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("contains", func(_ string, args []any) (string, error) {
 		if len(args) != 2 {
 			return "", fmt.Errorf("contains requires exactly 2 arguments")
 		}
@@ -165,7 +321,7 @@ func main() {
 	})
 
 	// !contains operator is basically column NOT LIKE '%value%'.
-	_ = transpiler.RegisterOperatorFunc("!contains", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("!contains", func(_ string, args []any) (string, error) {
 		if len(args) != 2 {
 			return "", fmt.Errorf("!contains requires exactly 2 arguments")
 		}
@@ -173,8 +329,12 @@ func main() {
 		return fmt.Sprintf("%s NOT LIKE '%%%s%%'", column, escapeLikePattern(pattern)), nil
 	})
 
+	// ========================================================================
+	// String Transformation Operators
+	// ========================================================================
+
 	// normalizeNFKC operator is basically NORMALIZE(column, 'NFKC').
-	_ = transpiler.RegisterOperatorFunc("normalizeNFKC", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("normalizeNFKC", func(_ string, args []any) (string, error) {
 		if len(args) != 1 {
 			return "", fmt.Errorf("normalizeNFKC requires exactly 1 argument")
 		}
@@ -186,8 +346,7 @@ func main() {
 	// U+301C (〜) wave dash → ~
 	// U+FF5E (～) fullwidth tilde → ~
 	// SQL: REGEXP_REPLACE(column, '[〜～]', '~')
-	//nolint:errcheck // RegisterOperatorFunc only errors on invalid operator names, which are constants here
-	transpiler.RegisterOperatorFunc("normalizeWaveDash", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("normalizeWaveDash", func(_ string, args []any) (string, error) {
 		if len(args) != 1 {
 			return "", fmt.Errorf("normalizeWaveDash requires exactly 1 argument")
 		}
@@ -197,7 +356,7 @@ func main() {
 	})
 
 	// toLower operator is basically LOWER(column).
-	_ = transpiler.RegisterOperatorFunc("toLower", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("toLower", func(_ string, args []any) (string, error) {
 		if len(args) != 1 {
 			return "", fmt.Errorf("toLower requires exactly 1 argument")
 		}
@@ -206,7 +365,7 @@ func main() {
 	})
 
 	// toUpper operator is basically UPPER(column).
-	_ = transpiler.RegisterOperatorFunc("toUpper", func(_ string, args []interface{}) (string, error) {
+	_ = transpiler.RegisterOperatorFunc("toUpper", func(_ string, args []any) (string, error) {
 		if len(args) != 1 {
 			return "", fmt.Errorf("toUpper requires exactly 1 argument")
 		}
@@ -228,7 +387,7 @@ func main() {
 	// ClickHouse: now()
 	// Example: {"==": [{"currentTimestamp": []}, {"var": "created_at"}]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("currentTimestamp",
-		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
 			if len(args) != 0 {
 				return "", fmt.Errorf("currentTimestamp takes no arguments")
 			}
@@ -252,7 +411,7 @@ func main() {
 	// ClickHouse: dateDiff('day', date2, date1) -- same as DuckDB
 	// Example: {">": [{"dateDiff": [{"var": "end_date"}, {"var": "start_date"}]}, 30]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("dateDiff",
-		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
 			if len(args) != 2 {
 				return "", fmt.Errorf("dateDiff requires exactly 2 arguments")
 			}
@@ -280,7 +439,7 @@ func main() {
 	// ClickHouse: length(array)
 	// Example: {">": [{"arrayLength": [{"var": "tags"}]}, 0]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("arrayLength",
-		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
 			if len(args) != 1 {
 				return "", fmt.Errorf("arrayLength requires exactly 1 argument")
 			}
@@ -305,7 +464,7 @@ func main() {
 	// ClickHouse: match(string, pattern)
 	// Example: {"regexpContains": [{"var": "email"}, "^[a-z]+@example\\.com$"]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("regexpContains",
-		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
 			if len(args) != 2 {
 				return "", fmt.Errorf("regexpContains requires exactly 2 arguments")
 			}
@@ -336,7 +495,7 @@ func main() {
 	// ClickHouse: if(denominator = 0, NULL, numerator / denominator)
 	// Example: {"safeDivide": [{"var": "total"}, {"var": "count"}]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
-		func(_ string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
 			if len(args) != 2 {
 				return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
 			}
@@ -356,73 +515,17 @@ func main() {
 				return "", fmt.Errorf("unsupported dialect: %v", dialect)
 			}
 		})
-
-	for {
-		fmt.Print("jsonlogic> ")
-		if !scanner.Scan() {
-			break
-		}
-
-		input := strings.TrimSpace(scanner.Text())
-
-		// Handle empty input
-		if input == "" {
-			continue
-		}
-
-		// Handle commands
-		if strings.HasPrefix(input, ":") {
-			handleCommand(input)
-			continue
-		}
-
-		// Process JSON Logic input
-		result, err := transpiler.Transpile(input)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		} else {
-			fmt.Printf("SQL: %s\n", result)
-		}
-		fmt.Println()
-	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func handleCommand(input string) {
-	parts := strings.Fields(input)
-	if len(parts) == 0 {
-		return
-	}
-
-	command := parts[0]
-
-	switch command {
-	case ":help":
-		showHelp()
-	case ":examples":
-		showExamples()
-	case ":quit", ":exit":
-		fmt.Println("Goodbye!")
-		os.Exit(0)
-	case ":clear":
-		// Clear screen (works on most terminals)
-		fmt.Print("\033[2J\033[H")
-	default:
-		fmt.Printf("Unknown command: %s\n", command)
-		fmt.Println("Type ':help' for available commands")
-	}
 }
 
 func showHelp() {
 	fmt.Println("Available commands:")
 	fmt.Println("  :help     - Show this help message")
 	fmt.Println("  :examples - Show example JSON Logic expressions")
+	fmt.Println("  :dialect  - Change the SQL dialect")
 	fmt.Println("  :clear    - Clear the screen")
 	fmt.Println("  :quit     - Exit the REPL")
+	fmt.Println()
+	fmt.Printf("Current dialect: %s\n", getDialectName(currentDialect))
 	fmt.Println()
 	fmt.Println("Enter JSON Logic expressions to convert them to SQL WHERE clauses.")
 	fmt.Println("Example: {\">\": [{\"var\": \"amount\"}, 1000]}")
