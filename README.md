@@ -4,7 +4,7 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 
 ## Features
 
-- **Complete JSON Logic Support**: Implements all core JSON Logic operators with 100% test coverage
+- **Complete JSON Logic Support**: Implements all core JSON Logic operators with comprehensive test coverage
 - **SQL Dialect Support**: Target BigQuery, Spanner, PostgreSQL, DuckDB, or ClickHouse with dialect-specific SQL generation
 - **Custom Operators**: Extensible registry pattern to add custom SQL functions (LENGTH, UPPER, etc.)
 - **Dialect-Aware Custom Operators**: Register operators that generate different SQL per dialect
@@ -351,6 +351,21 @@ WHERE (SAFE_DIVIDE(revenue, cost) > 1.5 AND status IN ('active', 'pending') AND 
 **Spanner Output:**
 ```sql
 WHERE (CASE WHEN cost = 0 THEN NULL ELSE revenue / cost END > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+```
+
+**PostgreSQL Output:**
+```sql
+WHERE (CASE WHEN cost = 0 THEN NULL ELSE revenue / cost END > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+```
+
+**DuckDB Output:**
+```sql
+WHERE (CASE WHEN cost = 0 THEN NULL ELSE revenue / cost END > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+```
+
+**ClickHouse Output:**
+```sql
+WHERE (if(cost = 0, NULL, revenue / cost) > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
 ```
 
 This example filters records where:
