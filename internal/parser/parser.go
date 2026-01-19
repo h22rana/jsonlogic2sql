@@ -88,6 +88,24 @@ func (p *Parser) Parse(logic interface{}) (string, error) {
 	return fmt.Sprintf("WHERE %s", sql), nil
 }
 
+// ParseCondition converts a JSON Logic expression to a SQL condition without the WHERE keyword.
+// This is useful when you need to embed the condition in a larger query.
+func (p *Parser) ParseCondition(logic interface{}) (string, error) {
+	// First validate the expression
+	if err := p.validator.Validate(logic); err != nil {
+		return "", tperrors.NewValidationError(err)
+	}
+
+	// Parse the expression with root path
+	sql, err := p.parseExpression(logic, "$")
+	if err != nil {
+		return "", err // TranspileError already contains full context
+	}
+
+	// Return condition without WHERE prefix
+	return sql, nil
+}
+
 // parseExpression recursively parses JSON Logic expressions.
 // path is the JSONPath to the current expression for error reporting.
 func (p *Parser) parseExpression(expr interface{}, path string) (string, error) {
