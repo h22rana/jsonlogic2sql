@@ -1072,9 +1072,9 @@ jsonlogic2sql/
 
 ### Testing
 
-The project includes comprehensive tests with **100% test coverage**:
+The project includes comprehensive tests:
 
-- **Unit Tests**: Each operator and component is thoroughly tested (400+ test cases passing)
+- **Unit Tests**: Each operator and component is thoroughly tested (870+ test cases passing)
 - **Integration Tests**: End-to-end tests with real JSON Logic examples (168 REPL test cases)
 - **Error Cases**: Validation and error handling tests
 - **Edge Cases**: Boundary conditions and special cases
