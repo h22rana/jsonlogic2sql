@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
 
 // StringOperator handles string operations like cat, substr.
@@ -62,7 +64,7 @@ func (s *StringOperator) validateStringOperand(value interface{}) error {
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (s *StringOperator) extractFieldNameFromValue(value interface{}) string {
 	if varExpr, ok := value.(map[string]interface{}); ok {
-		if varName, hasVar := varExpr["var"]; hasVar {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
 			return s.extractFieldName(varName)
 		}
 	}
@@ -150,25 +152,40 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 	// Convert 0-based start to 1-based, handling numeric literals cleanly
 	startSQL := s.convertStartIndex(start)
 
+	// Get the function name based on dialect
+	d := dialect.DialectUnspecified
+	if s.config != nil {
+		d = s.config.GetDialect()
+	}
+
+	var substrFunc string
+	//nolint:exhaustive // default handles BigQuery/Spanner/PostgreSQL/DuckDB
+	switch d {
+	case dialect.DialectClickHouse:
+		substrFunc = "substring"
+	default:
+		substrFunc = "SUBSTR"
+	}
+
 	// Third argument: length (optional)
 	if len(args) == 3 {
 		length, err := s.valueToSQL(args[2])
 		if err != nil {
 			return "", fmt.Errorf("invalid substring length argument: %w", err)
 		}
-		return fmt.Sprintf("SUBSTR(%s, %s, %s)", str, startSQL, length), nil
+		return fmt.Sprintf("%s(%s, %s, %s)", substrFunc, str, startSQL, length), nil
 	}
 
-	// If no length provided, use SUBSTR without length parameter
-	return fmt.Sprintf("SUBSTR(%s, %s)", str, startSQL), nil
+	// If no length provided, use SUBSTR/substring without length parameter
+	return fmt.Sprintf("%s(%s, %s)", substrFunc, str, startSQL), nil
 }
 
 // valueToSQL converts a value to SQL, handling var expressions, complex expressions, and literals.
 func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 	// Handle var expressions
 	if expr, ok := value.(map[string]interface{}); ok {
-		if varExpr, hasVar := expr["var"]; hasVar {
-			return s.dataOp.ToSQL("var", []interface{}{varExpr})
+		if varExpr, hasVar := expr[OpVar]; hasVar {
+			return s.dataOp.ToSQL(OpVar, []interface{}{varExpr})
 		}
 
 		// Handle complex expressions (arithmetic, comparisons, conditionals, etc.)

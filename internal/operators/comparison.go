@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
 
 // ComparisonOperator handles comparison operators (==, ===, !=, !==, >, >=, <, <=).
@@ -26,6 +28,27 @@ func (c *ComparisonOperator) schema() SchemaProvider {
 		return nil
 	}
 	return c.config.Schema
+}
+
+// strposFunc returns the appropriate string position function call based on dialect.
+// BigQuery/Spanner/DuckDB: STRPOS(haystack, needle)
+// PostgreSQL: POSITION(needle IN haystack)
+// ClickHouse: position(haystack, needle).
+func (c *ComparisonOperator) strposFunc(haystack, needle string) string {
+	d := dialect.DialectUnspecified
+	if c.config != nil {
+		d = c.config.GetDialect()
+	}
+
+	//nolint:exhaustive // default handles BigQuery/Spanner/DuckDB
+	switch d {
+	case dialect.DialectPostgreSQL:
+		return fmt.Sprintf("POSITION(%s IN %s)", needle, haystack)
+	case dialect.DialectClickHouse:
+		return fmt.Sprintf("position(%s, %s)", haystack, needle)
+	default:
+		return fmt.Sprintf("STRPOS(%s, %s)", haystack, needle)
+	}
 }
 
 // validateOrderingOperand checks if a field used in an ordering comparison is of a valid type
@@ -58,7 +81,7 @@ func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (c *ComparisonOperator) extractFieldNameFromValue(value interface{}) string {
 	if varExpr, ok := value.(map[string]interface{}); ok {
-		if varName, hasVar := varExpr["var"]; hasVar {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
 			return c.extractFieldName(varName)
 		}
 	}
@@ -279,7 +302,7 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 					if varName, ok := args.(string); ok && varName == "" {
 						return "elem", nil
 					}
-					return c.dataOp.ToSQL("var", []interface{}{args})
+					return c.dataOp.ToSQL(OpVar, []interface{}{args})
 				}
 			}
 		}
@@ -348,7 +371,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 
 	// Check if right side is a variable expression
 	if varExpr, ok := rightValue.(map[string]interface{}); ok {
-		if varName, hasVar := varExpr["var"]; hasVar {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
 			// Handle variable on right side
 			// According to JSON Logic spec, "in" supports both:
 			// 1. Array membership: {"in": [value, array]} → value IN array
@@ -357,7 +380,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 			// Use schema to determine the correct SQL:
 			// - If variable is an ARRAY column: 'value' IN column (array membership)
 			// - If variable is a STRING column: STRPOS(column, 'value') > 0 (string containment)
-			rightSQL, err := c.dataOp.ToSQL("var", []interface{}{varName})
+			rightSQL, err := c.dataOp.ToSQL(OpVar, []interface{}{varName})
 			if err != nil {
 				return "", fmt.Errorf("invalid variable in IN operator: %w", err)
 			}
@@ -379,7 +402,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 					return fmt.Sprintf("%s IN %s", leftSQL, rightSQL), nil
 				} else if c.schema().IsStringType(fieldName) {
 					// String type: use string containment syntax
-					return fmt.Sprintf("STRPOS(%s, %s) > 0", rightSQL, leftSQL), nil
+					return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
 				}
 			}
 
@@ -387,8 +410,8 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 			// If left side is a literal (quoted), assume string containment
 			isLeftLiteral := strings.HasPrefix(leftSQL, "'") && strings.HasSuffix(leftSQL, "'")
 			if isLeftLiteral {
-				// Use STRPOS for string containment (default for Spanner/BigQuery)
-				return fmt.Sprintf("STRPOS(%s, %s) > 0", rightSQL, leftSQL), nil
+				// Use STRPOS/position for string containment
+				return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
 			}
 			// Otherwise, assume array membership
 			return fmt.Sprintf("%s IN %s", leftSQL, rightSQL), nil

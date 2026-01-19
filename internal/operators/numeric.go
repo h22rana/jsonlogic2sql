@@ -55,7 +55,7 @@ func (n *NumericOperator) validateNumericOperand(value interface{}) error {
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (n *NumericOperator) extractFieldNameFromValue(value interface{}) string {
 	if varExpr, ok := value.(map[string]interface{}); ok {
-		if varName, hasVar := varExpr["var"]; hasVar {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
 			return n.extractFieldName(varName)
 		}
 	}
@@ -305,8 +305,8 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 
 	// Handle var expressions and complex expressions
 	if expr, ok := value.(map[string]interface{}); ok {
-		if varExpr, hasVar := expr["var"]; hasVar {
-			return n.dataOp.ToSQL("var", []interface{}{varExpr})
+		if varExpr, hasVar := expr[OpVar]; hasVar {
+			return n.dataOp.ToSQL(OpVar, []interface{}{varExpr})
 		}
 		// Handle complex expressions by recursively parsing them
 		for operator, args := range expr {

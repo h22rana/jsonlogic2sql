@@ -232,6 +232,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 		{"Spanner", dialect.DialectSpanner},
 		{"PostgreSQL", dialect.DialectPostgreSQL},
 		{"DuckDB", dialect.DialectDuckDB},
+		// Note: ClickHouse has different syntax, tested separately in TestArrayOperator_ClickHouse
 	}
 
 	for _, d := range dialects {
@@ -466,6 +467,25 @@ func TestArrayOperator_MergeDialectSpecific(t *testing.T) {
 			dialect:  dialect.DialectDuckDB,
 			args:     []any{map[string]any{"var": "arr"}},
 			expected: "ARRAY_CONCAT(arr)",
+		},
+		// ClickHouse tests - uses arrayConcat
+		{
+			name:     "ClickHouse merge two arrays",
+			dialect:  dialect.DialectClickHouse,
+			args:     []any{map[string]any{"var": "array1"}, map[string]any{"var": "array2"}},
+			expected: "arrayConcat(array1, array2)",
+		},
+		{
+			name:     "ClickHouse merge three arrays",
+			dialect:  dialect.DialectClickHouse,
+			args:     []any{map[string]any{"var": "a"}, map[string]any{"var": "b"}, map[string]any{"var": "c"}},
+			expected: "arrayConcat(a, b, c)",
+		},
+		{
+			name:     "ClickHouse merge single array",
+			dialect:  dialect.DialectClickHouse,
+			args:     []any{map[string]any{"var": "arr"}},
+			expected: "arrayConcat(arr)",
 		},
 	}
 
@@ -850,6 +870,88 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "d"},
 			},
 			expected: "ARRAY_CONCAT(a, b, c, d)",
+			hasError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := op.ToSQL(tt.operator, tt.args)
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+			if result != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, result)
+			}
+		})
+	}
+}
+
+// TestArrayOperator_ClickHouse tests array operators with ClickHouse-specific syntax.
+func TestArrayOperator_ClickHouse(t *testing.T) {
+	config := NewOperatorConfig(dialect.DialectClickHouse, nil)
+	op := NewArrayOperator(config)
+
+	tests := []struct {
+		name     string
+		operator string
+		args     []any
+		expected string
+		hasError bool
+	}{
+		// Map - uses arrayMap
+		{
+			name:     "map with transformation",
+			operator: "map",
+			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": "item"}, 2}}},
+			expected: "arrayMap(elem -> (elem * 2), numbers)",
+			hasError: false,
+		},
+		// Filter - uses arrayFilter
+		{
+			name:     "filter with condition",
+			operator: "filter",
+			args:     []any{map[string]any{"var": "scores"}, map[string]any{">=": []any{map[string]any{"var": "item"}, 70}}},
+			expected: "arrayFilter(elem -> elem >= 70, scores)",
+			hasError: false,
+		},
+		// Reduce - uses arrayReduce for aggregates
+		{
+			name:     "reduce with SUM pattern",
+			operator: "reduce",
+			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 0},
+			expected: "0 + coalesce(arrayReduce('sum', numbers), 0)",
+			hasError: false,
+		},
+		// All - uses arrayAll
+		{
+			name:     "all with condition",
+			operator: "all",
+			args:     []any{map[string]any{"var": "values"}, map[string]any{">": []any{map[string]any{"var": "item"}, 0}}},
+			expected: "arrayAll(elem -> elem > 0, values)",
+			hasError: false,
+		},
+		// Some - uses arrayExists
+		{
+			name:     "some with condition",
+			operator: "some",
+			args:     []any{map[string]any{"var": "items"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "active"}}},
+			expected: "arrayExists(elem -> elem = 'active', items)",
+			hasError: false,
+		},
+		// None - uses NOT arrayExists
+		{
+			name:     "none with condition",
+			operator: "none",
+			args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "error"}}},
+			expected: "NOT arrayExists(elem -> elem = 'error', statuses)",
 			hasError: false,
 		},
 	}

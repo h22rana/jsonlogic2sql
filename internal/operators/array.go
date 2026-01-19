@@ -35,6 +35,14 @@ func (a *ArrayOperator) schema() SchemaProvider {
 	return a.config.Schema
 }
 
+// getDialect returns the configured dialect, or DialectUnspecified if not configured.
+func (a *ArrayOperator) getDialect() dialect.Dialect {
+	if a.config == nil {
+		return dialect.DialectUnspecified
+	}
+	return a.config.GetDialect()
+}
+
 // getLogicalOperator returns the logical operator, creating it lazily if needed.
 func (a *ArrayOperator) getLogicalOperator() *LogicalOperator {
 	if a.logicalOp == nil {
@@ -74,7 +82,7 @@ func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (a *ArrayOperator) extractFieldNameFromValue(value interface{}) string {
 	if varExpr, ok := value.(map[string]interface{}); ok {
-		if varName, hasVar := varExpr["var"]; hasVar {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
 			return a.extractFieldName(varName)
 		}
 	}
@@ -122,6 +130,7 @@ func (a *ArrayOperator) ToSQL(operator string, args []interface{}) (string, erro
 
 // handleMap converts map operator to SQL.
 // Generates: ARRAY(SELECT transformation FROM UNNEST(array) AS elem).
+// For ClickHouse: Uses arrayMap or subquery with arrayJoin.
 func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("map requires exactly 2 arguments")
@@ -154,11 +163,19 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	// Replace element reference in transformation
 	transformationWithElem := a.replaceElementReference(transformation)
 
-	return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS elem)", transformationWithElem, array), nil
+	// Generate SQL based on dialect
+	//nolint:exhaustive // default handles BigQuery/Spanner/PostgreSQL/DuckDB
+	switch a.getDialect() {
+	case dialect.DialectClickHouse:
+		return fmt.Sprintf("arrayMap(elem -> %s, %s)", transformationWithElem, array), nil
+	default:
+		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS elem)", transformationWithElem, array), nil
+	}
 }
 
 // handleFilter converts filter operator to SQL.
 // Generates: ARRAY(SELECT elem FROM UNNEST(array) AS elem WHERE condition).
+// For ClickHouse: Uses arrayFilter function.
 func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("filter requires exactly 2 arguments")
@@ -191,7 +208,14 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	// Replace element reference in condition
 	conditionWithElem := a.replaceElementReference(condition)
 
-	return fmt.Sprintf("ARRAY(SELECT elem FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
+	// Generate SQL based on dialect
+	//nolint:exhaustive // default handles BigQuery/Spanner/PostgreSQL/DuckDB
+	switch a.getDialect() {
+	case dialect.DialectClickHouse:
+		return fmt.Sprintf("arrayFilter(elem -> %s, %s)", conditionWithElem, array), nil
+	default:
+		return fmt.Sprintf("ARRAY(SELECT elem FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
+	}
 }
 
 // handleReduce converts reduce operator to SQL.
@@ -201,6 +225,7 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 // For common patterns, this generates optimized SQL:
 // - Addition: initial + COALESCE((SELECT SUM(elem) FROM UNNEST(array) AS elem), 0).
 // - General: (SELECT reducer FROM UNNEST(array) AS elem).
+// For ClickHouse: Uses arrayReduce function for aggregates.
 func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	if len(args) != 3 {
 		return "", fmt.Errorf("reduce requires exactly 3 arguments")
@@ -235,10 +260,18 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 
 	// Check for common reduction patterns and optimize
 	if aggregateFunc := a.detectAggregatePattern(reducerExpr); aggregateFunc != "" {
-		// Optimized path: use SQL aggregate function
-		// Generate: initial + COALESCE((SELECT AGG(elem) FROM UNNEST(array) AS elem), 0)
-		return fmt.Sprintf("%s + COALESCE((SELECT %s(elem) FROM UNNEST(%s) AS elem), 0)",
-			initial, aggregateFunc, array), nil
+		// Generate optimized aggregate SQL based on dialect
+		//nolint:exhaustive // default handles BigQuery/Spanner/PostgreSQL/DuckDB
+		switch a.getDialect() {
+		case dialect.DialectClickHouse:
+			// ClickHouse: initial + coalesce(arrayReduce('sum', array), 0)
+			return fmt.Sprintf("%s + coalesce(arrayReduce('%s', %s), 0)",
+				initial, strings.ToLower(aggregateFunc), array), nil
+		default:
+			// Standard SQL: initial + COALESCE((SELECT AGG(elem) FROM UNNEST(array) AS elem), 0)
+			return fmt.Sprintf("%s + COALESCE((SELECT %s(elem) FROM UNNEST(%s) AS elem), 0)",
+				initial, aggregateFunc, array), nil
+		}
 	}
 
 	// General case: evaluate reducer expression with element reference
@@ -250,11 +283,18 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	// Replace variable references
 	reducerWithElem := a.replaceElementReference(reducer)
 	// Replace accumulator with initial for the subquery context
-	reducerWithElem = strings.ReplaceAll(reducerWithElem, "accumulator", initial)
+	reducerWithElem = strings.ReplaceAll(reducerWithElem, AccumulatorVar, initial)
 
-	// Generate SQL using a subquery
-	// This works for simple cases but may not handle all reduce patterns
-	return fmt.Sprintf("(SELECT %s FROM UNNEST(%s) AS elem)", reducerWithElem, array), nil
+	// Generate SQL based on dialect
+	//nolint:exhaustive // default handles BigQuery/Spanner/PostgreSQL/DuckDB
+	switch a.getDialect() {
+	case dialect.DialectClickHouse:
+		// ClickHouse uses arrayFold for general reduction (ClickHouse 22.8+)
+		return fmt.Sprintf("arrayFold((acc, elem) -> %s, %s, %s)", reducerWithElem, array, initial), nil
+	default:
+		// Standard SQL using a subquery
+		return fmt.Sprintf("(SELECT %s FROM UNNEST(%s) AS elem)", reducerWithElem, array), nil
+	}
 }
 
 // detectAggregatePattern checks if the reducer expression matches a common aggregate pattern.
@@ -266,23 +306,23 @@ func (a *ArrayOperator) detectAggregatePattern(expr interface{}) string {
 	}
 
 	// Check for addition pattern: {"+": [{"var": "accumulator"}, {"var": "current"}]}
-	if args, hasPlus := exprMap["+"]; hasPlus {
+	if args, hasPlus := exprMap[OpAdd]; hasPlus {
 		if a.isAccumulatorCurrentPattern(args) {
-			return "SUM"
+			return AggregateSUM
 		}
 	}
 
 	// Check for min pattern: {"min": [{"var": "accumulator"}, {"var": "current"}]}
-	if args, hasMin := exprMap["min"]; hasMin {
+	if args, hasMin := exprMap[OpMin]; hasMin {
 		if a.isAccumulatorCurrentPattern(args) {
-			return "MIN"
+			return AggregateMIN
 		}
 	}
 
 	// Check for max pattern: {"max": [{"var": "accumulator"}, {"var": "current"}]}
-	if args, hasMax := exprMap["max"]; hasMax {
+	if args, hasMax := exprMap[OpMax]; hasMax {
 		if a.isAccumulatorCurrentPattern(args) {
-			return "MAX"
+			return AggregateMAX
 		}
 	}
 
@@ -301,7 +341,7 @@ func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) bool {
 	if !ok {
 		return false
 	}
-	if varName, hasVar := arg0Map["var"]; !hasVar || varName != "accumulator" {
+	if varName, hasVar := arg0Map[OpVar]; !hasVar || varName != AccumulatorVar {
 		return false
 	}
 
@@ -310,7 +350,7 @@ func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) bool {
 	if !ok {
 		return false
 	}
-	if varName, hasVar := arg1Map["var"]; !hasVar || varName != "current" {
+	if varName, hasVar := arg1Map[OpVar]; !hasVar || varName != CurrentVar {
 		return false
 	}
 
@@ -320,6 +360,7 @@ func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) bool {
 // handleAll converts all operator to SQL.
 // This checks if all elements in an array satisfy a condition.
 // Generates: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE NOT (condition)).
+// For ClickHouse: Uses arrayAll function.
 func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("all requires exactly 2 arguments")
@@ -349,15 +390,24 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
 
-	// Use standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE NOT (condition))
 	// Replace 'elem' in condition with the actual element reference
 	conditionWithElem := a.replaceElementReference(condition)
-	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE NOT (%s))", array, conditionWithElem), nil
+
+	// Generate SQL based on dialect
+	//nolint:exhaustive // default handles BigQuery/Spanner/PostgreSQL/DuckDB
+	switch a.getDialect() {
+	case dialect.DialectClickHouse:
+		return fmt.Sprintf("arrayAll(elem -> %s, %s)", conditionWithElem, array), nil
+	default:
+		// Standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE NOT (condition))
+		return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE NOT (%s))", array, conditionWithElem), nil
+	}
 }
 
 // handleSome converts some operator to SQL.
 // This checks if some elements in an array satisfy a condition.
 // Generates: EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition).
+// For ClickHouse: Uses arrayExists function.
 func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("some requires exactly 2 arguments")
@@ -387,14 +437,24 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
 
-	// Use standard SQL: EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
+	// Replace element reference in condition
 	conditionWithElem := a.replaceElementReference(condition)
-	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
+
+	// Generate SQL based on dialect
+	//nolint:exhaustive // default handles BigQuery/Spanner/PostgreSQL/DuckDB
+	switch a.getDialect() {
+	case dialect.DialectClickHouse:
+		return fmt.Sprintf("arrayExists(elem -> %s, %s)", conditionWithElem, array), nil
+	default:
+		// Standard SQL: EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
+		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
+	}
 }
 
 // handleNone converts none operator to SQL.
 // This checks if no elements in an array satisfy a condition.
 // Generates: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition).
+// For ClickHouse: Uses NOT arrayExists function.
 func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	if len(args) != 2 {
 		return "", fmt.Errorf("none requires exactly 2 arguments")
@@ -424,9 +484,18 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
 
-	// Use standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
+	// Replace element reference in condition
 	conditionWithElem := a.replaceElementReference(condition)
-	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
+
+	// Generate SQL based on dialect
+	//nolint:exhaustive // default handles BigQuery/Spanner/PostgreSQL/DuckDB
+	switch a.getDialect() {
+	case dialect.DialectClickHouse:
+		return fmt.Sprintf("NOT arrayExists(elem -> %s, %s)", conditionWithElem, array), nil
+	default:
+		// Standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
+		return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS elem WHERE %s)", array, conditionWithElem), nil
+	}
 }
 
 // handleMerge converts merge operator to SQL.
@@ -478,6 +547,9 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 	case dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectDuckDB:
 		// BigQuery/Spanner/DuckDB: Use ARRAY_CONCAT function
 		return fmt.Sprintf("ARRAY_CONCAT(%s)", strings.Join(arrays, ", ")), nil
+	case dialect.DialectClickHouse:
+		// ClickHouse: Use arrayConcat function
+		return fmt.Sprintf("arrayConcat(%s)", strings.Join(arrays, ", ")), nil
 	case dialect.DialectUnspecified:
 		return "", fmt.Errorf("merge: dialect not specified")
 	default:
@@ -490,8 +562,8 @@ func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
 	// Handle complex expressions (operators)
 	if expr, ok := value.(map[string]interface{}); ok {
 		// Check if it's a var expression
-		if varExpr, hasVar := expr["var"]; hasVar {
-			return a.dataOp.ToSQL("var", []interface{}{varExpr})
+		if varExpr, hasVar := expr[OpVar]; hasVar {
+			return a.dataOp.ToSQL(OpVar, []interface{}{varExpr})
 		}
 		// Otherwise, it's a complex expression - convert it using expressionToSQL
 		return a.expressionToSQL(value)
@@ -524,12 +596,12 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 
 	// Handle var expressions
 	if varExpr, ok := expr.(map[string]interface{}); ok {
-		if varName, hasVar := varExpr["var"]; hasVar {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
 			// Special case: empty var name represents the current element in array operations
 			if varName == "" {
-				return "elem", nil
+				return ElemVar, nil
 			}
-			return a.dataOp.ToSQL("var", []interface{}{varName})
+			return a.dataOp.ToSQL(OpVar, []interface{}{varName})
 		}
 	}
 
@@ -571,7 +643,7 @@ func (a *ArrayOperator) replaceElementReference(condition string) string {
 	// This handles cases where {"var": "item"} should become "elem"
 	// Simple string replacement for now - in a more complex implementation,
 	// you'd want to parse the SQL and replace variable references properly
-	return strings.ReplaceAll(condition, "item", "elem")
+	return strings.ReplaceAll(condition, ItemVar, ElemVar)
 }
 
 // isPrimitive checks if a value is a primitive type.
