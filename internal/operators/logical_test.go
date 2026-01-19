@@ -316,3 +316,147 @@ func TestLogicalOperator_isPrimitive(t *testing.T) {
 		})
 	}
 }
+
+func TestLogicalOperator_handleDoubleNot(t *testing.T) {
+	op := NewLogicalOperator(nil)
+
+	tests := []struct {
+		name     string
+		args     []interface{}
+		expected string
+		hasError bool
+	}{
+		{
+			name:     "empty array",
+			args:     []interface{}{[]interface{}{}},
+			expected: "FALSE",
+			hasError: false,
+		},
+		{
+			name:     "non-empty array",
+			args:     []interface{}{[]interface{}{1, 2, 3}},
+			expected: "TRUE",
+			hasError: false,
+		},
+		{
+			name:     "var expression",
+			args:     []interface{}{map[string]interface{}{"var": "value"}},
+			expected: "(value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')",
+			hasError: false,
+		},
+		{
+			name:     "numeric literal",
+			args:     []interface{}{42},
+			expected: "(42 IS NOT NULL AND 42 != FALSE AND 42 != 0 AND 42 != '')",
+			hasError: false,
+		},
+		{
+			name:     "string literal",
+			args:     []interface{}{"hello"},
+			expected: "('hello' IS NOT NULL AND 'hello' != FALSE AND 'hello' != 0 AND 'hello' != '')",
+			hasError: false,
+		},
+		{
+			name:     "boolean true",
+			args:     []interface{}{true},
+			expected: "(TRUE IS NOT NULL AND TRUE != FALSE AND TRUE != 0 AND TRUE != '')",
+			hasError: false,
+		},
+		{
+			name:     "no arguments - error",
+			args:     []interface{}{},
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "too many arguments - error",
+			args:     []interface{}{1, 2},
+			expected: "",
+			hasError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := op.handleDoubleNot(tt.args)
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("handleDoubleNot() expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("handleDoubleNot() unexpected error = %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("handleDoubleNot() = %v, want %v", result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+func TestLogicalOperator_handleIf_EdgeCases(t *testing.T) {
+	op := NewLogicalOperator(nil)
+
+	tests := []struct {
+		name     string
+		args     []interface{}
+		expected string
+		hasError bool
+	}{
+		{
+			name:     "simple if-then-else with nested conditions",
+			args:     []interface{}{map[string]interface{}{"var": "flag"}, "yes", "no"},
+			expected: "CASE WHEN flag THEN 'yes' ELSE 'no' END",
+			hasError: false,
+		},
+		{
+			name:     "if-then (two args)",
+			args:     []interface{}{true, "result"},
+			expected: "CASE WHEN TRUE THEN 'result' ELSE NULL END",
+			hasError: false,
+		},
+		{
+			name: "multiple condition-value pairs",
+			args: []interface{}{
+				map[string]interface{}{">": []interface{}{map[string]interface{}{"var": "score"}, 90}},
+				"A",
+				map[string]interface{}{">": []interface{}{map[string]interface{}{"var": "score"}, 80}},
+				"B",
+				"C",
+			},
+			expected: "CASE WHEN score > 90 THEN 'A' WHEN score > 80 THEN 'B' ELSE 'C' END",
+			hasError: false,
+		},
+		{
+			name:     "insufficient args - error",
+			args:     []interface{}{true},
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "no args - error",
+			args:     []interface{}{},
+			expected: "",
+			hasError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := op.handleIf(tt.args)
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("handleIf() expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("handleIf() unexpected error = %v", err)
+				}
+				if result != tt.expected {
+					t.Errorf("handleIf() = %v, want %v", result, tt.expected)
+				}
+			}
+		})
+	}
+}
