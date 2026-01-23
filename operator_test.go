@@ -756,3 +756,351 @@ func TestDialectAwareOperators(t *testing.T) {
 		}
 	})
 }
+
+// TestDeeplyNestedCustomOperators tests custom operators in deeply nested contexts.
+func TestDeeplyNestedCustomOperators(t *testing.T) {
+	// Helper to create a transpiler with common custom operators
+	setupTranspiler := func(dialect Dialect) *Transpiler {
+		tr, _ := NewTranspiler(dialect)
+		tr.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
+			if len(args) != 1 {
+				return "", fmt.Errorf("toLower requires 1 argument")
+			}
+			return fmt.Sprintf("LOWER(%s)", args[0]), nil
+		})
+		tr.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
+			if len(args) != 1 {
+				return "", fmt.Errorf("toUpper requires 1 argument")
+			}
+			return fmt.Sprintf("UPPER(%s)", args[0]), nil
+		})
+		tr.RegisterOperatorFunc("startsWith", func(op string, args []interface{}) (string, error) {
+			if len(args) != 2 {
+				return "", fmt.Errorf("startsWith requires 2 arguments")
+			}
+			return fmt.Sprintf("%s LIKE '%s%%'", args[0], args[1]), nil
+		})
+		tr.RegisterOperatorFunc("!startsWith", func(op string, args []interface{}) (string, error) {
+			if len(args) != 2 {
+				return "", fmt.Errorf("!startsWith requires 2 arguments")
+			}
+			return fmt.Sprintf("%s NOT LIKE '%s%%'", args[0], args[1]), nil
+		})
+		tr.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
+			if len(args) != 2 {
+				return "", fmt.Errorf("endsWith requires 2 arguments")
+			}
+			return fmt.Sprintf("%s LIKE '%%%s'", args[0], args[1]), nil
+		})
+		tr.RegisterOperatorFunc("!endsWith", func(op string, args []interface{}) (string, error) {
+			if len(args) != 2 {
+				return "", fmt.Errorf("!endsWith requires 2 arguments")
+			}
+			return fmt.Sprintf("%s NOT LIKE '%%%s'", args[0], args[1]), nil
+		})
+		tr.RegisterOperatorFunc("contains", func(op string, args []interface{}) (string, error) {
+			if len(args) != 2 {
+				return "", fmt.Errorf("contains requires 2 arguments")
+			}
+			return fmt.Sprintf("%s LIKE '%%%s%%'", args[0], args[1]), nil
+		})
+		tr.RegisterOperatorFunc("!contains", func(op string, args []interface{}) (string, error) {
+			if len(args) != 2 {
+				return "", fmt.Errorf("!contains requires 2 arguments")
+			}
+			return fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0], args[1]), nil
+		})
+		return tr
+	}
+
+	t.Run("custom operator inside cat", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"cat": [{"toLower": [{"var": "firstName"}]}, " ", {"toUpper": [{"var": "lastName"}]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "WHERE CONCAT(LOWER(firstName), ' ', UPPER(lastName))"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("custom operator inside if then/else branches", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"if": [{"==": [{"var": "type"}, "premium"]}, {"toUpper": [{"var": "name"}]}, {"toLower": [{"var": "name"}]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "WHERE CASE WHEN type = 'premium' THEN UPPER(name) ELSE LOWER(name) END"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("custom operator inside and/or", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"and": [{"startsWith": [{"var": "name"}, "A"]}, {"or": [{"endsWith": [{"var": "email"}, "@company.com"]}, {"!contains": [{"var": "desc"}, "spam"]}]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Note: string literals come pre-quoted from the parser
+		expected := "WHERE (name LIKE ''A'%' AND (email LIKE '%'@company.com'' OR desc NOT LIKE '%'spam'%'))"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("custom operator inside all array operator", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Note: string literals come pre-quoted from the parser
+		expected := "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%'))"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("custom operator inside some array operator", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"some": [{"var": "emails"}, {"endsWith": [{"var": "item"}, "@company.com"]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Note: string literals come pre-quoted from the parser
+		expected := "WHERE EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE '%'@company.com'')"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("custom operator inside none array operator", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"none": [{"var": "names"}, {"startsWith": [{"var": "item"}, "Bot"]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Note: string literals come pre-quoted from the parser
+		expected := "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE ''Bot'%')"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("custom operator inside filter array operator", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"filter": [{"var": "users"}, {"and": [{"!startsWith": [{"var": "item.name"}, "Test"]}, {"!endsWith": [{"var": "item.email"}, "@temp.com"]}]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Note: string literals come pre-quoted from the parser
+		expected := "WHERE ARRAY(SELECT elem FROM UNNEST(users) AS elem WHERE (elem.name NOT LIKE ''Test'%' AND elem.email NOT LIKE '%'@temp.com''))"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("custom operator inside map array operator", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"map": [{"var": "names"}, {"toLower": [{"var": "item"}]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "WHERE ARRAY(SELECT LOWER(elem) FROM UNNEST(names) AS elem)"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("custom operator inside reduce array operator", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"reduce": [{"var": "items"}, {"cat": [{"var": "accumulator"}, {"toUpper": [{"var": "current"}]}]}, ""]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "WHERE (SELECT CONCAT('', UPPER(elem)) FROM UNNEST(items) AS elem)"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("deeply nested: and with all containing custom operators", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": "item"}, "@valid.com"]}]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Note: string literals come pre-quoted from the parser
+		expected := "WHERE (NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE '%'@valid.com''))"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("deeply nested: or with none containing custom operators", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"or": [{"none": [{"var": "names"}, {"startsWith": [{"var": "item"}, "Bot"]}]}, {"all": [{"var": "scores"}, {">": [{"var": "item"}, 50]}]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Note: string literals come pre-quoted from the parser
+		expected := "WHERE (NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE ''Bot'%') OR NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem > 50)))"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("triple nested: and with or containing all/some/none", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"and": [{"or": [{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}, {"none": [{"var": "emails"}, {"startsWith": [{"var": "item"}, "blocked_"]}]}]}, {"some": [{"var": "scores"}, {">": [{"var": "item"}, 100]}]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Note: string literals come pre-quoted from the parser
+		expected := "WHERE ((NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')) OR NOT EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE ''blocked_'%')) AND EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE elem > 100))"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("filter with nested and/or and multiple custom operators", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"filter": [{"var": "transactions"}, {"and": [{"!startsWith": [{"var": "item.name"}, "VOID"]}, {"!endsWith": [{"var": "item.category"}, "_canceled"]}, {"!contains": [{"var": "item.email"}, "spam"]}]}]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Note: string literals come pre-quoted from the parser
+		expected := "WHERE ARRAY(SELECT elem FROM UNNEST(transactions) AS elem WHERE (elem.name NOT LIKE ''VOID'%' AND elem.category NOT LIKE '%'_canceled'' AND elem.email NOT LIKE '%'spam'%'))"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("if with all condition in then branch", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"if": [{"all": [{"var": "scores"}, {">": [{"var": "item"}, 50]}]}, {"var": "status"}, "FAILED"]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "WHERE CASE WHEN NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem > 50)) THEN status ELSE 'FAILED' END"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("comparison with custom operator result", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"==": [{"toLower": [{"var": "status"}]}, "active"]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "WHERE LOWER(status) = 'active'"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+
+	t.Run("nested custom operators inside substr", func(t *testing.T) {
+		tr := setupTranspiler(DialectBigQuery)
+		sql, err := tr.Transpile(`{"!=": [{"substr": [{"toUpper": [{"var": "region"}]}, 0, 2]}, "XX"]}`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := "WHERE SUBSTR(UPPER(region), 1, 2) != 'XX'"
+		if sql != expected {
+			t.Errorf("expected %s, got %s", expected, sql)
+		}
+	})
+}
+
+// TestDeeplyNestedCustomOperatorsMultiDialect tests deeply nested custom operators across all dialects.
+func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
+	dialects := []struct {
+		dialect Dialect
+		name    string
+	}{
+		{DialectBigQuery, "BigQuery"},
+		{DialectSpanner, "Spanner"},
+		{DialectPostgreSQL, "PostgreSQL"},
+		{DialectDuckDB, "DuckDB"},
+		{DialectClickHouse, "ClickHouse"},
+	}
+
+	// Helper to create a transpiler with common custom operators
+	setupTranspiler := func(dialect Dialect) *Transpiler {
+		tr, _ := NewTranspiler(dialect)
+		tr.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
+			return fmt.Sprintf("LOWER(%s)", args[0]), nil
+		})
+		tr.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
+			return fmt.Sprintf("UPPER(%s)", args[0]), nil
+		})
+		tr.RegisterOperatorFunc("!contains", func(op string, args []interface{}) (string, error) {
+			return fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0], args[1]), nil
+		})
+		tr.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
+			return fmt.Sprintf("%s LIKE '%%%s'", args[0], args[1]), nil
+		})
+		return tr
+	}
+
+	for _, d := range dialects {
+		t.Run(d.name, func(t *testing.T) {
+			tr := setupTranspiler(d.dialect)
+
+			// Test: custom operator inside cat
+			sql, err := tr.Transpile(`{"cat": ["Hello ", {"toUpper": [{"var": "name"}]}]}`)
+			if err != nil {
+				t.Errorf("[%s] cat with custom operator: unexpected error: %v", d.name, err)
+			}
+			if sql != "WHERE CONCAT('Hello ', UPPER(name))" {
+				t.Errorf("[%s] cat with custom operator: got %s", d.name, sql)
+			}
+
+			// Test: custom operator inside map
+			sql, err = tr.Transpile(`{"map": [{"var": "tags"}, {"toLower": [{"var": "item"}]}]}`)
+			if err != nil {
+				t.Errorf("[%s] map with custom operator: unexpected error: %v", d.name, err)
+			}
+			// ClickHouse uses arrayMap, others use UNNEST
+			if d.dialect == DialectClickHouse {
+				if sql != "WHERE arrayMap(elem -> LOWER(elem), tags)" {
+					t.Errorf("[%s] map with custom operator: got %s", d.name, sql)
+				}
+			} else {
+				if sql != "WHERE ARRAY(SELECT LOWER(elem) FROM UNNEST(tags) AS elem)" {
+					t.Errorf("[%s] map with custom operator: got %s", d.name, sql)
+				}
+			}
+
+			// Test: custom operator inside all
+			sql, err = tr.Transpile(`{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}`)
+			if err != nil {
+				t.Errorf("[%s] all with custom operator: unexpected error: %v", d.name, err)
+			}
+			// ClickHouse uses arrayAll, others use NOT EXISTS
+			// Note: string literals come pre-quoted from the parser
+			if d.dialect == DialectClickHouse {
+				if sql != "WHERE arrayAll(elem -> elem NOT LIKE '%'spam'%', tags)" {
+					t.Errorf("[%s] all with custom operator: got %s", d.name, sql)
+				}
+			} else {
+				if sql != "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%'))" {
+					t.Errorf("[%s] all with custom operator: got %s", d.name, sql)
+				}
+			}
+
+			// Test: and with all and some containing custom operators
+			sql, err = tr.Transpile(`{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": "item"}, "@valid.com"]}]}]}`)
+			if err != nil {
+				t.Errorf("[%s] and with all/some: unexpected error: %v", d.name, err)
+			}
+			// Just verify no error - detailed output differs by dialect
+			if sql == "" {
+				t.Errorf("[%s] and with all/some: got empty result", d.name)
+			}
+		})
+	}
+}
