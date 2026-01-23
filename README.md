@@ -1,6 +1,6 @@
 # JSON Logic to SQL Transpiler
 
-A Go library that converts JSON Logic expressions into SQL WHERE clauses. This library provides a clean, type-safe API for transforming JSON Logic rules into SQL with support for multiple SQL dialects.
+A Go library that converts JSON Logic expressions into SQL. This library provides a clean, type-safe API for transforming JSON Logic rules into SQL WHERE clauses or standalone conditions, with support for multiple SQL dialects.
 
 ## Features
 
@@ -267,7 +267,7 @@ transpiler.ClearCustomOperators()
 
 #### Dialect-Aware Custom Operators
 
-For operators that generate different SQL based on the target dialect, use the dialect-aware registration methods. This is useful when SQL syntax differs between BigQuery and Spanner:
+For operators that generate different SQL based on the target dialect, use the dialect-aware registration methods. This is useful when SQL syntax differs between dialects (BigQuery, Spanner, PostgreSQL, DuckDB, ClickHouse):
 
 ```go
 transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
@@ -399,9 +399,9 @@ sql, _ := transpiler.Transpile(`{"cat": [{"toLower": [{"var": "firstName"}]}, " 
 sql, _ = transpiler.Transpile(`{"if": [{"==": [{"var": "type"}, "premium"]}, {"toUpper": [{"var": "name"}]}, {"toLower": [{"var": "name"}]}]}`)
 // Output: WHERE CASE WHEN type = 'premium' THEN UPPER(name) ELSE LOWER(name) END
 
-// Custom operators nested inside reduce (array aggregation)
-sql, _ = transpiler.Transpile(`{">": [{"reduce": [{"var": "items"}, {"+": [{"var": "accumulator"}, {"toLower": [{"var": "current"}]}]}, 0]}, 100]}`)
-// Generates proper SQL with LOWER() inside the reduce expression
+// Custom operators nested inside comparison with reduce
+sql, _ = transpiler.Transpile(`{"==": [{"toLower": [{"var": "status"}]}, "active"]}`)
+// Output: WHERE LOWER(status) = 'active'
 
 // Custom operators inside and/or (logical operators)
 sql, _ = transpiler.Transpile(`{"and": [{"==": [{"toLower": [{"var": "status"}]}, "active"]}, {">": [{"var": "amount"}, 100]}]}`)
@@ -1149,7 +1149,7 @@ jsonlogic2sql/
 
 The project includes comprehensive tests:
 
-- **Unit Tests**: Each operator and component is thoroughly tested (1,500+ test cases passing)
+- **Unit Tests**: Each operator and component is thoroughly tested (3,000+ test cases passing)
 - **Integration Tests**: End-to-end tests with real JSON Logic examples (168 REPL test cases)
 - **Error Cases**: Validation and error handling tests
 - **Edge Cases**: Boundary conditions and special cases
@@ -1182,22 +1182,22 @@ go test ./internal/operators/
 
 ### Functions
 
-#### `Transpile(jsonLogic string) (string, error)`
-Converts a JSON Logic string to a SQL WHERE clause.
+#### `Transpile(dialect Dialect, jsonLogic string) (string, error)`
+Converts a JSON Logic string to a SQL WHERE clause using the specified dialect.
 
-#### `TranspileFromMap(logic map[string]interface{}) (string, error)`
-Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
+#### `TranspileFromMap(dialect Dialect, logic map[string]interface{}) (string, error)`
+Converts a pre-parsed JSON Logic map to a SQL WHERE clause using the specified dialect.
 
-#### `TranspileFromInterface(logic interface{}) (string, error)`
-Converts any JSON Logic interface{} to a SQL WHERE clause.
+#### `TranspileFromInterface(dialect Dialect, logic interface{}) (string, error)`
+Converts any JSON Logic interface{} to a SQL WHERE clause using the specified dialect.
 
-#### `TranspileCondition(jsonLogic string) (string, error)`
+#### `TranspileCondition(dialect Dialect, jsonLogic string) (string, error)`
 Converts a JSON Logic string to a SQL condition **without** the WHERE keyword. Useful when embedding conditions in larger queries.
 
-#### `TranspileConditionFromMap(logic map[string]interface{}) (string, error)`
+#### `TranspileConditionFromMap(dialect Dialect, logic map[string]interface{}) (string, error)`
 Converts a pre-parsed JSON Logic map to a SQL condition without the WHERE keyword.
 
-#### `TranspileConditionFromInterface(logic interface{}) (string, error)`
+#### `TranspileConditionFromInterface(dialect Dialect, logic interface{}) (string, error)`
 Converts any JSON Logic interface{} to a SQL condition without the WHERE keyword.
 
 #### `NewTranspiler(dialect Dialect) (*Transpiler, error)`
