@@ -114,15 +114,90 @@ func (l *LogicalOperator) handleDoubleNot(args []interface{}) (string, error) {
 		return "TRUE", nil
 	}
 
+	// Try to extract field name for schema-aware type checking
+	fieldName := l.extractVarFieldName(args[0])
+
 	condition, err := l.expressionToSQL(args[0])
 	if err != nil {
 		return "", fmt.Errorf("invalid !! argument: %w", err)
 	}
 
-	// !! converts to boolean - check for non-null/truthy values
+	// If we have a schema and a field name, generate type-appropriate SQL
+	if fieldName != "" && l.config != nil && l.config.Schema != nil {
+		return l.generateTypeSafeTruthiness(condition, fieldName)
+	}
+
+	// Fallback: generic truthiness check for non-null/truthy values
 	// This checks for non-null, non-false, non-zero, non-empty string
 	return fmt.Sprintf("(%s IS NOT NULL AND %s != FALSE AND %s != 0 AND %s != '')",
 		condition, condition, condition, condition), nil
+}
+
+// extractVarFieldName extracts the field name from a var expression.
+// Returns empty string if the argument is not a simple var expression.
+func (l *LogicalOperator) extractVarFieldName(arg interface{}) string {
+	obj, ok := arg.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	if len(obj) != 1 {
+		return ""
+	}
+
+	varArgs, ok := obj["var"]
+	if !ok {
+		return ""
+	}
+
+	// Handle {"var": "fieldName"} format
+	if fieldName, ok := varArgs.(string); ok {
+		return fieldName
+	}
+
+	// Handle {"var": ["fieldName", defaultValue]} format
+	if arr, ok := varArgs.([]interface{}); ok && len(arr) > 0 {
+		if fieldName, ok := arr[0].(string); ok {
+			return fieldName
+		}
+	}
+
+	return ""
+}
+
+// generateTypeSafeTruthiness generates type-appropriate SQL for truthiness check.
+func (l *LogicalOperator) generateTypeSafeTruthiness(condition, fieldName string) (string, error) {
+	schema := l.config.Schema
+
+	// Check field type and generate appropriate SQL
+	switch {
+	case schema.IsBooleanType(fieldName):
+		// For boolean fields: field IS TRUE
+		// This is the cleanest check for boolean truthiness
+		return fmt.Sprintf("%s IS TRUE", condition), nil
+
+	case schema.IsStringType(fieldName):
+		// For string fields: field IS NOT NULL AND field != ''
+		return fmt.Sprintf("(%s IS NOT NULL AND %s != '')", condition, condition), nil
+
+	case schema.IsNumericType(fieldName):
+		// For numeric fields (integer/number): field IS NOT NULL AND field != 0
+		return fmt.Sprintf("(%s IS NOT NULL AND %s != 0)", condition, condition), nil
+
+	case schema.IsArrayType(fieldName):
+		// For array fields: check non-null and non-empty
+		// Use CARDINALITY which is supported by BigQuery, Spanner, PostgreSQL, DuckDB
+		// For ClickHouse, use length()
+		if l.config != nil && l.config.GetDialect().String() == "ClickHouse" {
+			return fmt.Sprintf("(%s IS NOT NULL AND length(%s) > 0)", condition, condition), nil
+		}
+		return fmt.Sprintf("(%s IS NOT NULL AND CARDINALITY(%s) > 0)", condition, condition), nil
+
+	default:
+		// Unknown type or field not in schema: use generic check
+		return fmt.Sprintf("(%s IS NOT NULL AND %s != FALSE AND %s != 0 AND %s != '')",
+			condition, condition, condition, condition), nil
+	}
 }
 
 // handleIf converts if operator to SQL.
