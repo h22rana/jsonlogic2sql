@@ -45,6 +45,13 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 
 	// Handle string argument (direct variable name)
 	if varName, ok := args[0].(string); ok {
+		// Special case: empty var name represents the current element in array operations
+		// In JSON Logic, {"var": ""} means "the current data context"
+		// In array operations (map, filter, reduce), this refers to the current element
+		if varName == "" {
+			return ElemVar, nil
+		}
+
 		// Validate field against schema if schema is provided
 		if d.schema() != nil {
 			if err := d.schema().ValidateField(varName); err != nil {

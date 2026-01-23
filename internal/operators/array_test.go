@@ -336,6 +336,35 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					expected: "100 + COALESCE((SELECT SUM(elem) FROM UNNEST([10 20 30]) AS elem), 0)",
 					hasError: false,
 				},
+				// Reduce with current.field patterns (accessing object field)
+				{
+					name:     "reduce with SUM pattern on current.price",
+					operator: "reduce",
+					args:     []any{map[string]any{"var": "items"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.price"}}}, 0},
+					expected: "0 + COALESCE((SELECT SUM(elem.price) FROM UNNEST(items) AS elem), 0)",
+					hasError: false,
+				},
+				{
+					name:     "reduce with MAX pattern on current.value",
+					operator: "reduce",
+					args:     []any{map[string]any{"var": "readings"}, map[string]any{"max": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.value"}}}, 0},
+					expected: "0 + COALESCE((SELECT MAX(elem.value) FROM UNNEST(readings) AS elem), 0)",
+					hasError: false,
+				},
+				{
+					name:     "reduce with MIN pattern on current.amount",
+					operator: "reduce",
+					args:     []any{map[string]any{"var": "transactions"}, map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.amount"}}}, 9999999},
+					expected: "9999999 + COALESCE((SELECT MIN(elem.amount) FROM UNNEST(transactions) AS elem), 0)",
+					hasError: false,
+				},
+				{
+					name:     "reduce with SUM pattern on deeply nested current.data.metrics.count",
+					operator: "reduce",
+					args:     []any{map[string]any{"var": "logs"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.data.metrics.count"}}}, 0},
+					expected: "0 + COALESCE((SELECT SUM(elem.data.metrics.count) FROM UNNEST(logs) AS elem), 0)",
+					hasError: false,
+				},
 
 				// All tests
 				{
@@ -928,6 +957,27 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 			operator: "reduce",
 			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 0},
 			expected: "0 + coalesce(arrayReduce('sum', numbers), 0)",
+			hasError: false,
+		},
+		{
+			name:     "reduce with SUM pattern on current.price (ClickHouse)",
+			operator: "reduce",
+			args:     []any{map[string]any{"var": "items"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.price"}}}, 0},
+			expected: "0 + coalesce(arrayReduce('sum', arrayMap(x -> x.price, items)), 0)",
+			hasError: false,
+		},
+		{
+			name:     "reduce with MAX pattern on current.value (ClickHouse)",
+			operator: "reduce",
+			args:     []any{map[string]any{"var": "readings"}, map[string]any{"max": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.value"}}}, 0},
+			expected: "0 + coalesce(arrayReduce('max', arrayMap(x -> x.value, readings)), 0)",
+			hasError: false,
+		},
+		{
+			name:     "reduce with MIN pattern on current.amount (ClickHouse)",
+			operator: "reduce",
+			args:     []any{map[string]any{"var": "transactions"}, map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.amount"}}}, 9999999},
+			expected: "9999999 + coalesce(arrayReduce('min', arrayMap(x -> x.amount, transactions)), 0)",
 			hasError: false,
 		},
 		// All - uses arrayAll
