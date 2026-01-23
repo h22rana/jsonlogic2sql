@@ -559,6 +559,15 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 
 // valueToSQL converts a value to SQL, handling var expressions, arrays, and literals.
 func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
+	// Handle ProcessedValue (pre-processed SQL from parser)
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return pv.Value, nil
+		}
+		// It's a literal, convert it
+		return a.dataOp.valueToSQL(pv.Value)
+	}
+
 	// Handle complex expressions (operators)
 	if expr, ok := value.(map[string]interface{}); ok {
 		// Check if it's a var expression
@@ -589,6 +598,15 @@ func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
 
 // expressionToSQL converts a JSON Logic expression to SQL.
 func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
+	// Handle ProcessedValue (pre-processed SQL from parser)
+	if pv, ok := expr.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return pv.Value, nil
+		}
+		// It's a literal, recursively convert it
+		return a.expressionToSQL(pv.Value)
+	}
+
 	// Handle primitive values
 	if a.isPrimitive(expr) {
 		return a.dataOp.valueToSQL(expr)
@@ -642,13 +660,15 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 
 // replaceElementReference replaces element references in conditions.
 // For now, this is a simple implementation that assumes the condition uses a variable.
-// It replaces "item" references with "elem" for UNNEST subqueries.
+// It replaces "item" and "current" references with "elem" for UNNEST subqueries.
 func (a *ArrayOperator) replaceElementReference(condition string) string {
 	// Replace variable references in the condition with the element name
-	// This handles cases where {"var": "item"} should become "elem"
+	// This handles cases where {"var": "item"} or {"var": "current"} should become "elem"
 	// Simple string replacement for now - in a more complex implementation,
 	// you'd want to parse the SQL and replace variable references properly
-	return strings.ReplaceAll(condition, ItemVar, ElemVar)
+	result := strings.ReplaceAll(condition, ItemVar, ElemVar)
+	result = strings.ReplaceAll(result, CurrentVar, ElemVar)
+	return result
 }
 
 // isPrimitive checks if a value is a primitive type.

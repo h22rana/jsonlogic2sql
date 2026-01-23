@@ -297,6 +297,15 @@ func (n *NumericOperator) handleMin(args []interface{}) (string, error) {
 
 // valueToSQL converts a value to SQL, handling var expressions and literals.
 func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
+	// Handle ProcessedValue (pre-processed SQL from parser)
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return pv.Value, nil
+		}
+		// It's a literal, convert it
+		return n.dataOp.valueToSQL(pv.Value)
+	}
+
 	// Handle pre-processed SQL strings from the parser
 	if sqlStr, ok := value.(string); ok {
 		// This is a pre-processed SQL string from the parser

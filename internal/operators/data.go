@@ -249,6 +249,15 @@ func (d *DataOperator) getNumber(value interface{}) (float64, error) {
 
 // valueToSQL converts a Go value to SQL literal.
 func (d *DataOperator) valueToSQL(value interface{}) (string, error) {
+	// Handle ProcessedValue (pre-processed SQL from parser)
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return pv.Value, nil
+		}
+		// It's a literal, recursively convert it
+		return d.valueToSQL(pv.Value)
+	}
+
 	switch v := value.(type) {
 	case string:
 		// Escape single quotes in strings
