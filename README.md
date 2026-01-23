@@ -10,6 +10,7 @@ A Go library that converts JSON Logic expressions into SQL. This library provide
 - **Dialect-Aware Custom Operators**: Register operators that generate different SQL per dialect
 - **Nested Custom Operators**: Custom operators work seamlessly when nested inside built-in operators (`cat`, `if`, `and`, etc.)
 - **Schema/Metadata Validation**: Optional field schema to enforce strict column validation and type-aware SQL generation
+- **Schema-Aware Truthiness**: The `!!` operator generates type-appropriate SQL based on field schema (boolean → `IS TRUE`, string → `!= ''`, numeric → `!= 0`, array → `CARDINALITY > 0`)
 - **Dialect-Specific SQL**: Generates optimized SQL with proper syntax for each supported dialect
 - **Complex Nested Expressions**: Full support for deeply nested arithmetic and logical operations
 - **Array Operations**: Complete support for all/none/some with proper SQL subqueries
@@ -24,6 +25,12 @@ A Go library that converts JSON Logic expressions into SQL. This library provide
 - **Structured Errors**: Error codes, JSONPath locations, and programmatic error handling via `AsTranspileError()` and `IsErrorCode()`
 - **Library & CLI**: Both programmatic API and interactive REPL
 - **Type Safety**: Full Go type safety with proper error handling
+
+## Important Notes
+
+> **Semantic Correctness Assumption:** This library assumes that the input JSONLogic is semantically correct. The transpiler generates SQL that directly corresponds to the JSONLogic structure without validating the logical correctness of the expressions. For example, if a JSONLogic expression uses a non-boolean value in a boolean context (e.g., `{"and": [{"var": "name"}]}`), the generated SQL will reflect this structure. It is the caller's responsibility to ensure that JSONLogic expressions are semantically valid for their intended use case.
+
+> **SQL Injection:** This library does NOT handle SQL injection prevention. The caller is responsible for validating input and using parameterized queries where appropriate.
 
 ## Supported Operators
 
@@ -648,6 +655,30 @@ Example JSON Logic expressions:
 jsonlogic> :quit
 ```
 
+#### REPL Commands
+
+| Command | Description |
+|---------|-------------|
+| `:help` | Show available commands |
+| `:examples` | Show example JSON Logic expressions |
+| `:dialect` | Change the SQL dialect |
+| `:file <path>` | Read JSON Logic from a file (for large inputs) |
+| `:clear` | Clear the screen |
+| `:quit` | Exit the REPL |
+
+#### Large JSON Input Support
+
+For JSON Logic expressions larger than ~4KB (terminal line input limit), use the `:file` command to load from a file:
+
+```bash
+# Save your large JSON to a file
+echo '{"and": [...very large JSON...]}' > input.json
+
+# In the REPL, load it with :file
+[BigQuery] jsonlogic> :file input.json
+SQL: WHERE (...)
+```
+
 ## Examples
 
 ### Data Access Operations
@@ -787,8 +818,23 @@ WHERE NOT (TRUE)
 {"!!": [{"var": "value"}]}
 ```
 ```sql
+-- Without schema (generic truthiness check):
 WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
+
+-- With schema (type-appropriate SQL - see Schema-Aware Truthiness below)
 ```
+
+#### Schema-Aware Truthiness
+
+When a schema is provided, the `!!` operator generates type-appropriate SQL to avoid type mismatch errors in strongly-typed databases:
+
+| Field Type | JSONLogic | Generated SQL |
+|------------|-----------|---------------|
+| Boolean | `{"!!": {"var": "is_verified"}}` | `is_verified IS TRUE` |
+| String | `{"!!": {"var": "name"}}` | `(name IS NOT NULL AND name != '')` |
+| Integer/Number | `{"!!": {"var": "amount"}}` | `(amount IS NOT NULL AND amount != 0)` |
+| Array (BigQuery/Spanner/PostgreSQL/DuckDB) | `{"!!": {"var": "tags"}}` | `(tags IS NOT NULL AND CARDINALITY(tags) > 0)` |
+| Array (ClickHouse) | `{"!!": {"var": "tags"}}` | `(tags IS NOT NULL AND length(tags) > 0)` |
 
 #### Double Negation (Empty Array)
 ```json
