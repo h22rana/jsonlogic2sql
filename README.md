@@ -8,6 +8,7 @@ A Go library that converts JSON Logic expressions into SQL WHERE clauses. This l
 - **SQL Dialect Support**: Target BigQuery, Spanner, PostgreSQL, DuckDB, or ClickHouse with dialect-specific SQL generation
 - **Custom Operators**: Extensible registry pattern to add custom SQL functions (LENGTH, UPPER, etc.)
 - **Dialect-Aware Custom Operators**: Register operators that generate different SQL per dialect
+- **Nested Custom Operators**: Custom operators work seamlessly when nested inside built-in operators (`cat`, `if`, `and`, etc.)
 - **Schema/Metadata Validation**: Optional field schema to enforce strict column validation and type-aware SQL generation
 - **Dialect-Specific SQL**: Generates optimized SQL with proper syntax for each supported dialect
 - **Complex Nested Expressions**: Full support for deeply nested arithmetic and logical operations
@@ -373,6 +374,65 @@ This example filters records where:
 - Status is either "active" or "pending"
 - Either the region starts with "US" OR priority is 5 or higher
 - Category contains "premium"
+
+#### Nested Custom Operators
+
+Custom operators work seamlessly when nested inside any built-in operator. This enables complex transformations combining custom SQL functions with JSONLogic's built-in operators.
+
+```go
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+// Register custom operators
+transpiler.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LOWER(%s)", args[0]), nil
+})
+
+transpiler.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+})
+
+// Custom operators nested inside cat (string concatenation)
+sql, _ := transpiler.Transpile(`{"cat": [{"toLower": [{"var": "firstName"}]}, " ", {"toUpper": [{"var": "lastName"}]}]}`)
+// Output: WHERE CONCAT(LOWER(firstName), ' ', UPPER(lastName))
+
+// Custom operators nested inside if (conditional)
+sql, _ = transpiler.Transpile(`{"if": [{"==": [{"var": "type"}, "premium"]}, {"toUpper": [{"var": "name"}]}, {"toLower": [{"var": "name"}]}]}`)
+// Output: WHERE CASE WHEN type = 'premium' THEN UPPER(name) ELSE LOWER(name) END
+
+// Custom operators nested inside reduce (array aggregation)
+sql, _ = transpiler.Transpile(`{">": [{"reduce": [{"var": "items"}, {"+": [{"var": "accumulator"}, {"toLower": [{"var": "current"}]}]}, 0]}, 100]}`)
+// Generates proper SQL with LOWER() inside the reduce expression
+
+// Custom operators inside and/or (logical operators)
+sql, _ = transpiler.Transpile(`{"and": [{"==": [{"toLower": [{"var": "status"}]}, "active"]}, {">": [{"var": "amount"}, 100]}]}`)
+// Output: WHERE (LOWER(status) = 'active' AND amount > 100)
+```
+
+**Deeply Nested Example:**
+
+```json
+{
+  "and": [
+    {"==": [{"toLower": [{"var": "status"}]}, "active"]},
+    {">": [
+      {"reduce": [
+        {"filter": [{"var": "items"}, {">": [{"var": ""}, 0]}]},
+        {"+": [{"var": "accumulator"}, {"var": "current"}]},
+        0
+      ]},
+      1000
+    ]},
+    {"!=": [{"substr": [{"toUpper": [{"var": "region"}]}, 0, 2]}, "XX"]}
+  ]
+}
+```
+
+This demonstrates:
+- `toLower` nested inside `and` → `==`
+- `filter` nested inside `reduce` nested inside `>` nested inside `and`
+- `toUpper` nested inside `substr` nested inside `!=` nested inside `and`
+
+All custom operators are dialect-aware, so they generate the correct SQL for each target database when using `RegisterDialectAwareOperatorFunc`.
 
 ### Schema/Metadata Validation
 
@@ -1100,6 +1160,7 @@ The project includes comprehensive tests:
 - **Multiple Field Checks**: Missing operator supports both single and multiple fields
 - **NULL Handling**: Proper IS NULL/IS NOT NULL for null comparisons
 - **Nested Conditionals**: If expressions inside string concatenation
+- **Nested Custom Operators**: Custom operators work inside all built-in operators
 
 Run tests with:
 
