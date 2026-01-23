@@ -665,7 +665,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested arithmetic in reduce",
 			input:    `{"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current"}, 2]}]}, 0]}`,
-			expected: "WHERE (SELECT (0 + (current * 2)) FROM UNNEST(numbers) AS elem)",
+			expected: "WHERE (SELECT (0 + (elem * 2)) FROM UNNEST(numbers) AS elem)",
 			hasError: false,
 		},
 		{
@@ -683,7 +683,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "deeply nested reduce filter",
 			input:    `{"reduce": [{"filter": [{"var": "data"}, {"and": [{"some": [{"var": "tags"}, {"==": [{"var": "elem"}, "important"]}]}, {">": [{"var": "value"}, 0]}]}]}, {"+": [{"var": "accumulator"}, {"reduce": [{"var": "current.subitems"}, {"+": [{"var": "acc"}, {"var": "item"}]}, 0]}]}, 0]}`,
-			expected: "WHERE (SELECT (0 + (SELECT (acc + elem) FROM UNNEST(current.subelems) AS elem)) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE (EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem = 'important') AND value > 0))) AS elem)",
+			expected: "WHERE (SELECT (0 + (SELECT (acc + elem) FROM UNNEST(elem.subelems) AS elem)) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE (EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem = 'important') AND value > 0))) AS elem)",
 			hasError: false,
 		},
 		{
@@ -719,7 +719,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested reduce with complex expression",
 			input:    `{"reduce": [{"var": "items"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current.price"}, {"if": [{">": [{"var": "current.discount"}, 0]}, {"-": [1, {"var": "current.discount"}]}, 1]}]}]}, 0]}`,
-			expected: "WHERE (SELECT (0 + (current.price * CASE WHEN current.discount > 0 THEN (1 - current.discount) ELSE 1 END)) FROM UNNEST(items) AS elem)",
+			expected: "WHERE (SELECT (0 + (elem.price * CASE WHEN elem.discount > 0 THEN (1 - elem.discount) ELSE 1 END)) FROM UNNEST(items) AS elem)",
 			hasError: false,
 		},
 		{
@@ -749,7 +749,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "very deeply nested",
 			input:    `{"and": [{"some": [{"filter": [{"var": "data"}, {">": [{"var": "value"}, 0]}]}, {"all": [{"var": "elem.items"}, {">=": [{"var": "elem.score"}, 50]}]}]}, {">": [{"reduce": [{"var": "totals"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current"}, {"if": [{">": [{"var": "current"}, 100]}, 2, 1]}]}]}, 0]}, 1000]}]}`,
-			expected: "WHERE (EXISTS (SELECT 1 FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE value > 0)) AS elem WHERE NOT EXISTS (SELECT 1 FROM UNNEST(elem.elems) AS elem WHERE NOT (elem.score >= 50))) AND (SELECT (0 + (current * CASE WHEN current > 100 THEN 2 ELSE 1 END)) FROM UNNEST(totals) AS elem) > 1000)",
+			expected: "WHERE (EXISTS (SELECT 1 FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE value > 0)) AS elem WHERE NOT EXISTS (SELECT 1 FROM UNNEST(elem.elems) AS elem WHERE NOT (elem.score >= 50))) AND (SELECT (0 + (elem * CASE WHEN elem > 100 THEN 2 ELSE 1 END)) FROM UNNEST(totals) AS elem) > 1000)",
 			hasError: false,
 		},
 		{
@@ -1226,7 +1226,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				{
 					name:     "reduce with multiplication pattern",
 					input:    `{"reduce": [{"var": "numbers"}, {"*": [{"var": "accumulator"}, {"var": "current"}]}, 1]}`,
-					expected: "WHERE (SELECT (1 * current) FROM UNNEST(numbers) AS elem)",
+					expected: "WHERE (SELECT (1 * elem) FROM UNNEST(numbers) AS elem)",
 				},
 
 				// All operator tests
