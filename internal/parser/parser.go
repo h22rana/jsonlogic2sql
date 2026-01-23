@@ -39,7 +39,7 @@ func NewParser(config *operators.OperatorConfig) *Parser {
 		// Default to BigQuery for backward compatibility in internal usage
 		config = operators.NewOperatorConfig(dialect.DialectBigQuery, nil)
 	}
-	return &Parser{
+	p := &Parser{
 		validator:    validator.NewValidator(),
 		config:       config,
 		dataOp:       operators.NewDataOperator(config),
@@ -49,6 +49,12 @@ func NewParser(config *operators.OperatorConfig) *Parser {
 		stringOp:     operators.NewStringOperator(config),
 		arrayOp:      operators.NewArrayOperator(config),
 	}
+
+	// Set the expression parser callback so operators can delegate
+	// nested expression parsing back to the parser (enabling custom operators)
+	config.SetExpressionParser(p.parseExpression)
+
+	return p
 }
 
 // SetCustomOperatorLookup sets the function used to look up custom operators.

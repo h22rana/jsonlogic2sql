@@ -203,7 +203,46 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 				case "if":
 					// Handle conditional expressions
 					return s.processIfExpression(args)
+				case "substr":
+					// Handle nested substr operations
+					argsSlice, ok := args.([]interface{})
+					if !ok {
+						return "", fmt.Errorf("substr requires array of arguments")
+					}
+					return s.handleSubstring(argsSlice)
+				case "cat":
+					// Handle nested cat operations
+					argsSlice, ok := args.([]interface{})
+					if !ok {
+						return "", fmt.Errorf("cat requires array of arguments")
+					}
+					return s.handleConcatenation(argsSlice)
+				case "max", "min":
+					// Handle max/min operations
+					argsSlice, ok := args.([]interface{})
+					if !ok {
+						return "", fmt.Errorf("%s requires array of arguments", op)
+					}
+					return s.processMaxMinExpression(op, argsSlice)
+				case "and", "or":
+					// Handle logical operations
+					argsSlice, ok := args.([]interface{})
+					if !ok {
+						return "", fmt.Errorf("%s requires array of arguments", op)
+					}
+					return s.processLogicalExpression(op, argsSlice)
+				case "!":
+					// Handle NOT operation
+					return s.processNotExpression(args)
+				case "!!":
+					// Handle boolean coercion
+					return s.processBooleanCoercion(args)
 				default:
+					// Try to use the expression parser callback for unknown operators
+					// This enables support for custom operators in nested contexts
+					if s.config != nil && s.config.HasExpressionParser() {
+						return s.config.ParseExpression(expr, "$")
+					}
 					return "", fmt.Errorf("unsupported expression type in string operation: %s", op)
 				}
 			}
@@ -379,4 +418,93 @@ func (s *StringOperator) processComparisonExpression(op string, args interface{}
 	default:
 		return "", fmt.Errorf("unsupported comparison operation: %s", op)
 	}
+}
+
+// processMaxMinExpression handles max/min operations within string operations.
+func (s *StringOperator) processMaxMinExpression(op string, args []interface{}) (string, error) {
+	if len(args) < 1 {
+		return "", fmt.Errorf("%s requires at least 1 argument", op)
+	}
+
+	operands := make([]string, len(args))
+	for i, arg := range args {
+		operand, err := s.valueToSQL(arg)
+		if err != nil {
+			return "", fmt.Errorf("invalid %s argument %d: %w", op, i, err)
+		}
+		operands[i] = operand
+	}
+
+	funcName := "GREATEST"
+	if op == "min" {
+		funcName = "LEAST"
+	}
+
+	return fmt.Sprintf("%s(%s)", funcName, strings.Join(operands, ", ")), nil
+}
+
+// processLogicalExpression handles and/or operations within string operations.
+func (s *StringOperator) processLogicalExpression(op string, args []interface{}) (string, error) {
+	if len(args) < 1 {
+		return "", fmt.Errorf("%s requires at least 1 argument", op)
+	}
+
+	operands := make([]string, len(args))
+	for i, arg := range args {
+		operand, err := s.valueToSQL(arg)
+		if err != nil {
+			return "", fmt.Errorf("invalid %s argument %d: %w", op, i, err)
+		}
+		operands[i] = operand
+	}
+
+	sqlOp := " AND "
+	if op == "or" {
+		sqlOp = " OR "
+	}
+
+	return fmt.Sprintf("(%s)", strings.Join(operands, sqlOp)), nil
+}
+
+// processNotExpression handles NOT (!) operation within string operations.
+func (s *StringOperator) processNotExpression(args interface{}) (string, error) {
+	// Handle single value or array with single element
+	var value interface{}
+	if argsSlice, ok := args.([]interface{}); ok {
+		if len(argsSlice) != 1 {
+			return "", fmt.Errorf("NOT operation requires exactly 1 argument")
+		}
+		value = argsSlice[0]
+	} else {
+		value = args
+	}
+
+	operand, err := s.valueToSQL(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid NOT argument: %w", err)
+	}
+
+	return fmt.Sprintf("NOT (%s)", operand), nil
+}
+
+// processBooleanCoercion handles boolean coercion (!!) within string operations.
+func (s *StringOperator) processBooleanCoercion(args interface{}) (string, error) {
+	// Handle single value or array with single element
+	var value interface{}
+	if argsSlice, ok := args.([]interface{}); ok {
+		if len(argsSlice) != 1 {
+			return "", fmt.Errorf("boolean coercion requires exactly 1 argument")
+		}
+		value = argsSlice[0]
+	} else {
+		value = args
+	}
+
+	operand, err := s.valueToSQL(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid boolean coercion argument: %w", err)
+	}
+
+	// Boolean coercion: check if value is truthy
+	return fmt.Sprintf("(%s IS NOT NULL AND %s != FALSE AND %s != 0 AND %s != '')", operand, operand, operand, operand), nil
 }
