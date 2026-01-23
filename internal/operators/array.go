@@ -627,6 +627,11 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 					return a.ToSQL(operator, arr)
 				}
 			default:
+				// Try to use the expression parser callback for unknown operators
+				// This enables support for custom operators in nested contexts
+				if a.config != nil && a.config.HasExpressionParser() {
+					return a.config.ParseExpression(exprMap, "$")
+				}
 				return "", fmt.Errorf("unsupported operator in array expression: %s", operator)
 			}
 		}

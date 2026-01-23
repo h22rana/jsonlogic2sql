@@ -348,6 +348,11 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 					}
 					return "", fmt.Errorf("string operator %s requires array arguments", op)
 				default:
+					// Try to use the expression parser callback for unknown operators
+					// This enables support for custom operators in nested contexts
+					if c.config != nil && c.config.HasExpressionParser() {
+						return c.config.ParseExpression(expr, "$")
+					}
 					return "", fmt.Errorf("unsupported expression type in comparison: %s", op)
 				}
 			}

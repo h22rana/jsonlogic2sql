@@ -342,7 +342,11 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 					arrayOp := NewArrayOperator(n.config)
 					return arrayOp.ToSQL(operator, arr)
 				default:
-					// For other operators, they should have been pre-processed
+					// Try to use the expression parser callback for unknown operators
+					// This enables support for custom operators in nested contexts
+					if n.config != nil && n.config.HasExpressionParser() {
+						return n.config.ParseExpression(expr, "$")
+					}
 					return "", fmt.Errorf("unsupported operator in numeric expression: %s", operator)
 				}
 			}

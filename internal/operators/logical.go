@@ -265,6 +265,11 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 				}
 				return "", fmt.Errorf("array operator requires array arguments")
 			default:
+				// Try to use the expression parser callback for unknown operators
+				// This enables support for custom operators in nested contexts
+				if l.config != nil && l.config.HasExpressionParser() {
+					return l.config.ParseExpression(obj, "$")
+				}
 				return "", fmt.Errorf("unsupported operator in logical expression: %s", operator)
 			}
 		}
