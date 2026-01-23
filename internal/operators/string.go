@@ -182,6 +182,15 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 
 // valueToSQL converts a value to SQL, handling var expressions, complex expressions, and literals.
 func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
+	// Handle ProcessedValue (pre-processed SQL from parser)
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return pv.Value, nil
+		}
+		// It's a literal, convert it
+		return s.dataOp.valueToSQL(pv.Value)
+	}
+
 	// Handle var expressions
 	if expr, ok := value.(map[string]interface{}); ok {
 		if varExpr, hasVar := expr[OpVar]; hasVar {

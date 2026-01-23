@@ -259,18 +259,30 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	}
 
 	// Check for common reduction patterns and optimize
-	if aggregateFunc := a.detectAggregatePattern(reducerExpr); aggregateFunc != "" {
+	if pattern := a.detectAggregatePattern(reducerExpr); pattern != nil {
+		// Build the element reference: "elem" or "elem.field" if field suffix exists
+		elemRef := ElemVar
+		if pattern.fieldSuffix != "" {
+			elemRef = ElemVar + "." + pattern.fieldSuffix
+		}
+
 		// Generate optimized aggregate SQL based on dialect
 		//nolint:exhaustive // default handles BigQuery/Spanner/PostgreSQL/DuckDB
 		switch a.getDialect() {
 		case dialect.DialectClickHouse:
-			// ClickHouse: initial + coalesce(arrayReduce('sum', array), 0)
+			// ClickHouse: For field access, we need arrayMap first to extract the field
+			if pattern.fieldSuffix != "" {
+				// initial + coalesce(arrayReduce('sum', arrayMap(x -> x.field, array)), 0)
+				return fmt.Sprintf("%s + coalesce(arrayReduce('%s', arrayMap(x -> x.%s, %s)), 0)",
+					initial, strings.ToLower(pattern.function), pattern.fieldSuffix, array), nil
+			}
+			// initial + coalesce(arrayReduce('sum', array), 0)
 			return fmt.Sprintf("%s + coalesce(arrayReduce('%s', %s), 0)",
-				initial, strings.ToLower(aggregateFunc), array), nil
+				initial, strings.ToLower(pattern.function), array), nil
 		default:
-			// Standard SQL: initial + COALESCE((SELECT AGG(elem) FROM UNNEST(array) AS elem), 0)
-			return fmt.Sprintf("%s + COALESCE((SELECT %s(elem) FROM UNNEST(%s) AS elem), 0)",
-				initial, aggregateFunc, array), nil
+			// Standard SQL: initial + COALESCE((SELECT AGG(elem.field) FROM UNNEST(array) AS elem), 0)
+			return fmt.Sprintf("%s + COALESCE((SELECT %s(%s) FROM UNNEST(%s) AS elem), 0)",
+				initial, pattern.function, elemRef, array), nil
 		}
 	}
 
@@ -297,64 +309,92 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	}
 }
 
+// aggregatePattern represents a detected aggregate pattern with optional field suffix.
+type aggregatePattern struct {
+	function    string // SQL aggregate function name (SUM, MIN, MAX)
+	fieldSuffix string // Optional field suffix (e.g., "price" for "current.price")
+}
+
 // detectAggregatePattern checks if the reducer expression matches a common aggregate pattern.
-// Returns the SQL aggregate function name if detected, empty string otherwise.
-func (a *ArrayOperator) detectAggregatePattern(expr interface{}) string {
+// Returns the aggregate pattern if detected, nil otherwise.
+func (a *ArrayOperator) detectAggregatePattern(expr interface{}) *aggregatePattern {
 	exprMap, ok := expr.(map[string]interface{})
 	if !ok {
-		return ""
+		return nil
 	}
 
 	// Check for addition pattern: {"+": [{"var": "accumulator"}, {"var": "current"}]}
+	// or {"+": [{"var": "accumulator"}, {"var": "current.price"}]}
 	if args, hasPlus := exprMap[OpAdd]; hasPlus {
-		if a.isAccumulatorCurrentPattern(args) {
-			return AggregateSUM
+		if fieldSuffix, ok := a.isAccumulatorCurrentPattern(args); ok {
+			return &aggregatePattern{function: AggregateSUM, fieldSuffix: fieldSuffix}
 		}
 	}
 
 	// Check for min pattern: {"min": [{"var": "accumulator"}, {"var": "current"}]}
+	// or {"min": [{"var": "accumulator"}, {"var": "current.price"}]}
 	if args, hasMin := exprMap[OpMin]; hasMin {
-		if a.isAccumulatorCurrentPattern(args) {
-			return AggregateMIN
+		if fieldSuffix, ok := a.isAccumulatorCurrentPattern(args); ok {
+			return &aggregatePattern{function: AggregateMIN, fieldSuffix: fieldSuffix}
 		}
 	}
 
 	// Check for max pattern: {"max": [{"var": "accumulator"}, {"var": "current"}]}
+	// or {"max": [{"var": "accumulator"}, {"var": "current.price"}]}
 	if args, hasMax := exprMap[OpMax]; hasMax {
-		if a.isAccumulatorCurrentPattern(args) {
-			return AggregateMAX
+		if fieldSuffix, ok := a.isAccumulatorCurrentPattern(args); ok {
+			return &aggregatePattern{function: AggregateMAX, fieldSuffix: fieldSuffix}
 		}
 	}
 
-	return ""
+	return nil
 }
 
-// isAccumulatorCurrentPattern checks if args match [{"var": "accumulator"}, {"var": "current"}].
-func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) bool {
+// isAccumulatorCurrentPattern checks if args match [{"var": "accumulator"}, {"var": "current"}]
+// or [{"var": "accumulator"}, {"var": "current.field"}].
+// Returns (fieldSuffix, true) if pattern matches, ("", false) otherwise.
+// fieldSuffix is empty for plain "current", or contains the field path (e.g., "price" for "current.price").
+func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) (string, bool) {
 	argsArr, ok := args.([]interface{})
 	if !ok || len(argsArr) != 2 {
-		return false
+		return "", false
 	}
 
 	// Check first arg is {"var": "accumulator"}
 	arg0Map, ok := argsArr[0].(map[string]interface{})
 	if !ok {
-		return false
+		return "", false
 	}
 	if varName, hasVar := arg0Map[OpVar]; !hasVar || varName != AccumulatorVar {
-		return false
+		return "", false
 	}
 
-	// Check second arg is {"var": "current"}
+	// Check second arg is {"var": "current"} or {"var": "current.field"}
 	arg1Map, ok := argsArr[1].(map[string]interface{})
 	if !ok {
-		return false
+		return "", false
 	}
-	if varName, hasVar := arg1Map[OpVar]; !hasVar || varName != CurrentVar {
-		return false
+	varName, hasVar := arg1Map[OpVar]
+	if !hasVar {
+		return "", false
 	}
 
-	return true
+	varNameStr, ok := varName.(string)
+	if !ok {
+		return "", false
+	}
+
+	// Check if it's exactly "current" or starts with "current."
+	if varNameStr == CurrentVar {
+		return "", true // Plain current, no field suffix
+	}
+	if strings.HasPrefix(varNameStr, CurrentVar+".") {
+		// Extract field suffix (e.g., "price" from "current.price")
+		fieldSuffix := strings.TrimPrefix(varNameStr, CurrentVar+".")
+		return fieldSuffix, true
+	}
+
+	return "", false
 }
 
 // handleAll converts all operator to SQL.
@@ -559,6 +599,15 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 
 // valueToSQL converts a value to SQL, handling var expressions, arrays, and literals.
 func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
+	// Handle ProcessedValue (pre-processed SQL from parser)
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return pv.Value, nil
+		}
+		// It's a literal, convert it
+		return a.dataOp.valueToSQL(pv.Value)
+	}
+
 	// Handle complex expressions (operators)
 	if expr, ok := value.(map[string]interface{}); ok {
 		// Check if it's a var expression
@@ -589,6 +638,15 @@ func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
 
 // expressionToSQL converts a JSON Logic expression to SQL.
 func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
+	// Handle ProcessedValue (pre-processed SQL from parser)
+	if pv, ok := expr.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return pv.Value, nil
+		}
+		// It's a literal, recursively convert it
+		return a.expressionToSQL(pv.Value)
+	}
+
 	// Handle primitive values
 	if a.isPrimitive(expr) {
 		return a.dataOp.valueToSQL(expr)
@@ -642,13 +700,15 @@ func (a *ArrayOperator) expressionToSQL(expr interface{}) (string, error) {
 
 // replaceElementReference replaces element references in conditions.
 // For now, this is a simple implementation that assumes the condition uses a variable.
-// It replaces "item" references with "elem" for UNNEST subqueries.
+// It replaces "item" and "current" references with "elem" for UNNEST subqueries.
 func (a *ArrayOperator) replaceElementReference(condition string) string {
 	// Replace variable references in the condition with the element name
-	// This handles cases where {"var": "item"} should become "elem"
+	// This handles cases where {"var": "item"} or {"var": "current"} should become "elem"
 	// Simple string replacement for now - in a more complex implementation,
 	// you'd want to parse the SQL and replace variable references properly
-	return strings.ReplaceAll(condition, ItemVar, ElemVar)
+	result := strings.ReplaceAll(condition, ItemVar, ElemVar)
+	result = strings.ReplaceAll(result, CurrentVar, ElemVar)
+	return result
 }
 
 // isPrimitive checks if a value is a primitive type.

@@ -133,12 +133,18 @@ func getDialectName(d jsonlogic2sql.Dialect) string {
 	return "Unknown"
 }
 
+// maxInputSize is the maximum size for a single line of input (1MB).
+// Default bufio.Scanner limit is 64KB which truncates large JSON inputs.
+const maxInputSize = 1024 * 1024
+
 func main() {
 	fmt.Println("JSON Logic to SQL Transpiler REPL")
 	fmt.Println("==================================")
 	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
+	// Increase buffer size to handle large JSON inputs
+	scanner.Buffer(make([]byte, maxInputSize), maxInputSize)
 
 	// Prompt user to select dialect
 	currentDialect = selectDialect(scanner)
@@ -195,7 +201,7 @@ func main() {
 	}
 }
 
-func handleCommand(input string, _ *jsonlogic2sql.Transpiler, scanner *bufio.Scanner) *jsonlogic2sql.Transpiler {
+func handleCommand(input string, transpiler *jsonlogic2sql.Transpiler, scanner *bufio.Scanner) *jsonlogic2sql.Transpiler {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
 		return nil
@@ -210,6 +216,8 @@ func handleCommand(input string, _ *jsonlogic2sql.Transpiler, scanner *bufio.Sca
 		showExamples()
 	case ":dialect":
 		return handleDialectChange(scanner)
+	case ":file":
+		handleFileInput(parts, transpiler)
 	case ":quit", ":exit":
 		fmt.Println("Goodbye!")
 		os.Exit(0)
@@ -221,6 +229,37 @@ func handleCommand(input string, _ *jsonlogic2sql.Transpiler, scanner *bufio.Sca
 		fmt.Println("Type ':help' for available commands")
 	}
 	return nil
+}
+
+// handleFileInput handles the :file command to read JSON from a file.
+// This is useful for large JSON inputs that exceed terminal line limits (~4096 bytes).
+func handleFileInput(parts []string, transpiler *jsonlogic2sql.Transpiler) {
+	if len(parts) < 2 {
+		fmt.Println("Usage: :file <path>")
+		fmt.Println("Example: :file input.json")
+		return
+	}
+
+	filePath := parts[1]
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Printf("Error reading file: %v\n", err)
+		return
+	}
+
+	input := strings.TrimSpace(string(data))
+	if input == "" {
+		fmt.Println("File is empty")
+		return
+	}
+
+	result, err := transpiler.Transpile(input)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	} else {
+		fmt.Printf("SQL: %s\n", result)
+	}
+	fmt.Println()
 }
 
 // handleDialectChange handles the :dialect command to switch SQL dialects.
@@ -519,16 +558,19 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 
 func showHelp() {
 	fmt.Println("Available commands:")
-	fmt.Println("  :help     - Show this help message")
-	fmt.Println("  :examples - Show example JSON Logic expressions")
-	fmt.Println("  :dialect  - Change the SQL dialect")
-	fmt.Println("  :clear    - Clear the screen")
-	fmt.Println("  :quit     - Exit the REPL")
+	fmt.Println("  :help        - Show this help message")
+	fmt.Println("  :examples    - Show example JSON Logic expressions")
+	fmt.Println("  :dialect     - Change the SQL dialect")
+	fmt.Println("  :file <path> - Read JSON Logic from a file (for large inputs)")
+	fmt.Println("  :clear       - Clear the screen")
+	fmt.Println("  :quit        - Exit the REPL")
 	fmt.Println()
 	fmt.Printf("Current dialect: %s\n", getDialectName(currentDialect))
 	fmt.Println()
 	fmt.Println("Enter JSON Logic expressions to convert them to SQL WHERE clauses.")
 	fmt.Println("Example: {\">\": [{\"var\": \"amount\"}, 1000]}")
+	fmt.Println()
+	fmt.Println("Note: For large JSON inputs (>4KB), use :file to avoid terminal limits.")
 }
 
 func showExamples() {
