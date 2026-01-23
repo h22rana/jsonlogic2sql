@@ -6,12 +6,19 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
 
+// ExpressionParser is a callback function type for parsing nested expressions.
+// This allows operators to delegate expression parsing back to the parser,
+// enabling support for custom operators in nested contexts.
+// The path parameter is the JSONPath for error reporting.
+type ExpressionParser func(expr any, path string) (string, error)
+
 // OperatorConfig holds shared configuration for all operators.
 // By using a shared config object, all operators automatically see
 // configuration changes without requiring individual SetSchema calls.
 type OperatorConfig struct {
-	Schema  SchemaProvider
-	Dialect dialect.Dialect
+	Schema           SchemaProvider
+	Dialect          dialect.Dialect
+	ExpressionParser ExpressionParser
 }
 
 // NewOperatorConfig creates a new operator config with dialect and optional schema.
@@ -73,4 +80,26 @@ func (c *OperatorConfig) IsDuckDB() bool {
 // IsClickHouse returns true if the dialect is ClickHouse.
 func (c *OperatorConfig) IsClickHouse() bool {
 	return c.GetDialect() == dialect.DialectClickHouse
+}
+
+// SetExpressionParser sets the callback for parsing nested expressions.
+// This should be called by the parser after all operators are created.
+func (c *OperatorConfig) SetExpressionParser(parser ExpressionParser) {
+	if c != nil {
+		c.ExpressionParser = parser
+	}
+}
+
+// HasExpressionParser returns true if an expression parser is configured.
+func (c *OperatorConfig) HasExpressionParser() bool {
+	return c != nil && c.ExpressionParser != nil
+}
+
+// ParseExpression parses a nested expression using the configured parser.
+// Returns an error if no parser is configured.
+func (c *OperatorConfig) ParseExpression(expr any, path string) (string, error) {
+	if !c.HasExpressionParser() {
+		return "", fmt.Errorf("expression parser not configured")
+	}
+	return c.ExpressionParser(expr, path)
 }
