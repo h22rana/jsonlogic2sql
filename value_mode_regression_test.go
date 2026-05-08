@@ -7,6 +7,63 @@ import (
 	"testing"
 )
 
+func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		dialect Dialect
+		want    string
+	}{
+		{DialectBigQuery, "[]"},
+		{DialectSpanner, "[]"},
+		{DialectPostgreSQL, "ARRAY[]"},
+		{DialectDuckDB, "[]"},
+		{DialectClickHouse, "[]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dialect.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(tt.dialect)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			got, err := tr.TranspileValue(`[]`)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
+			}
+
+			got, err = tr.TranspileValueFromInterface([]interface{}{})
+			if err != nil {
+				t.Fatalf("TranspileValueFromInterface() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("TranspileValueFromInterface() = %q, want %q", got, tt.want)
+			}
+
+			paramSQL, params, err := tr.TranspileParameterizedValue(`[]`)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if paramSQL != tt.want {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", paramSQL, tt.want)
+			}
+			if len(params) != 0 {
+				t.Fatalf("TranspileParameterizedValue() params = %#v, want none", params)
+			}
+
+			if _, err = tr.TranspileCondition(`[]`); !IsErrorCode(err, ErrValidation) {
+				t.Fatalf("TranspileCondition() error = %v, want %s", err, ErrValidation)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_NestedValueLogicals(t *testing.T) {
 	tr, err := NewTranspiler(DialectBigQuery)
 	if err != nil {

@@ -156,7 +156,7 @@ func (p *Parser) ParseCondition(logic interface{}) (string, error) {
 
 // ParseValue converts a JSON Logic expression to a SQL value expression.
 func (p *Parser) ParseValue(logic interface{}) (string, error) {
-	if err := p.validator.Validate(logic); err != nil {
+	if err := p.validateValueRoot(logic); err != nil {
 		return "", tperrors.NewValidationError(err)
 	}
 
@@ -165,6 +165,13 @@ func (p *Parser) ParseValue(logic interface{}) (string, error) {
 		return "", err
 	}
 	return res.SQL, nil
+}
+
+func (p *Parser) validateValueRoot(logic interface{}) error {
+	if _, ok := logic.([]interface{}); ok {
+		return nil
+	}
+	return p.validator.Validate(logic)
 }
 
 type expressionResult struct {
@@ -1366,7 +1373,7 @@ func (p *Parser) ParseConditionParameterized(logic interface{}) (string, []param
 // ParseValueParameterized converts a JSON Logic expression to a parameterized
 // SQL value expression.
 func (p *Parser) ParseValueParameterized(logic interface{}) (string, []params.QueryParam, error) {
-	if err := p.validator.Validate(logic); err != nil {
+	if err := p.validateValueRoot(logic); err != nil {
 		return "", nil, tperrors.NewValidationError(err)
 	}
 
