@@ -396,7 +396,7 @@ func valueOperandSQL(res expressionResult) string {
 	if res.Kind != operators.ExpressionKindPredicate || res.SQL == "TRUE" || res.SQL == "FALSE" {
 		return res.SQL
 	}
-	return fmt.Sprintf("(%s)", res.SQL)
+	return fmt.Sprintf("(%s)", operators.StripRedundantOuterParens(res.SQL))
 }
 
 func typedValueOperand(res expressionResult) operators.ProcessedValue {
@@ -600,7 +600,7 @@ func (p *Parser) parseOperatorPredicate(operator string, args interface{}, path 
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
-		processedArgs, err := p.processArgs(arr, path)
+		processedArgs, err := p.processValueArgs(arr, path)
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -1019,10 +1019,10 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 	// Comparison operators
 	case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
 		if arr, ok := args.([]interface{}); ok {
-			// Process arguments to handle complex expressions
-			processedArgs, err := p.processArgs(arr, path)
+			// Comparison operands are value expressions.
+			processedArgs, err := p.processValueArgs(arr, path)
 			if err != nil {
-				return "", err // processArgs already returns TranspileError
+				return "", err
 			}
 			sql, err := p.comparisonOp.ToSQL(operator, processedArgs)
 			return sql, p.wrapOperatorError(operator, path, err)
@@ -1511,7 +1511,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
-		processedArgs, err := p.processArgsParam(arr, path, pc)
+		processedArgs, err := p.processValueArgsParam(arr, path, pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -1877,7 +1877,7 @@ func (p *Parser) parseOperatorParam(operator string, args interface{}, path stri
 
 	case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
 		if arr, ok := args.([]interface{}); ok {
-			processedArgs, err := p.processArgsParam(arr, path, pc)
+			processedArgs, err := p.processValueArgsParam(arr, path, pc)
 			if err != nil {
 				return "", err
 			}

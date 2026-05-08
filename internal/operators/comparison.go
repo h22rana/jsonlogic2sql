@@ -1403,6 +1403,9 @@ func (c *ComparisonOperator) isStringLikeInOperandNoSchema(
 	case string:
 		return true
 	case ProcessedValue:
+		if v.HasExpressionInfo && v.Kind == ExpressionKindValue && v.Type == ExpressionTypeString {
+			return true
+		}
 		if !v.IsSQL {
 			return true
 		}

@@ -434,10 +434,27 @@ func TestParser_isPrimitive(t *testing.T) {
 
 // mockCustomHandler implements CustomOperatorHandler for testing.
 type mockCustomHandler struct {
-	toSQL func(operator string, args []interface{}) (string, error)
+	toSQL          func(operator string, args []interface{}) (string, error)
+	forcePredicate bool
 }
 
 func (m *mockCustomHandler) ToSQL(operator string, args []operators.OperatorArg) (operators.OperatorResult, error) {
+	return m.toSQLResult(operator, args, operators.ExpressionKindPredicate)
+}
+
+func (m *mockCustomHandler) ToSQLInContext(
+	operator string,
+	args []operators.OperatorArg,
+	kind operators.ExpressionKind,
+) (operators.OperatorResult, error) {
+	return m.toSQLResult(operator, args, kind)
+}
+
+func (m *mockCustomHandler) toSQLResult(
+	operator string,
+	args []operators.OperatorArg,
+	kind operators.ExpressionKind,
+) (operators.OperatorResult, error) {
 	legacyArgs := make([]interface{}, len(args))
 	for i, arg := range args {
 		legacyArgs[i] = arg.SQL
@@ -445,6 +462,9 @@ func (m *mockCustomHandler) ToSQL(operator string, args []operators.OperatorArg)
 	sql, err := m.toSQL(operator, legacyArgs)
 	if err != nil {
 		return operators.OperatorResult{}, err
+	}
+	if kind == operators.ExpressionKindValue && !m.forcePredicate {
+		return operators.ValueSQL(sql, operators.ExpressionTypeUnknown), nil
 	}
 	return operators.PredicateSQL(sql), nil
 }
@@ -1693,6 +1713,7 @@ func TestParser_CustomOperatorInUnaryContext(t *testing.T) {
 	p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 		if operatorName == "isEmpty" {
 			return &mockCustomHandler{
+				forcePredicate: true,
 				toSQL: func(op string, args []interface{}) (string, error) {
 					return fmt.Sprintf("(%s IS NULL OR %s = '')", args[0], args[0]), nil
 				},

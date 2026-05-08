@@ -272,6 +272,76 @@ func TestTranspileCondition_LegacyCustomOperatorUsesPredicateContext(t *testing.
 	}
 }
 
+func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:    "literal truthy if condition folds before comparison",
+			logic:   `{"==":[{"if":["nonempty","x","y"]},"x"]}`,
+			wantSQL: "'x' = 'x'",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("%s = %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "x"}, {Name: "p2", Value: "x"}},
+		},
+		{
+			name:    "unreachable comparison operand branch is not parsed",
+			logic:   `{"<":[{"if":[false,{"var":"bad-name"},3]},4]}`,
+			wantSQL: "3 < 4",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("%s < %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(3)}, {Name: "p2", Value: float64(4)}},
+		},
+		{
+			name:    "value logical fallback folds before comparison",
+			logic:   `{"==":[{"or":[0,5]},5]}`,
+			wantSQL: "5 = 5",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("%s = %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(5)}, {Name: "p2", Value: float64(5)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.wantSQL {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.wantSQL)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_DoubleBangUsesValueTruthinessExplicitly(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "flag", Type: FieldTypeBoolean},
