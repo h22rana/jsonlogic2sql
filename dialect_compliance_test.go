@@ -504,8 +504,8 @@ func TestEdgeCasesBooleanValues(t *testing.T) {
 		{"false literal", `{"==": [{"var": "flag"}, false]}`, "flag = FALSE"},
 		{"boolean in and", `{"and": [true, false]}`, "FALSE"},
 		{"boolean in or", `{"or": [false, true]}`, "TRUE"},
-		{"not true", `{"!": [true]}`, "NOT (TRUE)"},
-		{"not false", `{"!": [false]}`, "NOT (FALSE)"},
+		{"not true", `{"!": [true]}`, "FALSE"},
+		{"not false", `{"!": [false]}`, "TRUE"},
 		{"double bang true", `{"!!": [true]}`, "TRUE"},
 		{"double bang false", `{"!!": [false]}`, "FALSE"},
 	}

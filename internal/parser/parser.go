@@ -196,6 +196,12 @@ func resultFromOperator(res operators.OperatorResult) expressionResult {
 }
 
 func predicateResult(sql string) expressionResult {
+	switch strings.TrimSpace(sql) {
+	case "TRUE":
+		return booleanPredicateResult(true)
+	case "FALSE":
+		return booleanPredicateResult(false)
+	}
 	return expressionResult{OperatorResult: operators.PredicateSQL(sql)}
 }
 
@@ -428,11 +434,6 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	return operators.TypedSQLResult(valueOperandSQL(res), res.Kind, valueTypeOf(res))
 }
 
-func (p *Parser) parseTruthinessParam(expr interface{}, path string, pc *params.ParamCollector) (string, error) {
-	_, condition, err := p.parseTruthinessResultParam(expr, path, pc)
-	return condition, err
-}
-
 func (p *Parser) parseTruthinessResultParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, string, error) {
 	checkpoint := pc.Checkpoint()
 	res, err := p.parseExpressionAnyParam(expr, path, pc)
@@ -440,7 +441,7 @@ func (p *Parser) parseTruthinessResultParam(expr interface{}, path string, pc *p
 		return expressionResult{}, "", err
 	}
 	condition := p.truthinessSQL(res)
-	if res.Kind != operators.ExpressionKindPredicate && (res.truthKnown || res.Type == operators.ExpressionTypeNull) {
+	if res.truthKnown || (res.Kind != operators.ExpressionKindPredicate && res.Type == operators.ExpressionTypeNull) {
 		pc.Restore(checkpoint)
 	}
 	return res, condition, nil
@@ -813,7 +814,13 @@ func (p *Parser) parseNotPredicate(operator string, args interface{}, path strin
 	}
 	condition := p.truthinessSQL(res)
 	if double {
+		if res.truthKnown {
+			return booleanPredicateResult(res.truthy), nil
+		}
 		return predicateResult(condition), nil
+	}
+	if res.truthKnown {
+		return booleanPredicateResult(!res.truthy), nil
 	}
 	condition = operators.StripRedundantOuterParens(condition)
 	return predicateResult(fmt.Sprintf("NOT (%s)", condition)), nil
@@ -1742,12 +1749,18 @@ func (p *Parser) parseNotPredicateParam(operator string, args interface{}, path 
 	if !ok {
 		return expressionResult{}, tperrors.NewTypeMismatch(operator, path, "exactly 1 argument", "multiple arguments")
 	}
-	condition, err := p.parseTruthinessParam(arg, tperrors.BuildArrayPath(path, 0), pc)
+	res, condition, err := p.parseTruthinessResultParam(arg, tperrors.BuildArrayPath(path, 0), pc)
 	if err != nil {
 		return expressionResult{}, err
 	}
 	if double {
+		if res.truthKnown {
+			return booleanPredicateResult(res.truthy), nil
+		}
 		return predicateResult(condition), nil
+	}
+	if res.truthKnown {
+		return booleanPredicateResult(!res.truthy), nil
 	}
 	condition = operators.StripRedundantOuterParens(condition)
 	return predicateResult(fmt.Sprintf("NOT (%s)", condition)), nil

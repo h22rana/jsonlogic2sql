@@ -133,14 +133,11 @@ func TestTranspileParameterized_EqualityConstantFoldsDoNotConsumeParams(t *testi
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
 
-	wantSQL := "(TRUE AND code = @p1 AND FALSE AND name = @p2)"
+	wantSQL := "FALSE"
 	if gotSQL != wantSQL {
 		t.Fatalf("SQL = %q, want %q", gotSQL, wantSQL)
 	}
-	assertParams(t, gotParams, []QueryParam{
-		{Name: "p1", Value: "5"},
-		{Name: "p2", Value: "bob"},
-	})
+	assertParams(t, gotParams, []QueryParam{})
 }
 
 func TestTranspile_EqualitySemanticsAcrossDialects(t *testing.T) {
@@ -157,23 +154,23 @@ func TestTranspile_EqualitySemanticsAcrossDialects(t *testing.T) {
 	}{
 		{
 			dialect:      DialectBigQuery,
-			wantParamSQL: "(amount = @p1 AND active = FALSE AND code = @p2 AND code = @p3 AND code = @p4 AND FALSE)",
+			wantParamSQL: "FALSE",
 		},
 		{
 			dialect:      DialectSpanner,
-			wantParamSQL: "(amount = @p1 AND active = FALSE AND code = @p2 AND code = @p3 AND code = @p4 AND FALSE)",
+			wantParamSQL: "FALSE",
 		},
 		{
 			dialect:      DialectPostgreSQL,
-			wantParamSQL: "(amount = $1 AND active = FALSE AND code = $2 AND code = $3 AND code = $4 AND FALSE)",
+			wantParamSQL: "FALSE",
 		},
 		{
 			dialect:      DialectDuckDB,
-			wantParamSQL: "(amount = $1 AND active = FALSE AND code = $2 AND code = $3 AND code = $4 AND FALSE)",
+			wantParamSQL: "FALSE",
 		},
 		{
 			dialect:      DialectClickHouse,
-			wantParamSQL: "(amount = @p1 AND active = FALSE AND code = @p2 AND code = @p3 AND code = @p4 AND FALSE)",
+			wantParamSQL: "FALSE",
 		},
 	}
 
@@ -189,7 +186,7 @@ func TestTranspile_EqualitySemanticsAcrossDialects(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TranspileCondition() error = %v", err)
 			}
-			wantSQL := "(amount = 10 AND active = FALSE AND code = '5' AND code = '1e-7' AND code = '9223372036854776000' AND FALSE)"
+			wantSQL := "FALSE"
 			if gotSQL != wantSQL {
 				t.Fatalf("TranspileCondition() SQL = %q, want %q", gotSQL, wantSQL)
 			}
@@ -201,12 +198,7 @@ func TestTranspile_EqualitySemanticsAcrossDialects(t *testing.T) {
 			if gotParamSQL != tt.wantParamSQL {
 				t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", gotParamSQL, tt.wantParamSQL)
 			}
-			assertParams(t, gotParams, []QueryParam{
-				{Name: "p1", Value: int64(10)},
-				{Name: "p2", Value: "5"},
-				{Name: "p3", Value: "1e-7"},
-				{Name: "p4", Value: "9223372036854776000"},
-			})
+			assertParams(t, gotParams, []QueryParam{})
 		})
 	}
 }

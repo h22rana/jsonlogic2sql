@@ -364,6 +364,92 @@ func TestTranspileValue_IfConditionsUseTruthiness(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_FoldedPredicateConditionsShortCircuit(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "code", Type: FieldTypeString},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		want       string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "folded equality false skips unreachable if branch",
+			logic: `{"if":[{"==":[true,false]},{"var":"missing"},"ok"]}`,
+			want:  "'ok'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
+		},
+		{
+			name:  "schema strict mismatch skips unreachable if branch",
+			logic: `{"if":[{"===":[{"var":"code"},5]},{"var":"missing"},"ok"]}`,
+			want:  "'ok'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
+		},
+		{
+			name:  "constant not false skips unreachable and branch",
+			logic: `{"and":[{"!":"x"},{"var":"missing"}]}`,
+			want:  "FALSE",
+			wantParam: func(Dialect) string {
+				return "FALSE"
+			},
+			wantParams: []QueryParam{},
+		},
+		{
+			name:  "constant not false skips unreachable if branch",
+			logic: `{"if":[{"!":"x"},{"var":"missing"},"ok"]}`,
+			want:  "'ok'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_IfConstantTestsShortCircuit(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -870,7 +956,7 @@ func TestTranspileParameterizedValue_TruthinessDoesNotLeakSkippedParams(t *testi
 		{
 			name:       "parameterized not folds literal truthiness without leaked parameter",
 			logic:      `{"!":"x"}`,
-			wantSQL:    "NOT (TRUE)",
+			wantSQL:    "FALSE",
 			wantParams: []QueryParam{},
 		},
 		{
