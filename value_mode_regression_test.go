@@ -107,6 +107,110 @@ func TestTranspileValue_IfConditionsUseTruthiness(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_DynamicLogicalTruthinessWithSchema(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "name", Type: FieldTypeString},
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:    "or returns string field or fallback",
+			logic:   `{"or":[{"var":"name"},"fallback"]}`,
+			wantSQL: "CASE WHEN (name IS NOT NULL AND name != '') THEN name ELSE 'fallback' END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN (name IS NOT NULL AND name != '') THEN name ELSE %s END", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
+		},
+		{
+			name:    "and returns numeric fallback or original field",
+			logic:   `{"and":[{"var":"amount"},10]}`,
+			wantSQL: "CASE WHEN (amount IS NOT NULL AND amount != 0) THEN 10 ELSE amount END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN (amount IS NOT NULL AND amount != 0) THEN %s ELSE amount END", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(10)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if got != tt.wantSQL {
+						t.Fatalf("TranspileValue() = %q, want %q", got, tt.wantSQL)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_CatStringifiesBuiltInPredicate(t *testing.T) {
+	logic := `{"cat":[{"==":[{"var":"amount"},10]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			want := "CONCAT(CASE WHEN amount = 10 THEN 'true' ELSE 'false' END)"
+			if got != want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, want)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			wantParam := fmt.Sprintf("CONCAT(CASE WHEN amount = %s THEN 'true' ELSE 'false' END)", testPlaceholder(d, 1))
+			if gotParam != wantParam {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: float64(10)}}
+			if !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_CatStringifiesCustomPredicate(t *testing.T) {
 	tr, err := NewTranspiler(DialectBigQuery)
 	if err != nil {
@@ -367,6 +471,14 @@ func TestTranspileValue_ArrayTransformationsUseValueSemantics(t *testing.T) {
 		t.Fatalf("TranspileValue() map = %q, want %q", got, want)
 	}
 
+	got, err = tr.TranspileValue(`{"map":[{"var":"arr"},{"+":[{"*":[{"or":[0,{"var":""}]},2]},1]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileValue() nested map error = %v", err)
+	}
+	if want := "ARRAY(SELECT ((elem * 2) + 1) FROM UNNEST(arr) AS elem)"; got != want {
+		t.Fatalf("TranspileValue() nested map = %q, want %q", got, want)
+	}
+
 	got, err = tr.TranspileValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`)
 	if err != nil {
 		t.Fatalf("TranspileValue() cat reduce error = %v", err)
@@ -393,6 +505,17 @@ func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *te
 		t.Fatalf("TranspileParameterizedValue() map params = %#v, want none", gotParams)
 	}
 
+	gotSQL, gotParams, err = tr.TranspileParameterizedValue(`{"map":[{"var":"arr"},{"+":[{"*":[{"or":[0,{"var":""}]},2]},1]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedValue() nested map error = %v", err)
+	}
+	if want := "ARRAY(SELECT ((elem * @p1) + @p2) FROM UNNEST(arr) AS elem)"; gotSQL != want {
+		t.Fatalf("TranspileParameterizedValue() nested map SQL = %q, want %q", gotSQL, want)
+	}
+	if wantParams := []QueryParam{{Name: "p1", Value: float64(2)}, {Name: "p2", Value: float64(1)}}; !reflect.DeepEqual(gotParams, wantParams) {
+		t.Fatalf("TranspileParameterizedValue() nested map params = %#v, want %#v", gotParams, wantParams)
+	}
+
 	gotSQL, gotParams, err = tr.TranspileParameterizedValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`)
 	if err != nil {
 		t.Fatalf("TranspileParameterizedValue() cat reduce error = %v", err)
@@ -402,6 +525,32 @@ func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *te
 	}
 	if wantParams := []QueryParam{{Name: "p1", Value: ""}}; !reflect.DeepEqual(gotParams, wantParams) {
 		t.Fatalf("TranspileParameterizedValue() cat reduce params = %#v, want %#v", gotParams, wantParams)
+	}
+}
+
+func TestTranspileValue_ArrayPredicateContextsRejectValueLogicals(t *testing.T) {
+	logic := `{"filter":[{"var":"items"},{"or":[0,{"==":[{"var":"current"},1]}]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			_, err = tr.TranspileValue(logic)
+			if !IsErrorCode(err, ErrInvalidExpressionContext) {
+				t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidExpressionContext)
+			}
+
+			_, params, err := tr.TranspileParameterizedValue(logic)
+			if !IsErrorCode(err, ErrInvalidExpressionContext) {
+				t.Fatalf("TranspileParameterizedValue() error = %v, want %s", err, ErrInvalidExpressionContext)
+			}
+			if len(params) != 0 {
+				t.Fatalf("params = %#v, want none", params)
+			}
+		})
 	}
 }
 

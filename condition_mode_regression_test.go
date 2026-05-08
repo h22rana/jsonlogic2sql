@@ -66,3 +66,113 @@ func TestTranspileCondition_PredicateIfAcceptsBooleanConstants(t *testing.T) {
 		})
 	}
 }
+
+func TestTranspileCondition_RejectsValueOperandsInPredicateContexts(t *testing.T) {
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "logical operand cannot be value fallback",
+			logic: `{"and":[{"or":[0,5]},{">":[{"var":"amount"},1]}]}`,
+		},
+		{
+			name:  "array predicate cannot be value fallback",
+			logic: `{"some":[{"var":"items"},{"or":[0,{"==":[{"var":"current"},1]}]}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					if _, err := tr.TranspileCondition(tt.logic); !IsErrorCode(err, ErrInvalidExpressionContext) {
+						t.Fatalf("TranspileCondition() error = %v, want %s", err, ErrInvalidExpressionContext)
+					}
+
+					_, params, err := tr.TranspileParameterizedCondition(tt.logic)
+					if !IsErrorCode(err, ErrInvalidExpressionContext) {
+						t.Fatalf("TranspileParameterizedCondition() error = %v, want %s", err, ErrInvalidExpressionContext)
+					}
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_RejectsValueCustomOperator(t *testing.T) {
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			err = tr.RegisterOperatorFunc("valueOnly", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return ValueSQL("VALUE_ONLY()", ExpressionTypeString), nil
+			})
+			if err != nil {
+				t.Fatalf("RegisterOperatorFunc() error = %v", err)
+			}
+
+			logic := `{"valueOnly":[{"var":"name"}]}`
+			_, err = tr.TranspileCondition(logic)
+			if !IsErrorCode(err, ErrInvalidExpressionContext) {
+				t.Fatalf("TranspileCondition() error = %v, want %s", err, ErrInvalidExpressionContext)
+			}
+
+			_, params, err := tr.TranspileParameterizedCondition(logic)
+			if !IsErrorCode(err, ErrInvalidExpressionContext) {
+				t.Fatalf("TranspileParameterizedCondition() error = %v, want %s", err, ErrInvalidExpressionContext)
+			}
+			if len(params) != 0 {
+				t.Fatalf("params = %#v, want none", params)
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_DoubleBangUsesValueTruthinessExplicitly(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
+	})
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			logic := `{"!!":{"or":[0,{"var":"flag"}]}}`
+			got, err := tr.TranspileCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
+			}
+			if got != "flag IS TRUE" {
+				t.Fatalf("TranspileCondition() = %q, want %q", got, "flag IS TRUE")
+			}
+
+			gotParam, params, err := tr.TranspileParameterizedCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			if gotParam != "flag IS TRUE" {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, "flag IS TRUE")
+			}
+			if len(params) != 0 {
+				t.Fatalf("params = %#v, want none", params)
+			}
+		})
+	}
+}

@@ -553,8 +553,7 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	rewritten := a.rewriteElementVars(args[1])
-	condition, err := a.expressionToSQLWithContextAndPath(rewritten, false, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[1], a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
 	}
@@ -790,8 +789,7 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	rewritten := a.rewriteElementVars(args[1])
-	condition, err := a.expressionToSQLWithContextAndPath(rewritten, false, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[1], a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
@@ -840,8 +838,7 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	rewritten := a.rewriteElementVars(args[1])
-	condition, err := a.expressionToSQLWithContextAndPath(rewritten, false, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[1], a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
@@ -888,8 +885,7 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	rewritten := a.rewriteElementVars(args[1])
-	condition, err := a.expressionToSQLWithContextAndPath(rewritten, false, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[1], a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
@@ -987,6 +983,21 @@ func (a *ArrayOperator) valueExpressionToSQLWithContextAndPath(expr interface{},
 	return res.SQL, nil
 }
 
+func (a *ArrayOperator) predicateExpressionToSQLWithContextAndPath(expr interface{}, path string) (string, error) {
+	if a.config == nil || !a.config.HasPredicateExpressionParser() {
+		return a.expressionToSQLWithContextAndPath(expr, false, path)
+	}
+	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, false, path)
+	if err != nil {
+		return "", err
+	}
+	res, err := a.config.ParsePredicateExpression(rewritten, path)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
 func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string, error) {
 	// Handle ProcessedValue (pre-processed SQL from parser)
 	if pv, ok := value.(ProcessedValue); ok {
@@ -1056,6 +1067,9 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 	// Handle complex expressions by delegating to other operators
 	if exprMap, ok := expr.(map[string]interface{}); ok {
 		for operator, args := range exprMap {
+			if a.valueSemantics && operator != OpVar && !a.isArrayOperator(operator) && a.config != nil && a.config.HasValueExpressionParser() {
+				return a.valueExpressionToSQLWithContextAndPath(exprMap, allowAccumulator, path)
+			}
 			switch operator {
 			case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
 				if arr, ok := args.([]interface{}); ok {
@@ -1645,8 +1659,7 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
 	}
-	rewritten := a.rewriteElementVars(args[1])
-	condition, err := a.expressionToSQLParamWithContextAndPath(rewritten, pc, false, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[1], pc, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
 	}
@@ -1747,8 +1760,7 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
-	rewritten := a.rewriteElementVars(args[1])
-	condition, err := a.expressionToSQLParamWithContextAndPath(rewritten, pc, false, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[1], pc, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
@@ -1782,8 +1794,7 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
-	rewritten := a.rewriteElementVars(args[1])
-	condition, err := a.expressionToSQLParamWithContextAndPath(rewritten, pc, false, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[1], pc, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
@@ -1816,8 +1827,7 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
-	rewritten := a.rewriteElementVars(args[1])
-	condition, err := a.expressionToSQLParamWithContextAndPath(rewritten, pc, false, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[1], pc, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
@@ -1903,6 +1913,25 @@ func (a *ArrayOperator) valueExpressionToSQLParamWithContextAndPath(
 	return res.SQL, nil
 }
 
+func (a *ArrayOperator) predicateExpressionToSQLParamWithContextAndPath(
+	expr interface{},
+	pc *params.ParamCollector,
+	path string,
+) (string, error) {
+	if a.config == nil || !a.config.HasParamPredicateExpressionParser() {
+		return a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
+	}
+	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, pc, false, path)
+	if err != nil {
+		return "", err
+	}
+	res, err := a.config.ParsePredicateExpressionParam(rewritten, path, pc)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
 func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.ParamCollector, path string) (string, error) {
 	if pv, ok := value.(ProcessedValue); ok {
 		if pv.IsSQL {
@@ -1964,6 +1993,9 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 
 	if exprMap, ok := expr.(map[string]interface{}); ok {
 		for operator, args := range exprMap {
+			if a.valueSemantics && operator != OpVar && !a.isArrayOperator(operator) && a.config != nil && a.config.HasParamValueExpressionParser() {
+				return a.valueExpressionToSQLParamWithContextAndPath(exprMap, pc, allowAccumulator, path)
+			}
 			switch operator {
 			case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
 				if arr, ok := args.([]interface{}); ok {
