@@ -117,6 +117,18 @@ func TestParseContainsArgs(t *testing.T) {
 			wantPat:    "'it''s'",
 		},
 		{
+			name:       "postgres array pattern",
+			args:       []interface{}{"col", "ARRAY['it''s']"},
+			wantColumn: "col",
+			wantPat:    "'it''s'",
+		},
+		{
+			name:       "postgres array placeholder pattern",
+			args:       []interface{}{"col", "ARRAY[$1]"},
+			wantColumn: "col",
+			wantPat:    "$1",
+		},
+		{
 			name:       "placeholder arg (parameterized mode)",
 			args:       []interface{}{"col", "@p1"},
 			wantColumn: "col",
@@ -790,6 +802,60 @@ func TestContainsArrayPatternParameterized(t *testing.T) {
 	}
 	if len(params) != 1 || params[0].Value != "x" {
 		t.Fatalf("Params = %#v, want scalar x", params)
+	}
+}
+
+func TestContainsArrayPatternPostgreSQL(t *testing.T) {
+	origDialect := currentDialect
+	t.Cleanup(func() { currentDialect = origDialect })
+
+	currentDialect = jsonlogic2sql.DialectPostgreSQL
+	tr, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL)
+	if err != nil {
+		t.Fatalf("NewTranspiler: %v", err)
+	}
+	registerCustomOperators(tr)
+
+	sqlNonParam, err := tr.TranspileCondition(`{"contains": [{"var": "col"}, ["x"]]}`)
+	if err != nil {
+		t.Fatalf("Transpile error: %v", err)
+	}
+	wantNonParam := "col LIKE '%x%'"
+	if sqlNonParam != wantNonParam {
+		t.Errorf("Non-param SQL:\n  got:  %s\n  want: %s", sqlNonParam, wantNonParam)
+	}
+
+	sqlNotContains, err := tr.TranspileCondition(`{"!contains": [{"var": "col"}, ["x"]]}`)
+	if err != nil {
+		t.Fatalf("Transpile !contains error: %v", err)
+	}
+	wantNotContains := "col NOT LIKE '%x%'"
+	if sqlNotContains != wantNotContains {
+		t.Errorf("!contains SQL:\n  got:  %s\n  want: %s", sqlNotContains, wantNotContains)
+	}
+
+	sqlParam, params, err := tr.TranspileParameterizedCondition(`{"contains": [{"var": "col"}, ["x"]]}`)
+	if err != nil {
+		t.Fatalf("TranspileParameterized error: %v", err)
+	}
+	wantParam := "col LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST($1 AS TEXT), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')"
+	if sqlParam != wantParam {
+		t.Errorf("Param SQL:\n  got:  %s\n  want: %s", sqlParam, wantParam)
+	}
+	if len(params) != 1 || params[0].Value != "x" {
+		t.Fatalf("Params = %#v, want scalar x", params)
+	}
+
+	sqlParamNotContains, params, err := tr.TranspileParameterizedCondition(`{"!contains": [{"var": "col"}, ["x"]]}`)
+	if err != nil {
+		t.Fatalf("TranspileParameterized !contains error: %v", err)
+	}
+	wantParamNotContains := "col NOT LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST($1 AS TEXT), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')"
+	if sqlParamNotContains != wantParamNotContains {
+		t.Errorf("Param !contains SQL:\n  got:  %s\n  want: %s", sqlParamNotContains, wantParamNotContains)
+	}
+	if len(params) != 1 || params[0].Value != "x" {
+		t.Fatalf("!contains params = %#v, want scalar x", params)
 	}
 }
 

@@ -40,17 +40,32 @@ func unescapeSQLString(s string) string {
 	return s
 }
 
-// extractFromArrayString extracts value from array string representation like "[T]".
-func extractFromArrayString(s string) string {
+func isArrayString(s string) bool {
 	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
-		inner := s[1 : len(s)-1]
-		if len(inner) >= 2 && inner[0] == '\'' && inner[len(inner)-1] == '\'' {
-			inner = inner[1 : len(inner)-1]
-			return strings.ReplaceAll(inner, "''", "'")
-		}
-		return inner
+		return true
 	}
-	return s
+	return strings.HasPrefix(strings.ToUpper(s), "ARRAY[") && strings.HasSuffix(s, "]")
+}
+
+// extractFromArrayString extracts value from array string representations like
+// "[T]" and PostgreSQL "ARRAY[T]".
+func extractFromArrayString(s string) string {
+	switch {
+	case strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]"):
+		return unquoteArrayElement(s[1 : len(s)-1])
+	case strings.HasPrefix(strings.ToUpper(s), "ARRAY[") && strings.HasSuffix(s, "]"):
+		return unquoteArrayElement(s[len("ARRAY[") : len(s)-1])
+	default:
+		return s
+	}
+}
+
+func unquoteArrayElement(inner string) string {
+	if len(inner) >= 2 && inner[0] == '\'' && inner[len(inner)-1] == '\'' {
+		inner = inner[1 : len(inner)-1]
+		return strings.ReplaceAll(inner, "''", "'")
+	}
+	return inner
 }
 
 // isSQLStringLiteral returns true if s is a SQL-quoted string literal (e.g., 'hello').
@@ -139,7 +154,7 @@ func parseContainsArgs(args []interface{}) (column, pattern string) {
 	arg1Str, arg1IsStr := args[1].(string)
 
 	if arg0IsStr && arg1IsStr {
-		if strings.HasPrefix(arg1Str, "[") && strings.HasSuffix(arg1Str, "]") {
+		if isArrayString(arg1Str) {
 			column = arg0Str
 			inner := extractFromArrayString(arg1Str)
 			if isPlaceholder(inner) {
@@ -147,7 +162,7 @@ func parseContainsArgs(args []interface{}) (column, pattern string) {
 			}
 			return column, fmt.Sprintf("'%s'", strings.ReplaceAll(inner, "'", "''"))
 		}
-		if strings.HasPrefix(arg0Str, "[") && strings.HasSuffix(arg0Str, "]") {
+		if isArrayString(arg0Str) {
 			column = arg1Str
 			inner := extractFromArrayString(arg0Str)
 			if isPlaceholder(inner) {
@@ -163,7 +178,7 @@ func parseContainsArgs(args []interface{}) (column, pattern string) {
 
 	column = args[0].(string)
 	pattern = args[1].(string)
-	if strings.HasPrefix(pattern, "[") && strings.HasSuffix(pattern, "]") {
+	if isArrayString(pattern) {
 		inner := extractFromArrayString(pattern)
 		if isPlaceholder(inner) {
 			return column, inner
