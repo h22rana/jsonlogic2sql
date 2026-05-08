@@ -816,9 +816,18 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 		if err != nil {
 			return expressionResult{}, err
 		}
+		if cond.truthKnown && !cond.truthy {
+			continue
+		}
 		thenRes, err := p.parsePredicateIfOperand(args[i+1], tperrors.BuildArrayPath(path, i+1))
 		if err != nil {
 			return expressionResult{}, err
+		}
+		if cond.truthKnown && cond.truthy {
+			if len(parts) == 0 {
+				return thenRes, nil
+			}
+			return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL)), nil
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", cond.SQL, thenRes.SQL))
 	}
@@ -828,7 +837,13 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 		if err != nil {
 			return expressionResult{}, err
 		}
+		if len(parts) == 0 {
+			return elseRes, nil
+		}
 		elseSQL = elseRes.SQL
+	}
+	if len(parts) == 0 {
+		return booleanPredicateResult(false), nil
 	}
 	return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL)), nil
 }
@@ -1728,9 +1743,18 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		if err != nil {
 			return expressionResult{}, err
 		}
+		if cond.truthKnown && !cond.truthy {
+			continue
+		}
 		thenRes, err := p.parsePredicateIfOperandParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
 		if err != nil {
 			return expressionResult{}, err
+		}
+		if cond.truthKnown && cond.truthy {
+			if len(parts) == 0 {
+				return thenRes, nil
+			}
+			return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL)), nil
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", cond.SQL, thenRes.SQL))
 	}
@@ -1740,7 +1764,13 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		if err != nil {
 			return expressionResult{}, err
 		}
+		if len(parts) == 0 {
+			return elseRes, nil
+		}
 		elseSQL = elseRes.SQL
+	}
+	if len(parts) == 0 {
+		return booleanPredicateResult(false), nil
 	}
 	return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL)), nil
 }

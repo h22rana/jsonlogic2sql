@@ -26,9 +26,9 @@ func TestTranspileCondition_PredicateIfAcceptsBooleanConstants(t *testing.T) {
 		{
 			name:  "boolean condition",
 			logic: `{"if":[true,{">":[{"var":"age"},18]},false]}`,
-			want:  "CASE WHEN TRUE THEN age > 18 ELSE FALSE END",
+			want:  "age > 18",
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("CASE WHEN TRUE THEN age > %s ELSE FALSE END", testPlaceholder(d, 1))
+				return fmt.Sprintf("age > %s", testPlaceholder(d, 1))
 			},
 			params: []QueryParam{{Name: "p1", Value: float64(18)}},
 		},
@@ -57,6 +57,121 @@ func TestTranspileCondition_PredicateIfAcceptsBooleanConstants(t *testing.T) {
 					}
 					if want := tt.wantParam(d); gotParam != want {
 						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.params) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_PredicateIfSkipsUnreachableBranches(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "x", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		want       string
+		wantParam  func(Dialect) string
+		params     []QueryParam
+		wantNoBind bool
+	}{
+		{
+			name:  "true condition skips invalid else",
+			logic: `{"if":[true,{">":[{"var":"x"},1]},{">":[{"var":"missing"},1]}]}`,
+			want:  "x > 1",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+		{
+			name:  "false condition skips invalid then",
+			logic: `{"if":[false,{">":[{"var":"missing"},1]},{">":[{"var":"x"},1]}]}`,
+			want:  "x > 1",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+		{
+			name:  "false condition without else skips invalid then",
+			logic: `{"if":[false,{">":[{"var":"missing"},1]}]}`,
+			want:  "FALSE",
+			wantParam: func(Dialect) string {
+				return "FALSE"
+			},
+			wantNoBind: true,
+		},
+		{
+			name:  "dynamic condition keeps case and true condition becomes else",
+			logic: `{"if":[{">":[{"var":"x"},1]},{">":[{"var":"x"},2]},true,{">":[{"var":"x"},3]},{">":[{"var":"missing"},1]}]}`,
+			want:  "CASE WHEN x > 1 THEN x > 2 ELSE x > 3 END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf(
+					"CASE WHEN x > %s THEN x > %s ELSE x > %s END",
+					testPlaceholder(d, 1),
+					testPlaceholder(d, 2),
+					testPlaceholder(d, 3),
+				)
+			},
+			params: []QueryParam{
+				{Name: "p1", Value: float64(1)},
+				{Name: "p2", Value: float64(2)},
+				{Name: "p3", Value: float64(3)},
+			},
+		},
+		{
+			name:  "false logical condition rolls back skipped params",
+			logic: `{"if":[{"and":[false,{">":[{"var":"x"},1]}]},{">":[{"var":"missing"},1]},{">":[{"var":"x"},2]}]}`,
+			want:  "x > 2",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(2)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if tt.wantNoBind {
+						if len(gotParams) != 0 {
+							t.Fatalf("params = %#v, want none", gotParams)
+						}
+						return
 					}
 					if !reflect.DeepEqual(gotParams, tt.params) {
 						t.Fatalf("params = %#v, want %#v", gotParams, tt.params)
