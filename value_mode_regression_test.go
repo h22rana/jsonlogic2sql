@@ -11,14 +11,15 @@ func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		dialect Dialect
-		want    string
+		dialect     Dialect
+		want        string
+		wantErrCode ErrorCode
 	}{
-		{DialectBigQuery, "[]"},
-		{DialectSpanner, "[]"},
-		{DialectPostgreSQL, "ARRAY[]"},
-		{DialectDuckDB, "[]"},
-		{DialectClickHouse, "[]"},
+		{dialect: DialectBigQuery, want: "[]"},
+		{dialect: DialectSpanner, want: "[]"},
+		{dialect: DialectPostgreSQL, wantErrCode: ErrInvalidArgument},
+		{dialect: DialectDuckDB, want: "[]"},
+		{dialect: DialectClickHouse, want: "[]"},
 	}
 
 	for _, tt := range tests {
@@ -31,29 +32,37 @@ func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
 			}
 
 			got, err := tr.TranspileValue(`[]`)
-			if err != nil {
+			if tt.wantErrCode != "" {
+				if !IsErrorCode(err, tt.wantErrCode) {
+					t.Fatalf("TranspileValue() error = %v, want %s", err, tt.wantErrCode)
+				}
+			} else if err != nil {
 				t.Fatalf("TranspileValue() error = %v", err)
-			}
-			if got != tt.want {
+			} else if got != tt.want {
 				t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
 			}
 
 			got, err = tr.TranspileValueFromInterface([]interface{}{})
-			if err != nil {
+			if tt.wantErrCode != "" {
+				if !IsErrorCode(err, tt.wantErrCode) {
+					t.Fatalf("TranspileValueFromInterface() error = %v, want %s", err, tt.wantErrCode)
+				}
+			} else if err != nil {
 				t.Fatalf("TranspileValueFromInterface() error = %v", err)
-			}
-			if got != tt.want {
+			} else if got != tt.want {
 				t.Fatalf("TranspileValueFromInterface() = %q, want %q", got, tt.want)
 			}
 
 			paramSQL, params, err := tr.TranspileParameterizedValue(`[]`)
-			if err != nil {
+			if tt.wantErrCode != "" {
+				if !IsErrorCode(err, tt.wantErrCode) {
+					t.Fatalf("TranspileParameterizedValue() error = %v, want %s", err, tt.wantErrCode)
+				}
+			} else if err != nil {
 				t.Fatalf("TranspileParameterizedValue() error = %v", err)
-			}
-			if paramSQL != tt.want {
+			} else if paramSQL != tt.want {
 				t.Fatalf("TranspileParameterizedValue() = %q, want %q", paramSQL, tt.want)
-			}
-			if len(params) != 0 {
+			} else if len(params) != 0 {
 				t.Fatalf("TranspileParameterizedValue() params = %#v, want none", params)
 			}
 

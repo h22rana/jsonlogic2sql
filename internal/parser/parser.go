@@ -176,8 +176,10 @@ func (p *Parser) validateValueRoot(logic interface{}) error {
 
 type expressionResult struct {
 	operators.OperatorResult
-	truthKnown bool
-	truthy     bool
+	truthKnown      bool
+	truthy          bool
+	rawLiteralKnown bool
+	rawLiteral      interface{}
 }
 
 func resultFromOperator(res operators.OperatorResult) expressionResult {
@@ -211,6 +213,13 @@ func literalValueResult(sql string, typ operators.ExpressionType, truthy bool) e
 	res := valueResult(sql, typ)
 	res.truthKnown = true
 	res.truthy = truthy
+	return res
+}
+
+func literalValueResultWithRaw(sql string, typ operators.ExpressionType, truthy bool, raw interface{}) expressionResult {
+	res := literalValueResult(sql, typ, truthy)
+	res.rawLiteralKnown = true
+	res.rawLiteral = raw
 	return res
 }
 
@@ -301,7 +310,7 @@ func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, erro
 		}
 		parts[i] = valueOperandSQL(res)
 	}
-	return p.config.ArrayLiteral(parts), nil
+	return p.config.ArrayLiteral(parts)
 }
 
 func (p *Parser) arrayLiteralToSQLParam(arr []interface{}, path string, pc *params.ParamCollector) (string, error) {
@@ -313,7 +322,7 @@ func (p *Parser) arrayLiteralToSQLParam(arr []interface{}, path string, pc *para
 		}
 		parts[i] = valueOperandSQL(res)
 	}
-	return p.config.ArrayLiteral(parts), nil
+	return p.config.ArrayLiteral(parts)
 }
 
 func literalTypeAndTruth(value interface{}) (operators.ExpressionType, bool, bool) {
@@ -466,7 +475,7 @@ func (p *Parser) parsePrimitiveValue(expr interface{}, path string) (expressionR
 	}
 	typ, known, truthy := literalTypeAndTruth(expr)
 	if known {
-		return literalValueResult(sql, typ, truthy), nil
+		return literalValueResultWithRaw(sql, typ, truthy, expr), nil
 	}
 	return valueResult(sql, typ), nil
 }
@@ -478,7 +487,7 @@ func (p *Parser) parsePrimitiveValueParam(expr interface{}, path string, pc *par
 	}
 	typ, known, truthy := literalTypeAndTruth(expr)
 	if known {
-		return literalValueResult(sql, typ, truthy), nil
+		return literalValueResultWithRaw(sql, typ, truthy, expr), nil
 	}
 	return valueResult(sql, typ), nil
 }
@@ -1198,6 +1207,9 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 				res, err := p.parseExpressionValue(arg, tperrors.BuildArrayPath(path, index))
 				if err != nil {
 					return nil, err
+				}
+				if res.rawLiteralKnown {
+					return res.rawLiteral, nil
 				}
 				return typedValueOperand(res), nil
 			}
@@ -2026,9 +2038,14 @@ func (p *Parser) processValueArgParam(arg interface{}, path string, index int, p
 	if exprMap, ok := arg.(map[string]interface{}); ok && len(exprMap) == 1 {
 		for operator := range exprMap {
 			if operator != "var" {
+				checkpoint := pc.Checkpoint()
 				res, err := p.parseExpressionValueParam(arg, tperrors.BuildArrayPath(path, index), pc)
 				if err != nil {
 					return nil, err
+				}
+				if res.rawLiteralKnown {
+					pc.Restore(checkpoint)
+					return res.rawLiteral, nil
 				}
 				return typedValueOperand(res), nil
 			}

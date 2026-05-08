@@ -115,15 +115,19 @@ func (c *OperatorConfig) ArrayLengthFunc(expr string) string {
 }
 
 // ArrayLiteral renders a SQL array/list literal for the configured dialect.
-func (c *OperatorConfig) ArrayLiteral(elements []string) string {
+func (c *OperatorConfig) ArrayLiteral(elements []string) (string, error) {
+	if len(elements) == 0 && c.GetDialect() == dialect.DialectPostgreSQL {
+		return "", fmt.Errorf("empty PostgreSQL array literals require an explicit element type")
+	}
+
 	body := strings.Join(elements, ", ")
 	switch c.GetDialect() {
 	case dialect.DialectPostgreSQL:
-		return fmt.Sprintf("ARRAY[%s]", body)
+		return fmt.Sprintf("ARRAY[%s]", body), nil
 	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectDuckDB, dialect.DialectClickHouse:
-		return fmt.Sprintf("[%s]", body)
+		return fmt.Sprintf("[%s]", body), nil
 	}
-	return fmt.Sprintf("[%s]", body)
+	return fmt.Sprintf("[%s]", body), nil
 }
 
 // SetExpressionParser sets the callback for parsing nested expressions.

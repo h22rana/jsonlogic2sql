@@ -158,6 +158,10 @@ Main transpiler instance.
 | `ListCustomOperators() []string` | List all custom operator names |
 | `ClearCustomOperators()` | Remove all custom operators |
 
+`TranspileValue*` returns standalone SQL value expressions. For PostgreSQL,
+root empty array values such as `[]` are rejected because `ARRAY[]` requires an
+explicit element type that is not available from the JSONLogic value alone.
+
 ### TranspilerConfig
 
 Configuration options for the transpiler.

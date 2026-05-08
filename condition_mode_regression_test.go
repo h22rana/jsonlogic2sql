@@ -529,6 +529,93 @@ func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
 	}
 }
 
+func TestTranspileCondition_SchemaAwareComparisonUsesFoldedValueLiterals(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "code", Type: FieldTypeString},
+		{Name: "amount", Type: FieldTypeInteger},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:    "strict string field equality folds impossible folded number literal",
+			logic:   `{"===":[{"var":"code"},{"or":[0,5]}]}`,
+			wantSQL: "FALSE",
+			wantParam: func(Dialect) string {
+				return "FALSE"
+			},
+			wantParams: []QueryParam{},
+		},
+		{
+			name:    "strict string field inequality folds impossible folded number literal",
+			logic:   `{"!==":[{"var":"code"},{"or":[0,5]}]}`,
+			wantSQL: "TRUE",
+			wantParam: func(Dialect) string {
+				return "TRUE"
+			},
+			wantParams: []QueryParam{},
+		},
+		{
+			name:    "loose string field equality coerces folded number literal",
+			logic:   `{"==":[{"var":"code"},{"or":[0,5]}]}`,
+			wantSQL: "code = '5'",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("code = %s", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "5"}},
+		},
+		{
+			name:    "loose integer field equality coerces folded string literal",
+			logic:   `{"==":[{"var":"amount"},{"or":["","5"]}]}`,
+			wantSQL: "amount = 5",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("amount = %s", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: int64(5)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.wantSQL {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.wantSQL)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_DoubleBangUsesValueTruthinessExplicitly(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "flag", Type: FieldTypeBoolean},
