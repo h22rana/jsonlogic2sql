@@ -21,6 +21,10 @@ type CustomOperatorHandler interface {
 	ToSQL(operator string, args []operators.OperatorArg) (operators.OperatorResult, error)
 }
 
+type customOperatorContextHandler interface {
+	ToSQLInContext(operator string, args []operators.OperatorArg, kind operators.ExpressionKind) (operators.OperatorResult, error)
+}
+
 // CustomOperatorLookup is a function type for looking up custom operators.
 type CustomOperatorLookup func(operatorName string) (CustomOperatorHandler, bool)
 
@@ -281,26 +285,26 @@ func (p *Parser) literalToSQLParam(value interface{}, pc *params.ParamCollector)
 	return p.dataOp.ValueToSQLParam(value, pc)
 }
 
-func (p *Parser) arrayLiteralToSQL(arr []interface{}) (string, error) {
+func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, error) {
 	parts := make([]string, len(arr))
 	for i, elem := range arr {
-		sql, err := p.literalToSQL(elem)
+		res, err := p.parseExpressionValue(elem, tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return "", fmt.Errorf("invalid array element %d: %w", i, err)
 		}
-		parts[i] = sql
+		parts[i] = valueOperandSQL(res)
 	}
 	return p.config.ArrayLiteral(parts), nil
 }
 
-func (p *Parser) arrayLiteralToSQLParam(arr []interface{}, pc *params.ParamCollector) (string, error) {
+func (p *Parser) arrayLiteralToSQLParam(arr []interface{}, path string, pc *params.ParamCollector) (string, error) {
 	parts := make([]string, len(arr))
 	for i, elem := range arr {
-		sql, err := p.literalToSQLParam(elem, pc)
+		res, err := p.parseExpressionValueParam(elem, tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return "", fmt.Errorf("invalid array element %d: %w", i, err)
 		}
-		parts[i] = sql
+		parts[i] = valueOperandSQL(res)
 	}
 	return p.config.ArrayLiteral(parts), nil
 }
@@ -417,6 +421,18 @@ func (p *Parser) parseTruthinessResultParam(expr interface{}, path string, pc *p
 	return res, condition, nil
 }
 
+func (p *Parser) customOperatorToSQL(
+	handler CustomOperatorHandler,
+	operator string,
+	args []operators.OperatorArg,
+	kind operators.ExpressionKind,
+) (operators.OperatorResult, error) {
+	if contextual, ok := handler.(customOperatorContextHandler); ok {
+		return contextual.ToSQLInContext(operator, args, kind)
+	}
+	return handler.ToSQL(operator, args)
+}
+
 func compatibleValueType(left, right expressionResult, path string) (operators.ExpressionType, error) {
 	leftType := valueTypeOf(left)
 	rightType := valueTypeOf(right)
@@ -504,7 +520,7 @@ func (p *Parser) parseExpressionValue(expr interface{}, path string) (expression
 		return p.parsePrimitiveValue(expr, path)
 	}
 	if arr, ok := expr.([]interface{}); ok {
-		sql, err := p.arrayLiteralToSQL(arr)
+		sql, err := p.arrayLiteralToSQL(arr, path)
 		if err != nil {
 			return expressionResult{}, tperrors.Wrap(tperrors.ErrInvalidArgument, "", path, "invalid array literal", err)
 		}
@@ -556,7 +572,7 @@ func (p *Parser) parseOperatorPredicate(operator string, args interface{}, path 
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"failed to process custom operator arguments", err)
 			}
-			res, err := handler.ToSQL(operator, processedArgs)
+			res, err := p.customOperatorToSQL(handler, operator, processedArgs, operators.ExpressionKindPredicate)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
@@ -628,7 +644,7 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"failed to process custom operator arguments", err)
 			}
-			res, err := handler.ToSQL(operator, processedArgs)
+			res, err := p.customOperatorToSQL(handler, operator, processedArgs, operators.ExpressionKindValue)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
@@ -1409,7 +1425,7 @@ func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *pa
 		return p.parsePrimitiveValueParam(expr, path, pc)
 	}
 	if arr, ok := expr.([]interface{}); ok {
-		sql, err := p.arrayLiteralToSQLParam(arr, pc)
+		sql, err := p.arrayLiteralToSQLParam(arr, path, pc)
 		if err != nil {
 			return expressionResult{}, tperrors.Wrap(tperrors.ErrInvalidArgument, "", path, "invalid array literal", err)
 		}
@@ -1463,7 +1479,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"failed to process custom operator arguments", err)
 			}
-			res, err := handler.ToSQL(operator, processedArgs)
+			res, err := p.customOperatorToSQL(handler, operator, processedArgs, operators.ExpressionKindPredicate)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
@@ -1539,7 +1555,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"failed to process custom operator arguments", err)
 			}
-			res, err := handler.ToSQL(operator, processedArgs)
+			res, err := p.customOperatorToSQL(handler, operator, processedArgs, operators.ExpressionKindValue)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)

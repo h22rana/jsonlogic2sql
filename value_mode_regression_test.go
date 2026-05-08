@@ -312,6 +312,23 @@ func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 			params: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(2)}},
 		},
 		{
+			name:  "root array evaluates value expression elements",
+			logic: `[{"var":"amount"},1,{"==":[{"var":"status"},"ok"]}]`,
+			wantSQL: func(d Dialect) string {
+				if d == DialectPostgreSQL {
+					return "ARRAY[amount, 1, (status = 'ok')]"
+				}
+				return "[amount, 1, (status = 'ok')]"
+			},
+			wantParam: func(d Dialect) string {
+				if d == DialectPostgreSQL {
+					return fmt.Sprintf("ARRAY[amount, %s, (status = %s)]", testPlaceholder(d, 1), testPlaceholder(d, 2))
+				}
+				return fmt.Sprintf("[amount, %s, (status = %s)]", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: "ok"}},
+		},
+		{
 			name:  "map source array literal",
 			logic: `{"map":[[1,2],{"+":[{"var":"item"},1]}]}`,
 			wantSQL: func(d Dialect) string {
@@ -400,6 +417,44 @@ func TestTranspileValue_CatStringifiesCustomPredicate(t *testing.T) {
 	want := "CONCAT(CASE WHEN amount > 0 THEN 'true' ELSE 'false' END)"
 	if got != want {
 		t.Fatalf("TranspileValue() = %q, want %q", got, want)
+	}
+}
+
+func TestTranspileValue_LegacyCustomOperatorUsesValueContext(t *testing.T) {
+	tr, err := NewTranspiler(DialectPostgreSQL)
+	if err != nil {
+		t.Fatalf("NewTranspiler() error = %v", err)
+	}
+	err = tr.RegisterDialectAwareOperatorFunc("safeDivideLegacy", func(_ string, args []any, _ Dialect) (string, error) {
+		if len(args) != 2 {
+			return "", fmt.Errorf("safeDivideLegacy requires exactly 2 arguments")
+		}
+		return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", args[1], args[0], args[1]), nil
+	})
+	if err != nil {
+		t.Fatalf("RegisterDialectAwareOperatorFunc() error = %v", err)
+	}
+
+	logic := `{"cat":[{"safeDivideLegacy":[{"var":"total"},{"var":"count"}]}]}`
+	want := "CONCAT(CASE WHEN count = 0 THEN NULL ELSE total / count END)"
+
+	got, err := tr.TranspileValue(logic)
+	if err != nil {
+		t.Fatalf("TranspileValue() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("TranspileValue() = %q, want %q", got, want)
+	}
+
+	gotParam, params, err := tr.TranspileParameterizedValue(logic)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedValue() error = %v", err)
+	}
+	if gotParam != want {
+		t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+	}
+	if len(params) != 0 {
+		t.Fatalf("params = %#v, want none", params)
 	}
 }
 

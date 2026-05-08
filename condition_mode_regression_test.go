@@ -230,6 +230,48 @@ func TestTranspileCondition_RejectsValueCustomOperator(t *testing.T) {
 	}
 }
 
+func TestTranspileCondition_LegacyCustomOperatorUsesPredicateContext(t *testing.T) {
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			err = tr.RegisterOperatorFunc("isGreaterLegacy", func(_ string, args []any) (string, error) {
+				if len(args) != 2 {
+					return "", fmt.Errorf("isGreaterLegacy requires exactly 2 arguments")
+				}
+				return fmt.Sprintf("%s>%s", args[0], args[1]), nil
+			})
+			if err != nil {
+				t.Fatalf("RegisterOperatorFunc() error = %v", err)
+			}
+
+			logic := `{"isGreaterLegacy":[{"var":"amount"},10]}`
+			got, err := tr.TranspileCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
+			}
+			if got != "amount>10" {
+				t.Fatalf("TranspileCondition() = %q, want %q", got, "amount>10")
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			wantParam := fmt.Sprintf("amount>%s", testPlaceholder(d, 1))
+			if gotParam != wantParam {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, wantParam)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: float64(10)}}
+			if !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_DoubleBangUsesValueTruthinessExplicitly(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "flag", Type: FieldTypeBoolean},

@@ -218,30 +218,7 @@ func (t *Transpiler) RegisterDialectAwareOperatorFunc(name string, fn any) error
 	if err := validateOperatorName(name); err != nil {
 		return err
 	}
-	// Wrap the function with the dialect so ToSQL works correctly
-	dialect := t.config.Dialect
-	t.customOperators.RegisterFunc(name, func(op string, args []OperatorArg) (OperatorResult, error) {
-		switch typed := fn.(type) {
-		case DialectAwareOperatorFunc:
-			return typed(op, args, dialect)
-		case func(string, []OperatorArg, Dialect) (OperatorResult, error):
-			return typed(op, args, dialect)
-		case LegacyDialectAwareOperatorFunc:
-			sql, err := typed(op, legacyArgs(args), dialect)
-			if err != nil {
-				return OperatorResult{}, err
-			}
-			return inferLegacyOperatorResult(sql), nil
-		case func(string, []interface{}, Dialect) (string, error):
-			sql, err := typed(op, legacyArgs(args), dialect)
-			if err != nil {
-				return OperatorResult{}, err
-			}
-			return inferLegacyOperatorResult(sql), nil
-		default:
-			return OperatorResult{}, fmt.Errorf("unsupported dialect-aware operator function type %T", fn)
-		}
-	})
+	t.customOperators.Register(name, &boundDialectAwareFuncHandler{fn: fn, dialect: t.config.Dialect})
 	return nil
 }
 
