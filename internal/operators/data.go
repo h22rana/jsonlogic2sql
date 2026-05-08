@@ -102,6 +102,19 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 			return "", fmt.Errorf("var operator array cannot be empty")
 		}
 
+		if pv, ok := arr[0].(ProcessedValue); ok && pv.IsSQL {
+			columnName := pv.Value
+			if len(arr) > 1 {
+				defaultValue := arr[1]
+				defaultSQL, err := d.valueToSQL(defaultValue)
+				if err != nil {
+					return "", fmt.Errorf("invalid default value: %w", err)
+				}
+				return fmt.Sprintf("COALESCE(%s, %s)", columnName, defaultSQL), nil
+			}
+			return columnName, nil
+		}
+
 		// Check if first element is a string (variable name)
 		if varName, ok := arr[0].(string); ok {
 			columnName, err := d.columnNameForVar(varName)
@@ -376,6 +389,19 @@ func (d *DataOperator) handleVarParam(args []interface{}, pc *params.ParamCollec
 	if arr, ok := args[0].([]interface{}); ok {
 		if len(arr) == 0 {
 			return "", fmt.Errorf("var operator array cannot be empty")
+		}
+
+		if pv, ok := arr[0].(ProcessedValue); ok && pv.IsSQL {
+			columnName := pv.Value
+			if len(arr) > 1 {
+				defaultValue := arr[1]
+				defaultSQL, err := d.valueToSQLParam(defaultValue, pc)
+				if err != nil {
+					return "", fmt.Errorf("invalid default value: %w", err)
+				}
+				return fmt.Sprintf("COALESCE(%s, %s)", columnName, defaultSQL), nil
+			}
+			return columnName, nil
 		}
 
 		if varName, ok := arr[0].(string); ok {

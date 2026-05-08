@@ -107,6 +107,81 @@ func TestTranspileValue_IfConditionsUseTruthiness(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_IfConstantTestsShortCircuit(t *testing.T) {
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:    "true test returns then without parsing else",
+			logic:   `{"if":[true,"ok",0]}`,
+			wantSQL: "'ok'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
+		},
+		{
+			name:    "false test skips invalid then branch",
+			logic:   `{"if":[false,{"var":"bad-name"},"ok"]}`,
+			wantSQL: "'ok'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
+		},
+		{
+			name:    "dynamic test followed by true test folds to else",
+			logic:   `{"if":[{">":[{"var":"x"},0]},"positive",true,"fallback",{"var":"bad-name"}]}`,
+			wantSQL: "CASE WHEN x > 0 THEN 'positive' ELSE 'fallback' END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN x > %s THEN %s ELSE %s END",
+					testPlaceholder(d, 1), testPlaceholder(d, 2), testPlaceholder(d, 3))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(0)},
+				{Name: "p2", Value: "positive"},
+				{Name: "p3", Value: "fallback"},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if got != tt.wantSQL {
+						t.Fatalf("TranspileValue() = %q, want %q", got, tt.wantSQL)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_DynamicLogicalTruthinessWithSchema(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "name", Type: FieldTypeString},
@@ -459,8 +534,8 @@ func TestTranspileParameterizedValue_TruthinessDoesNotLeakSkippedParams(t *testi
 		{
 			name:       "literal if condition",
 			logic:      `{"if":["nonempty","yes","no"]}`,
-			wantSQL:    "CASE WHEN TRUE THEN @p1 ELSE @p2 END",
-			wantParams: []QueryParam{{Name: "p1", Value: "yes"}, {Name: "p2", Value: "no"}},
+			wantSQL:    "@p1",
+			wantParams: []QueryParam{{Name: "p1", Value: "yes"}},
 		},
 		{
 			name:       "boolean field if condition",
@@ -671,6 +746,36 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing
 				{Name: "p2", Value: "yes"},
 				{Name: "p3", Value: "no"},
 			}
+			if !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
+	}
+}
+
+func TestTranspileParameterizedValue_ArrayScopedDefaultSkippedByValueLogical(t *testing.T) {
+	logic := `{"map":[{"var":"items"},{"or":["x",{"var":["current","fallback"]}]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			gotSQL, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			wantValue := testPlaceholder(d, 1)
+			wantSQL := fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(items) AS elem)", wantValue)
+			if d == DialectClickHouse {
+				wantSQL = fmt.Sprintf("arrayMap(elem -> %s, items)", wantValue)
+			}
+			if gotSQL != wantSQL {
+				t.Fatalf("SQL = %q, want %q", gotSQL, wantSQL)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: "x"}}
 			if !reflect.DeepEqual(gotParams, wantParams) {
 				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
 			}

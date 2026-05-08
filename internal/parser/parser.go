@@ -400,16 +400,21 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 }
 
 func (p *Parser) parseTruthinessParam(expr interface{}, path string, pc *params.ParamCollector) (string, error) {
+	_, condition, err := p.parseTruthinessResultParam(expr, path, pc)
+	return condition, err
+}
+
+func (p *Parser) parseTruthinessResultParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, string, error) {
 	checkpoint := pc.Checkpoint()
 	res, err := p.parseExpressionAnyParam(expr, path, pc)
 	if err != nil {
-		return "", err
+		return expressionResult{}, "", err
 	}
 	condition := p.truthinessSQL(res)
 	if res.Kind != operators.ExpressionKindPredicate && (res.truthKnown || res.Type == operators.ExpressionTypeNull) {
 		pc.Restore(checkpoint)
 	}
-	return condition, nil
+	return res, condition, nil
 }
 
 func compatibleValueType(left, right expressionResult, path string) (operators.ExpressionType, error) {
@@ -812,31 +817,46 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 	}
 	var parts []string
 	resultType := operators.ExpressionTypeNull
+	typeSet := false
+	mergeResultType := func(res expressionResult) error {
+		if !typeSet {
+			resultType = valueTypeOf(res)
+			typeSet = true
+			return nil
+		}
+		typ, err := compatibleValueType(valueResult("", resultType), res, path)
+		if err != nil {
+			return err
+		}
+		resultType = typ
+		return nil
+	}
 	pairLimit := len(args)
 	hasElse := len(args)%2 == 1
 	if hasElse {
 		pairLimit = len(args) - 1
 	}
-	typeSet := false
 	for i := 0; i < pairLimit; i += 2 {
 		cond, err := p.parseExpressionAny(args[i], tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return expressionResult{}, err
 		}
 		condition := p.truthinessSQL(cond)
+		if cond.truthKnown && !cond.truthy {
+			continue
+		}
 		thenRes, err := p.parseExpressionValue(args[i+1], tperrors.BuildArrayPath(path, i+1))
 		if err != nil {
 			return expressionResult{}, err
 		}
-		if !typeSet {
-			resultType = valueTypeOf(thenRes)
-			typeSet = true
-		} else {
-			typ, err := compatibleValueType(valueResult("", resultType), thenRes, path)
-			if err != nil {
-				return expressionResult{}, err
+		if err := mergeResultType(thenRes); err != nil {
+			return expressionResult{}, err
+		}
+		if cond.truthKnown && cond.truthy {
+			if len(parts) == 0 {
+				return thenRes, nil
 			}
-			resultType = typ
+			return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL), resultType), nil
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
@@ -846,12 +866,16 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 		if err != nil {
 			return expressionResult{}, err
 		}
-		typ, err := compatibleValueType(valueResult("", resultType), elseRes, path)
-		if err != nil {
+		if len(parts) == 0 {
+			return elseRes, nil
+		}
+		if err := mergeResultType(elseRes); err != nil {
 			return expressionResult{}, err
 		}
-		resultType = typ
 		elseSQL = elseRes.SQL
+	}
+	if len(parts) == 0 {
+		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
 	}
 	return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL), resultType), nil
 }
@@ -1696,30 +1720,45 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 	}
 	var parts []string
 	resultType := operators.ExpressionTypeNull
+	typeSet := false
+	mergeResultType := func(res expressionResult) error {
+		if !typeSet {
+			resultType = valueTypeOf(res)
+			typeSet = true
+			return nil
+		}
+		typ, err := compatibleValueType(valueResult("", resultType), res, path)
+		if err != nil {
+			return err
+		}
+		resultType = typ
+		return nil
+	}
 	pairLimit := len(args)
 	hasElse := len(args)%2 == 1
 	if hasElse {
 		pairLimit = len(args) - 1
 	}
-	typeSet := false
 	for i := 0; i < pairLimit; i += 2 {
-		condition, err := p.parseTruthinessParam(args[i], tperrors.BuildArrayPath(path, i), pc)
+		cond, condition, err := p.parseTruthinessResultParam(args[i], tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return expressionResult{}, err
+		}
+		if cond.truthKnown && !cond.truthy {
+			continue
 		}
 		thenRes, err := p.parseExpressionValueParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
-		if !typeSet {
-			resultType = valueTypeOf(thenRes)
-			typeSet = true
-		} else {
-			typ, err := compatibleValueType(valueResult("", resultType), thenRes, path)
-			if err != nil {
-				return expressionResult{}, err
+		if err := mergeResultType(thenRes); err != nil {
+			return expressionResult{}, err
+		}
+		if cond.truthKnown && cond.truthy {
+			if len(parts) == 0 {
+				return thenRes, nil
 			}
-			resultType = typ
+			return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL), resultType), nil
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
@@ -1729,12 +1768,16 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 		if err != nil {
 			return expressionResult{}, err
 		}
-		typ, err := compatibleValueType(valueResult("", resultType), elseRes, path)
-		if err != nil {
+		if len(parts) == 0 {
+			return elseRes, nil
+		}
+		if err := mergeResultType(elseRes); err != nil {
 			return expressionResult{}, err
 		}
-		resultType = typ
 		elseSQL = elseRes.SQL
+	}
+	if len(parts) == 0 {
+		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
 	}
 	return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL), resultType), nil
 }

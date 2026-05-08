@@ -1909,7 +1909,7 @@ func (a *ArrayOperator) valueExpressionToSQLParamWithContextAndPath(
 	if a.config == nil || !a.config.HasParamValueExpressionParser() {
 		return a.expressionToSQLParamWithContextAndPath(expr, pc, allowAccumulator, path)
 	}
-	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, pc, allowAccumulator, path)
+	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, allowAccumulator, path)
 	if err != nil {
 		return "", err
 	}
@@ -1928,7 +1928,7 @@ func (a *ArrayOperator) predicateExpressionToSQLParamWithContextAndPath(
 	if a.config == nil || !a.config.HasParamPredicateExpressionParser() {
 		return a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
 	}
-	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, pc, false, path)
+	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, false, path)
 	if err != nil {
 		return "", err
 	}
@@ -2007,7 +2007,7 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 			case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
 				if arr, ok := args.([]interface{}); ok {
 					opPath := tperrors.BuildPath(path, operator, -1)
-					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, pc, allowAccumulator, opPath)
+					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, allowAccumulator, opPath)
 					if err != nil {
 						return "", err
 					}
@@ -2047,7 +2047,7 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 						return a.valueExpressionToSQLParamWithContextAndPath(exprMap, pc, allowAccumulator, path)
 					}
 					opPath := tperrors.BuildPath(path, operator, -1)
-					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, pc, allowAccumulator, opPath)
+					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, allowAccumulator, opPath)
 					if err != nil {
 						return "", err
 					}
@@ -2061,7 +2061,7 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 			case "+", "-", "*", "/", "%", "max", "min":
 				if arr, ok := args.([]interface{}); ok {
 					opPath := tperrors.BuildPath(path, operator, -1)
-					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, pc, allowAccumulator, opPath)
+					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, allowAccumulator, opPath)
 					if err != nil {
 						return "", err
 					}
@@ -2087,7 +2087,7 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 				}
 			default:
 				if a.config != nil && a.config.HasParamExpressionParser() {
-					rewrittenExpr, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(exprMap, pc, allowAccumulator, path)
+					rewrittenExpr, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(exprMap, allowAccumulator, path)
 					if err != nil {
 						return "", err
 					}
@@ -2143,6 +2143,45 @@ func (a *ArrayOperator) arrayScopeVarToSQLParam(varExpr interface{}, pc *params.
 	}
 
 	return "", false, nil
+}
+
+func (a *ArrayOperator) rewriteArrayScopeVarParam(varExpr interface{}) (interface{}, bool, error) {
+	if varName, ok := varExpr.(string); ok {
+		mapped, handled, err := a.mapArrayScopeVar(varName)
+		if err != nil {
+			return nil, true, err
+		}
+		if handled {
+			return SQLFieldResult(mapped), true, nil
+		}
+		return nil, false, nil
+	}
+
+	if arr, ok := varExpr.([]interface{}); ok {
+		if len(arr) == 0 {
+			return nil, false, nil
+		}
+		varName, ok := arr[0].(string)
+		if !ok {
+			return nil, false, nil
+		}
+		mapped, handled, err := a.mapArrayScopeVar(varName)
+		if err != nil {
+			return nil, true, err
+		}
+		if !handled {
+			return nil, false, nil
+		}
+		if len(arr) == 1 {
+			return SQLFieldResult(mapped), true, nil
+		}
+		newArr := make([]interface{}, len(arr))
+		copy(newArr, arr)
+		newArr[0] = SQLFieldResult(mapped)
+		return map[string]interface{}{OpVar: newArr}, true, nil
+	}
+
+	return nil, false, nil
 }
 
 // arrayInternalVarToSQLParam is the parameterized variant of arrayInternalVarToSQL.
@@ -2203,7 +2242,6 @@ func (a *ArrayOperator) arrayInternalVarToSQLParam(varExpr interface{}, pc *para
 
 func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 	expr interface{},
-	pc *params.ParamCollector,
 	allowAccumulator bool,
 	path string,
 ) (interface{}, error) {
@@ -2214,11 +2252,11 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 				if allowAccumulator && varName == AccumulatorVar {
 					return SQLResult(AccumulatorVar), nil
 				}
-				if sql, handled, err := a.arrayScopeVarToSQLParam(varName, pc); handled || err != nil {
+				if rewritten, handled, err := a.rewriteArrayScopeVarParam(varName); handled || err != nil {
 					if err != nil {
 						return nil, err
 					}
-					return SQLFieldResult(sql), nil
+					return rewritten, nil
 				}
 				return e, nil
 			}
@@ -2232,14 +2270,14 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 					copy(newArgs, arr)
 					opPath := tperrors.BuildPath(path, opName, -1)
 					if len(newArgs) > 0 {
-						rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr[0], pc, allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
+						rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr[0], allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
 						if err != nil {
 							return nil, err
 						}
 						newArgs[0] = rewritten
 					}
 					if opName == OpReduce && len(newArgs) > 2 {
-						rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr[2], pc, allowAccumulator, tperrors.BuildArrayPath(opPath, 2))
+						rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr[2], allowAccumulator, tperrors.BuildArrayPath(opPath, 2))
 						if err != nil {
 							return nil, err
 						}
@@ -2249,7 +2287,7 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 				}
 				if !a.isBuiltInOperatorName(opName) {
 					opPath := tperrors.BuildPath(path, opName, -1)
-					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(opArgs, pc, allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
+					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(opArgs, allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
 					if err != nil {
 						return nil, err
 					}
@@ -2259,7 +2297,7 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 		}
 		result := make(map[string]interface{}, len(e))
 		for k, v := range e {
-			rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(v, pc, allowAccumulator, tperrors.BuildPath(path, k, -1))
+			rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(v, allowAccumulator, tperrors.BuildPath(path, k, -1))
 			if err != nil {
 				return nil, err
 			}
@@ -2270,7 +2308,7 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 	case []interface{}:
 		result := make([]interface{}, len(e))
 		for i, v := range e {
-			rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(v, pc, allowAccumulator, tperrors.BuildArrayPath(path, i))
+			rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(v, allowAccumulator, tperrors.BuildArrayPath(path, i))
 			if err != nil {
 				return nil, err
 			}
