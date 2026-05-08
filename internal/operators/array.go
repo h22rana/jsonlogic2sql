@@ -823,6 +823,9 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
 	}
+	if isEmptyArrayLiteral(args[0]) {
+		return "FALSE", nil
+	}
 
 	// First argument: array
 	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
@@ -872,6 +875,9 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
 	}
+	if isEmptyArrayLiteral(args[0]) {
+		return "FALSE", nil
+	}
 
 	// First argument: array
 	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
@@ -918,6 +924,9 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	// Validate that first argument is an array type
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
+	}
+	if isEmptyArrayLiteral(args[0]) {
+		return "TRUE", nil
 	}
 
 	// First argument: array
@@ -1227,6 +1236,12 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 // operators or nested operator chains that may emit literal "item"/"current" tokens
 // not reachable by the AST-level rewrite.
 func (a *ArrayOperator) replaceElementRefsInSQL(sql string) string {
+	return replaceOutsideSingleQuotedStrings(sql, func(segment string) string {
+		return a.replaceElementRefsInSQLSegment(segment)
+	})
+}
+
+func (a *ArrayOperator) replaceElementRefsInSQLSegment(sql string) string {
 	return elementRefPathPattern.ReplaceAllStringFunc(sql, func(match string) string {
 		loc := elementRefPathPattern.FindStringSubmatchIndex(match)
 		if loc == nil {
@@ -1241,6 +1256,36 @@ func (a *ArrayOperator) replaceElementRefsInSQL(sql string) string {
 		}
 		return prefix + quoted
 	})
+}
+
+func replaceOutsideSingleQuotedStrings(sql string, replace func(string) string) string {
+	var b strings.Builder
+	segmentStart := 0
+	for i := 0; i < len(sql); {
+		if sql[i] != '\'' {
+			i++
+			continue
+		}
+
+		b.WriteString(replace(sql[segmentStart:i]))
+		quoteStart := i
+		i++
+		for i < len(sql) {
+			if sql[i] == '\'' {
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					i += 2
+					continue
+				}
+				i++
+				break
+			}
+			i++
+		}
+		b.WriteString(sql[quoteStart:i])
+		segmentStart = i
+	}
+	b.WriteString(replace(sql[segmentStart:]))
+	return b.String()
 }
 
 // replaceWithLiteral replaces regex matches while preserving the captured prefix
@@ -1613,6 +1658,11 @@ func (a *ArrayOperator) rewriteElementVars(expr interface{}) interface{} {
 	}
 }
 
+func isEmptyArrayLiteral(value interface{}) bool {
+	arr, ok := value.([]interface{})
+	return ok && len(arr) == 0
+}
+
 // isPrimitive checks if a value is a primitive type.
 func (a *ArrayOperator) isPrimitive(value interface{}) bool {
 	switch value.(type) {
@@ -1809,6 +1859,9 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
 	}
+	if isEmptyArrayLiteral(args[0]) {
+		return "FALSE", nil
+	}
 	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
@@ -1843,6 +1896,9 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
 	}
+	if isEmptyArrayLiteral(args[0]) {
+		return "FALSE", nil
+	}
 	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
@@ -1875,6 +1931,9 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	}
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
+	}
+	if isEmptyArrayLiteral(args[0]) {
+		return "TRUE", nil
 	}
 	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
 	if err != nil {

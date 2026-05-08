@@ -73,6 +73,129 @@ func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_PostgreSQLEmptyArrayFoldableContexts(t *testing.T) {
+	tr, err := NewTranspiler(DialectPostgreSQL)
+	if err != nil {
+		t.Fatalf("NewTranspiler() error = %v", err)
+	}
+
+	valueLogic := `{"or":[[],"fallback"]}`
+	got, err := tr.TranspileValue(valueLogic)
+	if err != nil {
+		t.Fatalf("TranspileValue() error = %v", err)
+	}
+	if got != "'fallback'" {
+		t.Fatalf("TranspileValue() = %q, want %q", got, "'fallback'")
+	}
+
+	gotParam, gotParams, err := tr.TranspileParameterizedValue(valueLogic)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedValue() error = %v", err)
+	}
+	if gotParam != "$1" {
+		t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, "$1")
+	}
+	if want := []QueryParam{{Name: "p1", Value: "fallback"}}; !reflect.DeepEqual(gotParams, want) {
+		t.Fatalf("params = %#v, want %#v", gotParams, want)
+	}
+
+	conditionLogic := `{"all":[[],true]}`
+	got, err = tr.TranspileCondition(conditionLogic)
+	if err != nil {
+		t.Fatalf("TranspileCondition() error = %v", err)
+	}
+	if got != "FALSE" {
+		t.Fatalf("TranspileCondition() = %q, want %q", got, "FALSE")
+	}
+
+	gotParam, gotParams, err = tr.TranspileParameterizedCondition(conditionLogic)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+	}
+	if gotParam != "FALSE" {
+		t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, "FALSE")
+	}
+	if len(gotParams) != 0 {
+		t.Fatalf("params = %#v, want none", gotParams)
+	}
+
+	emptyReturningLogic := `{"and":[[],"fallback"]}`
+	if _, err = tr.TranspileValue(emptyReturningLogic); !IsErrorCode(err, ErrInvalidArgument) {
+		t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
+	}
+	if _, _, err = tr.TranspileParameterizedValue(emptyReturningLogic); !IsErrorCode(err, ErrInvalidArgument) {
+		t.Fatalf("TranspileParameterizedValue() error = %v, want %s", err, ErrInvalidArgument)
+	}
+}
+
+func TestTranspileValue_ArrayValueFallbackStringLiteralsNotRewritten(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		logic   string
+		literal string
+		param   string
+	}{
+		{
+			name:    "current literal",
+			logic:   `{"map":[{"var":"arr"},{"or":[0,"current"]}]}`,
+			literal: "'current'",
+			param:   "current",
+		},
+		{
+			name:    "current and item in escaped literal",
+			logic:   `{"map":[{"var":"arr"},{"or":[0,"current's item"]}]}`,
+			literal: "'current''s item'",
+			param:   "current's item",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					want := fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", tt.literal)
+					if d == DialectClickHouse {
+						want = fmt.Sprintf("arrayMap(elem -> %s, arr)", tt.literal)
+					}
+					if got != want {
+						t.Fatalf("TranspileValue() = %q, want %q", got, want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					placeholder := testPlaceholder(d, 1)
+					wantParam := fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", placeholder)
+					if d == DialectClickHouse {
+						wantParam = fmt.Sprintf("arrayMap(elem -> %s, arr)", placeholder)
+					}
+					if gotParam != wantParam {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
+					}
+					wantParams := []QueryParam{{Name: "p1", Value: tt.param}}
+					if !reflect.DeepEqual(gotParams, wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_ArrayOperatorArrayLiteralElementsAsExpressions(t *testing.T) {
 	t.Parallel()
 

@@ -159,8 +159,10 @@ Main transpiler instance.
 | `ClearCustomOperators()` | Remove all custom operators |
 
 `TranspileValue*` returns standalone SQL value expressions. For PostgreSQL,
-root empty array values such as `[]` are rejected because `ARRAY[]` requires an
-explicit element type that is not available from the JSONLogic value alone.
+standalone empty-array results such as `[]` are rejected because `ARRAY[]`
+requires an explicit element type that is not available from the JSONLogic value alone.
+Foldable expressions such as `{"or":[[],"fallback"]}` are still allowed because
+they do not emit the empty array literal.
 
 ### TranspilerConfig
 

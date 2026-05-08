@@ -239,6 +239,17 @@ func TestTranspilerCustomOperators(t *testing.T) {
 		}
 	})
 
+	t.Run("RegisterOperatorFunc rejects unsupported function type", func(t *testing.T) {
+		transpiler, _ := NewTranspiler(DialectBigQuery)
+		err := transpiler.RegisterOperatorFunc("bad", 123)
+		if err == nil {
+			t.Fatal("RegisterOperatorFunc() expected error, got nil")
+		}
+		if transpiler.HasCustomOperator("bad") {
+			t.Fatal("unsupported function type should not be registered")
+		}
+	})
+
 	t.Run("RegisterOperator with struct", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
 		err := transpiler.RegisterOperator("length", &LengthOperator{})

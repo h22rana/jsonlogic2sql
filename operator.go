@@ -244,6 +244,39 @@ func legacyOperatorResultForKind(sql string, kind operators.ExpressionKind) Oper
 	return ValueSQL(sql, ExpressionTypeUnknown)
 }
 
+func validateOperatorFunc(fn any) error {
+	switch fn.(type) {
+	case OperatorFunc,
+		func(string, []OperatorArg) (OperatorResult, error),
+		LegacyOperatorFunc,
+		func(string, []interface{}) (string, error):
+		return nil
+	default:
+		return fmt.Errorf("unsupported operator function type %T", fn)
+	}
+}
+
+func validateDialectAwareOperatorFunc(fn any) error {
+	switch fn.(type) {
+	case DialectAwareOperatorFunc,
+		func(string, []OperatorArg, Dialect) (OperatorResult, error),
+		LegacyDialectAwareOperatorFunc,
+		func(string, []interface{}, Dialect) (string, error):
+		return nil
+	default:
+		return fmt.Errorf("unsupported dialect-aware operator function type %T", fn)
+	}
+}
+
+func validateDialectAwareOperatorHandler(handler any) error {
+	switch handler.(type) {
+	case DialectAwareOperatorHandler, LegacyDialectAwareOperatorHandler:
+		return nil
+	default:
+		return fmt.Errorf("unsupported dialect-aware operator handler type %T", handler)
+	}
+}
+
 // dialectAwareHandlerWrapper wraps a DialectAwareOperatorHandler to implement OperatorHandler.
 // It stores the dialect from the transpiler config and uses it when ToSQL is called.
 type dialectAwareHandlerWrapper struct {

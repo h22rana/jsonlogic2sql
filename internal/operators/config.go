@@ -116,10 +116,6 @@ func (c *OperatorConfig) ArrayLengthFunc(expr string) string {
 
 // ArrayLiteral renders a SQL array/list literal for the configured dialect.
 func (c *OperatorConfig) ArrayLiteral(elements []string) (string, error) {
-	if len(elements) == 0 && c.GetDialect() == dialect.DialectPostgreSQL {
-		return "", fmt.Errorf("empty PostgreSQL array literals require an explicit element type")
-	}
-
 	body := strings.Join(elements, ", ")
 	switch c.GetDialect() {
 	case dialect.DialectPostgreSQL:

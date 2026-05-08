@@ -172,6 +172,9 @@ func (t *Transpiler) RegisterOperatorFunc(name string, fn any) error {
 	if err := validateOperatorName(name); err != nil {
 		return err
 	}
+	if err := validateOperatorFunc(fn); err != nil {
+		return err
+	}
 	t.customOperators.RegisterFunc(name, fn)
 	return nil
 }
@@ -189,6 +192,9 @@ func (t *Transpiler) RegisterOperatorFunc(name string, fn any) error {
 //	// Spanner: CURRENT_TIMESTAMP()
 func (t *Transpiler) RegisterDialectAwareOperator(name string, handler any) error {
 	if err := validateOperatorName(name); err != nil {
+		return err
+	}
+	if err := validateDialectAwareOperatorHandler(handler); err != nil {
 		return err
 	}
 	// Wrap in a handler that implements OperatorHandler for registry storage
@@ -216,6 +222,9 @@ func (t *Transpiler) RegisterDialectAwareOperator(name string, handler any) erro
 //	})
 func (t *Transpiler) RegisterDialectAwareOperatorFunc(name string, fn any) error {
 	if err := validateOperatorName(name); err != nil {
+		return err
+	}
+	if err := validateDialectAwareOperatorFunc(fn); err != nil {
 		return err
 	}
 	t.customOperators.Register(name, &boundDialectAwareFuncHandler{fn: fn, dialect: t.config.Dialect})

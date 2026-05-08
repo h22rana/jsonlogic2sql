@@ -164,6 +164,10 @@ func (p *Parser) ParseValue(logic interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if p.isUnsupportedStandaloneEmptyArrayResult(res) {
+		return "", tperrors.New(tperrors.ErrInvalidArgument, "", "$",
+			"empty PostgreSQL array literals require an explicit element type")
+	}
 	return res.SQL, nil
 }
 
@@ -172,6 +176,11 @@ func (p *Parser) validateValueRoot(logic interface{}) error {
 		return nil
 	}
 	return p.validator.Validate(logic)
+}
+
+func (p *Parser) isUnsupportedStandaloneEmptyArrayResult(res expressionResult) bool {
+	arr, ok := res.rawLiteral.([]interface{})
+	return res.rawLiteralKnown && ok && len(arr) == 0 && p.config.GetDialect() == dialect.DialectPostgreSQL
 }
 
 type expressionResult struct {
@@ -540,7 +549,7 @@ func (p *Parser) parseExpressionValue(expr interface{}, path string) (expression
 		if err != nil {
 			return expressionResult{}, tperrors.Wrap(tperrors.ErrInvalidArgument, "", path, "invalid array literal", err)
 		}
-		return literalValueResult(sql, operators.ExpressionTypeArray, len(arr) > 0), nil
+		return literalValueResultWithRaw(sql, operators.ExpressionTypeArray, len(arr) > 0, expr), nil
 	}
 	if obj, ok := expr.(map[string]interface{}); ok {
 		if len(obj) != 1 {
@@ -1417,6 +1426,10 @@ func (p *Parser) ParseValueParameterized(logic interface{}) (string, []params.Qu
 	if err != nil {
 		return "", nil, err
 	}
+	if p.isUnsupportedStandaloneEmptyArrayResult(res) {
+		return "", nil, tperrors.New(tperrors.ErrInvalidArgument, "", "$",
+			"empty PostgreSQL array literals require an explicit element type")
+	}
 
 	if vErr := params.ValidatePlaceholderRefs(res.SQL, pc.Params(), style); vErr != nil {
 		return "", nil, vErr
@@ -1469,7 +1482,7 @@ func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *pa
 		if err != nil {
 			return expressionResult{}, tperrors.Wrap(tperrors.ErrInvalidArgument, "", path, "invalid array literal", err)
 		}
-		return literalValueResult(sql, operators.ExpressionTypeArray, len(arr) > 0), nil
+		return literalValueResultWithRaw(sql, operators.ExpressionTypeArray, len(arr) > 0, expr), nil
 	}
 	if obj, ok := expr.(map[string]interface{}); ok {
 		if len(obj) != 1 {
