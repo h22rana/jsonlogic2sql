@@ -45,40 +45,40 @@ func assertAllAPIsErrorForAccumulatorOutsideReduce(t *testing.T, tr *Transpiler,
 	m := decodeLogicMapLocal(t, logic)
 	logicAny := decodeLogicAnyLocal(t, logic)
 
-	_, err := tr.Transpile(logic)
+	_, err := tr.TranspileValue(logic)
 	assertAccumulatorSchemaError(t, err)
 
-	_, err = tr.TranspileCondition(logic)
+	_, err = tr.TranspileValue(logic)
 	assertAccumulatorSchemaError(t, err)
 
-	_, _, err = tr.TranspileParameterized(logic)
+	_, _, err = tr.TranspileParameterizedValue(logic)
 	assertAccumulatorSchemaError(t, err)
 
-	_, _, err = tr.TranspileConditionParameterized(logic)
+	_, _, err = tr.TranspileParameterizedValue(logic)
 	assertAccumulatorSchemaError(t, err)
 
-	_, err = tr.TranspileFromMap(m)
+	_, err = tr.TranspileValueFromMap(m)
 	assertAccumulatorSchemaError(t, err)
 
-	_, err = tr.TranspileFromInterface(logicAny)
+	_, err = tr.TranspileValueFromInterface(logicAny)
 	assertAccumulatorSchemaError(t, err)
 
-	_, err = tr.TranspileConditionFromMap(m)
+	_, err = tr.TranspileValueFromMap(m)
 	assertAccumulatorSchemaError(t, err)
 
-	_, err = tr.TranspileConditionFromInterface(logicAny)
+	_, err = tr.TranspileValueFromInterface(logicAny)
 	assertAccumulatorSchemaError(t, err)
 
-	_, _, err = tr.TranspileParameterizedFromMap(m)
+	_, _, err = tr.TranspileParameterizedValueFromMap(m)
 	assertAccumulatorSchemaError(t, err)
 
-	_, _, err = tr.TranspileParameterizedFromInterface(logicAny)
+	_, _, err = tr.TranspileParameterizedValueFromInterface(logicAny)
 	assertAccumulatorSchemaError(t, err)
 
-	_, _, err = tr.TranspileConditionParameterizedFromMap(m)
+	_, _, err = tr.TranspileParameterizedValueFromMap(m)
 	assertAccumulatorSchemaError(t, err)
 
-	_, _, err = tr.TranspileConditionParameterizedFromInterface(logicAny)
+	_, _, err = tr.TranspileParameterizedValueFromInterface(logicAny)
 	assertAccumulatorSchemaError(t, err)
 }
 
@@ -167,17 +167,17 @@ func TestReduceAccumulatorStillWorks_AllDialects(t *testing.T) {
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}
 
-			sql, err := tr.Transpile(logic)
+			sql, err := tr.TranspileValue(logic)
 			if err != nil {
-				t.Fatalf("Transpile() error: %v", err)
+				t.Fatalf("TranspileValue() error: %v", err)
 			}
 			if accWord.MatchString(sql) {
 				t.Fatalf("unexpected bare accumulator in inline SQL: %s", sql)
 			}
 
-			psql, params, err := tr.TranspileParameterized(logic)
+			psql, params, err := tr.TranspileParameterizedValue(logic)
 			if err != nil {
-				t.Fatalf("TranspileParameterized() error: %v", err)
+				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}
 			if accWord.MatchString(psql) {
 				t.Fatalf("unexpected bare accumulator in parameterized SQL: %s", psql)

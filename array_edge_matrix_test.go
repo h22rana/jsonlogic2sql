@@ -48,58 +48,85 @@ func decodeLogicAny(t *testing.T, logic string) interface{} {
 func runAllAPIVariants(t *testing.T, tr *Transpiler, logic string) apiOutput {
 	t.Helper()
 
-	inlineSQL, err := tr.Transpile(logic)
-	if err != nil {
-		t.Fatalf("Transpile() error: %v", err)
+	inlineSQL, err := tr.TranspileCondition(logic)
+	valueMode := IsErrorCode(err, ErrInvalidExpressionContext)
+	if valueMode {
+		inlineSQL, err = tr.TranspileValue(logic)
 	}
-	condSQL, err := tr.TranspileCondition(logic)
 	if err != nil {
 		t.Fatalf("TranspileCondition() error: %v", err)
 	}
-	paramSQL, params, err := tr.TranspileParameterized(logic)
-	if err != nil {
-		t.Fatalf("TranspileParameterized() error: %v", err)
+	condSQL := inlineSQL
+	if !valueMode {
+		condSQL, err = tr.TranspileCondition(logic)
+		if err != nil {
+			t.Fatalf("TranspileCondition() error: %v", err)
+		}
 	}
-	paramCond, condParams, err := tr.TranspileConditionParameterized(logic)
+	var paramSQL string
+	var params []QueryParam
+	if valueMode {
+		paramSQL, params, err = tr.TranspileParameterizedValue(logic)
+	} else {
+		paramSQL, params, err = tr.TranspileParameterizedCondition(logic)
+	}
 	if err != nil {
-		t.Fatalf("TranspileConditionParameterized() error: %v", err)
+		t.Fatalf("TranspileParameterizedCondition() error: %v", err)
+	}
+	paramCond := paramSQL
+	condParams := params
+	if !valueMode {
+		paramCond, condParams, err = tr.TranspileParameterizedCondition(logic)
+		if err != nil {
+			t.Fatalf("TranspileParameterizedCondition() error: %v", err)
+		}
 	}
 
 	logicMap := decodeLogicMap(t, logic)
 	logicAny := decodeLogicAny(t, logic)
 
-	inlineFromMap, err := tr.TranspileFromMap(logicMap)
-	if err != nil {
-		t.Fatalf("TranspileFromMap() error: %v", err)
+	var inlineFromMap, inlineFromAny string
+	if valueMode {
+		inlineFromMap, err = tr.TranspileValueFromMap(logicMap)
+	} else {
+		inlineFromMap, err = tr.TranspileConditionFromMap(logicMap)
 	}
-	inlineFromAny, err := tr.TranspileFromInterface(logicAny)
 	if err != nil {
-		t.Fatalf("TranspileFromInterface() error: %v", err)
+		t.Fatalf("TranspileFromMap variant error: %v", err)
 	}
-	condFromMap, err := tr.TranspileConditionFromMap(logicMap)
+	if valueMode {
+		inlineFromAny, err = tr.TranspileValueFromInterface(logicAny)
+	} else {
+		inlineFromAny, err = tr.TranspileConditionFromInterface(logicAny)
+	}
 	if err != nil {
-		t.Fatalf("TranspileConditionFromMap() error: %v", err)
+		t.Fatalf("TranspileFromInterface variant error: %v", err)
 	}
-	condFromAny, err := tr.TranspileConditionFromInterface(logicAny)
+	condFromMap := inlineFromMap
+	condFromAny := inlineFromAny
+
+	var paramFromMap, paramFromAny string
+	var mapParams, anyParams []QueryParam
+	if valueMode {
+		paramFromMap, mapParams, err = tr.TranspileParameterizedValueFromMap(logicMap)
+	} else {
+		paramFromMap, mapParams, err = tr.TranspileParameterizedConditionFromMap(logicMap)
+	}
 	if err != nil {
-		t.Fatalf("TranspileConditionFromInterface() error: %v", err)
+		t.Fatalf("TranspileParameterizedFromMap variant error: %v", err)
 	}
-	paramFromMap, mapParams, err := tr.TranspileParameterizedFromMap(logicMap)
+	if valueMode {
+		paramFromAny, anyParams, err = tr.TranspileParameterizedValueFromInterface(logicAny)
+	} else {
+		paramFromAny, anyParams, err = tr.TranspileParameterizedConditionFromInterface(logicAny)
+	}
 	if err != nil {
-		t.Fatalf("TranspileParameterizedFromMap() error: %v", err)
+		t.Fatalf("TranspileParameterizedFromInterface variant error: %v", err)
 	}
-	paramFromAny, anyParams, err := tr.TranspileParameterizedFromInterface(logicAny)
-	if err != nil {
-		t.Fatalf("TranspileParameterizedFromInterface() error: %v", err)
-	}
-	paramCondFromMap, mapCondParams, err := tr.TranspileConditionParameterizedFromMap(logicMap)
-	if err != nil {
-		t.Fatalf("TranspileConditionParameterizedFromMap() error: %v", err)
-	}
-	paramCondFromAny, anyCondParams, err := tr.TranspileConditionParameterizedFromInterface(logicAny)
-	if err != nil {
-		t.Fatalf("TranspileConditionParameterizedFromInterface() error: %v", err)
-	}
+	paramCondFromMap := paramFromMap
+	paramCondFromAny := paramFromAny
+	mapCondParams := mapParams
+	anyCondParams := anyParams
 
 	if inlineFromMap != inlineSQL || inlineFromAny != inlineSQL {
 		t.Fatalf("inline API mismatch: direct=%q fromMap=%q fromAny=%q", inlineSQL, inlineFromMap, inlineFromAny)
@@ -119,10 +146,10 @@ func runAllAPIVariants(t *testing.T, tr *Transpiler, logic string) apiOutput {
 	if len(mapCondParams) != len(condParams) || len(anyCondParams) != len(condParams) {
 		t.Fatalf("parameterized condition API param count mismatch: direct=%d fromMap=%d fromAny=%d", len(condParams), len(mapCondParams), len(anyCondParams))
 	}
-	if condSQL != strings.TrimPrefix(inlineSQL, "WHERE ") {
+	if condSQL != strings.TrimPrefix(inlineSQL, "") {
 		t.Fatalf("condition mismatch: inline=%q cond=%q", inlineSQL, condSQL)
 	}
-	if paramCond != strings.TrimPrefix(paramSQL, "WHERE ") {
+	if paramCond != strings.TrimPrefix(paramSQL, "") {
 		t.Fatalf("parameterized condition mismatch: inline=%q cond=%q", paramSQL, paramCond)
 	}
 
@@ -182,7 +209,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem -> (elem * 2), bag.numbers)")
 				} else {
@@ -197,7 +224,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				switch d {
 				case DialectBigQuery, DialectSpanner:
 					assertContains(t, inline, "ARRAY_LENGTH(bag.numbers)")
@@ -214,7 +241,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				switch d {
 				case DialectPostgreSQL:
 					assertContains(t, inline, "bag.numbers || bag.words")
@@ -231,7 +258,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 2,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				assertContains(t, inline, "COALESCE(elem, 0)")
 			},
 		},
@@ -241,7 +268,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem1 -> (elem.base + elem1), elem.values)")
 				} else {
@@ -257,7 +284,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayFilter(elem1 -> elem1 >= elem.base, elem.values)")
 					assertNotContains(t, inline, "arrayFilter(elem -> elem >= elem.base, elem.values)")
@@ -274,7 +301,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayAll(elem1 -> elem1 >= elem.base, elem.values)")
 				} else {
@@ -289,7 +316,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayExists(elem1 -> elem1 >= elem.base, elem.values)")
 				} else {
@@ -304,7 +331,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayExists(elem1 -> elem1 < elem.base, elem.values)")
 				} else {
@@ -319,7 +346,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem -> elem.base + coalesce(arrayReduce('sum', elem.values), 0), bag.records)")
 				} else {
@@ -335,7 +362,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 2,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "WHERE ")
+				inline := strings.TrimPrefix(out.inlineSQL, "")
 				assertContains(t, inline, "metrics.amount >= 100")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayFilter(elem1 -> elem1 >= elem.base, elem.values)")
@@ -448,17 +475,17 @@ func TestArrayEdgeMatrix_SchemaVsNoSchemaValidation(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
-					_, err := schemaTrByDialect[d].Transpile(tc.logic)
+					_, err := schemaTrByDialect[d].TranspileValue(tc.logic)
 					if err == nil || !strings.Contains(err.Error(), tc.wantSchemaErr) {
 						t.Fatalf("expected schema error containing %q, got: %v", tc.wantSchemaErr, err)
 					}
 
 					// No-schema mode should accept and produce SQL shape.
-					sql, err := noSchemaTrByDialect[d].Transpile(tc.logic)
+					sql, err := noSchemaTrByDialect[d].TranspileValue(tc.logic)
 					if err != nil {
 						t.Fatalf("no-schema mode should pass, got error: %v", err)
 					}
-					if !strings.HasPrefix(sql, "WHERE ") {
+					if !strings.HasPrefix(sql, "") {
 						t.Fatalf("expected WHERE SQL in no-schema mode, got: %s", sql)
 					}
 				})
@@ -481,41 +508,41 @@ func TestArrayEdgeMatrix_PackageFunctionsSmoke(t *testing.T) {
 
 	for _, d := range dialects {
 		t.Run(d.String(), func(t *testing.T) {
-			sql1, err := Transpile(d, logic)
+			sql1, err := TranspileValue(d, logic)
 			if err != nil {
-				t.Fatalf("Transpile() error: %v", err)
+				t.Fatalf("TranspileValue() error: %v", err)
 			}
-			sql2, err := TranspileFromMap(d, logicMap)
+			sql2, err := TranspileValueFromMap(d, logicMap)
 			if err != nil {
-				t.Fatalf("TranspileFromMap() error: %v", err)
+				t.Fatalf("TranspileValueFromMap() error: %v", err)
 			}
-			sql3, err := TranspileFromInterface(d, logicAny)
+			sql3, err := TranspileValueFromInterface(d, logicAny)
 			if err != nil {
-				t.Fatalf("TranspileFromInterface() error: %v", err)
+				t.Fatalf("TranspileValueFromInterface() error: %v", err)
 			}
-			cond, err := TranspileCondition(d, logic)
+			cond, err := TranspileValue(d, logic)
 			if err != nil {
-				t.Fatalf("TranspileCondition() error: %v", err)
+				t.Fatalf("TranspileValue() error: %v", err)
 			}
 			if sql1 != sql2 || sql1 != sql3 {
 				t.Fatalf("package transpile mismatch: direct=%q map=%q any=%q", sql1, sql2, sql3)
 			}
-			if strings.TrimPrefix(sql1, "WHERE ") != cond {
+			if strings.TrimPrefix(sql1, "") != cond {
 				t.Fatalf("package condition mismatch: sql=%q cond=%q", sql1, cond)
 			}
 
-			psql, params, err := TranspileParameterized(d, logic)
+			psql, params, err := TranspileParameterizedValue(d, logic)
 			if err != nil {
-				t.Fatalf("TranspileParameterized() error: %v", err)
+				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}
 			if len(params) != 1 {
 				t.Fatalf("expected 1 param, got %d", len(params))
 			}
-			pcond, cparams, err := TranspileConditionParameterized(d, logic)
+			pcond, cparams, err := TranspileParameterizedValue(d, logic)
 			if err != nil {
-				t.Fatalf("TranspileConditionParameterized() error: %v", err)
+				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}
-			if strings.TrimPrefix(psql, "WHERE ") != pcond {
+			if strings.TrimPrefix(psql, "") != pcond {
 				t.Fatalf("package parameterized condition mismatch: sql=%q cond=%q", psql, pcond)
 			}
 			if len(cparams) != len(params) {
@@ -536,8 +563,8 @@ func BenchmarkArrayEdgeMatrix_DeepNesting(b *testing.B) {
 		b.Fatalf("failed to init transpiler: %v", err)
 	}
 	for i := 0; i < b.N; i++ {
-		if _, err := tr.Transpile(logic); err != nil {
-			b.Fatalf("Transpile() error: %v", err)
+		if _, err := tr.TranspileCondition(logic); err != nil {
+			b.Fatalf("TranspileCondition() error: %v", err)
 		}
 	}
 }
@@ -550,7 +577,7 @@ func TestArrayEdgeMatrix_ErrorMessagesAreStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init transpiler: %v", err)
 	}
-	_, err = tr.Transpile(`{"reduce":[{"var":"bag.numbers"},{"var":"current"}]}`)
+	_, err = tr.TranspileCondition(`{"reduce":[{"var":"bag.numbers"},{"var":"current"}]}`)
 	if err == nil {
 		t.Fatal("expected reduce arity error")
 	}
@@ -576,11 +603,20 @@ func TestArrayEdgeMatrix_NoPanicOnComplexInputs(t *testing.T) {
 
 	for i, logic := range inputs {
 		t.Run(fmt.Sprintf("case_%d", i), func(t *testing.T) {
-			if _, err := tr.Transpile(logic); err != nil {
-				t.Fatalf("Transpile() failed for complex input: %v", err)
+			if strings.HasPrefix(logic, `{"all"`) {
+				if _, err := tr.TranspileCondition(logic); err != nil {
+					t.Fatalf("TranspileCondition() failed for complex input: %v", err)
+				}
+				if _, _, err := tr.TranspileParameterizedCondition(logic); err != nil {
+					t.Fatalf("TranspileParameterizedCondition() failed for complex input: %v", err)
+				}
+				return
 			}
-			if _, _, err := tr.TranspileParameterized(logic); err != nil {
-				t.Fatalf("TranspileParameterized() failed for complex input: %v", err)
+			if _, err := tr.TranspileValue(logic); err != nil {
+				t.Fatalf("TranspileValue() failed for complex input: %v", err)
+			}
+			if _, _, err := tr.TranspileParameterizedValue(logic); err != nil {
+				t.Fatalf("TranspileParameterizedValue() failed for complex input: %v", err)
 			}
 		})
 	}

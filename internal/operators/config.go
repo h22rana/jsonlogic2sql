@@ -17,15 +17,26 @@ type ExpressionParser func(expr any, path string) (string, error)
 // It additionally receives a ParamCollector to register bind parameters.
 type ParamExpressionParser func(expr any, path string, pc *params.ParamCollector) (string, error)
 
+// TypedExpressionParser parses a nested expression and returns SQL plus coarse
+// context/type metadata.
+type TypedExpressionParser func(expr any, path string) (OperatorResult, error)
+
+// ParamTypedExpressionParser is the parameterized variant of TypedExpressionParser.
+type ParamTypedExpressionParser func(expr any, path string, pc *params.ParamCollector) (OperatorResult, error)
+
 // OperatorConfig holds shared configuration for all operators.
 // By using a shared config object, all operators automatically see
 // configuration changes without requiring individual SetSchema calls.
 type OperatorConfig struct {
-	Schema                SchemaProvider
-	Dialect               dialect.Dialect
-	NullSafeFieldEquality bool
-	ExpressionParser      ExpressionParser
-	ParamExpressionParser ParamExpressionParser
+	Schema                     SchemaProvider
+	Dialect                    dialect.Dialect
+	NullSafeFieldEquality      bool
+	ExpressionParser           ExpressionParser
+	ParamExpressionParser      ParamExpressionParser
+	ValueExpressionParser      TypedExpressionParser
+	PredicateExpressionParser  TypedExpressionParser
+	ParamValueExpressionParser ParamTypedExpressionParser
+	ParamPredicateParser       ParamTypedExpressionParser
 }
 
 // NewOperatorConfig creates a new operator config with dialect and optional schema.
@@ -143,4 +154,84 @@ func (c *OperatorConfig) ParseExpressionParam(expr any, path string, pc *params.
 		return "", fmt.Errorf("parameterized expression parser not configured")
 	}
 	return c.ParamExpressionParser(expr, path, pc)
+}
+
+// SetValueExpressionParser sets the callback for value-expression parsing.
+func (c *OperatorConfig) SetValueExpressionParser(parser TypedExpressionParser) {
+	if c != nil {
+		c.ValueExpressionParser = parser
+	}
+}
+
+// HasValueExpressionParser returns true if a value parser is configured.
+func (c *OperatorConfig) HasValueExpressionParser() bool {
+	return c != nil && c.ValueExpressionParser != nil
+}
+
+// ParseValueExpression parses a nested expression as a value expression.
+func (c *OperatorConfig) ParseValueExpression(expr any, path string) (OperatorResult, error) {
+	if !c.HasValueExpressionParser() {
+		return OperatorResult{}, fmt.Errorf("value expression parser not configured")
+	}
+	return c.ValueExpressionParser(expr, path)
+}
+
+// SetPredicateExpressionParser sets the callback for predicate-expression parsing.
+func (c *OperatorConfig) SetPredicateExpressionParser(parser TypedExpressionParser) {
+	if c != nil {
+		c.PredicateExpressionParser = parser
+	}
+}
+
+// HasPredicateExpressionParser returns true if a predicate parser is configured.
+func (c *OperatorConfig) HasPredicateExpressionParser() bool {
+	return c != nil && c.PredicateExpressionParser != nil
+}
+
+// ParsePredicateExpression parses a nested expression as a predicate.
+func (c *OperatorConfig) ParsePredicateExpression(expr any, path string) (OperatorResult, error) {
+	if !c.HasPredicateExpressionParser() {
+		return OperatorResult{}, fmt.Errorf("predicate expression parser not configured")
+	}
+	return c.PredicateExpressionParser(expr, path)
+}
+
+// SetParamValueExpressionParser sets the parameterized value parser callback.
+func (c *OperatorConfig) SetParamValueExpressionParser(parser ParamTypedExpressionParser) {
+	if c != nil {
+		c.ParamValueExpressionParser = parser
+	}
+}
+
+// HasParamValueExpressionParser returns true if a parameterized value parser is configured.
+func (c *OperatorConfig) HasParamValueExpressionParser() bool {
+	return c != nil && c.ParamValueExpressionParser != nil
+}
+
+// ParseValueExpressionParam parses a nested value expression through the parameterized pipeline.
+func (c *OperatorConfig) ParseValueExpressionParam(expr any, path string, pc *params.ParamCollector) (OperatorResult, error) {
+	if !c.HasParamValueExpressionParser() {
+		return OperatorResult{}, fmt.Errorf("parameterized value expression parser not configured")
+	}
+	return c.ParamValueExpressionParser(expr, path, pc)
+}
+
+// SetParamPredicateExpressionParser sets the parameterized predicate parser callback.
+func (c *OperatorConfig) SetParamPredicateExpressionParser(parser ParamTypedExpressionParser) {
+	if c != nil {
+		c.ParamPredicateParser = parser
+	}
+}
+
+// HasParamPredicateExpressionParser returns true if a parameterized predicate parser is configured.
+func (c *OperatorConfig) HasParamPredicateExpressionParser() bool {
+	return c != nil && c.ParamPredicateParser != nil
+}
+
+// ParsePredicateExpressionParam parses a nested predicate through the parameterized pipeline.
+func (c *OperatorConfig) ParsePredicateExpressionParam(expr any, path string, pc *params.ParamCollector) (OperatorResult, error) {
+	if !c.HasParamPredicateExpressionParser() {
+		return OperatorResult{}, fmt.Errorf("parameterized predicate expression parser not configured")
+	}
+	return c.ParamPredicateParser(expr, path, pc)
 }

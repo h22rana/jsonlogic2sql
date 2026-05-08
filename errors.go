@@ -12,7 +12,7 @@ import (
 //
 // Example:
 //
-//	sql, err := transpiler.Transpile(jsonLogic)
+//	sql, err := transpiler.TranspileCondition(jsonLogic)
 //	if err != nil {
 //	    var tpErr *TranspileError
 //	    if errors.As(err, &tpErr) {
@@ -34,13 +34,14 @@ type ErrorCode = tperrors.ErrorCode
 // Error codes for programmatic error handling.
 const (
 	// Structural/validation errors (E001-E099).
-	ErrInvalidExpression   = tperrors.ErrInvalidExpression
-	ErrEmptyArray          = tperrors.ErrEmptyArray
-	ErrMultipleKeys        = tperrors.ErrMultipleKeys
-	ErrPrimitiveNotAllowed = tperrors.ErrPrimitiveNotAllowed
-	ErrArrayNotAllowed     = tperrors.ErrArrayNotAllowed
-	ErrValidation          = tperrors.ErrValidation
-	ErrInvalidJSON         = tperrors.ErrInvalidJSON
+	ErrInvalidExpression        = tperrors.ErrInvalidExpression
+	ErrEmptyArray               = tperrors.ErrEmptyArray
+	ErrMultipleKeys             = tperrors.ErrMultipleKeys
+	ErrPrimitiveNotAllowed      = tperrors.ErrPrimitiveNotAllowed
+	ErrArrayNotAllowed          = tperrors.ErrArrayNotAllowed
+	ErrValidation               = tperrors.ErrValidation
+	ErrInvalidJSON              = tperrors.ErrInvalidJSON
+	ErrInvalidExpressionContext = tperrors.ErrInvalidExpressionContext
 
 	// Operator-specific errors (E100-E199).
 	ErrUnsupportedOperator   = tperrors.ErrUnsupportedOperator
@@ -68,7 +69,7 @@ const (
 //
 // Example:
 //
-//	sql, err := transpiler.Transpile(jsonLogic)
+//	sql, err := transpiler.TranspileCondition(jsonLogic)
 //	if tpErr, ok := jsonlogic2sql.AsTranspileError(err); ok {
 //	    fmt.Printf("Error code: %s\n", tpErr.Code)
 //	}

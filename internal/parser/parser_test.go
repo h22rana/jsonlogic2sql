@@ -45,19 +45,19 @@ func TestParser_Parse(t *testing.T) {
 		{
 			name:     "simple greater than",
 			input:    map[string]interface{}{">": []interface{}{map[string]interface{}{"var": "amount"}, 1000}},
-			expected: "WHERE amount > 1000",
+			expected: "amount > 1000",
 			hasError: false,
 		},
 		{
 			name:     "simple equality",
 			input:    map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "status"}, "pending"}},
-			expected: "WHERE status = 'pending'",
+			expected: "status = 'pending'",
 			hasError: false,
 		},
 		{
 			name:     "simple inequality",
 			input:    map[string]interface{}{"!=": []interface{}{map[string]interface{}{"var": "verified"}, false}},
-			expected: "WHERE verified != FALSE",
+			expected: "verified != FALSE",
 			hasError: false,
 		},
 
@@ -70,7 +70,7 @@ func TestParser_Parse(t *testing.T) {
 					map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "status"}, "pending"}},
 				},
 			},
-			expected: "WHERE (amount > 5000 AND status = 'pending')",
+			expected: "(amount > 5000 AND status = 'pending')",
 			hasError: false,
 		},
 		{
@@ -82,7 +82,7 @@ func TestParser_Parse(t *testing.T) {
 					map[string]interface{}{"!=": []interface{}{map[string]interface{}{"var": "verified"}, false}},
 				},
 			},
-			expected: "WHERE (amount > 1000 AND status = 'active' AND verified != FALSE)",
+			expected: "(amount > 1000 AND status = 'active' AND verified != FALSE)",
 			hasError: false,
 		},
 
@@ -95,7 +95,7 @@ func TestParser_Parse(t *testing.T) {
 					map[string]interface{}{"in": []interface{}{map[string]interface{}{"var": "country"}, []interface{}{"CN", "RU"}}},
 				},
 			},
-			expected: "WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))",
+			expected: "(failedAttempts >= 5 OR country IN ('CN', 'RU'))",
 			hasError: false,
 		},
 
@@ -103,7 +103,7 @@ func TestParser_Parse(t *testing.T) {
 		{
 			name:     "not operation",
 			input:    map[string]interface{}{"!": []interface{}{map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "verified"}, true}}}},
-			expected: "WHERE NOT (verified = TRUE)",
+			expected: "NOT (verified = TRUE)",
 			hasError: false,
 		},
 
@@ -116,7 +116,7 @@ func TestParser_Parse(t *testing.T) {
 					"adult",
 				},
 			},
-			expected: "WHERE CASE WHEN age > 18 THEN 'adult' ELSE NULL END",
+			expected: "CASE WHEN age > 18 THEN 'adult' ELSE NULL END",
 			hasError: false,
 		},
 		{
@@ -128,7 +128,7 @@ func TestParser_Parse(t *testing.T) {
 					"minor",
 				},
 			},
-			expected: "WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END",
+			expected: "CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END",
 			hasError: false,
 		},
 
@@ -144,7 +144,7 @@ func TestParser_Parse(t *testing.T) {
 					}},
 				},
 			},
-			expected: "WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7))",
+			expected: "(transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7))",
 			hasError: false,
 		},
 
@@ -152,13 +152,13 @@ func TestParser_Parse(t *testing.T) {
 		{
 			name:     "missing operation",
 			input:    map[string]interface{}{"missing": "field"},
-			expected: "WHERE field IS NULL",
+			expected: "field IS NULL",
 			hasError: false,
 		},
 		{
 			name:     "missing_some operation",
 			input:    map[string]interface{}{"missing_some": []interface{}{1, []interface{}{"field1", "field2"}}},
-			expected: "WHERE (field1 IS NULL OR field2 IS NULL)",
+			expected: "(field1 IS NULL OR field2 IS NULL)",
 			hasError: false,
 		},
 
@@ -166,13 +166,13 @@ func TestParser_Parse(t *testing.T) {
 		{
 			name:     "in operation with strings",
 			input:    map[string]interface{}{"in": []interface{}{map[string]interface{}{"var": "country"}, []interface{}{"CN", "RU"}}},
-			expected: "WHERE country IN ('CN', 'RU')",
+			expected: "country IN ('CN', 'RU')",
 			hasError: false,
 		},
 		{
 			name:     "in operation with numbers",
 			input:    map[string]interface{}{"in": []interface{}{map[string]interface{}{"var": "status"}, []interface{}{1, 2, 3}}},
-			expected: "WHERE status IN (1, 2, 3)",
+			expected: "status IN (1, 2, 3)",
 			hasError: false,
 		},
 
@@ -220,7 +220,7 @@ func TestParser_Parse(t *testing.T) {
 			input: map[string]interface{}{
 				"+": []interface{}{5, 3},
 			},
-			expected: "WHERE (5 + 3)",
+			expected: "(5 + 3)",
 			hasError: false,
 		},
 		{
@@ -228,7 +228,7 @@ func TestParser_Parse(t *testing.T) {
 			input: map[string]interface{}{
 				"*": []interface{}{map[string]interface{}{"var": "price"}, 1.2},
 			},
-			expected: "WHERE (price * 1.2)",
+			expected: "(price * 1.2)",
 			hasError: false,
 		},
 		{
@@ -236,7 +236,7 @@ func TestParser_Parse(t *testing.T) {
 			input: map[string]interface{}{
 				"max": []interface{}{10, 20, 15},
 			},
-			expected: "WHERE GREATEST(10, 20, 15)",
+			expected: "GREATEST(10, 20, 15)",
 			hasError: false,
 		},
 
@@ -246,7 +246,7 @@ func TestParser_Parse(t *testing.T) {
 			input: map[string]interface{}{
 				"merge": []interface{}{[]interface{}{1, 2}, []interface{}{3, 4}},
 			},
-			expected: "WHERE ARRAY_CONCAT([1, 2], [3, 4])",
+			expected: "ARRAY_CONCAT([1, 2], [3, 4])",
 			hasError: false,
 		},
 		{
@@ -254,7 +254,7 @@ func TestParser_Parse(t *testing.T) {
 			input: map[string]interface{}{
 				"map": []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "item"}, 1}}},
 			},
-			expected: "WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)",
+			expected: "ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)",
 			hasError: false,
 		},
 	}
@@ -437,8 +437,16 @@ type mockCustomHandler struct {
 	toSQL func(operator string, args []interface{}) (string, error)
 }
 
-func (m *mockCustomHandler) ToSQL(operator string, args []interface{}) (string, error) {
-	return m.toSQL(operator, args)
+func (m *mockCustomHandler) ToSQL(operator string, args []operators.OperatorArg) (operators.OperatorResult, error) {
+	legacyArgs := make([]interface{}, len(args))
+	for i, arg := range args {
+		legacyArgs[i] = arg.SQL
+	}
+	sql, err := m.toSQL(operator, legacyArgs)
+	if err != nil {
+		return operators.OperatorResult{}, err
+	}
+	return operators.PredicateSQL(sql), nil
 }
 
 // mockSchemaProvider implements operators.SchemaProvider for testing.
@@ -560,7 +568,7 @@ func TestParser_ParseCondition(t *testing.T) {
 				if result != tt.expected {
 					t.Errorf("ParseCondition() = %q, expected %q", result, tt.expected)
 				}
-				// Verify it does NOT have "WHERE " prefix
+				// Verify it does NOT have "" prefix
 				if strings.HasPrefix(result, "WHERE ") {
 					t.Errorf("ParseCondition() should not have WHERE prefix, got %q", result)
 				}
@@ -597,7 +605,7 @@ func TestParser_SetCustomOperatorLookup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Parse() unexpected error: %v", err)
 		}
-		expected := "WHERE LENGTH(name)"
+		expected := "LENGTH(name)"
 		if result != expected {
 			t.Errorf("Parse() = %q, expected %q", result, expected)
 		}
@@ -641,7 +649,7 @@ func TestParser_SetCustomOperatorLookup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Parse() unexpected error: %v", err)
 		}
-		expected := "WHERE SINGLE(x)"
+		expected := "SINGLE(x)"
 		if result != expected {
 			t.Errorf("Parse() = %q, expected %q", result, expected)
 		}
@@ -694,8 +702,8 @@ func TestParser_SetSchema(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Parse() unexpected error for valid field: %v", err)
 		}
-		if result != "WHERE amount > 100" {
-			t.Errorf("Parse() = %q, expected %q", result, "WHERE amount > 100")
+		if result != "amount > 100" {
+			t.Errorf("Parse() = %q, expected %q", result, "amount > 100")
 		}
 	})
 
@@ -1104,7 +1112,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE LENGTH(name)"
+		expected := "LENGTH(name)"
 		if result != expected {
 			t.Errorf("got %q, expected %q", result, expected)
 		}
@@ -1130,7 +1138,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE REPEAT(name, 'hello')"
+		expected := "REPEAT(name, 'hello')"
 		if result != expected {
 			t.Errorf("got %q, expected %q", result, expected)
 		}
@@ -1156,7 +1164,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE FLAG(field, TRUE)"
+		expected := "FLAG(field, TRUE)"
 		if result != expected {
 			t.Errorf("got %q, expected %q", result, expected)
 		}
@@ -1182,7 +1190,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE FLAG(field, FALSE)"
+		expected := "FLAG(field, FALSE)"
 		if result != expected {
 			t.Errorf("got %q, expected %q", result, expected)
 		}
@@ -1208,7 +1216,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE CHECK(field, NULL)"
+		expected := "CHECK(field, NULL)"
 		if result != expected {
 			t.Errorf("got %q, expected %q", result, expected)
 		}
@@ -1234,7 +1242,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE POWER(base, 3.14)"
+		expected := "POWER(base, 3.14)"
 		if result != expected {
 			t.Errorf("got %q, expected %q", result, expected)
 		}
@@ -1301,7 +1309,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE LENGTH(LOWER(name))"
+		expected := "LENGTH(LOWER(name))"
 		if result != expected {
 			t.Errorf("got %q, expected %q", result, expected)
 		}
@@ -1328,7 +1336,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE CAST(count AS STRING)"
+		expected := "CAST(count AS STRING)"
 		if result != expected {
 			t.Errorf("got %q, expected %q", result, expected)
 		}
@@ -1355,7 +1363,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE LITERAL('hello')"
+		expected := "LITERAL('hello')"
 		if result != expected {
 			t.Errorf("got %q, expected %q", result, expected)
 		}
@@ -1622,7 +1630,7 @@ func TestParser_CustomOperatorInComparison(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := "WHERE LENGTH(name) > 5"
+	expected := "LENGTH(name) > 5"
 	if result != expected {
 		t.Errorf("got %q, expected %q", result, expected)
 	}
@@ -1671,7 +1679,7 @@ func TestParser_CustomOperatorInLogicalContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := "WHERE (LENGTH(name) > 3 AND LOWER(status) = 'active')"
+	expected := "(LENGTH(name) > 3 AND LOWER(status) = 'active')"
 	if result != expected {
 		t.Errorf("got %q, expected %q", result, expected)
 	}
@@ -1704,7 +1712,7 @@ func TestParser_CustomOperatorInUnaryContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := "WHERE NOT ((name IS NULL OR name = ''))"
+	expected := "NOT ((name IS NULL OR name = ''))"
 	if result != expected {
 		t.Errorf("got %q, expected %q", result, expected)
 	}
@@ -1816,7 +1824,7 @@ func TestParser_ParseParameterized(t *testing.T) {
 			input: map[string]interface{}{
 				"==": []interface{}{map[string]interface{}{"var": "email"}, "alice"},
 			},
-			wantSQL:    "WHERE email = @p1",
+			wantSQL:    "email = @p1",
 			wantParams: []params.QueryParam{{Name: "p1", Value: "alice"}},
 		},
 		{
@@ -1824,7 +1832,7 @@ func TestParser_ParseParameterized(t *testing.T) {
 			input: map[string]interface{}{
 				">": []interface{}{map[string]interface{}{"var": "age"}, float64(18)},
 			},
-			wantSQL:    "WHERE age > @p1",
+			wantSQL:    "age > @p1",
 			wantParams: []params.QueryParam{{Name: "p1", Value: float64(18)}},
 		},
 		{
@@ -1835,7 +1843,7 @@ func TestParser_ParseParameterized(t *testing.T) {
 					[]interface{}{float64(1), float64(2)},
 				},
 			},
-			wantSQL: "WHERE x IN (@p1, @p2)",
+			wantSQL: "x IN (@p1, @p2)",
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(1)},
 				{Name: "p2", Value: float64(2)},
@@ -1853,7 +1861,7 @@ func TestParser_ParseParameterized(t *testing.T) {
 					},
 				},
 			},
-			wantSQL: "WHERE (status = @p1 AND age > @p2)",
+			wantSQL: "(status = @p1 AND age > @p2)",
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: "active"},
 				{Name: "p2", Value: float64(18)},
@@ -1864,7 +1872,7 @@ func TestParser_ParseParameterized(t *testing.T) {
 			input: map[string]interface{}{
 				"==": []interface{}{map[string]interface{}{"var": "field"}, nil},
 			},
-			wantSQL:    "WHERE field IS NULL",
+			wantSQL:    "field IS NULL",
 			wantParams: nil,
 		},
 		{
@@ -1872,7 +1880,7 @@ func TestParser_ParseParameterized(t *testing.T) {
 			input: map[string]interface{}{
 				"==": []interface{}{map[string]interface{}{"var": "active"}, true},
 			},
-			wantSQL:    "WHERE active = TRUE",
+			wantSQL:    "active = TRUE",
 			wantParams: nil,
 		},
 	}
@@ -1905,7 +1913,7 @@ func TestParser_ParseParameterized_PostgreSQL(t *testing.T) {
 			input: map[string]interface{}{
 				"==": []interface{}{map[string]interface{}{"var": "email"}, "alice"},
 			},
-			wantSQL:    "WHERE email = $1",
+			wantSQL:    "email = $1",
 			wantParams: []params.QueryParam{{Name: "p1", Value: "alice"}},
 		},
 		{
@@ -1913,7 +1921,7 @@ func TestParser_ParseParameterized_PostgreSQL(t *testing.T) {
 			input: map[string]interface{}{
 				">": []interface{}{map[string]interface{}{"var": "age"}, float64(18)},
 			},
-			wantSQL:    "WHERE age > $1",
+			wantSQL:    "age > $1",
 			wantParams: []params.QueryParam{{Name: "p1", Value: float64(18)}},
 		},
 		{
@@ -1924,7 +1932,7 @@ func TestParser_ParseParameterized_PostgreSQL(t *testing.T) {
 					[]interface{}{float64(1), float64(2)},
 				},
 			},
-			wantSQL: "WHERE x IN ($1, $2)",
+			wantSQL: "x IN ($1, $2)",
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(1)},
 				{Name: "p2", Value: float64(2)},
@@ -1942,7 +1950,7 @@ func TestParser_ParseParameterized_PostgreSQL(t *testing.T) {
 					},
 				},
 			},
-			wantSQL: "WHERE (status = $1 AND age > $2)",
+			wantSQL: "(status = $1 AND age > $2)",
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: "active"},
 				{Name: "p2", Value: float64(18)},
@@ -1953,7 +1961,7 @@ func TestParser_ParseParameterized_PostgreSQL(t *testing.T) {
 			input: map[string]interface{}{
 				"==": []interface{}{map[string]interface{}{"var": "field"}, nil},
 			},
-			wantSQL:    "WHERE field IS NULL",
+			wantSQL:    "field IS NULL",
 			wantParams: nil,
 		},
 		{
@@ -1961,7 +1969,7 @@ func TestParser_ParseParameterized_PostgreSQL(t *testing.T) {
 			input: map[string]interface{}{
 				"==": []interface{}{map[string]interface{}{"var": "active"}, true},
 			},
-			wantSQL:    "WHERE active = TRUE",
+			wantSQL:    "active = TRUE",
 			wantParams: nil,
 		},
 	}
@@ -2056,7 +2064,7 @@ func TestParser_ParseParameterized_CustomOperator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseParameterized: unexpected error: %v", err)
 	}
-	wantSQL := "WHERE (n + n) = @p1"
+	wantSQL := "(n + n) = @p1"
 	if gotSQL != wantSQL {
 		t.Errorf("SQL: got %q, want %q", gotSQL, wantSQL)
 	}

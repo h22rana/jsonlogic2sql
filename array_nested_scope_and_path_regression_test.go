@@ -28,9 +28,9 @@ func TestNestedCurrentDottedUsesInnerAlias_AllDialects(t *testing.T) {
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}
 
-			sql, err := tr.Transpile(logic)
+			sql, err := tr.TranspileValue(logic)
 			if err != nil {
-				t.Fatalf("Transpile() error: %v", err)
+				t.Fatalf("TranspileValue() error: %v", err)
 			}
 			if strings.Contains(sql, "AND elem.base") {
 				t.Fatalf("unexpected outer alias in inner current.* predicate: %s", sql)
@@ -39,9 +39,9 @@ func TestNestedCurrentDottedUsesInnerAlias_AllDialects(t *testing.T) {
 				t.Fatalf("expected inner alias for current.* in predicate, got: %s", sql)
 			}
 
-			psql, _, err := tr.TranspileParameterized(logic)
+			psql, _, err := tr.TranspileParameterizedValue(logic)
 			if err != nil {
-				t.Fatalf("TranspileParameterized() error: %v", err)
+				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}
 			if strings.Contains(psql, "AND elem.base") {
 				t.Fatalf("unexpected outer alias in parameterized inner current.* predicate: %s", psql)
@@ -85,7 +85,7 @@ func TestCustomOperatorPathInsideArrayContexts_InlineAndParam(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := tr.Transpile(tc.logic)
+			_, err := tr.TranspileValue(tc.logic)
 			if err == nil {
 				t.Fatalf("expected inline error for %s, got nil", tc.name)
 			}
@@ -93,7 +93,7 @@ func TestCustomOperatorPathInsideArrayContexts_InlineAndParam(t *testing.T) {
 				t.Fatalf("inline error missing expected path %q: %v", tc.wantPath, err)
 			}
 
-			_, _, err = tr.TranspileParameterized(tc.logic)
+			_, _, err = tr.TranspileParameterizedValue(tc.logic)
 			if err == nil {
 				t.Fatalf("expected parameterized error for %s, got nil", tc.name)
 			}

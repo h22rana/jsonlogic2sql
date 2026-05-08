@@ -947,6 +947,21 @@ func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
 	return a.valueToSQLAtPath(value, a.currentPath())
 }
 
+func (a *ArrayOperator) valueExpressionToSQLWithContextAndPath(expr interface{}, allowAccumulator bool, path string) (string, error) {
+	if a.config == nil || !a.config.HasValueExpressionParser() {
+		return a.expressionToSQLWithContextAndPath(expr, allowAccumulator, path)
+	}
+	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, allowAccumulator, path)
+	if err != nil {
+		return "", err
+	}
+	res, err := a.config.ParseValueExpression(rewritten, path)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
 func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string, error) {
 	// Handle ProcessedValue (pre-processed SQL from parser)
 	if pv, ok := value.(ProcessedValue); ok {
@@ -966,8 +981,8 @@ func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string
 			}
 			return a.dataOp.ToSQL(OpVar, []interface{}{varExpr})
 		}
-		// Otherwise, it's a complex expression - convert it using expressionToSQL
-		return a.expressionToSQLWithContextAndPath(value, false, path)
+		// Otherwise, it's a complex value expression.
+		return a.valueExpressionToSQLWithContextAndPath(value, false, path)
 	}
 
 	// Handle arrays
@@ -1031,7 +1046,27 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 					arr = converted
 					return a.comparisonOp.ToSQL(operator, arr)
 				}
-			case "and", "or", "!", "!!", "if":
+			case "and", "or":
+				if arr, ok := args.([]interface{}); ok {
+					opPath := tperrors.BuildPath(path, operator, -1)
+					parts := make([]string, len(arr))
+					for i, arg := range arr {
+						part, err := a.expressionToSQLWithContextAndPath(arg, allowAccumulator, tperrors.BuildArrayPath(opPath, i))
+						if err != nil {
+							return "", err
+						}
+						parts[i] = part
+					}
+					if len(parts) == 1 {
+						return parts[0], nil
+					}
+					joiner := " AND "
+					if operator == "or" {
+						joiner = " OR "
+					}
+					return fmt.Sprintf("(%s)", strings.Join(parts, joiner)), nil
+				}
+			case "!", "!!", "if":
 				if arr, ok := args.([]interface{}); ok {
 					opPath := tperrors.BuildPath(path, operator, -1)
 					rewrittenArgs, err := a.rewriteScopedVarsForOperatorWithContextAndPath(arr, allowAccumulator, opPath)
@@ -1340,17 +1375,13 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorWithContextAndPath(expr inte
 					}
 					return map[string]interface{}{opName: newArgs}, nil
 				}
-				if !a.isBuiltInOperatorName(opName) && a.config != nil && a.config.HasExpressionParser() {
+				if !a.isBuiltInOperatorName(opName) {
 					opPath := tperrors.BuildPath(path, opName, -1)
 					rewrittenArgs, err := a.rewriteScopedVarsForOperatorWithContextAndPath(opArgs, allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
 					if err != nil {
 						return nil, err
 					}
-					sql, err := a.config.ParseExpression(map[string]interface{}{opName: rewrittenArgs}, path)
-					if err != nil {
-						return nil, err
-					}
-					return SQLResult(sql), nil
+					return map[string]interface{}{opName: rewrittenArgs}, nil
 				}
 			}
 		}
@@ -1818,6 +1849,26 @@ func (a *ArrayOperator) valueToSQLParam(value interface{}, pc *params.ParamColle
 	return a.valueToSQLParamAtPath(value, pc, a.currentPath())
 }
 
+func (a *ArrayOperator) valueExpressionToSQLParamWithContextAndPath(
+	expr interface{},
+	pc *params.ParamCollector,
+	allowAccumulator bool,
+	path string,
+) (string, error) {
+	if a.config == nil || !a.config.HasParamValueExpressionParser() {
+		return a.expressionToSQLParamWithContextAndPath(expr, pc, allowAccumulator, path)
+	}
+	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, allowAccumulator, path)
+	if err != nil {
+		return "", err
+	}
+	res, err := a.config.ParseValueExpressionParam(rewritten, path, pc)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
 func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.ParamCollector, path string) (string, error) {
 	if pv, ok := value.(ProcessedValue); ok {
 		if pv.IsSQL {
@@ -1833,7 +1884,7 @@ func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.Para
 			}
 			return a.dataOp.ToSQLParam(OpVar, []interface{}{varExpr}, pc)
 		}
-		return a.expressionToSQLParamWithContextAndPath(value, pc, false, path)
+		return a.valueExpressionToSQLParamWithContextAndPath(value, pc, false, path)
 	}
 
 	if arr, ok := value.([]interface{}); ok {
@@ -1894,7 +1945,27 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 					arr = converted
 					return a.comparisonOp.ToSQLParam(operator, arr, pc)
 				}
-			case "and", "or", "!", "!!", "if":
+			case "and", "or":
+				if arr, ok := args.([]interface{}); ok {
+					opPath := tperrors.BuildPath(path, operator, -1)
+					parts := make([]string, len(arr))
+					for i, arg := range arr {
+						part, err := a.expressionToSQLParamWithContextAndPath(arg, pc, allowAccumulator, tperrors.BuildArrayPath(opPath, i))
+						if err != nil {
+							return "", err
+						}
+						parts[i] = part
+					}
+					if len(parts) == 1 {
+						return parts[0], nil
+					}
+					joiner := " AND "
+					if operator == "or" {
+						joiner = " OR "
+					}
+					return fmt.Sprintf("(%s)", strings.Join(parts, joiner)), nil
+				}
+			case "!", "!!", "if":
 				if arr, ok := args.([]interface{}); ok {
 					opPath := tperrors.BuildPath(path, operator, -1)
 					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, pc, allowAccumulator, opPath)

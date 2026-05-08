@@ -8,7 +8,7 @@ func BenchmarkSimpleComparison(b *testing.B) {
 	input := `{"==": [{"var": "status"}, "active"]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -18,7 +18,7 @@ func BenchmarkChainedComparison(b *testing.B) {
 	input := `{"<=": [18, {"var": "age"}, 65]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -28,7 +28,7 @@ func BenchmarkNestedLogical(b *testing.B) {
 	input := `{"and": [{">=": [{"var": "age"}, 18]}, {"or": [{"==": [{"var": "role"}, "admin"]}, {"==": [{"var": "role"}, "moderator"]}]}, {"!=": [{"var": "status"}, "banned"]}]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -38,7 +38,7 @@ func BenchmarkArithmeticExpression(b *testing.B) {
 	input := `{">": [{"+": [{"var": "price"}, {"*": [{"var": "tax_rate"}, {"var": "price"}]}]}, 100]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -48,7 +48,7 @@ func BenchmarkArrayAll(b *testing.B) {
 	input := `{"all": [{"var": "scores"}, {">=": [{"var": "item"}, 70]}]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -58,7 +58,7 @@ func BenchmarkArrayReduce(b *testing.B) {
 	input := `{"reduce": [{"var": "amounts"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -68,7 +68,7 @@ func BenchmarkStringConcat(b *testing.B) {
 	input := `{"cat": [{"var": "first_name"}, " ", {"var": "last_name"}]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -78,7 +78,7 @@ func BenchmarkIfCondition(b *testing.B) {
 	input := `{"if": [{">": [{"var": "score"}, 90]}, "A", {">": [{"var": "score"}, 80]}, "B", {">": [{"var": "score"}, 70]}, "C", "F"]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -88,7 +88,7 @@ func BenchmarkDeeplyNested(b *testing.B) {
 	input := `{"and": [{"some": [{"filter": [{"var": "data"}, {">": [{"var": "value"}, 0]}]}, {">": [{"var": "elem.score"}, 50]}]}, {">": [{"reduce": [{"var": "totals"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}, 1000]}]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -107,7 +107,7 @@ func BenchmarkWithSchema(b *testing.B) {
 	input := `{"and": [{">=": [{"var": "age"}, 18]}, {"==": [{"var": "status"}, "active"]}, {"some": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -131,7 +131,7 @@ func BenchmarkDialects(b *testing.B) {
 			tr, _ := NewTranspiler(d.dialect)
 			b.ResetTimer()
 			for b.Loop() {
-				_, _ = tr.Transpile(input)
+				_, _ = tr.TranspileCondition(input)
 			}
 		})
 	}
@@ -143,7 +143,7 @@ func BenchmarkInOperator(b *testing.B) {
 	input := `{"in": [{"var": "code"}, ["A001", "A002", "A003", "A004", "A005", "A006", "A007", "A008", "A009", "A010", "A011", "A012", "A013", "A014", "A015", "A016", "A017", "A018", "A019", "A020"]]}`
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.Transpile(input)
+		_, _ = tr.TranspileCondition(input)
 	}
 }
 
@@ -157,8 +157,8 @@ func BenchmarkTranspileCondition(b *testing.B) {
 	}
 }
 
-// BenchmarkTranspileFromMap benchmarks TranspileFromMap with pre-parsed input.
-func BenchmarkTranspileFromMap(b *testing.B) {
+// BenchmarkTranspileConditionFromMap benchmarks TranspileConditionFromMap with pre-parsed input.
+func BenchmarkTranspileConditionFromMap(b *testing.B) {
 	tr, _ := NewTranspiler(DialectBigQuery)
 	input := map[string]interface{}{
 		"and": []interface{}{
@@ -168,6 +168,6 @@ func BenchmarkTranspileFromMap(b *testing.B) {
 	}
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = tr.TranspileFromMap(input)
+		_, _ = tr.TranspileConditionFromMap(input)
 	}
 }

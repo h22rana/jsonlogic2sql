@@ -27,11 +27,13 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 	tests := []struct {
 		name        string
 		jsonLogic   string
+		valueRoot   bool
 		mustContain []string
 	}{
 		{
 			name:      "map supports item alias",
 			jsonLogic: `{"map":[{"var":"numbers"},{"*":[{"var":"item"},2]}]}`,
+			valueRoot: true,
 			mustContain: []string{
 				"elem",
 			},
@@ -39,6 +41,7 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 		{
 			name:      "filter supports current alias",
 			jsonLogic: `{"filter":[{"var":"numbers"},{">":[{"var":"current"},1]}]}`,
+			valueRoot: true,
 			mustContain: []string{
 				"elem",
 			},
@@ -53,6 +56,7 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 		{
 			name:      "reduce supports array-form current default",
 			jsonLogic: `{"reduce":[{"var":"numbers"},{"+":[{"var":"accumulator"},{"var":["current",0]}]},1]}`,
+			valueRoot: true,
 			mustContain: []string{
 				"COALESCE(elem, 0)",
 			},
@@ -60,6 +64,7 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 		{
 			name:      "nested reduce initial uses outer item alias",
 			jsonLogic: `{"map":[{"var":"groups"},{"reduce":[{"var":"item.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"item.base"}]}]}`,
+			valueRoot: true,
 			mustContain: []string{
 				"elem.base",
 			},
@@ -78,9 +83,15 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
-					sql, err := tr.Transpile(tt.jsonLogic)
+					var sql string
+					var err error
+					if tt.valueRoot {
+						sql, err = tr.TranspileValue(tt.jsonLogic)
+					} else {
+						sql, err = tr.TranspileCondition(tt.jsonLogic)
+					}
 					if err != nil {
-						t.Fatalf("Transpile() error: %v", err)
+						t.Fatalf("transpile error: %v", err)
 					}
 					for _, frag := range tt.mustContain {
 						if !strings.Contains(sql, frag) {
@@ -97,12 +108,14 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 	tests := []struct {
 		name           string
 		jsonLogic      string
+		valueRoot      bool
 		mustContainSQL string
 		wantParamCount int
 	}{
 		{
 			name:           "map supports item alias",
 			jsonLogic:      `{"map":[{"var":"numbers"},{"*":[{"var":"item"},2]}]}`,
+			valueRoot:      true,
 			mustContainSQL: "elem",
 			wantParamCount: 1,
 		},
@@ -115,12 +128,14 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 		{
 			name:           "reduce supports array-form current default",
 			jsonLogic:      `{"reduce":[{"var":"numbers"},{"+":[{"var":"accumulator"},{"var":["current",0]}]},1]}`,
+			valueRoot:      true,
 			mustContainSQL: "COALESCE(elem",
 			wantParamCount: 2,
 		},
 		{
 			name:           "nested reduce initial uses outer item alias",
 			jsonLogic:      `{"map":[{"var":"groups"},{"reduce":[{"var":"item.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"item.base"}]}]}`,
+			valueRoot:      true,
 			mustContainSQL: "elem.base",
 			wantParamCount: 0,
 		},
@@ -138,9 +153,16 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
-					sql, params, err := tr.TranspileParameterized(tt.jsonLogic)
+					var sql string
+					var params []QueryParam
+					var err error
+					if tt.valueRoot {
+						sql, params, err = tr.TranspileParameterizedValue(tt.jsonLogic)
+					} else {
+						sql, params, err = tr.TranspileParameterizedCondition(tt.jsonLogic)
+					}
 					if err != nil {
-						t.Fatalf("TranspileParameterized() error: %v", err)
+						t.Fatalf("parameterized transpile error: %v", err)
 					}
 					if !strings.Contains(sql, tt.mustContainSQL) {
 						t.Fatalf("expected SQL to contain %q, got: %s", tt.mustContainSQL, sql)
@@ -179,9 +201,9 @@ func TestTranspile_ArrayNestedScopeUsesDistinctAliases(t *testing.T) {
 
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
-					sql, err := tr.Transpile(tt.jsonLogic)
+					sql, err := tr.TranspileValue(tt.jsonLogic)
 					if err != nil {
-						t.Fatalf("Transpile() error: %v", err)
+						t.Fatalf("TranspileValue() error: %v", err)
 					}
 					if tt.expectElem1 && !strings.Contains(sql, "elem1") {
 						allowClickHouseOptimizedReduce := d == DialectClickHouse &&
@@ -228,9 +250,9 @@ func TestTranspileParameterized_ArrayNestedScopeUsesDistinctAliases(t *testing.T
 
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
-					sql, _, err := tr.TranspileParameterized(tt.jsonLogic)
+					sql, _, err := tr.TranspileParameterizedValue(tt.jsonLogic)
 					if err != nil {
-						t.Fatalf("TranspileParameterized() error: %v", err)
+						t.Fatalf("TranspileParameterizedValue() error: %v", err)
 					}
 					if tt.expectElem1 && !strings.Contains(sql, "elem1") {
 						allowClickHouseOptimizedReduce := d == DialectClickHouse &&

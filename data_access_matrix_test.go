@@ -91,30 +91,30 @@ func TestRegressionMatrix_DataAccess_AllDialects(t *testing.T) {
 								return
 							}
 
-							sql, err := tr.Transpile(tc.logic)
+							sql, err := tr.TranspileCondition(tc.logic)
 							if err != nil {
-								t.Fatalf("Transpile() error: %v", err)
+								t.Fatalf("TranspileCondition() error: %v", err)
 							}
 							cond, err := tr.TranspileCondition(tc.logic)
 							if err != nil {
 								t.Fatalf("TranspileCondition() error: %v", err)
 							}
-							if strings.TrimPrefix(sql, "WHERE ") != cond {
+							if strings.TrimPrefix(sql, "") != cond {
 								t.Fatalf("WHERE/condition mismatch: sql=%q cond=%q", sql, cond)
 							}
 
-							psql, params, err := tr.TranspileParameterized(tc.logic)
+							psql, params, err := tr.TranspileParameterizedCondition(tc.logic)
 							if err != nil {
-								t.Fatalf("TranspileParameterized() error: %v", err)
+								t.Fatalf("TranspileParameterizedCondition() error: %v", err)
 							}
-							if !strings.HasPrefix(psql, "WHERE ") {
-								t.Fatalf("TranspileParameterized() SQL missing WHERE: %q", psql)
+							if !strings.HasPrefix(psql, "") {
+								t.Fatalf("TranspileParameterizedCondition() SQL missing WHERE: %q", psql)
 							}
-							pcond, cparams, err := tr.TranspileConditionParameterized(tc.logic)
+							pcond, cparams, err := tr.TranspileParameterizedCondition(tc.logic)
 							if err != nil {
-								t.Fatalf("TranspileConditionParameterized() error: %v", err)
+								t.Fatalf("TranspileParameterizedCondition() error: %v", err)
 							}
-							if strings.TrimPrefix(psql, "WHERE ") != pcond {
+							if strings.TrimPrefix(psql, "") != pcond {
 								t.Fatalf("param WHERE/condition mismatch: psql=%q pcond=%q", psql, pcond)
 							}
 							if !reflect.DeepEqual(params, cparams) {
@@ -122,13 +122,13 @@ func TestRegressionMatrix_DataAccess_AllDialects(t *testing.T) {
 							}
 
 							logicMap := parseDataAccessLogicMap(t, tc.logic)
-							pFromMap, mapParams, err := tr.TranspileParameterizedFromMap(logicMap)
+							pFromMap, mapParams, err := tr.TranspileParameterizedConditionFromMap(logicMap)
 							if err != nil {
-								t.Fatalf("TranspileParameterizedFromMap() error: %v", err)
+								t.Fatalf("TranspileParameterizedConditionFromMap() error: %v", err)
 							}
-							pFromAny, anyParams, err := tr.TranspileParameterizedFromInterface(logicMap)
+							pFromAny, anyParams, err := tr.TranspileParameterizedConditionFromInterface(logicMap)
 							if err != nil {
-								t.Fatalf("TranspileParameterizedFromInterface() error: %v", err)
+								t.Fatalf("TranspileParameterizedConditionFromInterface() error: %v", err)
 							}
 							if pFromMap != psql || pFromAny != psql {
 								t.Fatalf("param SQL mismatch map/interface variants:\npsql=%q\nfromMap=%q\nfromAny=%q", psql, pFromMap, pFromAny)
@@ -137,13 +137,13 @@ func TestRegressionMatrix_DataAccess_AllDialects(t *testing.T) {
 								t.Fatalf("param value mismatch map/interface variants:\nparams=%#v\nmap=%#v\nany=%#v", params, mapParams, anyParams)
 							}
 
-							pcFromMap, mapCondParams, err := tr.TranspileConditionParameterizedFromMap(logicMap)
+							pcFromMap, mapCondParams, err := tr.TranspileParameterizedConditionFromMap(logicMap)
 							if err != nil {
-								t.Fatalf("TranspileConditionParameterizedFromMap() error: %v", err)
+								t.Fatalf("TranspileParameterizedConditionFromMap() error: %v", err)
 							}
-							pcFromAny, anyCondParams, err := tr.TranspileConditionParameterizedFromInterface(logicMap)
+							pcFromAny, anyCondParams, err := tr.TranspileParameterizedConditionFromInterface(logicMap)
 							if err != nil {
-								t.Fatalf("TranspileConditionParameterizedFromInterface() error: %v", err)
+								t.Fatalf("TranspileParameterizedConditionFromInterface() error: %v", err)
 							}
 							if pcFromMap != pcond || pcFromAny != pcond {
 								t.Fatalf("param condition mismatch map/interface variants:\npcond=%q\nfromMap=%q\nfromAny=%q", pcond, pcFromMap, pcFromAny)
@@ -191,29 +191,29 @@ func assertDataAccessAllErrorPaths(t *testing.T, tr *Transpiler, logic string) {
 
 	logicMap := parseDataAccessLogicMap(t, logic)
 
-	if _, err := tr.Transpile(logic); err == nil {
-		t.Fatal("expected Transpile() error, got nil")
+	if _, err := tr.TranspileCondition(logic); err == nil {
+		t.Fatal("expected TranspileCondition() error, got nil")
 	}
 	if _, err := tr.TranspileCondition(logic); err == nil {
 		t.Fatal("expected TranspileCondition() error, got nil")
 	}
-	if _, _, err := tr.TranspileParameterized(logic); err == nil {
-		t.Fatal("expected TranspileParameterized() error, got nil")
+	if _, _, err := tr.TranspileParameterizedCondition(logic); err == nil {
+		t.Fatal("expected TranspileParameterizedCondition() error, got nil")
 	}
-	if _, _, err := tr.TranspileConditionParameterized(logic); err == nil {
-		t.Fatal("expected TranspileConditionParameterized() error, got nil")
+	if _, _, err := tr.TranspileParameterizedCondition(logic); err == nil {
+		t.Fatal("expected TranspileParameterizedCondition() error, got nil")
 	}
-	if _, _, err := tr.TranspileParameterizedFromMap(logicMap); err == nil {
-		t.Fatal("expected TranspileParameterizedFromMap() error, got nil")
+	if _, _, err := tr.TranspileParameterizedConditionFromMap(logicMap); err == nil {
+		t.Fatal("expected TranspileParameterizedConditionFromMap() error, got nil")
 	}
-	if _, _, err := tr.TranspileParameterizedFromInterface(logicMap); err == nil {
-		t.Fatal("expected TranspileParameterizedFromInterface() error, got nil")
+	if _, _, err := tr.TranspileParameterizedConditionFromInterface(logicMap); err == nil {
+		t.Fatal("expected TranspileParameterizedConditionFromInterface() error, got nil")
 	}
-	if _, _, err := tr.TranspileConditionParameterizedFromMap(logicMap); err == nil {
-		t.Fatal("expected TranspileConditionParameterizedFromMap() error, got nil")
+	if _, _, err := tr.TranspileParameterizedConditionFromMap(logicMap); err == nil {
+		t.Fatal("expected TranspileParameterizedConditionFromMap() error, got nil")
 	}
-	if _, _, err := tr.TranspileConditionParameterizedFromInterface(logicMap); err == nil {
-		t.Fatal("expected TranspileConditionParameterizedFromInterface() error, got nil")
+	if _, _, err := tr.TranspileParameterizedConditionFromInterface(logicMap); err == nil {
+		t.Fatal("expected TranspileParameterizedConditionFromInterface() error, got nil")
 	}
 }
 

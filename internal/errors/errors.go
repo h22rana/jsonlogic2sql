@@ -27,6 +27,9 @@ const (
 	ErrValidation ErrorCode = "E006"
 	// ErrInvalidJSON indicates the input is not valid JSON.
 	ErrInvalidJSON ErrorCode = "E007"
+	// ErrInvalidExpressionContext indicates a value expression was used where
+	// a predicate was required, or vice versa.
+	ErrInvalidExpressionContext ErrorCode = "E008"
 )
 
 // Operator-specific error codes (E100-E199).
@@ -199,6 +202,13 @@ func NewTypeMismatch(operator, path, expected, got string) *TranspileError {
 		fmt.Sprintf("expected %s, got %s", expected, got))
 }
 
+// NewInvalidExpressionContext creates an error for expressions used in a
+// disallowed context.
+func NewInvalidExpressionContext(operator, path, expected, got string) *TranspileError {
+	return New(ErrInvalidExpressionContext, operator, path,
+		fmt.Sprintf("expected %s expression, got %s expression", expected, got))
+}
+
 // NewFieldNotInSchema creates an error when a field is not in the schema.
 func NewFieldNotInSchema(field, path string) *TranspileError {
 	return New(ErrFieldNotInSchema, "var", path,
@@ -226,13 +236,13 @@ func NewMultipleKeys(path string) *TranspileError {
 // NewPrimitiveNotAllowed creates an error when primitives are not allowed.
 func NewPrimitiveNotAllowed(path string) *TranspileError {
 	return New(ErrPrimitiveNotAllowed, "", path,
-		"primitive values not supported in WHERE clauses")
+		"primitive values are not supported in this expression context")
 }
 
 // NewArrayNotAllowed creates an error when arrays are not allowed at top level.
 func NewArrayNotAllowed(path string) *TranspileError {
 	return New(ErrArrayNotAllowed, "", path,
-		"arrays not supported in WHERE clauses")
+		"arrays are not supported in this expression context")
 }
 
 // BuildPath constructs a JSONPath string for a given operator and index.

@@ -46,14 +46,14 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			name:  "normal nested identifier remains unquoted",
 			logic: `{"==": [{"var": "profile.status"}, "active"]}`,
 			inlineSQL: sameSQLAllDialects(
-				"WHERE profile.status = 'active'",
+				"profile.status = 'active'",
 			),
 			paramSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE profile.status = @p1",
-				DialectSpanner:    "WHERE profile.status = @p1",
-				DialectPostgreSQL: "WHERE profile.status = $1",
-				DialectDuckDB:     "WHERE profile.status = $1",
-				DialectClickHouse: "WHERE profile.status = @p1",
+				DialectBigQuery:   "profile.status = @p1",
+				DialectSpanner:    "profile.status = @p1",
+				DialectPostgreSQL: "profile.status = $1",
+				DialectDuckDB:     "profile.status = $1",
+				DialectClickHouse: "profile.status = @p1",
 			},
 			expectedParam: []QueryParam{{Name: "p1", Value: "active"}},
 		},
@@ -61,18 +61,18 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			name:  "shallow numeric-leading segment is quoted",
 			logic: `{">=": [{"var": "metrics.24h.count"}, 50000]}`,
 			inlineSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE metrics.`24h`.count >= 50000",
-				DialectSpanner:    "WHERE metrics.`24h`.count >= 50000",
-				DialectPostgreSQL: `WHERE metrics."24h".count >= 50000`,
-				DialectDuckDB:     `WHERE metrics."24h".count >= 50000`,
-				DialectClickHouse: "WHERE metrics.`24h`.count >= 50000",
+				DialectBigQuery:   "metrics.`24h`.count >= 50000",
+				DialectSpanner:    "metrics.`24h`.count >= 50000",
+				DialectPostgreSQL: `metrics."24h".count >= 50000`,
+				DialectDuckDB:     `metrics."24h".count >= 50000`,
+				DialectClickHouse: "metrics.`24h`.count >= 50000",
 			},
 			paramSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE metrics.`24h`.count >= @p1",
-				DialectSpanner:    "WHERE metrics.`24h`.count >= @p1",
-				DialectPostgreSQL: `WHERE metrics."24h".count >= $1`,
-				DialectDuckDB:     `WHERE metrics."24h".count >= $1`,
-				DialectClickHouse: "WHERE metrics.`24h`.count >= @p1",
+				DialectBigQuery:   "metrics.`24h`.count >= @p1",
+				DialectSpanner:    "metrics.`24h`.count >= @p1",
+				DialectPostgreSQL: `metrics."24h".count >= $1`,
+				DialectDuckDB:     `metrics."24h".count >= $1`,
+				DialectClickHouse: "metrics.`24h`.count >= @p1",
 			},
 			expectedParam: []QueryParam{{Name: "p1", Value: float64(50000)}},
 		},
@@ -80,18 +80,18 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			name:  "deeply nested numeric-leading segments are quoted independently",
 			logic: `{"and":[{">=":[{"var":"fixture.windowed_metrics.24h.events.total"},50000]},{"<":[{"var":"fixture.windowed_metrics.7d.events.count"},100]}]}`,
 			inlineSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE (fixture.windowed_metrics.`24h`.events.total >= 50000 AND fixture.windowed_metrics.`7d`.events.count < 100)",
-				DialectSpanner:    "WHERE (fixture.windowed_metrics.`24h`.events.total >= 50000 AND fixture.windowed_metrics.`7d`.events.count < 100)",
-				DialectPostgreSQL: `WHERE (fixture.windowed_metrics."24h".events.total >= 50000 AND fixture.windowed_metrics."7d".events.count < 100)`,
-				DialectDuckDB:     `WHERE (fixture.windowed_metrics."24h".events.total >= 50000 AND fixture.windowed_metrics."7d".events.count < 100)`,
-				DialectClickHouse: "WHERE (fixture.windowed_metrics.`24h`.events.total >= 50000 AND fixture.windowed_metrics.`7d`.events.count < 100)",
+				DialectBigQuery:   "(fixture.windowed_metrics.`24h`.events.total >= 50000 AND fixture.windowed_metrics.`7d`.events.count < 100)",
+				DialectSpanner:    "(fixture.windowed_metrics.`24h`.events.total >= 50000 AND fixture.windowed_metrics.`7d`.events.count < 100)",
+				DialectPostgreSQL: `(fixture.windowed_metrics."24h".events.total >= 50000 AND fixture.windowed_metrics."7d".events.count < 100)`,
+				DialectDuckDB:     `(fixture.windowed_metrics."24h".events.total >= 50000 AND fixture.windowed_metrics."7d".events.count < 100)`,
+				DialectClickHouse: "(fixture.windowed_metrics.`24h`.events.total >= 50000 AND fixture.windowed_metrics.`7d`.events.count < 100)",
 			},
 			paramSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE (fixture.windowed_metrics.`24h`.events.total >= @p1 AND fixture.windowed_metrics.`7d`.events.count < @p2)",
-				DialectSpanner:    "WHERE (fixture.windowed_metrics.`24h`.events.total >= @p1 AND fixture.windowed_metrics.`7d`.events.count < @p2)",
-				DialectPostgreSQL: `WHERE (fixture.windowed_metrics."24h".events.total >= $1 AND fixture.windowed_metrics."7d".events.count < $2)`,
-				DialectDuckDB:     `WHERE (fixture.windowed_metrics."24h".events.total >= $1 AND fixture.windowed_metrics."7d".events.count < $2)`,
-				DialectClickHouse: "WHERE (fixture.windowed_metrics.`24h`.events.total >= @p1 AND fixture.windowed_metrics.`7d`.events.count < @p2)",
+				DialectBigQuery:   "(fixture.windowed_metrics.`24h`.events.total >= @p1 AND fixture.windowed_metrics.`7d`.events.count < @p2)",
+				DialectSpanner:    "(fixture.windowed_metrics.`24h`.events.total >= @p1 AND fixture.windowed_metrics.`7d`.events.count < @p2)",
+				DialectPostgreSQL: `(fixture.windowed_metrics."24h".events.total >= $1 AND fixture.windowed_metrics."7d".events.count < $2)`,
+				DialectDuckDB:     `(fixture.windowed_metrics."24h".events.total >= $1 AND fixture.windowed_metrics."7d".events.count < $2)`,
+				DialectClickHouse: "(fixture.windowed_metrics.`24h`.events.total >= @p1 AND fixture.windowed_metrics.`7d`.events.count < @p2)",
 			},
 			expectedParam: []QueryParam{
 				{Name: "p1", Value: float64(50000)},
@@ -102,18 +102,18 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			name:  "deeply nested numeric-leading segments inside custom operators",
 			logic: `{"and":[{"betweenInclusive":[{"var":"fixture.windowed_metrics.24h.events.total"},50000,100000]},{"isNonZero":[{"var":"fixture.windowed_metrics.7d.events.count"}]}]}`,
 			inlineSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE ((fixture.windowed_metrics.`24h`.events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
-				DialectSpanner:    "WHERE ((fixture.windowed_metrics.`24h`.events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
-				DialectPostgreSQL: `WHERE ((fixture.windowed_metrics."24h".events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics."7d".events.count != 0))`,
-				DialectDuckDB:     `WHERE ((fixture.windowed_metrics."24h".events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics."7d".events.count != 0))`,
-				DialectClickHouse: "WHERE ((fixture.windowed_metrics.`24h`.events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
+				DialectBigQuery:   "((fixture.windowed_metrics.`24h`.events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
+				DialectSpanner:    "((fixture.windowed_metrics.`24h`.events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
+				DialectPostgreSQL: `((fixture.windowed_metrics."24h".events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics."7d".events.count != 0))`,
+				DialectDuckDB:     `((fixture.windowed_metrics."24h".events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics."7d".events.count != 0))`,
+				DialectClickHouse: "((fixture.windowed_metrics.`24h`.events.total BETWEEN 50000 AND 100000) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
 			},
 			paramSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE ((fixture.windowed_metrics.`24h`.events.total BETWEEN @p1 AND @p2) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
-				DialectSpanner:    "WHERE ((fixture.windowed_metrics.`24h`.events.total BETWEEN @p1 AND @p2) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
-				DialectPostgreSQL: `WHERE ((fixture.windowed_metrics."24h".events.total BETWEEN $1 AND $2) AND (fixture.windowed_metrics."7d".events.count != 0))`,
-				DialectDuckDB:     `WHERE ((fixture.windowed_metrics."24h".events.total BETWEEN $1 AND $2) AND (fixture.windowed_metrics."7d".events.count != 0))`,
-				DialectClickHouse: "WHERE ((fixture.windowed_metrics.`24h`.events.total BETWEEN @p1 AND @p2) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
+				DialectBigQuery:   "((fixture.windowed_metrics.`24h`.events.total BETWEEN @p1 AND @p2) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
+				DialectSpanner:    "((fixture.windowed_metrics.`24h`.events.total BETWEEN @p1 AND @p2) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
+				DialectPostgreSQL: `((fixture.windowed_metrics."24h".events.total BETWEEN $1 AND $2) AND (fixture.windowed_metrics."7d".events.count != 0))`,
+				DialectDuckDB:     `((fixture.windowed_metrics."24h".events.total BETWEEN $1 AND $2) AND (fixture.windowed_metrics."7d".events.count != 0))`,
+				DialectClickHouse: "((fixture.windowed_metrics.`24h`.events.total BETWEEN @p1 AND @p2) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
 			},
 			expectedParam: []QueryParam{
 				{Name: "p1", Value: float64(50000)},
@@ -124,18 +124,18 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			name:  "deeply nested numeric-leading segment inside dialect-aware custom operator",
 			logic: `{"dialectMetricPresent":[{"var":"fixture.windowed_metrics.24h.events.total"}]}`,
 			inlineSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE IFNULL(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
-				DialectSpanner:    "WHERE IFNULL(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
-				DialectPostgreSQL: `WHERE COALESCE(fixture.windowed_metrics."24h".events.total, 0) > 0`,
-				DialectDuckDB:     `WHERE COALESCE(fixture.windowed_metrics."24h".events.total, 0) > 0`,
-				DialectClickHouse: "WHERE ifNull(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
+				DialectBigQuery:   "IFNULL(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
+				DialectSpanner:    "IFNULL(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
+				DialectPostgreSQL: `COALESCE(fixture.windowed_metrics."24h".events.total, 0) > 0`,
+				DialectDuckDB:     `COALESCE(fixture.windowed_metrics."24h".events.total, 0) > 0`,
+				DialectClickHouse: "ifNull(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
 			},
 			paramSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE IFNULL(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
-				DialectSpanner:    "WHERE IFNULL(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
-				DialectPostgreSQL: `WHERE COALESCE(fixture.windowed_metrics."24h".events.total, 0) > 0`,
-				DialectDuckDB:     `WHERE COALESCE(fixture.windowed_metrics."24h".events.total, 0) > 0`,
-				DialectClickHouse: "WHERE ifNull(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
+				DialectBigQuery:   "IFNULL(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
+				DialectSpanner:    "IFNULL(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
+				DialectPostgreSQL: `COALESCE(fixture.windowed_metrics."24h".events.total, 0) > 0`,
+				DialectDuckDB:     `COALESCE(fixture.windowed_metrics."24h".events.total, 0) > 0`,
+				DialectClickHouse: "ifNull(fixture.windowed_metrics.`24h`.events.total, 0) > 0",
 			},
 			expectedParam: nil,
 		},
@@ -143,18 +143,18 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			name:  "array filter quotes numeric-leading current segment",
 			logic: `{"filter":[{"var":"events"},{">=":[{"var":"current.24h"},1]}]}`,
 			inlineSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= 1)",
-				DialectSpanner:    "WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= 1)",
-				DialectPostgreSQL: `WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= 1)`,
-				DialectDuckDB:     `WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= 1)`,
-				DialectClickHouse: "WHERE arrayFilter(elem -> elem.`24h` >= 1, events)",
+				DialectBigQuery:   "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= 1)",
+				DialectSpanner:    "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= 1)",
+				DialectPostgreSQL: `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= 1)`,
+				DialectDuckDB:     `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= 1)`,
+				DialectClickHouse: "arrayFilter(elem -> elem.`24h` >= 1, events)",
 			},
 			paramSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= @p1)",
-				DialectSpanner:    "WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= @p1)",
-				DialectPostgreSQL: `WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= $1)`,
-				DialectDuckDB:     `WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= $1)`,
-				DialectClickHouse: "WHERE arrayFilter(elem -> elem.`24h` >= @p1, events)",
+				DialectBigQuery:   "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= @p1)",
+				DialectSpanner:    "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= @p1)",
+				DialectPostgreSQL: `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= $1)`,
+				DialectDuckDB:     `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= $1)`,
+				DialectClickHouse: "arrayFilter(elem -> elem.`24h` >= @p1, events)",
 			},
 			expectedParam: []QueryParam{{Name: "p1", Value: float64(1)}},
 		},
@@ -162,18 +162,18 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			name:  "array map quotes numeric-leading item segment",
 			logic: `{"map":[{"var":"events"},{"var":"item.24h.total"}]}`,
 			inlineSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
-				DialectSpanner:    "WHERE ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
-				DialectPostgreSQL: `WHERE ARRAY(SELECT elem."24h".total FROM UNNEST(events) AS elem)`,
-				DialectDuckDB:     `WHERE ARRAY(SELECT elem."24h".total FROM UNNEST(events) AS elem)`,
-				DialectClickHouse: "WHERE arrayMap(elem -> elem.`24h`.total, events)",
+				DialectBigQuery:   "ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
+				DialectSpanner:    "ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
+				DialectPostgreSQL: `ARRAY(SELECT elem."24h".total FROM UNNEST(events) AS elem)`,
+				DialectDuckDB:     `ARRAY(SELECT elem."24h".total FROM UNNEST(events) AS elem)`,
+				DialectClickHouse: "arrayMap(elem -> elem.`24h`.total, events)",
 			},
 			paramSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
-				DialectSpanner:    "WHERE ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
-				DialectPostgreSQL: `WHERE ARRAY(SELECT elem."24h".total FROM UNNEST(events) AS elem)`,
-				DialectDuckDB:     `WHERE ARRAY(SELECT elem."24h".total FROM UNNEST(events) AS elem)`,
-				DialectClickHouse: "WHERE arrayMap(elem -> elem.`24h`.total, events)",
+				DialectBigQuery:   "ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
+				DialectSpanner:    "ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
+				DialectPostgreSQL: `ARRAY(SELECT elem."24h".total FROM UNNEST(events) AS elem)`,
+				DialectDuckDB:     `ARRAY(SELECT elem."24h".total FROM UNNEST(events) AS elem)`,
+				DialectClickHouse: "arrayMap(elem -> elem.`24h`.total, events)",
 			},
 			expectedParam: nil,
 		},
@@ -181,18 +181,18 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			name:  "array reduce aggregate quotes numeric-leading current segment",
 			logic: `{"reduce":[{"var":"events"},{"+":[{"var":"accumulator"},{"var":"current.24h"}]},0]}`,
 			inlineSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE 0 + COALESCE((SELECT SUM(elem.`24h`) FROM UNNEST(events) AS elem), 0)",
-				DialectSpanner:    "WHERE 0 + COALESCE((SELECT SUM(elem.`24h`) FROM UNNEST(events) AS elem), 0)",
-				DialectPostgreSQL: `WHERE 0 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
-				DialectDuckDB:     `WHERE 0 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
-				DialectClickHouse: "WHERE 0 + coalesce(arrayReduce('sum', arrayMap(x -> x.`24h`, events)), 0)",
+				DialectBigQuery:   "0 + COALESCE((SELECT SUM(elem.`24h`) FROM UNNEST(events) AS elem), 0)",
+				DialectSpanner:    "0 + COALESCE((SELECT SUM(elem.`24h`) FROM UNNEST(events) AS elem), 0)",
+				DialectPostgreSQL: `0 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
+				DialectDuckDB:     `0 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
+				DialectClickHouse: "0 + coalesce(arrayReduce('sum', arrayMap(x -> x.`24h`, events)), 0)",
 			},
 			paramSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE @p1 + COALESCE((SELECT SUM(elem.`24h`) FROM UNNEST(events) AS elem), 0)",
-				DialectSpanner:    "WHERE @p1 + COALESCE((SELECT SUM(elem.`24h`) FROM UNNEST(events) AS elem), 0)",
-				DialectPostgreSQL: `WHERE $1 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
-				DialectDuckDB:     `WHERE $1 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
-				DialectClickHouse: "WHERE @p1 + coalesce(arrayReduce('sum', arrayMap(x -> x.`24h`, events)), 0)",
+				DialectBigQuery:   "@p1 + COALESCE((SELECT SUM(elem.`24h`) FROM UNNEST(events) AS elem), 0)",
+				DialectSpanner:    "@p1 + COALESCE((SELECT SUM(elem.`24h`) FROM UNNEST(events) AS elem), 0)",
+				DialectPostgreSQL: `$1 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
+				DialectDuckDB:     `$1 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
+				DialectClickHouse: "@p1 + coalesce(arrayReduce('sum', arrayMap(x -> x.`24h`, events)), 0)",
 			},
 			expectedParam: []QueryParam{{Name: "p1", Value: float64(0)}},
 		},
@@ -200,18 +200,18 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			name:  "array filter custom operator quotes numeric-leading current segment",
 			logic: `{"filter":[{"var":"events"},{"isNonZero":[{"var":"current.24h"}]}]}`,
 			inlineSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",
-				DialectSpanner:    "WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",
-				DialectPostgreSQL: `WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem."24h" != 0))`,
-				DialectDuckDB:     `WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem."24h" != 0))`,
-				DialectClickHouse: "WHERE arrayFilter(elem -> (elem.`24h` != 0), events)",
+				DialectBigQuery:   "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",
+				DialectSpanner:    "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",
+				DialectPostgreSQL: `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem."24h" != 0))`,
+				DialectDuckDB:     `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem."24h" != 0))`,
+				DialectClickHouse: "arrayFilter(elem -> (elem.`24h` != 0), events)",
 			},
 			paramSQL: map[Dialect]string{
-				DialectBigQuery:   "WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",
-				DialectSpanner:    "WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",
-				DialectPostgreSQL: `WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem."24h" != 0))`,
-				DialectDuckDB:     `WHERE ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem."24h" != 0))`,
-				DialectClickHouse: "WHERE arrayFilter(elem -> (elem.`24h` != 0), events)",
+				DialectBigQuery:   "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",
+				DialectSpanner:    "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",
+				DialectPostgreSQL: `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem."24h" != 0))`,
+				DialectDuckDB:     `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem."24h" != 0))`,
+				DialectClickHouse: "arrayFilter(elem -> (elem.`24h` != 0), events)",
 			},
 			expectedParam: nil,
 		},
@@ -260,28 +260,28 @@ func TestIdentifierQuotingRegression_NonASCIIDigitLeadingSchemaSegment(t *testin
 	}{
 		{
 			dialect: DialectBigQuery,
-			inline:  "WHERE metrics.`\uff124h`.count >= 10",
-			param:   "WHERE metrics.`\uff124h`.count >= @p1",
+			inline:  "metrics.`\uff124h`.count >= 10",
+			param:   "metrics.`\uff124h`.count >= @p1",
 		},
 		{
 			dialect: DialectSpanner,
-			inline:  "WHERE metrics.`\uff124h`.count >= 10",
-			param:   "WHERE metrics.`\uff124h`.count >= @p1",
+			inline:  "metrics.`\uff124h`.count >= 10",
+			param:   "metrics.`\uff124h`.count >= @p1",
 		},
 		{
 			dialect: DialectPostgreSQL,
-			inline:  "WHERE metrics.\"\uff124h\".count >= 10",
-			param:   "WHERE metrics.\"\uff124h\".count >= $1",
+			inline:  "metrics.\"\uff124h\".count >= 10",
+			param:   "metrics.\"\uff124h\".count >= $1",
 		},
 		{
 			dialect: DialectDuckDB,
-			inline:  "WHERE metrics.\"\uff124h\".count >= 10",
-			param:   "WHERE metrics.\"\uff124h\".count >= $1",
+			inline:  "metrics.\"\uff124h\".count >= 10",
+			param:   "metrics.\"\uff124h\".count >= $1",
 		},
 		{
 			dialect: DialectClickHouse,
-			inline:  "WHERE metrics.`\uff124h`.count >= 10",
-			param:   "WHERE metrics.`\uff124h`.count >= @p1",
+			inline:  "metrics.`\uff124h`.count >= 10",
+			param:   "metrics.`\uff124h`.count >= @p1",
 		},
 	}
 
@@ -361,17 +361,17 @@ func TestIdentifierQuotingRegression_UnsafeNoSchemaIdentifiersRejected_AllDialec
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}
 
-			if _, err := tr.Transpile(logic); err == nil {
-				t.Fatal("Transpile() expected invalid identifier error, got nil")
+			if _, err := tr.TranspileCondition(logic); err == nil {
+				t.Fatal("TranspileCondition() expected invalid identifier error, got nil")
 			}
 			if _, err := tr.TranspileCondition(logic); err == nil {
 				t.Fatal("TranspileCondition() expected invalid identifier error, got nil")
 			}
-			if _, _, err := tr.TranspileParameterized(logic); err == nil {
-				t.Fatal("TranspileParameterized() expected invalid identifier error, got nil")
+			if _, _, err := tr.TranspileParameterizedCondition(logic); err == nil {
+				t.Fatal("TranspileParameterizedCondition() expected invalid identifier error, got nil")
 			}
-			if _, _, err := tr.TranspileConditionParameterized(logic); err == nil {
-				t.Fatal("TranspileConditionParameterized() expected invalid identifier error, got nil")
+			if _, _, err := tr.TranspileParameterizedCondition(logic); err == nil {
+				t.Fatal("TranspileParameterizedCondition() expected invalid identifier error, got nil")
 			}
 		})
 	}
@@ -388,42 +388,63 @@ func assertIdentifierQuotingSQL(
 ) {
 	t.Helper()
 
-	sql, err := tr.Transpile(logic)
+	sql, err := tr.TranspileCondition(logic)
+	valueMode := IsErrorCode(err, ErrInvalidExpressionContext)
+	if valueMode {
+		sql, err = tr.TranspileValue(logic)
+	}
 	if err != nil {
-		t.Fatalf("Transpile() error: %v", err)
+		t.Fatalf("transpile error: %v", err)
 	}
 	if sql != expectedInline {
-		t.Fatalf("Transpile() for %s = %q, want %q", d, sql, expectedInline)
+		t.Fatalf("transpile for %s = %q, want %q", d, sql, expectedInline)
 	}
 
-	cond, err := tr.TranspileCondition(logic)
-	if err != nil {
-		t.Fatalf("TranspileCondition() error: %v", err)
+	var cond string
+	if valueMode {
+		cond, err = tr.TranspileValue(logic)
+	} else {
+		cond, err = tr.TranspileCondition(logic)
 	}
-	if cond != strings.TrimPrefix(expectedInline, "WHERE ") {
-		t.Fatalf("TranspileCondition() for %s = %q, want %q", d, cond, strings.TrimPrefix(expectedInline, "WHERE "))
+	if err != nil {
+		t.Fatalf("transpile repeat error: %v", err)
+	}
+	if cond != strings.TrimPrefix(expectedInline, "") {
+		t.Fatalf("TranspileCondition() for %s = %q, want %q", d, cond, strings.TrimPrefix(expectedInline, ""))
 	}
 
-	paramSQL, gotParams, err := tr.TranspileParameterized(logic)
+	var paramSQL string
+	var gotParams []QueryParam
+	if valueMode {
+		paramSQL, gotParams, err = tr.TranspileParameterizedValue(logic)
+	} else {
+		paramSQL, gotParams, err = tr.TranspileParameterizedCondition(logic)
+	}
 	if err != nil {
-		t.Fatalf("TranspileParameterized() error: %v", err)
+		t.Fatalf("parameterized transpile error: %v", err)
 	}
 	if paramSQL != expectedParamSQL {
-		t.Fatalf("TranspileParameterized() for %s = %q, want %q", d, paramSQL, expectedParamSQL)
+		t.Fatalf("TranspileParameterizedCondition() for %s = %q, want %q", d, paramSQL, expectedParamSQL)
 	}
 	if !reflect.DeepEqual(gotParams, expectedParams) {
-		t.Fatalf("TranspileParameterized() params for %s = %#v, want %#v", d, gotParams, expectedParams)
+		t.Fatalf("TranspileParameterizedCondition() params for %s = %#v, want %#v", d, gotParams, expectedParams)
 	}
 
-	paramCond, condParams, err := tr.TranspileConditionParameterized(logic)
-	if err != nil {
-		t.Fatalf("TranspileConditionParameterized() error: %v", err)
+	var paramCond string
+	var condParams []QueryParam
+	if valueMode {
+		paramCond, condParams, err = tr.TranspileParameterizedValue(logic)
+	} else {
+		paramCond, condParams, err = tr.TranspileParameterizedCondition(logic)
 	}
-	if paramCond != strings.TrimPrefix(expectedParamSQL, "WHERE ") {
-		t.Fatalf("TranspileConditionParameterized() for %s = %q, want %q", d, paramCond, strings.TrimPrefix(expectedParamSQL, "WHERE "))
+	if err != nil {
+		t.Fatalf("parameterized transpile repeat error: %v", err)
+	}
+	if paramCond != strings.TrimPrefix(expectedParamSQL, "") {
+		t.Fatalf("TranspileParameterizedCondition() for %s = %q, want %q", d, paramCond, strings.TrimPrefix(expectedParamSQL, ""))
 	}
 	if !reflect.DeepEqual(condParams, expectedParams) {
-		t.Fatalf("TranspileConditionParameterized() params for %s = %#v, want %#v", d, condParams, expectedParams)
+		t.Fatalf("TranspileParameterizedCondition() params for %s = %#v, want %#v", d, condParams, expectedParams)
 	}
 
 	var logicMap map[string]interface{}
@@ -431,15 +452,21 @@ func assertIdentifierQuotingSQL(
 		t.Fatalf("json.Unmarshal() error: %v", unmarshalErr)
 	}
 
-	fromMapSQL, fromMapParams, err := tr.TranspileParameterizedFromMap(logicMap)
+	var fromMapSQL string
+	var fromMapParams []QueryParam
+	if valueMode {
+		fromMapSQL, fromMapParams, err = tr.TranspileParameterizedValueFromMap(logicMap)
+	} else {
+		fromMapSQL, fromMapParams, err = tr.TranspileParameterizedConditionFromMap(logicMap)
+	}
 	if err != nil {
-		t.Fatalf("TranspileParameterizedFromMap() error: %v", err)
+		t.Fatalf("parameterized from map error: %v", err)
 	}
 	if fromMapSQL != expectedParamSQL {
-		t.Fatalf("TranspileParameterizedFromMap() for %s = %q, want %q", d, fromMapSQL, expectedParamSQL)
+		t.Fatalf("TranspileParameterizedConditionFromMap() for %s = %q, want %q", d, fromMapSQL, expectedParamSQL)
 	}
 	if !reflect.DeepEqual(fromMapParams, expectedParams) {
-		t.Fatalf("TranspileParameterizedFromMap() params for %s = %#v, want %#v", d, fromMapParams, expectedParams)
+		t.Fatalf("TranspileParameterizedConditionFromMap() params for %s = %#v, want %#v", d, fromMapParams, expectedParams)
 	}
 }
 

@@ -90,17 +90,17 @@ func TestSchemaWithTranspiler(t *testing.T) {
 	transpiler.SetSchema(schema)
 
 	// Test valid field
-	result, err := transpiler.Transpile(`{"==": [{"var": "amount"}, 100]}`)
+	result, err := transpiler.TranspileCondition(`{"==": [{"var": "amount"}, 100]}`)
 	if err != nil {
 		t.Fatalf("Transpile with valid field failed: %v", err)
 	}
-	expected := "WHERE amount = 100"
+	expected := "amount = 100"
 	if result != expected {
-		t.Errorf("Transpile() = %q, want %q", result, expected)
+		t.Errorf("TranspileCondition() = %q, want %q", result, expected)
 	}
 
 	// Test invalid field (should fail with schema validation)
-	_, err = transpiler.Transpile(`{"==": [{"var": "invalid_field"}, 100]}`)
+	_, err = transpiler.TranspileCondition(`{"==": [{"var": "invalid_field"}, 100]}`)
 	if err == nil {
 		t.Error("Transpile with invalid field should fail with schema validation")
 	}
@@ -120,36 +120,36 @@ func TestSchemaInOperator(t *testing.T) {
 	transpiler.SetSchema(schema)
 
 	// Test in operator with array field (right side is variable)
-	result, err := transpiler.Transpile(`{"in": ["tag1", {"var": "tags"}]}`)
+	result, err := transpiler.TranspileCondition(`{"in": ["tag1", {"var": "tags"}]}`)
 	if err != nil {
 		t.Fatalf("Transpile with array field failed: %v", err)
 	}
 	// Should use dialect-specific array membership syntax (BigQuery uses IN UNNEST)
-	expected := "WHERE 'tag1' IN UNNEST(tags)"
+	expected := "'tag1' IN UNNEST(tags)"
 	if result != expected {
-		t.Errorf("Transpile() = %q, want %q", result, expected)
+		t.Errorf("TranspileCondition() = %q, want %q", result, expected)
 	}
 
 	// Test in operator with string field (right side is variable)
-	result, err = transpiler.Transpile(`{"in": ["hello", {"var": "description"}]}`)
+	result, err = transpiler.TranspileCondition(`{"in": ["hello", {"var": "description"}]}`)
 	if err != nil {
 		t.Fatalf("Transpile with string field failed: %v", err)
 	}
 	// Should use string containment syntax: STRPOS(description, 'hello') > 0
-	expected = "WHERE STRPOS(description, 'hello') > 0"
+	expected = "STRPOS(description, 'hello') > 0"
 	if result != expected {
-		t.Errorf("Transpile() = %q, want %q", result, expected)
+		t.Errorf("TranspileCondition() = %q, want %q", result, expected)
 	}
 
 	// Test in operator with array field (left side is variable, right side is array)
-	result, err = transpiler.Transpile(`{"in": [{"var": "tags"}, ["tag1", "tag2"]]}`)
+	result, err = transpiler.TranspileCondition(`{"in": [{"var": "tags"}, ["tag1", "tag2"]]}`)
 	if err != nil {
 		t.Fatalf("Transpile with array field (left var) failed: %v", err)
 	}
 	// Should use array membership syntax: tags IN ('tag1', 'tag2')
-	expected = "WHERE tags IN ('tag1', 'tag2')"
+	expected = "tags IN ('tag1', 'tag2')"
 	if result != expected {
-		t.Errorf("Transpile() = %q, want %q", result, expected)
+		t.Errorf("TranspileCondition() = %q, want %q", result, expected)
 	}
 }
 
@@ -160,13 +160,13 @@ func TestSchemaOptional(t *testing.T) {
 		t.Fatalf("NewTranspiler() returned error: %v", err)
 	}
 
-	result, err := transpiler.Transpile(`{"==": [{"var": "any_field"}, 100]}`)
+	result, err := transpiler.TranspileCondition(`{"==": [{"var": "any_field"}, 100]}`)
 	if err != nil {
 		t.Fatalf("Transpile without schema failed: %v", err)
 	}
-	expected := "WHERE any_field = 100"
+	expected := "any_field = 100"
 	if result != expected {
-		t.Errorf("Transpile() = %q, want %q", result, expected)
+		t.Errorf("TranspileCondition() = %q, want %q", result, expected)
 	}
 }
 

@@ -335,6 +335,12 @@ func (d *DataOperator) valueToSQL(value interface{}) (string, error) {
 	}
 }
 
+// ValueToSQL converts a Go value to a SQL literal or expression. It exposes the
+// same conversion used internally by operators for parser-level value mode.
+func (d *DataOperator) ValueToSQL(value interface{}) (string, error) {
+	return d.valueToSQL(value)
+}
+
 // ToSQLParam is the parameterized variant of ToSQL. Keep in sync.
 func (d *DataOperator) ToSQLParam(operator string, args []interface{}, pc *params.ParamCollector) (string, error) {
 	switch operator {
@@ -484,6 +490,11 @@ func (d *DataOperator) valueToSQLParam(value interface{}, pc *params.ParamCollec
 	default:
 		return "", fmt.Errorf("unsupported value type: %T", value)
 	}
+}
+
+// ValueToSQLParam is the parameterized variant of ValueToSQL.
+func (d *DataOperator) ValueToSQLParam(value interface{}, pc *params.ParamCollector) (string, error) {
+	return d.valueToSQLParam(value, pc)
 }
 
 // jsonNumberParamValue converts a json.Number into a driver-friendly bind value.

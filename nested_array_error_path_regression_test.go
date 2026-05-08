@@ -80,16 +80,33 @@ func TestNestedArrayCustomOperatorErrorPath_Preserved_InlineAndParam(t *testing.
 				t.Run(tc.name, func(t *testing.T) {
 					logicMap := decodeLogicMapForPathTest(t, tc.logic)
 
-					_, err := tr.Transpile(tc.logic)
+					var err error
+					if tc.parentOp == "and" {
+						_, err = tr.TranspileValue(tc.logic)
+					} else {
+						_, err = tr.TranspileCondition(tc.logic)
+					}
 					assertNestedPathNotTruncated(t, err, tc.parentOp)
 
-					_, _, err = tr.TranspileParameterized(tc.logic)
+					if tc.parentOp == "and" {
+						_, _, err = tr.TranspileParameterizedValue(tc.logic)
+					} else {
+						_, _, err = tr.TranspileParameterizedCondition(tc.logic)
+					}
 					assertNestedPathNotTruncated(t, err, tc.parentOp)
 
-					_, err = tr.TranspileFromMap(logicMap)
+					if tc.parentOp == "and" {
+						_, err = tr.TranspileValueFromMap(logicMap)
+					} else {
+						_, err = tr.TranspileConditionFromMap(logicMap)
+					}
 					assertNestedPathNotTruncated(t, err, tc.parentOp)
 
-					_, _, err = tr.TranspileParameterizedFromMap(logicMap)
+					if tc.parentOp == "and" {
+						_, _, err = tr.TranspileParameterizedValueFromMap(logicMap)
+					} else {
+						_, _, err = tr.TranspileParameterizedConditionFromMap(logicMap)
+					}
 					assertNestedPathNotTruncated(t, err, tc.parentOp)
 				})
 			}
