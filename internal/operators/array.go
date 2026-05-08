@@ -194,6 +194,13 @@ func (a *ArrayOperator) referencesVisibleElemAlias(expr interface{}) bool {
 					if s, ok := v[0].(string); ok {
 						return a.isVisibleElemPath(s)
 					}
+					if pv, ok := v[0].(ProcessedValue); ok && pv.IsSQL {
+						for _, alias := range a.visibleElems {
+							if pv.Value == alias || strings.Contains(pv.Value, alias+".") {
+								return true
+							}
+						}
+					}
 				}
 			}
 		}
@@ -476,7 +483,42 @@ func (a *ArrayOperator) ToSQL(operator string, args []interface{}) (string, erro
 // ToSQLAtPath converts an array operation to SQL using the provided JSONPath
 // as the operator context for nested expression error reporting.
 func (a *ArrayOperator) ToSQLAtPath(operator string, args []interface{}, path string) (string, error) {
-	return a.withPath(path).ToSQL(operator, args)
+	scoped := a.withPath(path)
+	if scoped.shouldUseRenderedSourceChildScope(operator, args) {
+		nestedArgs := scoped.rewriteOuterDottedForNested(operator, args, scoped.elemAlias())
+		return scoped.withChildScope().ToSQL(operator, nestedArgs)
+	}
+	return scoped.ToSQL(operator, args)
+}
+
+func (a *ArrayOperator) shouldUseRenderedSourceChildScope(op string, args []interface{}) bool {
+	if len(args) == 0 || !a.shouldUseChildScope(op, args) {
+		return false
+	}
+	return isRenderedArrayScopeSource(args[0])
+}
+
+func isRenderedArrayScopeSource(value interface{}) bool {
+	switch v := value.(type) {
+	case ProcessedValue:
+		return v.IsSQL && v.IsField
+	case map[string]interface{}:
+		if len(v) != 1 {
+			return false
+		}
+		varName, ok := v[OpVar]
+		if !ok {
+			return false
+		}
+		arr, ok := varName.([]interface{})
+		if !ok || len(arr) == 0 {
+			return false
+		}
+		pv, ok := arr[0].(ProcessedValue)
+		return ok && pv.IsSQL && pv.IsField
+	default:
+		return false
+	}
 }
 
 // handleMap converts map operator to SQL.
@@ -1611,7 +1653,12 @@ func (a *ArrayOperator) ToSQLParam(operator string, args []interface{}, pc *para
 
 // ToSQLParamAtPath is the parameterized variant of ToSQLAtPath. Keep in sync.
 func (a *ArrayOperator) ToSQLParamAtPath(operator string, args []interface{}, pc *params.ParamCollector, path string) (string, error) {
-	return a.withPath(path).ToSQLParam(operator, args, pc)
+	scoped := a.withPath(path)
+	if scoped.shouldUseRenderedSourceChildScope(operator, args) {
+		nestedArgs := scoped.rewriteOuterDottedForNested(operator, args, scoped.elemAlias())
+		return scoped.withChildScope().ToSQLParam(operator, nestedArgs, pc)
+	}
+	return scoped.ToSQLParam(operator, args, pc)
 }
 
 // handleMapParam is the parameterized variant of handleMap. Keep in sync.
