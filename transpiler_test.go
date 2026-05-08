@@ -1645,7 +1645,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "cat with nested if expression",
 			input:    `{"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}`,
-			expected: "CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)",
+			expected: "CONCAT(CASE WHEN gender = 'M' THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)",
 			hasError: false,
 		},
 

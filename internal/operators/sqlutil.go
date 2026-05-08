@@ -18,6 +18,9 @@ func hasRedundantOuterParens(sql string) bool {
 	if len(sql) < 2 || sql[0] != '(' || sql[len(sql)-1] != ')' {
 		return false
 	}
+	if outerParensRequired(sql) {
+		return false
+	}
 
 	depth := 0
 	inString := false
@@ -49,4 +52,10 @@ func hasRedundantOuterParens(sql string) bool {
 		}
 	}
 	return depth == 0 && !inString
+}
+
+func outerParensRequired(sql string) bool {
+	inner := strings.TrimSpace(sql[1 : len(sql)-1])
+	upper := strings.ToUpper(inner)
+	return strings.HasPrefix(upper, "SELECT ") || strings.HasPrefix(upper, "WITH ")
 }

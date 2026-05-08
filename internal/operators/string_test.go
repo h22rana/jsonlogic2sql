@@ -230,6 +230,8 @@ func TestStripRedundantOuterParens(t *testing.T) {
 		{name: "not whole expression", sql: "(a = 1) OR (b = 2)", want: "(a = 1) OR (b = 2)"},
 		{name: "quoted parenthesis", sql: "(name = ')')", want: "name = ')'"},
 		{name: "escaped quote", sql: "(name = 'a''b')", want: "name = 'a''b'"},
+		{name: "scalar subquery", sql: "(SELECT value FROM UNNEST(arr) AS value)", want: "(SELECT value FROM UNNEST(arr) AS value)"},
+		{name: "nested scalar subquery wrapper", sql: "((SELECT value FROM UNNEST(arr) AS value))", want: "(SELECT value FROM UNNEST(arr) AS value)"},
 	}
 
 	for _, tt := range tests {

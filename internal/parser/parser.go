@@ -1089,7 +1089,7 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 		return arg, nil
 	}
 	if exprMap, ok := arg.(map[string]interface{}); ok && len(exprMap) == 1 {
-		for operator, opArgs := range exprMap {
+		for operator := range exprMap {
 			if !p.isBuiltInOperator(operator) {
 				res, err := p.parseExpressionValue(arg, tperrors.BuildArrayPath(path, index))
 				if err != nil {
@@ -1097,7 +1097,7 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 				}
 				return typedValueOperand(res), nil
 			}
-			if operator == "and" || operator == "or" || (operator == "if" && p.valueIfNeedsValueParsing(opArgs)) {
+			if operator == "and" || operator == "or" || operator == "if" {
 				res, err := p.parseExpressionValue(arg, tperrors.BuildArrayPath(path, index))
 				if err != nil {
 					return nil, err
@@ -1107,61 +1107,6 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 		}
 	}
 	return p.processArg(arg, path, index)
-}
-
-func (p *Parser) valueIfNeedsValueParsing(args interface{}) bool {
-	arr, ok := args.([]interface{})
-	if !ok {
-		return false
-	}
-	pairLimit := len(arr)
-	if len(arr)%2 == 1 {
-		pairLimit = len(arr) - 1
-	}
-	for i := 0; i < pairLimit; i += 2 {
-		if !p.isPredicateLikeExpression(arr[i]) {
-			return true
-		}
-	}
-	return false
-}
-
-func (p *Parser) isPredicateLikeExpression(expr interface{}) bool {
-	if p.isPrimitive(expr) {
-		return false
-	}
-	if _, ok := expr.([]interface{}); ok {
-		return false
-	}
-	obj, ok := expr.(map[string]interface{})
-	if !ok || len(obj) != 1 {
-		return true
-	}
-	for operator, args := range obj {
-		switch operator {
-		case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!",
-			operators.OpAll, operators.OpSome, operators.OpNone:
-			return true
-		case "and", "or":
-			arr, ok := args.([]interface{})
-			if !ok {
-				return true
-			}
-			for _, arg := range arr {
-				if !p.isPredicateLikeExpression(arg) {
-					return false
-				}
-			}
-			return true
-		case "if":
-			return !p.valueIfNeedsValueParsing(args)
-		case "var", operators.OpMap, operators.OpFilter, operators.OpReduce, operators.OpMerge, "+", "-", "*", "/", "%", "max", "min", "cat", "substr":
-			return false
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 // processArg processes a single argument, recursively handling custom operators.
@@ -1918,7 +1863,7 @@ func (p *Parser) processValueArgParam(arg interface{}, path string, index int, p
 		return arg, nil
 	}
 	if exprMap, ok := arg.(map[string]interface{}); ok && len(exprMap) == 1 {
-		for operator, opArgs := range exprMap {
+		for operator := range exprMap {
 			if !p.isBuiltInOperator(operator) {
 				res, err := p.parseExpressionValueParam(arg, tperrors.BuildArrayPath(path, index), pc)
 				if err != nil {
@@ -1926,7 +1871,7 @@ func (p *Parser) processValueArgParam(arg interface{}, path string, index int, p
 				}
 				return typedValueOperand(res), nil
 			}
-			if operator == "and" || operator == "or" || (operator == "if" && p.valueIfNeedsValueParsing(opArgs)) {
+			if operator == "and" || operator == "or" || operator == "if" {
 				res, err := p.parseExpressionValueParam(arg, tperrors.BuildArrayPath(path, index), pc)
 				if err != nil {
 					return nil, err

@@ -32,6 +32,11 @@ func TestTranspileValue_NestedValueLogicals(t *testing.T) {
 			logic: `{"+":["42",1]}`,
 			want:  "(42 + 1)",
 		},
+		{
+			name:  "if operand branch uses value fallback",
+			logic: `{"+":[{"if":[{">":[{"var":"x"},0]},{"or":[0,5]},1]},0]}`,
+			want:  "(CASE WHEN x > 0 THEN 5 ELSE 1 END + 0)",
+		},
 	}
 
 	for _, tt := range tests {
@@ -176,6 +181,20 @@ func TestTranspileParameterizedValue_NestedValueLogicalsRollbackSkippedParams(t 
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
+		{
+			name:  "if operand branch uses value fallback",
+			logic: `{"+":[{"if":[{">":[{"var":"x"},0]},{"or":[0,5]},1]},0]}`,
+			wantSQL: func(d Dialect) string {
+				return fmt.Sprintf("(CASE WHEN x > %s THEN %s ELSE %s END + %s)",
+					testPlaceholder(d, 1), testPlaceholder(d, 2), testPlaceholder(d, 3), testPlaceholder(d, 4))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(0)},
+				{Name: "p2", Value: float64(5)},
+				{Name: "p3", Value: float64(1)},
+				{Name: "p4", Value: float64(0)},
+			},
+		},
 	}
 
 	for _, d := range allDialects() {
@@ -312,6 +331,58 @@ func TestTranspileValue_NestedValueLogicalsPreserveSchemaValidation(t *testing.T
 	}
 	if got != "(amount + 1)" {
 		t.Fatalf("TranspileValue() = %q, want %q", got, "(amount + 1)")
+	}
+}
+
+func TestTranspileValue_ArrayTransformationsUseValueSemantics(t *testing.T) {
+	tr, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("NewTranspiler() error = %v", err)
+	}
+
+	got, err := tr.TranspileValue(`{"map":[{"var":"arr"},{"or":[0,{"var":""}]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileValue() map error = %v", err)
+	}
+	if want := "ARRAY(SELECT elem FROM UNNEST(arr) AS elem)"; got != want {
+		t.Fatalf("TranspileValue() map = %q, want %q", got, want)
+	}
+
+	got, err = tr.TranspileValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileValue() cat reduce error = %v", err)
+	}
+	if want := "CONCAT((SELECT CONCAT('', elem) FROM UNNEST(arr) AS elem))"; got != want {
+		t.Fatalf("TranspileValue() cat reduce = %q, want %q", got, want)
+	}
+}
+
+func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *testing.T) {
+	tr, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("NewTranspiler() error = %v", err)
+	}
+
+	gotSQL, gotParams, err := tr.TranspileParameterizedValue(`{"map":[{"var":"arr"},{"or":[0,{"var":""}]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedValue() map error = %v", err)
+	}
+	if want := "ARRAY(SELECT elem FROM UNNEST(arr) AS elem)"; gotSQL != want {
+		t.Fatalf("TranspileParameterizedValue() map SQL = %q, want %q", gotSQL, want)
+	}
+	if len(gotParams) != 0 {
+		t.Fatalf("TranspileParameterizedValue() map params = %#v, want none", gotParams)
+	}
+
+	gotSQL, gotParams, err = tr.TranspileParameterizedValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedValue() cat reduce error = %v", err)
+	}
+	if want := "CONCAT((SELECT CONCAT(@p1, elem) FROM UNNEST(arr) AS elem))"; gotSQL != want {
+		t.Fatalf("TranspileParameterizedValue() cat reduce SQL = %q, want %q", gotSQL, want)
+	}
+	if wantParams := []QueryParam{{Name: "p1", Value: ""}}; !reflect.DeepEqual(gotParams, wantParams) {
+		t.Fatalf("TranspileParameterizedValue() cat reduce params = %#v, want %#v", gotParams, wantParams)
 	}
 }
 

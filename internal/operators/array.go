@@ -39,20 +39,24 @@ type ArrayOperator struct {
 	visibleElems []string
 	exprPath     string
 	valueScope   bool
+	// valueSemantics means the current expression position returns a JSONLogic
+	// value, so and/or/if must preserve fallback values instead of boolean SQL.
+	valueSemantics bool
 }
 
 // NewArrayOperator creates a new ArrayOperator instance with optional config.
 func NewArrayOperator(config *OperatorConfig) *ArrayOperator {
 	return &ArrayOperator{
-		config:       config,
-		dataOp:       NewDataOperator(config),
-		comparisonOp: NewComparisonOperator(config),
-		logicalOp:    nil, // Will be created lazily
-		numericOp:    NewNumericOperator(config),
-		scopeDepth:   0,
-		visibleElems: []string{ElemVar},
-		exprPath:     "$",
-		valueScope:   false,
+		config:         config,
+		dataOp:         NewDataOperator(config),
+		comparisonOp:   NewComparisonOperator(config),
+		logicalOp:      nil, // Will be created lazily
+		numericOp:      NewNumericOperator(config),
+		scopeDepth:     0,
+		visibleElems:   []string{ElemVar},
+		exprPath:       "$",
+		valueScope:     false,
+		valueSemantics: false,
 	}
 }
 
@@ -65,15 +69,16 @@ func (a *ArrayOperator) elemAlias() string {
 
 func (a *ArrayOperator) withChildScope() *ArrayOperator {
 	child := &ArrayOperator{
-		config:       a.config,
-		dataOp:       a.dataOp,
-		comparisonOp: a.comparisonOp,
-		logicalOp:    a.logicalOp,
-		numericOp:    a.numericOp,
-		scopeDepth:   a.scopeDepth + 1,
-		visibleElems: append([]string{}, a.visibleElems...),
-		exprPath:     a.exprPath,
-		valueScope:   a.valueScope,
+		config:         a.config,
+		dataOp:         a.dataOp,
+		comparisonOp:   a.comparisonOp,
+		logicalOp:      a.logicalOp,
+		numericOp:      a.numericOp,
+		scopeDepth:     a.scopeDepth + 1,
+		visibleElems:   append([]string{}, a.visibleElems...),
+		exprPath:       a.exprPath,
+		valueScope:     a.valueScope,
+		valueSemantics: a.valueSemantics,
 	}
 	childAlias := child.elemAlias()
 	child.visibleElems = append(child.visibleElems, childAlias)
@@ -85,30 +90,48 @@ func (a *ArrayOperator) withPath(path string) *ArrayOperator {
 		path = "$"
 	}
 	child := &ArrayOperator{
-		config:       a.config,
-		dataOp:       a.dataOp,
-		comparisonOp: a.comparisonOp,
-		logicalOp:    a.logicalOp,
-		numericOp:    a.numericOp,
-		scopeDepth:   a.scopeDepth,
-		visibleElems: append([]string{}, a.visibleElems...),
-		exprPath:     path,
-		valueScope:   a.valueScope,
+		config:         a.config,
+		dataOp:         a.dataOp,
+		comparisonOp:   a.comparisonOp,
+		logicalOp:      a.logicalOp,
+		numericOp:      a.numericOp,
+		scopeDepth:     a.scopeDepth,
+		visibleElems:   append([]string{}, a.visibleElems...),
+		exprPath:       path,
+		valueScope:     a.valueScope,
+		valueSemantics: a.valueSemantics,
 	}
 	return child
 }
 
 func (a *ArrayOperator) withValueScope(enabled bool) *ArrayOperator {
 	child := &ArrayOperator{
-		config:       a.config,
-		dataOp:       a.dataOp,
-		comparisonOp: a.comparisonOp,
-		logicalOp:    a.logicalOp,
-		numericOp:    a.numericOp,
-		scopeDepth:   a.scopeDepth,
-		visibleElems: append([]string{}, a.visibleElems...),
-		exprPath:     a.exprPath,
-		valueScope:   enabled,
+		config:         a.config,
+		dataOp:         a.dataOp,
+		comparisonOp:   a.comparisonOp,
+		logicalOp:      a.logicalOp,
+		numericOp:      a.numericOp,
+		scopeDepth:     a.scopeDepth,
+		visibleElems:   append([]string{}, a.visibleElems...),
+		exprPath:       a.exprPath,
+		valueScope:     enabled,
+		valueSemantics: a.valueSemantics,
+	}
+	return child
+}
+
+func (a *ArrayOperator) withValueSemantics(enabled bool) *ArrayOperator {
+	child := &ArrayOperator{
+		config:         a.config,
+		dataOp:         a.dataOp,
+		comparisonOp:   a.comparisonOp,
+		logicalOp:      a.logicalOp,
+		numericOp:      a.numericOp,
+		scopeDepth:     a.scopeDepth,
+		visibleElems:   append([]string{}, a.visibleElems...),
+		exprPath:       a.exprPath,
+		valueScope:     a.valueScope,
+		valueSemantics: enabled,
 	}
 	return child
 }
@@ -484,7 +507,8 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 
 	// Second argument: transformation expression - rewrite element vars before SQL generation
 	rewritten := a.rewriteElementVars(args[1])
-	transformation, err := a.expressionToSQLWithContextAndPath(rewritten, false, a.argPath(1))
+	valueScoped := a.withValueSemantics(true)
+	transformation, err := valueScoped.expressionToSQLWithContextAndPath(rewritten, false, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
 	}
@@ -630,7 +654,8 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	// accumulator substitution must happen LAST so that the safety net
 	// doesn't corrupt initial values containing "current"/"item" field names.
 	rewritten := a.rewriteElementVars(reducerExpr)
-	reducerWithElem, err := a.expressionToSQLWithContextAndPath(rewritten, true, a.argPath(1))
+	valueScoped := a.withValueSemantics(true)
+	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(rewritten, true, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
@@ -1048,6 +1073,9 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 				}
 			case "and", "or":
 				if arr, ok := args.([]interface{}); ok {
+					if a.valueSemantics && a.config != nil && a.config.HasValueExpressionParser() {
+						return a.valueExpressionToSQLWithContextAndPath(exprMap, allowAccumulator, path)
+					}
 					opPath := tperrors.BuildPath(path, operator, -1)
 					parts := make([]string, len(arr))
 					for i, arg := range arr {
@@ -1068,6 +1096,9 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 				}
 			case "!", "!!", "if":
 				if arr, ok := args.([]interface{}); ok {
+					if a.valueSemantics && operator == "if" && a.config != nil && a.config.HasValueExpressionParser() {
+						return a.valueExpressionToSQLWithContextAndPath(exprMap, allowAccumulator, path)
+					}
 					opPath := tperrors.BuildPath(path, operator, -1)
 					rewrittenArgs, err := a.rewriteScopedVarsForOperatorWithContextAndPath(arr, allowAccumulator, opPath)
 					if err != nil {
@@ -1104,6 +1135,7 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 						target = a.withChildScope()
 					}
 					target = target.withValueScope(true)
+					target = target.withValueSemantics(false)
 					nestedPath := tperrors.BuildPath(path, operator, -1)
 					return target.ToSQLAtPath(operator, nestedArgs, nestedPath)
 				}
@@ -1579,7 +1611,8 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
 	rewritten := a.rewriteElementVars(args[1])
-	transformation, err := a.expressionToSQLParamWithContextAndPath(rewritten, pc, false, a.argPath(1))
+	valueScoped := a.withValueSemantics(true)
+	transformation, err := valueScoped.expressionToSQLParamWithContextAndPath(rewritten, pc, false, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
 	}
@@ -1680,7 +1713,8 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	}
 
 	rewritten := a.rewriteElementVars(reducerExpr)
-	reducerWithElem, err := a.expressionToSQLParamWithContextAndPath(rewritten, pc, true, a.argPath(1))
+	valueScoped := a.withValueSemantics(true)
+	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(rewritten, pc, true, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
@@ -1947,6 +1981,9 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 				}
 			case "and", "or":
 				if arr, ok := args.([]interface{}); ok {
+					if a.valueSemantics && a.config != nil && a.config.HasParamValueExpressionParser() {
+						return a.valueExpressionToSQLParamWithContextAndPath(exprMap, pc, allowAccumulator, path)
+					}
 					opPath := tperrors.BuildPath(path, operator, -1)
 					parts := make([]string, len(arr))
 					for i, arg := range arr {
@@ -1967,6 +2004,9 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 				}
 			case "!", "!!", "if":
 				if arr, ok := args.([]interface{}); ok {
+					if a.valueSemantics && operator == "if" && a.config != nil && a.config.HasParamValueExpressionParser() {
+						return a.valueExpressionToSQLParamWithContextAndPath(exprMap, pc, allowAccumulator, path)
+					}
 					opPath := tperrors.BuildPath(path, operator, -1)
 					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, pc, allowAccumulator, opPath)
 					if err != nil {
@@ -2002,6 +2042,7 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 						target = a.withChildScope()
 					}
 					target = target.withValueScope(true)
+					target = target.withValueSemantics(false)
 					nestedPath := tperrors.BuildPath(path, operator, -1)
 					return target.ToSQLParamAtPath(operator, nestedArgs, pc, nestedPath)
 				}
