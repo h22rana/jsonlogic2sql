@@ -3,6 +3,7 @@ package jsonlogic2sql
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -383,6 +384,38 @@ func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *te
 	}
 	if wantParams := []QueryParam{{Name: "p1", Value: ""}}; !reflect.DeepEqual(gotParams, wantParams) {
 		t.Fatalf("TranspileParameterizedValue() cat reduce params = %#v, want %#v", gotParams, wantParams)
+	}
+}
+
+func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing.T) {
+	logic := `{"map":[{"var":"items"},{"if":[{"var":["current","fallback"]},"yes","no"]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			gotSQL, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if strings.Contains(gotSQL, "'fallback'") {
+				t.Fatalf("SQL inlined scoped var default: %s", gotSQL)
+			}
+			if want := fmt.Sprintf("COALESCE(elem, %s)", testPlaceholder(d, 1)); !strings.Contains(gotSQL, want) {
+				t.Fatalf("SQL = %q, want to contain %q", gotSQL, want)
+			}
+			wantParams := []QueryParam{
+				{Name: "p1", Value: "fallback"},
+				{Name: "p2", Value: "yes"},
+				{Name: "p3", Value: "no"},
+			}
+			if !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
 	}
 }
 

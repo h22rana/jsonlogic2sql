@@ -749,11 +749,11 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 		pairLimit = len(args) - 1
 	}
 	for i := 0; i < pairLimit; i += 2 {
-		cond, err := p.parseExpressionPredicate(args[i], tperrors.BuildArrayPath(path, i))
+		cond, err := p.parsePredicateIfOperand(args[i], tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return expressionResult{}, err
 		}
-		thenRes, err := p.parseExpressionPredicate(args[i+1], tperrors.BuildArrayPath(path, i+1))
+		thenRes, err := p.parsePredicateIfOperand(args[i+1], tperrors.BuildArrayPath(path, i+1))
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -761,13 +761,23 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 	}
 	elseSQL := "FALSE"
 	if hasElse {
-		elseRes, err := p.parseExpressionPredicate(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1))
+		elseRes, err := p.parsePredicateIfOperand(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1))
 		if err != nil {
 			return expressionResult{}, err
 		}
 		elseSQL = elseRes.SQL
 	}
 	return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL)), nil
+}
+
+func (p *Parser) parsePredicateIfOperand(expr interface{}, path string) (expressionResult, error) {
+	if b, ok := expr.(bool); ok {
+		if b {
+			return predicateResult("TRUE"), nil
+		}
+		return predicateResult("FALSE"), nil
+	}
+	return p.parseExpressionPredicate(expr, path)
 }
 
 func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult, error) {
@@ -1619,11 +1629,11 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		pairLimit = len(args) - 1
 	}
 	for i := 0; i < pairLimit; i += 2 {
-		cond, err := p.parseExpressionPredicateParam(args[i], tperrors.BuildArrayPath(path, i), pc)
+		cond, err := p.parsePredicateIfOperandParam(args[i], tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
-		thenRes, err := p.parseExpressionPredicateParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
+		thenRes, err := p.parsePredicateIfOperandParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -1631,13 +1641,23 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 	}
 	elseSQL := "FALSE"
 	if hasElse {
-		elseRes, err := p.parseExpressionPredicateParam(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1), pc)
+		elseRes, err := p.parsePredicateIfOperandParam(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
 		elseSQL = elseRes.SQL
 	}
 	return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL)), nil
+}
+
+func (p *Parser) parsePredicateIfOperandParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
+	if b, ok := expr.(bool); ok {
+		if b {
+			return predicateResult("TRUE"), nil
+		}
+		return predicateResult("FALSE"), nil
+	}
+	return p.parseExpressionPredicateParam(expr, path, pc)
 }
 
 func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {

@@ -1892,7 +1892,7 @@ func (a *ArrayOperator) valueExpressionToSQLParamWithContextAndPath(
 	if a.config == nil || !a.config.HasParamValueExpressionParser() {
 		return a.expressionToSQLParamWithContextAndPath(expr, pc, allowAccumulator, path)
 	}
-	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, allowAccumulator, path)
+	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, pc, allowAccumulator, path)
 	if err != nil {
 		return "", err
 	}
