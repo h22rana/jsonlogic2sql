@@ -1100,14 +1100,7 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 	}
 	if exprMap, ok := arg.(map[string]interface{}); ok && len(exprMap) == 1 {
 		for operator := range exprMap {
-			if !p.isBuiltInOperator(operator) {
-				res, err := p.parseExpressionValue(arg, tperrors.BuildArrayPath(path, index))
-				if err != nil {
-					return nil, err
-				}
-				return typedValueOperand(res), nil
-			}
-			if operator == "and" || operator == "or" || operator == "if" {
+			if operator != "var" {
 				res, err := p.parseExpressionValue(arg, tperrors.BuildArrayPath(path, index))
 				if err != nil {
 					return nil, err
@@ -1884,14 +1877,7 @@ func (p *Parser) processValueArgParam(arg interface{}, path string, index int, p
 	}
 	if exprMap, ok := arg.(map[string]interface{}); ok && len(exprMap) == 1 {
 		for operator := range exprMap {
-			if !p.isBuiltInOperator(operator) {
-				res, err := p.parseExpressionValueParam(arg, tperrors.BuildArrayPath(path, index), pc)
-				if err != nil {
-					return nil, err
-				}
-				return typedValueOperand(res), nil
-			}
-			if operator == "and" || operator == "or" || operator == "if" {
+			if operator != "var" {
 				res, err := p.parseExpressionValueParam(arg, tperrors.BuildArrayPath(path, index), pc)
 				if err != nil {
 					return nil, err

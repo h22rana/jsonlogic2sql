@@ -2208,17 +2208,13 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 					}
 					return map[string]interface{}{opName: newArgs}, nil
 				}
-				if !a.isBuiltInOperatorName(opName) && a.config != nil && a.config.HasParamExpressionParser() {
+				if !a.isBuiltInOperatorName(opName) {
 					opPath := tperrors.BuildPath(path, opName, -1)
 					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(opArgs, pc, allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
 					if err != nil {
 						return nil, err
 					}
-					sql, err := a.config.ParseExpressionParam(map[string]interface{}{opName: rewrittenArgs}, path, pc)
-					if err != nil {
-						return nil, err
-					}
-					return SQLResult(sql), nil
+					return map[string]interface{}{opName: rewrittenArgs}, nil
 				}
 			}
 		}

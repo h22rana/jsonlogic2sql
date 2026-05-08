@@ -24,6 +24,11 @@ func TestTranspileValue_NestedValueLogicals(t *testing.T) {
 			want:  "(5 + 1)",
 		},
 		{
+			name:  "nested numeric operand uses value fallback recursively",
+			logic: `{"+":[{"*":[{"or":[0,5]},2]},1]}`,
+			want:  "((5 * 2) + 1)",
+		},
+		{
 			name:  "string operand uses value fallback",
 			logic: `{"cat":[{"or":[false,"fallback"]}]}`,
 			want:  "CONCAT('fallback')",
@@ -173,6 +178,19 @@ func TestTranspileParameterizedValue_NestedValueLogicalsRollbackSkippedParams(t 
 				return fmt.Sprintf("(%s + %s)", testPlaceholder(d, 1), testPlaceholder(d, 2))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: float64(5)}, {Name: "p2", Value: float64(1)}},
+		},
+		{
+			name:  "nested numeric operand preserves value fallback recursively",
+			logic: `{"+":[{"*":[{"or":[0,5]},2]},1]}`,
+			wantSQL: func(d Dialect) string {
+				return fmt.Sprintf("((%s * %s) + %s)",
+					testPlaceholder(d, 1), testPlaceholder(d, 2), testPlaceholder(d, 3))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(5)},
+				{Name: "p2", Value: float64(2)},
+				{Name: "p3", Value: float64(1)},
+			},
 		},
 		{
 			name:  "nested string operand preserves emitted parameter order",
@@ -412,6 +430,44 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing
 				{Name: "p2", Value: "yes"},
 				{Name: "p3", Value: "no"},
 			}
+			if !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
+	}
+}
+
+func TestTranspileParameterizedValue_ArrayCustomPredicateKeepsTypeMetadata(t *testing.T) {
+	logic := `{"map":[{"var":"items"},{"cat":[{"gt":[{"var":"current"},0]}]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			err = tr.RegisterOperatorFunc("gt", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				if len(args) != 2 {
+					return OperatorResult{}, fmt.Errorf("gt requires exactly 2 arguments")
+				}
+				return PredicateSQL(fmt.Sprintf("%s > %s", args[0].SQL, args[1].SQL)), nil
+			})
+			if err != nil {
+				t.Fatalf("RegisterOperatorFunc() error = %v", err)
+			}
+
+			gotSQL, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if strings.Contains(gotSQL, "CONCAT(elem >") {
+				t.Fatalf("SQL did not stringify custom predicate: %s", gotSQL)
+			}
+			wantPredicate := fmt.Sprintf("CASE WHEN elem > %s THEN 'true' ELSE 'false' END", testPlaceholder(d, 1))
+			if !strings.Contains(gotSQL, wantPredicate) {
+				t.Fatalf("SQL = %q, want to contain %q", gotSQL, wantPredicate)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: float64(0)}}
 			if !reflect.DeepEqual(gotParams, wantParams) {
 				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
 			}
