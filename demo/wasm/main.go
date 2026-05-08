@@ -88,8 +88,8 @@ func setNullSafeFieldEquality(_ js.Value, args []js.Value) interface{} {
 	return map[string]interface{}{"ok": true}
 }
 
-// transpile(id: number, jsonLogic: string) => {sql: string} | {error: string}
-func transpile(_ js.Value, args []js.Value) interface{} {
+// transpileValue(id: number, jsonLogic: string) => {sql: string} | {error: string}
+func transpileValue(_ js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
 		return map[string]interface{}{"error": "id and jsonLogic arguments required"}
 	}
@@ -101,7 +101,7 @@ func transpile(_ js.Value, args []js.Value) interface{} {
 		return map[string]interface{}{"error": "transpiler not found"}
 	}
 
-	sql, err := t.Transpile(jsonLogic)
+	sql, err := t.TranspileValue(jsonLogic)
 	if err != nil {
 		errResult := map[string]interface{}{"error": err.Error()}
 		if tErr, ok := jsonlogic2sql.AsTranspileError(err); ok {
@@ -134,8 +134,8 @@ func transpileCondition(_ js.Value, args []js.Value) interface{} {
 	return map[string]interface{}{"sql": sql}
 }
 
-// transpileParameterized(id: number, jsonLogic: string) => {sql: string, params: string} | {error: string}
-func transpileParameterized(_ js.Value, args []js.Value) interface{} {
+// transpileParameterizedValue(id: number, jsonLogic: string) => {sql: string, params: string} | {error: string}
+func transpileParameterizedValue(_ js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
 		return map[string]interface{}{"error": "id and jsonLogic arguments required"}
 	}
@@ -147,7 +147,7 @@ func transpileParameterized(_ js.Value, args []js.Value) interface{} {
 		return map[string]interface{}{"error": "transpiler not found"}
 	}
 
-	sql, params, err := t.TranspileParameterized(jsonLogic)
+	sql, params, err := t.TranspileParameterizedValue(jsonLogic)
 	if err != nil {
 		errResult := map[string]interface{}{"error": err.Error()}
 		if tErr, ok := jsonlogic2sql.AsTranspileError(err); ok {
@@ -164,8 +164,8 @@ func transpileParameterized(_ js.Value, args []js.Value) interface{} {
 	return map[string]interface{}{"sql": sql, "params": string(paramsJSON)}
 }
 
-// transpileConditionParameterized(id: number, jsonLogic: string) => {sql: string, params: string} | {error: string}
-func transpileConditionParameterized(_ js.Value, args []js.Value) interface{} {
+// transpileParameterizedCondition(id: number, jsonLogic: string) => {sql: string, params: string} | {error: string}
+func transpileParameterizedCondition(_ js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
 		return map[string]interface{}{"error": "id and jsonLogic arguments required"}
 	}
@@ -177,7 +177,7 @@ func transpileConditionParameterized(_ js.Value, args []js.Value) interface{} {
 		return map[string]interface{}{"error": "transpiler not found"}
 	}
 
-	sql, params, err := t.TranspileConditionParameterized(jsonLogic)
+	sql, params, err := t.TranspileParameterizedCondition(jsonLogic)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}
@@ -188,8 +188,8 @@ func transpileConditionParameterized(_ js.Value, args []js.Value) interface{} {
 	return map[string]interface{}{"sql": sql, "params": string(paramsJSON)}
 }
 
-// quickTranspileParameterized(dialect: string, jsonLogic: string) => {sql: string, params: string} | {error: string}
-func quickTranspileParameterized(_ js.Value, args []js.Value) interface{} {
+// quickTranspileParameterizedValue(dialect: string, jsonLogic: string) => {sql: string, params: string} | {error: string}
+func quickTranspileParameterizedValue(_ js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
 		return map[string]interface{}{"error": "dialect and jsonLogic arguments required"}
 	}
@@ -201,7 +201,7 @@ func quickTranspileParameterized(_ js.Value, args []js.Value) interface{} {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	sql, params, err := jsonlogic2sql.TranspileParameterized(dialect, jsonLogic)
+	sql, params, err := jsonlogic2sql.TranspileParameterizedValue(dialect, jsonLogic)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}
@@ -212,9 +212,8 @@ func quickTranspileParameterized(_ js.Value, args []js.Value) interface{} {
 	return map[string]interface{}{"sql": sql, "params": string(paramsJSON)}
 }
 
-// quickTranspile(dialect: string, jsonLogic: string) => {sql: string} | {error: string}
-// Convenience function that doesn't require creating a transpiler instance.
-func quickTranspile(_ js.Value, args []js.Value) interface{} {
+// quickTranspileParameterizedCondition(dialect: string, jsonLogic: string) => {sql: string, params: string} | {error: string}
+func quickTranspileParameterizedCondition(_ js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
 		return map[string]interface{}{"error": "dialect and jsonLogic arguments required"}
 	}
@@ -226,7 +225,51 @@ func quickTranspile(_ js.Value, args []js.Value) interface{} {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	sql, err := jsonlogic2sql.Transpile(dialect, jsonLogic)
+	sql, params, err := jsonlogic2sql.TranspileParameterizedCondition(dialect, jsonLogic)
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return map[string]interface{}{"error": "failed to encode params: " + err.Error()}
+	}
+	return map[string]interface{}{"sql": sql, "params": string(paramsJSON)}
+}
+
+// quickTranspileValue(dialect: string, jsonLogic: string) => {sql: string} | {error: string}
+func quickTranspileValue(_ js.Value, args []js.Value) interface{} {
+	if len(args) < 2 {
+		return map[string]interface{}{"error": "dialect and jsonLogic arguments required"}
+	}
+	dialectStr := args[0].String()
+	jsonLogic := args[1].String()
+
+	dialect, ok := dialetFromString(dialectStr)
+	if !ok {
+		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
+	}
+
+	sql, err := jsonlogic2sql.TranspileValue(dialect, jsonLogic)
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+	return map[string]interface{}{"sql": sql}
+}
+
+// quickTranspileCondition(dialect: string, jsonLogic: string) => {sql: string} | {error: string}
+func quickTranspileCondition(_ js.Value, args []js.Value) interface{} {
+	if len(args) < 2 {
+		return map[string]interface{}{"error": "dialect and jsonLogic arguments required"}
+	}
+	dialectStr := args[0].String()
+	jsonLogic := args[1].String()
+
+	dialect, ok := dialetFromString(dialectStr)
+	if !ok {
+		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
+	}
+
+	sql, err := jsonlogic2sql.TranspileCondition(dialect, jsonLogic)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}
@@ -252,17 +295,19 @@ func destroyTranspiler(_ js.Value, args []js.Value) interface{} {
 // getSamples() => JSON string of sample expressions.
 func getSamples(_ js.Value, _ []js.Value) interface{} {
 	samples := []map[string]string{
-		{"name": "Simple equality", "jsonLogic": `{"==": [{"var": "status"}, "active"]}`},
-		{"name": "Greater than", "jsonLogic": `{">": [{"var": "amount"}, 1000]}`},
-		{"name": "AND condition", "jsonLogic": `{"and": [{">": [{"var": "amount"}, 5000]}, {"==": [{"var": "status"}, "pending"]}]}`},
-		{"name": "OR condition", "jsonLogic": `{"or": [{">=": [{"var": "failedAttempts"}, 5]}, {"in": [{"var": "country"}, ["CN", "RU"]]}]}`},
-		{"name": "IN array", "jsonLogic": `{"in": [{"var": "country"}, ["US", "CA", "MX"]]}`},
-		{"name": "NOT IN", "jsonLogic": `{"!": {"in": [{"var": "status"}, ["blocked", "suspended"]]}}`},
-		{"name": "NULL check", "jsonLogic": `{"==": [{"var": "deleted_at"}, null]}`},
-		{"name": "Null-safe fields", "jsonLogic": `{"==": [{"var": "primary_email"}, {"var": "backup_email"}]}`},
-		{"name": "Chained comparison", "jsonLogic": `{"<": [18, {"var": "age"}, 65]}`},
-		{"name": "Nested arithmetic", "jsonLogic": `{">": [{"+": [{"var": "base"}, {"*": [{"var": "bonus"}, 0.1]}]}, 1000]}`},
-		{"name": "Conditional (if)", "jsonLogic": `{"if": [{">": [{"var": "age"}, 18]}, "adult", "minor"]}`},
+		{"name": "Simple equality", "mode": "condition", "jsonLogic": `{"==": [{"var": "status"}, "active"]}`},
+		{"name": "Greater than", "mode": "condition", "jsonLogic": `{">": [{"var": "amount"}, 1000]}`},
+		{"name": "AND condition", "mode": "condition", "jsonLogic": `{"and": [{">": [{"var": "amount"}, 5000]}, {"==": [{"var": "status"}, "pending"]}]}`},
+		{"name": "OR condition", "mode": "condition", "jsonLogic": `{"or": [{">=": [{"var": "failedAttempts"}, 5]}, {"in": [{"var": "country"}, ["CN", "RU"]]}]}`},
+		{"name": "IN array", "mode": "condition", "jsonLogic": `{"in": [{"var": "country"}, ["US", "CA", "MX"]]}`},
+		{"name": "NOT IN", "mode": "condition", "jsonLogic": `{"!": {"in": [{"var": "status"}, ["blocked", "suspended"]]}}`},
+		{"name": "NULL check", "mode": "condition", "jsonLogic": `{"==": [{"var": "deleted_at"}, null]}`},
+		{"name": "Null-safe fields", "mode": "condition", "jsonLogic": `{"==": [{"var": "primary_email"}, {"var": "backup_email"}]}`},
+		{"name": "Chained comparison", "mode": "condition", "jsonLogic": `{"<": [18, {"var": "age"}, 65]}`},
+		{"name": "Nested arithmetic", "mode": "condition", "jsonLogic": `{">": [{"+": [{"var": "base"}, {"*": [{"var": "bonus"}, 0.1]}]}, 1000]}`},
+		{"name": "Value fallback", "mode": "value", "jsonLogic": `{"or": [false, {"var": "nickname"}, "unknown"]}`},
+		{"name": "Conditional value", "mode": "value", "jsonLogic": `{"if": [{">": [{"var": "age"}, 18]}, "adult", "minor"]}`},
+		{"name": "String value", "mode": "value", "jsonLogic": `{"cat": ["Order ", {"var": "status"}]}`},
 	}
 	data, err := json.Marshal(samples)
 	if err != nil {
@@ -276,18 +321,20 @@ func main() {
 
 	// Register all functions on the global jsonlogic2sql object
 	jsObj := map[string]interface{}{
-		"newTranspiler":                   js.FuncOf(newTranspiler),
-		"setSchema":                       js.FuncOf(setSchema),
-		"setNullSafeFieldEquality":        js.FuncOf(setNullSafeFieldEquality),
-		"transpile":                       js.FuncOf(transpile),
-		"transpileCondition":              js.FuncOf(transpileCondition),
-		"transpileParameterized":          js.FuncOf(transpileParameterized),
-		"transpileConditionParameterized": js.FuncOf(transpileConditionParameterized),
-		"quickTranspile":                  js.FuncOf(quickTranspile),
-		"quickTranspileParameterized":     js.FuncOf(quickTranspileParameterized),
-		"destroyTranspiler":               js.FuncOf(destroyTranspiler),
-		"getDialects":                     js.FuncOf(getDialects),
-		"getSamples":                      js.FuncOf(getSamples),
+		"newTranspiler":                        js.FuncOf(newTranspiler),
+		"setSchema":                            js.FuncOf(setSchema),
+		"setNullSafeFieldEquality":             js.FuncOf(setNullSafeFieldEquality),
+		"transpileValue":                       js.FuncOf(transpileValue),
+		"transpileCondition":                   js.FuncOf(transpileCondition),
+		"transpileParameterizedValue":          js.FuncOf(transpileParameterizedValue),
+		"transpileParameterizedCondition":      js.FuncOf(transpileParameterizedCondition),
+		"quickTranspileValue":                  js.FuncOf(quickTranspileValue),
+		"quickTranspileCondition":              js.FuncOf(quickTranspileCondition),
+		"quickTranspileParameterizedValue":     js.FuncOf(quickTranspileParameterizedValue),
+		"quickTranspileParameterizedCondition": js.FuncOf(quickTranspileParameterizedCondition),
+		"destroyTranspiler":                    js.FuncOf(destroyTranspiler),
+		"getDialects":                          js.FuncOf(getDialects),
+		"getSamples":                           js.FuncOf(getSamples),
 	}
 
 	js.Global().Set("jsonlogic2sql", js.ValueOf(jsObj))

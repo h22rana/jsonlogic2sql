@@ -11,6 +11,11 @@ import (
 	"github.com/h22rana/jsonlogic2sql"
 )
 
+const (
+	modeCondition = "condition"
+	modeValue     = "value"
+)
+
 // escapeLikePattern escapes special characters for SQL LIKE patterns.
 // Escapes: single quotes ('), percent (%), and underscore (_)
 // For BigQuery/Spanner, use backslash escaping for LIKE wildcards.
@@ -137,11 +142,17 @@ func parseContainsArgs(args []interface{}) (column, pattern string) {
 		if strings.HasPrefix(arg1Str, "[") && strings.HasSuffix(arg1Str, "]") {
 			column = arg0Str
 			inner := extractFromArrayString(arg1Str)
+			if isPlaceholder(inner) {
+				return column, inner
+			}
 			return column, fmt.Sprintf("'%s'", strings.ReplaceAll(inner, "'", "''"))
 		}
 		if strings.HasPrefix(arg0Str, "[") && strings.HasSuffix(arg0Str, "]") {
 			column = arg1Str
 			inner := extractFromArrayString(arg0Str)
+			if isPlaceholder(inner) {
+				return column, inner
+			}
 			return column, fmt.Sprintf("'%s'", strings.ReplaceAll(inner, "'", "''"))
 		}
 		if isBoundValue(arg0Str) && !isBoundValue(arg1Str) {
@@ -154,6 +165,9 @@ func parseContainsArgs(args []interface{}) (column, pattern string) {
 	pattern = args[1].(string)
 	if strings.HasPrefix(pattern, "[") && strings.HasSuffix(pattern, "]") {
 		inner := extractFromArrayString(pattern)
+		if isPlaceholder(inner) {
+			return column, inner
+		}
 		return column, fmt.Sprintf("'%s'", strings.ReplaceAll(inner, "'", "''"))
 	}
 	return column, pattern
@@ -179,6 +193,10 @@ var currentSchema *jsonlogic2sql.Schema
 
 // paramsMode controls whether output uses parameterized placeholders.
 var paramsMode bool
+
+// valueMode controls whether input is transpiled as a SQL value expression.
+// When false, input is transpiled as a SQL condition/predicate expression.
+var valueMode bool
 
 // selectDialect prompts the user to select a SQL dialect.
 func selectDialect(scanner *bufio.Scanner) jsonlogic2sql.Dialect {
@@ -271,23 +289,7 @@ func main() {
 			continue
 		}
 
-		// Process JSON Logic input
-		if paramsMode {
-			sql, params, err := transpiler.TranspileParameterized(input)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Printf("SQL:    %s\n", sql)
-				printParams(params)
-			}
-		} else {
-			result, err := transpiler.Transpile(input)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Printf("SQL: %s\n", result)
-			}
-		}
+		processInput(input, transpiler)
 		fmt.Println()
 	}
 
@@ -295,6 +297,39 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func processInput(input string, transpiler *jsonlogic2sql.Transpiler) {
+	if paramsMode {
+		var sql string
+		var params []jsonlogic2sql.QueryParam
+		var err error
+		if valueMode {
+			sql, params, err = transpiler.TranspileParameterizedValue(input)
+		} else {
+			sql, params, err = transpiler.TranspileParameterizedCondition(input)
+		}
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
+		fmt.Printf("SQL:    %s\n", sql)
+		printParams(params)
+		return
+	}
+
+	var result string
+	var err error
+	if valueMode {
+		result, err = transpiler.TranspileValue(input)
+	} else {
+		result, err = transpiler.TranspileCondition(input)
+	}
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+	fmt.Printf("SQL: %s\n", result)
 }
 
 // promptSchema optionally loads a schema from a user-provided path.
@@ -368,6 +403,14 @@ func handleCommand(input string, transpiler *jsonlogic2sql.Transpiler, scanner *
 		} else {
 			fmt.Println("Parameterized mode: OFF (output uses inlined literals)")
 		}
+	case ":mode":
+		handleModeCommand(parts)
+	case ":condition":
+		valueMode = false
+		fmt.Println("Expression mode: condition")
+	case ":value":
+		valueMode = true
+		fmt.Println("Expression mode: value")
 	case ":schema":
 		handleSchemaCommand(parts, transpiler)
 	case ":file":
@@ -383,6 +426,27 @@ func handleCommand(input string, transpiler *jsonlogic2sql.Transpiler, scanner *
 		fmt.Println("Type ':help' for available commands")
 	}
 	return nil
+}
+
+func handleModeCommand(parts []string) {
+	if len(parts) < 2 {
+		mode := modeCondition
+		if valueMode {
+			mode = modeValue
+		}
+		fmt.Printf("Expression mode: %s\n", mode)
+		return
+	}
+	switch parts[1] {
+	case modeCondition, "predicate":
+		valueMode = false
+		fmt.Println("Expression mode: condition")
+	case modeValue:
+		valueMode = true
+		fmt.Println("Expression mode: value")
+	default:
+		fmt.Println("Usage: :mode condition|value")
+	}
 }
 
 // handleFileInput handles the :file command to read JSON from a file.
@@ -407,22 +471,7 @@ func handleFileInput(parts []string, transpiler *jsonlogic2sql.Transpiler) {
 		return
 	}
 
-	if paramsMode {
-		sql, params, err := transpiler.TranspileParameterized(input)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		} else {
-			fmt.Printf("SQL:    %s\n", sql)
-			printParams(params)
-		}
-	} else {
-		result, err := transpiler.Transpile(input)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		} else {
-			fmt.Printf("SQL: %s\n", result)
-		}
-	}
+	processInput(input, transpiler)
 	fmt.Println()
 }
 
@@ -736,6 +785,9 @@ func showHelp() {
 	fmt.Println("  :help          - Show this help message")
 	fmt.Println("  :examples      - Show example JSON Logic expressions")
 	fmt.Println("  :dialect       - Change the SQL dialect")
+	fmt.Println("  :mode <mode>   - Set expression mode: condition or value")
+	fmt.Println("  :condition     - Use condition/predicate expression mode")
+	fmt.Println("  :value         - Use value expression mode")
 	fmt.Println("  :params        - Toggle parameterized query output (bind placeholders)")
 	fmt.Println("  :schema <path> - Load schema for validation and type-aware SQL")
 	fmt.Println("  :file <path>   - Read JSON Logic from a file (for large inputs)")
@@ -746,9 +798,13 @@ func showHelp() {
 	if paramsMode {
 		paramStatus = "ON"
 	}
-	fmt.Printf("Current dialect: %s | Params: %s\n", getDialectName(currentDialect), paramStatus)
+	mode := modeCondition
+	if valueMode {
+		mode = modeValue
+	}
+	fmt.Printf("Current dialect: %s | Mode: %s | Params: %s\n", getDialectName(currentDialect), mode, paramStatus)
 	fmt.Println()
-	fmt.Println("Enter JSON Logic expressions to convert them to SQL WHERE clauses.")
+	fmt.Println("Enter JSON Logic expressions to convert them to SQL.")
 	fmt.Println("Example: {\">\": [{\"var\": \"amount\"}, 1000]}")
 	fmt.Println()
 	fmt.Println("Note: For large JSON inputs (>4KB), use :file to avoid terminal limits.")
@@ -763,42 +819,42 @@ func showExamples() {
 		{
 			name: "Simple Comparison",
 			json: `{">": [{"var": "amount"}, 1000]}`,
-			sql:  "WHERE amount > 1000",
+			sql:  "amount > 1000",
 		},
 		{
 			name: "Multiple Conditions (AND)",
 			json: `{"and": [{">": [{"var": "amount"}, 5000]}, {"==": [{"var": "status"}, "pending"]}]}`,
-			sql:  "WHERE (amount > 5000 AND status = 'pending')",
+			sql:  "(amount > 5000 AND status = 'pending')",
 		},
 		{
 			name: "Multiple Conditions (OR)",
 			json: `{"or": [{">=": [{"var": "failedAttempts"}, 5]}, {"in": [{"var": "country"}, ["CN", "RU"]]}]}`,
-			sql:  "WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))",
+			sql:  "(failedAttempts >= 5 OR country IN ('CN', 'RU'))",
 		},
 		{
 			name: "Nested Conditions",
 			json: `{"and": [{">": [{"var": "transaction.amount"}, 10000]}, {"or": [{"==": [{"var": "user.verified"}, false]}, {"<": [{"var": "user.accountAgeDays"}, 7]}]}]}`,
-			sql:  "WHERE (transaction_amount > 10000 AND (user_verified = FALSE OR user_accountAgeDays < 7))",
+			sql:  "(transaction_amount > 10000 AND (user_verified = FALSE OR user_accountAgeDays < 7))",
 		},
 		{
 			name: "IF Statement",
 			json: `{"if": [{">": [{"var": "age"}, 18]}, "adult", "minor"]}`,
-			sql:  "WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END",
+			sql:  "CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END",
 		},
 		{
 			name: "Missing Field Check",
 			json: `{"missing": ["field"]}`,
-			sql:  "WHERE field IS NULL",
+			sql:  "field IS NULL",
 		},
 		{
 			name: "Missing Some Fields",
 			json: `{"missing_some": [1, ["field1", "field2"]]}`,
-			sql:  "WHERE (field1 IS NULL + field2 IS NULL) >= 1",
+			sql:  "(field1 IS NULL + field2 IS NULL) >= 1",
 		},
 		{
 			name: "NOT Operation",
 			json: `{"!": [{"==": [{"var": "verified"}, true]}]}`,
-			sql:  "WHERE NOT (verified = TRUE)",
+			sql:  "NOT (verified = TRUE)",
 		},
 	}
 

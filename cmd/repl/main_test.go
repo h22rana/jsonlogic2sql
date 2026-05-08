@@ -170,43 +170,43 @@ func TestLikeOperatorsQuoteEscaping(t *testing.T) {
 		{
 			name:     "startsWith with apostrophe",
 			jsonExpr: `{"startsWith": [{"var": "column"}, "it's"]}`,
-			want:     "WHERE column LIKE 'it''s%'",
+			want:     "column LIKE 'it''s%'",
 		},
 		{
 			name:     "!startsWith with apostrophe",
 			jsonExpr: `{"!startsWith": [{"var": "column"}, "it's"]}`,
-			want:     "WHERE column NOT LIKE 'it''s%'",
+			want:     "column NOT LIKE 'it''s%'",
 		},
 		{
 			name:     "endsWith with apostrophe",
 			jsonExpr: `{"endsWith": [{"var": "column"}, "it's"]}`,
-			want:     "WHERE column LIKE '%it''s'",
+			want:     "column LIKE '%it''s'",
 		},
 		{
 			name:     "!endsWith with apostrophe",
 			jsonExpr: `{"!endsWith": [{"var": "column"}, "it's"]}`,
-			want:     "WHERE column NOT LIKE '%it''s'",
+			want:     "column NOT LIKE '%it''s'",
 		},
 		{
 			name:     "contains with apostrophe",
 			jsonExpr: `{"contains": [{"var": "column"}, "it's"]}`,
-			want:     "WHERE column LIKE '%it''s%'",
+			want:     "column LIKE '%it''s%'",
 		},
 		{
 			name:     "!contains with apostrophe",
 			jsonExpr: `{"!contains": [{"var": "column"}, "it's"]}`,
-			want:     "WHERE column NOT LIKE '%it''s%'",
+			want:     "column NOT LIKE '%it''s%'",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tr.Transpile(tt.jsonExpr)
+			got, err := tr.TranspileCondition(tt.jsonExpr)
 			if err != nil {
 				t.Fatalf("Transpile error: %v", err)
 			}
 			if got != tt.want {
-				t.Errorf("Transpile(%s)\n  got:  %s\n  want: %s", tt.jsonExpr, got, tt.want)
+				t.Errorf("TranspileCondition(%s)\n  got:  %s\n  want: %s", tt.jsonExpr, got, tt.want)
 			}
 		})
 	}
@@ -223,28 +223,28 @@ func TestLikeOperatorsPlainStrings(t *testing.T) {
 		{
 			name:     "startsWith plain",
 			jsonExpr: `{"startsWith": [{"var": "name"}, "Alice"]}`,
-			want:     "WHERE name LIKE 'Alice%'",
+			want:     "name LIKE 'Alice%'",
 		},
 		{
 			name:     "endsWith plain",
 			jsonExpr: `{"endsWith": [{"var": "email"}, "@company.com"]}`,
-			want:     "WHERE email LIKE '%@company.com'",
+			want:     "email LIKE '%@company.com'",
 		},
 		{
 			name:     "contains plain",
 			jsonExpr: `{"contains": [{"var": "desc"}, "hello"]}`,
-			want:     "WHERE desc LIKE '%hello%'",
+			want:     "desc LIKE '%hello%'",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tr.Transpile(tt.jsonExpr)
+			got, err := tr.TranspileCondition(tt.jsonExpr)
 			if err != nil {
 				t.Fatalf("Transpile error: %v", err)
 			}
 			if got != tt.want {
-				t.Errorf("Transpile(%s)\n  got:  %s\n  want: %s", tt.jsonExpr, got, tt.want)
+				t.Errorf("TranspileCondition(%s)\n  got:  %s\n  want: %s", tt.jsonExpr, got, tt.want)
 			}
 		})
 	}
@@ -261,28 +261,28 @@ func TestLikeOperatorsWildcardEscaping(t *testing.T) {
 		{
 			name:     "contains percent",
 			jsonExpr: `{"contains": [{"var": "col"}, "100%"]}`,
-			want:     `WHERE col LIKE '%100\%%'`,
+			want:     `col LIKE '%100\%%'`,
 		},
 		{
 			name:     "startsWith underscore",
 			jsonExpr: `{"startsWith": [{"var": "col"}, "_private"]}`,
-			want:     `WHERE col LIKE '\_private%'`,
+			want:     `col LIKE '\_private%'`,
 		},
 		{
 			name:     "endsWith mixed apostrophe and wildcard",
 			jsonExpr: `{"endsWith": [{"var": "col"}, "it's 100%"]}`,
-			want:     `WHERE col LIKE '%it''s 100\%'`,
+			want:     `col LIKE '%it''s 100\%'`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tr.Transpile(tt.jsonExpr)
+			got, err := tr.TranspileCondition(tt.jsonExpr)
 			if err != nil {
 				t.Fatalf("Transpile error: %v", err)
 			}
 			if got != tt.want {
-				t.Errorf("Transpile(%s)\n  got:  %s\n  want: %s", tt.jsonExpr, got, tt.want)
+				t.Errorf("TranspileCondition(%s)\n  got:  %s\n  want: %s", tt.jsonExpr, got, tt.want)
 			}
 		})
 	}
@@ -291,11 +291,11 @@ func TestLikeOperatorsWildcardEscaping(t *testing.T) {
 func TestContainsReversedWithApostrophe(t *testing.T) {
 	tr := setupTestTranspiler(t)
 
-	got, err := tr.Transpile(`{"contains": ["it's", {"var": "column"}]}`)
+	got, err := tr.TranspileCondition(`{"contains": ["it's", {"var": "column"}]}`)
 	if err != nil {
 		t.Fatalf("Transpile error: %v", err)
 	}
-	want := "WHERE column LIKE '%it''s%'"
+	want := "column LIKE '%it''s%'"
 	if got != want {
 		t.Errorf("reversed contains\n  got:  %s\n  want: %s", got, want)
 	}
@@ -389,7 +389,7 @@ func TestTranspileParameterized_BigQuery(t *testing.T) {
 		{
 			name:     "simple equality",
 			jsonExpr: `{"==": [{"var": "status"}, "active"]}`,
-			wantSQL:  "WHERE status = @p1",
+			wantSQL:  "status = @p1",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "active"},
 			},
@@ -397,7 +397,7 @@ func TestTranspileParameterized_BigQuery(t *testing.T) {
 		{
 			name:     "numeric comparison",
 			jsonExpr: `{">": [{"var": "amount"}, 1000]}`,
-			wantSQL:  "WHERE amount > @p1",
+			wantSQL:  "amount > @p1",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: float64(1000)},
 			},
@@ -405,7 +405,7 @@ func TestTranspileParameterized_BigQuery(t *testing.T) {
 		{
 			name:     "AND with mixed types",
 			jsonExpr: `{"and": [{"==": [{"var": "status"}, "pending"]}, {">": [{"var": "amount"}, 5000]}]}`,
-			wantSQL:  "WHERE (status = @p1 AND amount > @p2)",
+			wantSQL:  "(status = @p1 AND amount > @p2)",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "pending"},
 				{Name: "p2", Value: float64(5000)},
@@ -414,7 +414,7 @@ func TestTranspileParameterized_BigQuery(t *testing.T) {
 		{
 			name:     "IN array",
 			jsonExpr: `{"in": [{"var": "country"}, ["US", "CA"]]}`,
-			wantSQL:  "WHERE country IN (@p1, @p2)",
+			wantSQL:  "country IN (@p1, @p2)",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "US"},
 				{Name: "p2", Value: "CA"},
@@ -423,20 +423,20 @@ func TestTranspileParameterized_BigQuery(t *testing.T) {
 		{
 			name:       "null comparison produces no params",
 			jsonExpr:   `{"==": [{"var": "deleted_at"}, null]}`,
-			wantSQL:    "WHERE deleted_at IS NULL",
+			wantSQL:    "deleted_at IS NULL",
 			wantParams: nil,
 		},
 		{
 			name:       "boolean comparison produces no params",
 			jsonExpr:   `{"==": [{"var": "active"}, true]}`,
-			wantSQL:    "WHERE active = TRUE",
+			wantSQL:    "active = TRUE",
 			wantParams: nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sql, params, err := tr.TranspileParameterized(tt.jsonExpr)
+			sql, params, err := tr.TranspileParameterizedCondition(tt.jsonExpr)
 			if err != nil {
 				t.Fatalf("TranspileParameterized error: %v", err)
 			}
@@ -470,12 +470,12 @@ func TestTranspileParameterized_PostgreSQL(t *testing.T) {
 		t.Fatalf("NewTranspiler: %v", err)
 	}
 
-	sql, params, err := tr.TranspileParameterized(`{"==": [{"var": "email"}, "alice@example.com"]}`)
+	sql, params, err := tr.TranspileParameterizedCondition(`{"==": [{"var": "email"}, "alice@example.com"]}`)
 	if err != nil {
 		t.Fatalf("TranspileParameterized error: %v", err)
 	}
 
-	wantSQL := "WHERE email = $1"
+	wantSQL := "email = $1"
 	if sql != wantSQL {
 		t.Errorf("SQL: got %q, want %q", sql, wantSQL)
 	}
@@ -487,12 +487,12 @@ func TestTranspileParameterized_PostgreSQL(t *testing.T) {
 func TestTranspileParameterized_CustomOperator(t *testing.T) {
 	tr := setupTestTranspiler(t)
 
-	sql, _, err := tr.TranspileParameterized(`{"toLower": [{"var": "name"}]}`)
+	sql, _, err := tr.TranspileParameterizedValue(`{"toLower": [{"var": "name"}]}`)
 	if err != nil {
 		t.Fatalf("TranspileParameterized error: %v", err)
 	}
 
-	wantSQL := "WHERE LOWER(name)"
+	wantSQL := "LOWER(name)"
 	if sql != wantSQL {
 		t.Errorf("SQL: got %q, want %q", sql, wantSQL)
 	}
@@ -501,12 +501,12 @@ func TestTranspileParameterized_CustomOperator(t *testing.T) {
 func TestTranspileParameterized_Error(t *testing.T) {
 	tr := setupTestTranspiler(t)
 
-	_, _, err := tr.TranspileParameterized(`{invalid json}`)
+	_, _, err := tr.TranspileParameterizedCondition(`{invalid json}`)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
 
-	_, _, err = tr.TranspileParameterized(`{"unknownOp": [1, 2]}`)
+	_, _, err = tr.TranspileParameterizedCondition(`{"unknownOp": [1, 2]}`)
 	if err == nil {
 		t.Fatal("expected error for unknown operator")
 	}
@@ -522,7 +522,7 @@ func TestTranspileParameterized_LikeOperators(t *testing.T) {
 		{
 			name:     "startsWith parameterized",
 			jsonExpr: `{"startsWith": [{"var": "name"}, "Al"]}`,
-			wantSQL:  "WHERE name LIKE CONCAT(REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')",
+			wantSQL:  "name LIKE CONCAT(REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "Al"},
 			},
@@ -530,7 +530,7 @@ func TestTranspileParameterized_LikeOperators(t *testing.T) {
 		{
 			name:     "!startsWith parameterized",
 			jsonExpr: `{"!startsWith": [{"var": "name"}, "Al"]}`,
-			wantSQL:  "WHERE name NOT LIKE CONCAT(REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')",
+			wantSQL:  "name NOT LIKE CONCAT(REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "Al"},
 			},
@@ -538,7 +538,7 @@ func TestTranspileParameterized_LikeOperators(t *testing.T) {
 		{
 			name:     "endsWith parameterized",
 			jsonExpr: `{"endsWith": [{"var": "email"}, "@example.com"]}`,
-			wantSQL:  "WHERE email LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'))",
+			wantSQL:  "email LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'))",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "@example.com"},
 			},
@@ -546,7 +546,7 @@ func TestTranspileParameterized_LikeOperators(t *testing.T) {
 		{
 			name:     "!endsWith parameterized",
 			jsonExpr: `{"!endsWith": [{"var": "email"}, "@example.com"]}`,
-			wantSQL:  "WHERE email NOT LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'))",
+			wantSQL:  "email NOT LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'))",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "@example.com"},
 			},
@@ -554,7 +554,7 @@ func TestTranspileParameterized_LikeOperators(t *testing.T) {
 		{
 			name:     "contains parameterized",
 			jsonExpr: `{"contains": [{"var": "desc"}, "hello"]}`,
-			wantSQL:  "WHERE desc LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')",
+			wantSQL:  "desc LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "hello"},
 			},
@@ -562,7 +562,7 @@ func TestTranspileParameterized_LikeOperators(t *testing.T) {
 		{
 			name:     "!contains parameterized",
 			jsonExpr: `{"!contains": [{"var": "desc"}, "hello"]}`,
-			wantSQL:  "WHERE desc NOT LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')",
+			wantSQL:  "desc NOT LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "hello"},
 			},
@@ -573,7 +573,7 @@ func TestTranspileParameterized_LikeOperators(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sql, params, err := tr.TranspileParameterized(tt.jsonExpr)
+			sql, params, err := tr.TranspileParameterizedCondition(tt.jsonExpr)
 			if err != nil {
 				t.Fatalf("TranspileParameterized error: %v", err)
 			}
@@ -637,7 +637,7 @@ func TestTranspileParameterized_LikeOperators_PlaceholderNotQuoted(t *testing.T)
 			}
 			registerCustomOperators(tr)
 
-			sql, _, err := tr.TranspileParameterized(tt.jsonExpr)
+			sql, _, err := tr.TranspileParameterizedCondition(tt.jsonExpr)
 			if err != nil {
 				t.Fatalf("TranspileParameterized error: %v", err)
 			}
@@ -660,58 +660,58 @@ func TestLikeOperatorsNonParamStillWork(t *testing.T) {
 		{
 			name:     "startsWith non-param",
 			jsonExpr: `{"startsWith": [{"var": "name"}, "Alice"]}`,
-			want:     "WHERE name LIKE 'Alice%'",
+			want:     "name LIKE 'Alice%'",
 		},
 		{
 			name:     "endsWith non-param",
 			jsonExpr: `{"endsWith": [{"var": "email"}, "@company.com"]}`,
-			want:     "WHERE email LIKE '%@company.com'",
+			want:     "email LIKE '%@company.com'",
 		},
 		{
 			name:     "contains non-param",
 			jsonExpr: `{"contains": [{"var": "desc"}, "hello"]}`,
-			want:     "WHERE desc LIKE '%hello%'",
+			want:     "desc LIKE '%hello%'",
 		},
 		{
 			name:     "startsWith with apostrophe non-param",
 			jsonExpr: `{"startsWith": [{"var": "column"}, "it's"]}`,
-			want:     "WHERE column LIKE 'it''s%'",
+			want:     "column LIKE 'it''s%'",
 		},
 		{
 			name:     "contains with apostrophe non-param",
 			jsonExpr: `{"contains": [{"var": "column"}, "it's"]}`,
-			want:     "WHERE column LIKE '%it''s%'",
+			want:     "column LIKE '%it''s%'",
 		},
 		{
 			name:     "contains reversed args non-param",
 			jsonExpr: `{"contains": ["foo", {"var": "name"}]}`,
-			want:     "WHERE name LIKE '%foo%'",
+			want:     "name LIKE '%foo%'",
 		},
 		{
 			name:     "!contains reversed args non-param",
 			jsonExpr: `{"!contains": ["bar", {"var": "col"}]}`,
-			want:     "WHERE col NOT LIKE '%bar%'",
+			want:     "col NOT LIKE '%bar%'",
 		},
 		{
 			name:     "contains with numeric pattern non-param",
 			jsonExpr: `{"contains": [{"var": "desc"}, 1000]}`,
-			want:     "WHERE desc LIKE '%1000%'",
+			want:     "desc LIKE '%1000%'",
 		},
 		{
 			name:     "startsWith with numeric pattern non-param",
 			jsonExpr: `{"startsWith": [{"var": "code"}, 404]}`,
-			want:     "WHERE code LIKE '404%'",
+			want:     "code LIKE '404%'",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tr.Transpile(tt.jsonExpr)
+			got, err := tr.TranspileCondition(tt.jsonExpr)
 			if err != nil {
 				t.Fatalf("Transpile error: %v", err)
 			}
 			if got != tt.want {
-				t.Errorf("Transpile(%s)\n  got:  %s\n  want: %s", tt.jsonExpr, got, tt.want)
+				t.Errorf("TranspileCondition(%s)\n  got:  %s\n  want: %s", tt.jsonExpr, got, tt.want)
 			}
 		})
 	}
@@ -729,7 +729,7 @@ func TestContainsReversedArgsParameterized(t *testing.T) {
 		{
 			name:     "contains reversed parameterized",
 			jsonExpr: `{"contains": ["foo", {"var": "name"}]}`,
-			wantSQL:  "WHERE name LIKE CONCAT('%', " + escReplace + ", '%')",
+			wantSQL:  "name LIKE CONCAT('%', " + escReplace + ", '%')",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "foo"},
 			},
@@ -737,7 +737,7 @@ func TestContainsReversedArgsParameterized(t *testing.T) {
 		{
 			name:     "!contains reversed parameterized",
 			jsonExpr: `{"!contains": ["bar", {"var": "col"}]}`,
-			wantSQL:  "WHERE col NOT LIKE CONCAT('%', " + escReplace + ", '%')",
+			wantSQL:  "col NOT LIKE CONCAT('%', " + escReplace + ", '%')",
 			wantParams: []jsonlogic2sql.QueryParam{
 				{Name: "p1", Value: "bar"},
 			},
@@ -747,7 +747,7 @@ func TestContainsReversedArgsParameterized(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := setupTestTranspiler(t)
-			sql, params, err := tr.TranspileParameterized(tt.jsonExpr)
+			sql, params, err := tr.TranspileParameterizedCondition(tt.jsonExpr)
 			if err != nil {
 				t.Fatalf("TranspileParameterized error: %v", err)
 			}
@@ -770,35 +770,38 @@ func TestContainsArrayPatternParameterized(t *testing.T) {
 	tr := setupTestTranspiler(t)
 
 	// Non-param: array pattern ["x"] should produce the same LIKE as scalar "x"
-	sqlNonParam, err := tr.Transpile(`{"contains": [{"var": "col"}, ["x"]]}`)
+	sqlNonParam, err := tr.TranspileCondition(`{"contains": [{"var": "col"}, ["x"]]}`)
 	if err != nil {
 		t.Fatalf("Transpile error: %v", err)
 	}
-	wantNonParam := "WHERE col LIKE '%x%'"
+	wantNonParam := "col LIKE '%x%'"
 	if sqlNonParam != wantNonParam {
 		t.Errorf("Non-param SQL:\n  got:  %s\n  want: %s", sqlNonParam, wantNonParam)
 	}
 
-	// Param: array pattern ["x"] should also produce valid LIKE, not bind a slice
-	sqlParam, _, err := tr.TranspileParameterized(`{"contains": [{"var": "col"}, ["x"]]}`)
+	// Param: array pattern ["x"] should produce valid LIKE and bind the scalar element, not the slice.
+	sqlParam, params, err := tr.TranspileParameterizedCondition(`{"contains": [{"var": "col"}, ["x"]]}`)
 	if err != nil {
 		t.Fatalf("TranspileParameterized error: %v", err)
 	}
-	wantParam := "WHERE col LIKE '%x%'"
+	wantParam := "col LIKE CONCAT('%', REPLACE(REPLACE(REPLACE(CAST(@p1 AS STRING), '\\\\', '\\\\\\\\'), '%', '\\%'), '_', '\\_'), '%')"
 	if sqlParam != wantParam {
 		t.Errorf("Param SQL:\n  got:  %s\n  want: %s", sqlParam, wantParam)
+	}
+	if len(params) != 1 || params[0].Value != "x" {
+		t.Fatalf("Params = %#v, want scalar x", params)
 	}
 }
 
 func TestRegexpContainsBigQuery_NonParameterized(t *testing.T) {
 	tr := setupTestTranspiler(t)
 
-	sql, err := tr.Transpile(`{"regexpContains": [{"var": "email"}, "^foo.*bar$"]}`)
+	sql, err := tr.TranspileCondition(`{"regexpContains": [{"var": "email"}, "^foo.*bar$"]}`)
 	if err != nil {
 		t.Fatalf("Transpile error: %v", err)
 	}
 
-	want := "WHERE REGEXP_CONTAINS(email, r'^foo.*bar$')"
+	want := "REGEXP_CONTAINS(email, r'^foo.*bar$')"
 	if sql != want {
 		t.Errorf("SQL:\n  got:  %s\n  want: %s", sql, want)
 	}
@@ -807,12 +810,12 @@ func TestRegexpContainsBigQuery_NonParameterized(t *testing.T) {
 func TestRegexpContainsBigQuery_Parameterized(t *testing.T) {
 	tr := setupTestTranspiler(t)
 
-	sql, params, err := tr.TranspileParameterized(`{"regexpContains": [{"var": "email"}, "^foo.*bar$"]}`)
+	sql, params, err := tr.TranspileParameterizedCondition(`{"regexpContains": [{"var": "email"}, "^foo.*bar$"]}`)
 	if err != nil {
 		t.Fatalf("TranspileParameterized error: %v", err)
 	}
 
-	wantSQL := "WHERE REGEXP_CONTAINS(email, @p1)"
+	wantSQL := "REGEXP_CONTAINS(email, @p1)"
 	if sql != wantSQL {
 		t.Errorf("SQL:\n  got:  %s\n  want: %s", sql, wantSQL)
 	}
