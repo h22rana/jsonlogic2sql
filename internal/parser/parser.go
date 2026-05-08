@@ -730,6 +730,7 @@ func (p *Parser) parseNotPredicate(operator string, args interface{}, path strin
 	if double {
 		return predicateResult(condition), nil
 	}
+	condition = operators.StripRedundantOuterParens(condition)
 	return predicateResult(fmt.Sprintf("NOT (%s)", condition)), nil
 }
 
@@ -1647,6 +1648,7 @@ func (p *Parser) parseNotPredicateParam(operator string, args interface{}, path 
 	if double {
 		return predicateResult(condition), nil
 	}
+	condition = operators.StripRedundantOuterParens(condition)
 	return predicateResult(fmt.Sprintf("NOT (%s)", condition)), nil
 }
 

@@ -120,7 +120,7 @@ func (s *StringOperator) handleConcatenation(args []interface{}) (string, error)
 		if err != nil {
 			return "", fmt.Errorf("invalid concatenation argument %d: %w", i, err)
 		}
-		operands[i] = operand
+		operands[i] = StripRedundantOuterParens(operand)
 	}
 
 	// Use CONCAT function for SQL concatenation
@@ -417,7 +417,7 @@ func (s *StringOperator) processMaxMinExpression(op string, args []interface{}) 
 		if err != nil {
 			return "", fmt.Errorf("invalid %s argument %d: %w", op, i, err)
 		}
-		operands[i] = operand
+		operands[i] = StripRedundantOuterParens(operand)
 	}
 
 	funcName := "GREATEST"
@@ -440,6 +440,9 @@ func (s *StringOperator) processLogicalExpression(op string, args []interface{})
 		if err != nil {
 			return "", fmt.Errorf("invalid %s argument %d: %w", op, i, err)
 		}
+		if op != "and" || !isOrExpression(arg) {
+			operand = StripRedundantOuterParens(operand)
+		}
 		operands[i] = operand
 	}
 
@@ -449,6 +452,15 @@ func (s *StringOperator) processLogicalExpression(op string, args []interface{})
 	}
 
 	return fmt.Sprintf("(%s)", strings.Join(operands, sqlOp)), nil
+}
+
+func isOrExpression(arg interface{}) bool {
+	expr, ok := arg.(map[string]interface{})
+	if !ok || len(expr) != 1 {
+		return false
+	}
+	_, ok = expr["or"]
+	return ok
 }
 
 // processNotExpression handles NOT (!) operation within string operations.
@@ -525,7 +537,7 @@ func (s *StringOperator) handleConcatenationParam(args []interface{}, pc *params
 		if err != nil {
 			return "", fmt.Errorf("invalid concatenation argument %d: %w", i, err)
 		}
-		operands[i] = operand
+		operands[i] = StripRedundantOuterParens(operand)
 	}
 	return fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), nil
 }

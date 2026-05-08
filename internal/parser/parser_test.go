@@ -1712,7 +1712,7 @@ func TestParser_CustomOperatorInUnaryContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := "NOT ((name IS NULL OR name = ''))"
+	expected := "NOT (name IS NULL OR name = '')"
 	if result != expected {
 		t.Errorf("got %q, expected %q", result, expected)
 	}

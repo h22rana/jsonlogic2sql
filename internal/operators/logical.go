@@ -97,6 +97,7 @@ func (l *LogicalOperator) handleNot(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid ! argument: %w", err)
 	}
 
+	condition = StripRedundantOuterParens(condition)
 	return fmt.Sprintf("NOT (%s)", condition), nil
 }
 
@@ -472,6 +473,7 @@ func (l *LogicalOperator) handleNotParam(args []interface{}, pc *params.ParamCol
 	if err != nil {
 		return "", fmt.Errorf("invalid ! argument: %w", err)
 	}
+	condition = StripRedundantOuterParens(condition)
 	return fmt.Sprintf("NOT (%s)", condition), nil
 }
 

@@ -169,7 +169,7 @@ func TestTranspiler_NullSafeFieldEquality_ReviewRegressions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileCondition() negated equality error = %v", err)
 	}
-	want := "NOT (((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b)))"
+	want := "NOT ((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))"
 	if got != want {
 		t.Fatalf("TranspileCondition() negated equality = %q, want %q", got, want)
 	}
@@ -290,7 +290,7 @@ func TestTranspiler_NullSafeFieldEquality_AllDialectsSchemaModesNestedConditions
 
 					assertContains(t, out.inlineSQL, "((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))")
 					assertContains(t, out.inlineSQL, "((c IS NULL AND d IS NOT NULL) OR (c IS NOT NULL AND d IS NULL) OR (c IS NOT NULL AND d IS NOT NULL AND c != d))")
-					assertContains(t, out.inlineSQL, "NOT (((e IS NULL AND f IS NULL) OR (e IS NOT NULL AND f IS NOT NULL AND e = f)))")
+					assertContains(t, out.inlineSQL, "NOT ((e IS NULL AND f IS NULL) OR (e IS NOT NULL AND f IS NOT NULL AND e = f))")
 					assertContains(t, out.inlineSQL, "((elem.left IS NULL AND elem.right IS NULL) OR (elem.left IS NOT NULL AND elem.right IS NOT NULL AND elem.left = elem.right))")
 					assertContains(t, out.inlineSQL, "((elem.status IS NULL AND status IS NOT NULL) OR (elem.status IS NOT NULL AND status IS NULL) OR (elem.status IS NOT NULL AND status IS NOT NULL AND elem.status <> status))")
 
@@ -1104,7 +1104,7 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "logical not",
 			input:    `{"!": [{"var": "isDeleted"}]}`,
-			expected: "NOT ((isDeleted IS NOT NULL AND isDeleted != FALSE AND isDeleted != 0 AND isDeleted != ''))",
+			expected: "NOT (isDeleted IS NOT NULL AND isDeleted != FALSE AND isDeleted != 0 AND isDeleted != '')",
 			hasError: false,
 		},
 		{
@@ -1554,7 +1554,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "NOT with missing array",
 			input:    `{"!": [{"missing": ["email", "phone"]}]}`,
-			expected: "NOT ((email IS NULL OR phone IS NULL))",
+			expected: "NOT (email IS NULL OR phone IS NULL)",
 			hasError: false,
 		},
 		// Complex NULL scenarios
@@ -1661,7 +1661,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "double NOT",
 			input:    `{"!": [{"!": [{"var": "flag"}]}]}`,
-			expected: "NOT (NOT ((flag IS NOT NULL AND flag != FALSE AND flag != 0 AND flag != '')))",
+			expected: "NOT (NOT (flag IS NOT NULL AND flag != FALSE AND flag != 0 AND flag != ''))",
 			hasError: false,
 		},
 
@@ -1685,7 +1685,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "complex negation",
 			input:    `{"!": [{"or": [{"==": [{"var": "a"}, 1]}, {"==": [{"var": "b"}, 2]}]}]}`,
-			expected: "NOT ((a = 1 OR b = 2))",
+			expected: "NOT (a = 1 OR b = 2)",
 			hasError: false,
 		},
 

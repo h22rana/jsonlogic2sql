@@ -73,7 +73,7 @@ func TestStringOperator_ToSQL(t *testing.T) {
 					},
 				},
 			},
-			expected: "CONCAT((CASE WHEN x > 0 THEN 'a' WHEN y < 0 THEN 'b' END = 'b'))",
+			expected: "CONCAT(CASE WHEN x > 0 THEN 'a' WHEN y < 0 THEN 'b' END = 'b')",
 			hasError: false,
 		},
 		{
@@ -219,6 +219,28 @@ func TestStringOperator_valueToSQL(t *testing.T) {
 	}
 }
 
+func TestStripRedundantOuterParens(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want string
+	}{
+		{name: "single wrapper", sql: "(amount = 'abc')", want: "amount = 'abc'"},
+		{name: "nested wrapper", sql: "((amount = 'abc'))", want: "amount = 'abc'"},
+		{name: "not whole expression", sql: "(a = 1) OR (b = 2)", want: "(a = 1) OR (b = 2)"},
+		{name: "quoted parenthesis", sql: "(name = ')')", want: "name = ')'"},
+		{name: "escaped quote", sql: "(name = 'a''b')", want: "name = 'a''b'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StripRedundantOuterParens(tt.sql); got != tt.want {
+				t.Fatalf("StripRedundantOuterParens() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStringOperator_NestedOperations(t *testing.T) {
 	op := NewStringOperator(nil)
 
@@ -333,7 +355,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 					},
 				},
 			},
-			expected: "CONCAT('Status: ', CASE WHEN ((x > 0) AND (x < 100)) THEN 'OK' ELSE 'ERROR' END)",
+			expected: "CONCAT('Status: ', CASE WHEN (x > 0 AND x < 100) THEN 'OK' ELSE 'ERROR' END)",
 			hasError: false,
 		},
 		// Or inside if inside cat
@@ -355,7 +377,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 					},
 				},
 			},
-			expected: "CONCAT('Result: ', CASE WHEN ((type = 'A') OR (type = 'B')) THEN 'VALID' ELSE 'INVALID' END)",
+			expected: "CONCAT('Result: ', CASE WHEN (type = 'A' OR type = 'B') THEN 'VALID' ELSE 'INVALID' END)",
 			hasError: false,
 		},
 	}
@@ -1097,7 +1119,7 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ToSQLParam: %v", err)
 		}
-		wantSQL := "CONCAT((CASE WHEN x > @p1 THEN @p2 WHEN y < @p3 THEN @p4 END = @p5))"
+		wantSQL := "CONCAT(CASE WHEN x > @p1 THEN @p2 WHEN y < @p3 THEN @p4 END = @p5)"
 		if sql != wantSQL {
 			t.Errorf("SQL = %q, want %q", sql, wantSQL)
 		}
