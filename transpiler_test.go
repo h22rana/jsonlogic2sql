@@ -650,7 +650,7 @@ func TestTranspileFromInterface_RejectsInvalidJSONNumberLiterals(t *testing.T) {
 }
 
 func TestTranspileFromMap_SchemaEqualityRejectsInvalidJSONNumberBeforeFold(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "code", Type: FieldTypeString},
 		{Name: "amount", Type: FieldTypeInteger},
 	})
@@ -706,7 +706,7 @@ func TestTranspileFromMap_SchemaEqualityRejectsInvalidJSONNumberBeforeFold(t *te
 }
 
 func TestTranspile_SchemaEqualityValidatesEnumDefaultsForVarOperands(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active"}},
 		{Name: "other", Type: FieldTypeString},
 	})
@@ -740,7 +740,7 @@ func TestTranspile_SchemaEqualityValidatesEnumDefaultsForVarOperands(t *testing.
 }
 
 func TestTranspileFromInterface_SchemaEqualityPreservesFloat32ForEnum(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"1.2"}},
 	})
 	tr, _ := NewTranspiler(DialectBigQuery)
@@ -774,7 +774,7 @@ func TestTranspileFromInterface_SchemaEqualityPreservesFloat32ForEnum(t *testing
 }
 
 func TestTranspileFromInterface_SchemaNumberStrictEqualityFoldsNonFinite(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "score", Type: FieldTypeNumber},
 	})
 	tr, _ := NewTranspiler(DialectBigQuery)
@@ -824,7 +824,7 @@ func TestTranspileFromInterface_SchemaNumberStrictEqualityFoldsNonFinite(t *test
 }
 
 func TestTranspile_SchemaStringEqualityCanonicalizesNonFiniteNumbers(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "code", Type: FieldTypeString},
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"Infinity", "-Infinity"}},
 		{Name: "limited_status", Type: FieldTypeEnum, AllowedValues: []string{"active"}},
@@ -2248,7 +2248,7 @@ func TestNewTranspilerWithConfig(t *testing.T) {
 }
 
 func TestNewTranspilerWithConfig_WithSchema(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 		{Name: "status", Type: FieldTypeString},
 	})

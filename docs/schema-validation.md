@@ -14,12 +14,15 @@ import (
 
 func main() {
     // Create a schema with field definitions
-    schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
         {Name: "order.amount", Type: jsonlogic2sql.FieldTypeInteger},
         {Name: "order.status", Type: jsonlogic2sql.FieldTypeString},
         {Name: "user.verified", Type: jsonlogic2sql.FieldTypeBoolean},
         {Name: "user.roles", Type: jsonlogic2sql.FieldTypeArray},
     })
+    if err != nil {
+        panic(err)
+    }
 
     transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
     transpiler.SetSchema(schema)
@@ -39,12 +42,12 @@ func main() {
 }
 ```
 
-**Note:** Field names must be raw, unquoted identifiers. The transpiler handles identifier quoting automatically based on the target dialect. `NewSchema` remains source-compatible with the v1 API and reports invalid schema field names when the schema is used by the transpiler. Use `NewValidatedSchema`, `ValidateSchemaFields`, `NewSchemaFromJSON`, or `NewSchemaFromFile` when you need construction-time errors for schema field names that contain quote characters (backtick, double quote, or single quote).
+**Note:** Field names must be raw, unquoted identifiers. The transpiler handles identifier quoting automatically based on the target dialect. `NewSchema`, `NewValidatedSchema`, `NewSchemaFromJSON`, and `NewSchemaFromFile` return construction-time errors for schema field names that contain quote characters (backtick, double quote, or single quote).
 
 ## Validated Schema Construction
 
 ```go
-schema, err := jsonlogic2sql.NewValidatedSchema([]jsonlogic2sql.FieldSchema{
+schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "order.amount", Type: jsonlogic2sql.FieldTypeInteger},
     {Name: "order.status", Type: jsonlogic2sql.FieldTypeString},
 })
@@ -104,11 +107,14 @@ When a schema is provided, operators perform strict type validation:
 ### Example
 
 ```go
-schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
     {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
     {Name: "name", Type: jsonlogic2sql.FieldTypeString},
 })
+if err != nil {
+    panic(err)
+}
 
 transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 transpiler.SetSchema(schema)
@@ -308,10 +314,13 @@ Enum fields allow you to define a fixed set of allowed values:
 
 ```go
 // Define schema with enum field
-schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "status", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"active", "pending", "cancelled"}},
     {Name: "priority", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"low", "medium", "high"}},
 })
+if err != nil {
+    panic(err)
+}
 
 transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 transpiler.SetSchema(schema)
@@ -353,11 +362,11 @@ SQL expression.
 
 ```go
 // Schema creation
-schema := jsonlogic2sql.NewSchema(fields)
-err := jsonlogic2sql.ValidateSchemaFields(fields)
-schema, err := jsonlogic2sql.NewValidatedSchema(fields)
-schema, err := jsonlogic2sql.NewSchemaFromJSON(data)
-schema, err := jsonlogic2sql.NewSchemaFromFile(filepath)
+schema, err := jsonlogic2sql.NewSchema(fields)
+err = jsonlogic2sql.ValidateSchemaFields(fields)
+schema, err = jsonlogic2sql.NewValidatedSchema(fields)
+schema, err = jsonlogic2sql.NewSchemaFromJSON(data)
+schema, err = jsonlogic2sql.NewSchemaFromFile(filepath)
 
 // Schema methods
 schema.HasField(fieldName string) bool              // Check if field exists

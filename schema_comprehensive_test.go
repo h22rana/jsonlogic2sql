@@ -179,7 +179,7 @@ func TestSchemaValidationComprehensive(t *testing.T) {
 
 // TestSchemaTypeAwareBehavior tests the type-aware "in" operator behavior.
 func TestSchemaTypeAwareBehavior(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "tags", Type: FieldTypeArray},
 		{Name: "description", Type: FieldTypeString},
 		{Name: "status", Type: FieldTypeString},
@@ -502,7 +502,7 @@ func TestSchemaFromFileExample(t *testing.T) {
 
 // TestInOperatorWithSchemaIntegration tests the IN operator behavior with schema-based type detection.
 func TestInOperatorWithSchemaIntegration(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "user.roles", Type: FieldTypeArray},
 		{Name: "user.bio", Type: FieldTypeString},
 		{Name: "status", Type: FieldTypeString},
@@ -548,7 +548,7 @@ func TestInOperatorWithSchemaIntegration(t *testing.T) {
 
 // TestEdgeCasesWithSchema tests various edge cases.
 func TestEdgeCasesWithSchema(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 		{Name: "name", Type: FieldTypeString},
 		{Name: "active", Type: FieldTypeBoolean},
@@ -599,7 +599,7 @@ func TestEdgeCasesWithSchema(t *testing.T) {
 // TestTypeAwareOperators tests type validation across all operators.
 func TestTypeAwareOperators(t *testing.T) {
 	// Create a schema with various field types
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 		{Name: "price", Type: FieldTypeNumber},
 		{Name: "name", Type: FieldTypeString},
@@ -874,7 +874,7 @@ func TestTypeValidationWithoutSchema(t *testing.T) {
 
 // TestTypeValidationWithFieldNotInSchema verifies that fields not in schema pass validation.
 func TestTypeValidationWithFieldNotInSchema(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "known_field", Type: FieldTypeInteger},
 	})
 
@@ -893,7 +893,7 @@ func TestTypeValidationWithFieldNotInSchema(t *testing.T) {
 
 // TestEnumTypeSupport tests enum type validation and SQL generation.
 func TestEnumTypeSupport(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "canceled"}},
 		{Name: "priority", Type: FieldTypeEnum, AllowedValues: []string{"low", "medium", "high"}},
 		{Name: "name", Type: FieldTypeString},
@@ -1041,7 +1041,7 @@ func TestEnumSchemaFromJSON(t *testing.T) {
 
 // TestEnumWithComplexExpressions tests enum validation in complex nested expressions.
 func TestEnumWithComplexExpressions(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "canceled"}},
 		{Name: "amount", Type: FieldTypeInteger},
 	})
@@ -1509,7 +1509,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 // based on the field being compared. This ensures proper SQL output like "field >= 50000"
 // instead of "field >= '50000'" when comparing an integer field with a string value.
 func TestTypeCoercionForComparisons(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 		{Name: "price", Type: FieldTypeNumber},
 		{Name: "status", Type: FieldTypeString},

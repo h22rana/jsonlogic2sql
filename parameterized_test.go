@@ -104,7 +104,7 @@ func TestTranspileParameterized_EqualityConstantFoldsDoNotConsumeParams(t *testi
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
-	tp.SetSchema(NewSchema([]FieldSchema{
+	tp.SetSchema(mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 		{Name: "active", Type: FieldTypeBoolean},
 		{Name: "code", Type: FieldTypeString},
@@ -128,7 +128,7 @@ func TestTranspileParameterized_EqualityConstantFoldsDoNotConsumeParams(t *testi
 }
 
 func TestTranspile_EqualitySemanticsAcrossDialects(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 		{Name: "active", Type: FieldTypeBoolean},
 		{Name: "code", Type: FieldTypeString},
@@ -200,7 +200,7 @@ func TestTranspile_DefaultedVarEqualityWithSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
-	tp.SetSchema(NewSchema([]FieldSchema{
+	tp.SetSchema(mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 	}))
 
@@ -227,7 +227,7 @@ func TestTranspile_DefaultedVarEqualityWithSchema(t *testing.T) {
 }
 
 func TestTranspile_EqualityBoundaryAndNestedSemanticsAcrossDialects(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 	})
 
@@ -441,7 +441,7 @@ func TestTranspileParameterized_String(t *testing.T) {
 }
 
 func TestTranspile_StringNestedEqualitySemanticsWithSchema(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 	})
 	logic := `{"cat":[{"==":[{"var":"amount"},"abc"]}]}`

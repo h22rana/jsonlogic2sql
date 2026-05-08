@@ -38,13 +38,14 @@ type Schema struct {
 }
 
 // NewSchema creates a new schema from a slice of field schemas.
-//
-// This constructor is kept source-compatible with the v1 API. For callers that
-// need immediate validation errors, use NewValidatedSchema or ValidateSchemaFields.
-func NewSchema(fields []FieldSchema) *Schema {
-	s := newSchemaUnchecked(fields)
-	s.validationErr = ValidateSchemaFields(fields)
-	return s
+// Returns an error if any field name contains quote characters (backtick,
+// double quote, or single quote). Schema field names must be raw, unquoted
+// identifiers; the transpiler handles quoting automatically.
+func NewSchema(fields []FieldSchema) (*Schema, error) {
+	if err := ValidateSchemaFields(fields); err != nil {
+		return nil, err
+	}
+	return newSchemaUnchecked(fields), nil
 }
 
 func newSchemaUnchecked(fields []FieldSchema) *Schema {
@@ -73,13 +74,10 @@ func ValidateSchemaFields(fields []FieldSchema) error {
 	return nil
 }
 
-// NewValidatedSchema creates a schema and returns an error for invalid schema
-// field names. Use this when the caller needs construction-time validation.
+// NewValidatedSchema is an alias for NewSchema, kept for callers that already
+// use the explicit validated constructor name.
 func NewValidatedSchema(fields []FieldSchema) (*Schema, error) {
-	if err := ValidateSchemaFields(fields); err != nil {
-		return nil, err
-	}
-	return newSchemaUnchecked(fields), nil
+	return NewSchema(fields)
 }
 
 // NewSchemaFromJSON creates a new schema from a JSON byte slice.
@@ -88,7 +86,7 @@ func NewSchemaFromJSON(data []byte) (*Schema, error) {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return nil, fmt.Errorf("invalid schema JSON: %w", err)
 	}
-	return NewValidatedSchema(fields)
+	return NewSchema(fields)
 }
 
 // NewSchemaFromFile loads a schema from a JSON file.

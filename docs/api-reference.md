@@ -367,10 +367,10 @@ Check if error has specific code.
 ### NewSchema
 
 ```go
-func NewSchema(fields []FieldSchema) *Schema
+func NewSchema(fields []FieldSchema) (*Schema, error)
 ```
 
-Create a new schema from field definitions. This constructor is source-compatible with the v1 API. It stores schema field-name validation errors so they are still reported when the schema is used by the transpiler; use `NewValidatedSchema` or `ValidateSchemaFields` when you need an immediate error.
+Create a new schema from field definitions. Returns an error if any field name contains quote characters (backtick, double quote, or single quote). Field names must be raw, unquoted identifiers; the transpiler handles quoting automatically.
 
 ### ValidateSchemaFields
 
@@ -386,7 +386,7 @@ Validate schema field definitions. Returns an error if any field name contains q
 func NewValidatedSchema(fields []FieldSchema) (*Schema, error)
 ```
 
-Create a new schema from field definitions and return construction-time validation errors.
+Alias for `NewSchema`, kept for callers that already use the explicit validated constructor name.
 
 ### NewSchemaFromJSON
 
