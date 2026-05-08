@@ -182,6 +182,17 @@ func (c *ComparisonOperator) extractEqualityFieldOperand(value interface{}) (equ
 			}
 			return operand, true
 		}
+		if pv, ok := v[0].(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+			operand := equalityFieldOperand{}
+			if len(v) > 1 {
+				operand.hasDefault = true
+				if literal, ok := equalityLiteralValue(v[1]); ok {
+					operand.defaultLiteral = literal
+					operand.defaultLiteralKnown = true
+				}
+			}
+			return operand, true
+		}
 	}
 	return equalityFieldOperand{}, false
 }

@@ -195,6 +195,27 @@ func TestTranspiler_NullSafeFieldEquality_ReviewRegressions(t *testing.T) {
 		t.Fatalf("TranspileParameterizedCondition() params = %#v, want none", gotParams)
 	}
 
+	defaultedArrayLogic := `{"some":[{"var":"items"},{"==":[{"var":["current.left",null]},{"var":["current.right",null]}]}]}`
+	got, err = tr.TranspileCondition(defaultedArrayLogic)
+	if err != nil {
+		t.Fatalf("TranspileCondition() defaulted scoped array equality error = %v", err)
+	}
+	want = "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE ((COALESCE(elem.left, NULL) IS NULL AND COALESCE(elem.right, NULL) IS NULL) OR (COALESCE(elem.left, NULL) IS NOT NULL AND COALESCE(elem.right, NULL) IS NOT NULL AND COALESCE(elem.left, NULL) = COALESCE(elem.right, NULL))))"
+	if got != want {
+		t.Fatalf("TranspileCondition() defaulted scoped array equality = %q, want %q", got, want)
+	}
+
+	gotParamSQL, gotParams, err = tr.TranspileParameterizedCondition(defaultedArrayLogic)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedCondition() defaulted scoped array equality error = %v", err)
+	}
+	if gotParamSQL != want {
+		t.Fatalf("TranspileParameterizedCondition() defaulted scoped array equality = %q, want %q", gotParamSQL, want)
+	}
+	if len(gotParams) != 0 {
+		t.Fatalf("TranspileParameterizedCondition() defaulted params = %#v, want none", gotParams)
+	}
+
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "items", Type: FieldTypeArray},
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
