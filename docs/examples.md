@@ -1,6 +1,6 @@
 # Examples
 
-This document provides comprehensive examples of JSON Logic expressions and their SQL output.
+This document provides comprehensive examples of JSON Logic expressions and their SQL output. Predicate examples are suitable for `TranspileCondition`; scalar and array-producing examples use `TranspileValue`.
 
 ## Data Access Operations
 
@@ -10,7 +10,7 @@ This document provides comprehensive examples of JSON Logic expressions and thei
 {"var": "name"}
 ```
 ```sql
-WHERE name
+name
 ```
 
 > **Note:** JSONLogic's numeric `var` form, such as `{"var": 1}`, is not
@@ -23,7 +23,7 @@ WHERE name
 {"var": ["status", "pending"]}
 ```
 ```sql
-WHERE COALESCE(status, 'pending')
+COALESCE(status, 'pending')
 ```
 
 With a schema, equality and inequality comparisons against `[field, default]`
@@ -36,7 +36,7 @@ where supported.
 {"missing": "email"}
 ```
 ```sql
-WHERE email IS NULL
+email IS NULL
 ```
 
 ### Missing Field Check (Multiple)
@@ -45,7 +45,7 @@ WHERE email IS NULL
 {"missing": ["email", "phone"]}
 ```
 ```sql
-WHERE (email IS NULL OR phone IS NULL)
+(email IS NULL OR phone IS NULL)
 ```
 
 ### Missing Some Fields
@@ -54,7 +54,7 @@ WHERE (email IS NULL OR phone IS NULL)
 {"missing_some": [1, ["field1", "field2"]]}
 ```
 ```sql
-WHERE (field1 IS NULL OR field2 IS NULL)
+(field1 IS NULL OR field2 IS NULL)
 ```
 
 ## Logic and Boolean Operations
@@ -65,7 +65,7 @@ WHERE (field1 IS NULL OR field2 IS NULL)
 {">": [{"var": "amount"}, 1000]}
 ```
 ```sql
-WHERE amount > 1000
+amount > 1000
 ```
 
 ### Equality Comparison
@@ -74,7 +74,7 @@ WHERE amount > 1000
 {"==": [{"var": "status"}, "active"]}
 ```
 ```sql
-WHERE status = 'active'
+status = 'active'
 ```
 
 ### Strict Equality
@@ -83,7 +83,7 @@ WHERE status = 'active'
 {"===": [{"var": "count"}, 5]}
 ```
 ```sql
-WHERE count = 5
+count = 5
 ```
 
 ### Inequality
@@ -92,7 +92,7 @@ WHERE count = 5
 {"!=": [{"var": "status"}, "inactive"]}
 ```
 ```sql
-WHERE status != 'inactive'
+status != 'inactive'
 ```
 
 ### Strict Inequality
@@ -101,7 +101,7 @@ WHERE status != 'inactive'
 {"!==": [{"var": "count"}, 0]}
 ```
 ```sql
-WHERE count <> 0
+count <> 0
 ```
 
 ### Equality with NULL (IS NULL)
@@ -110,7 +110,7 @@ WHERE count <> 0
 {"==": [{"var": "deleted_at"}, null]}
 ```
 ```sql
-WHERE deleted_at IS NULL
+deleted_at IS NULL
 ```
 
 ### Inequality with NULL (IS NOT NULL)
@@ -119,7 +119,7 @@ WHERE deleted_at IS NULL
 {"!=": [{"var": "field"}, null]}
 ```
 ```sql
-WHERE field IS NOT NULL
+field IS NOT NULL
 ```
 
 ### Logical NOT (with array wrapper)
@@ -128,7 +128,7 @@ WHERE field IS NOT NULL
 {"!": [{"var": "isDeleted"}]}
 ```
 ```sql
-WHERE NOT (isDeleted)
+NOT (isDeleted)
 ```
 
 ### Logical NOT (without array wrapper)
@@ -137,7 +137,7 @@ WHERE NOT (isDeleted)
 {"!": {"var": "isDeleted"}}
 ```
 ```sql
-WHERE NOT (isDeleted)
+NOT (isDeleted)
 ```
 
 ### Logical NOT (literal)
@@ -146,7 +146,7 @@ WHERE NOT (isDeleted)
 {"!": true}
 ```
 ```sql
-WHERE NOT (TRUE)
+NOT (TRUE)
 ```
 
 ### Double Negation (Boolean Conversion)
@@ -156,7 +156,7 @@ WHERE NOT (TRUE)
 ```
 ```sql
 -- Without schema (generic truthiness check):
-WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
+(value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
 
 -- With schema (type-appropriate SQL)
 ```
@@ -167,7 +167,7 @@ WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
 {"!!": [[]]}
 ```
 ```sql
-WHERE FALSE
+FALSE
 ```
 
 ### Double Negation (Non-Empty Array)
@@ -176,7 +176,7 @@ WHERE FALSE
 {"!!": [[1, 2, 3]]}
 ```
 ```sql
-WHERE TRUE
+TRUE
 ```
 
 ### Logical AND
@@ -188,7 +188,7 @@ WHERE TRUE
 ]}
 ```
 ```sql
-WHERE (amount > 5000 AND status = 'pending')
+(amount > 5000 AND status = 'pending')
 ```
 
 ### Logical OR
@@ -200,7 +200,7 @@ WHERE (amount > 5000 AND status = 'pending')
 ]}
 ```
 ```sql
-WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+(failedAttempts >= 5 OR country IN ('CN', 'RU'))
 ```
 
 ### Conditional Expression
@@ -213,7 +213,7 @@ WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 ]}
 ```
 ```sql
-WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
+CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
 ```
 
 ## Numeric Operations
@@ -224,7 +224,7 @@ WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
 {">": [{"var": "amount"}, 1000]}
 ```
 ```sql
-WHERE amount > 1000
+amount > 1000
 ```
 
 ### Greater Than or Equal
@@ -233,7 +233,7 @@ WHERE amount > 1000
 {">=": [{"var": "score"}, 80]}
 ```
 ```sql
-WHERE score >= 80
+score >= 80
 ```
 
 ### Less Than
@@ -242,7 +242,7 @@ WHERE score >= 80
 {"<": [{"var": "age"}, 65]}
 ```
 ```sql
-WHERE age < 65
+age < 65
 ```
 
 ### Less Than or Equal
@@ -251,7 +251,7 @@ WHERE age < 65
 {"<=": [{"var": "count"}, 10]}
 ```
 ```sql
-WHERE count <= 10
+count <= 10
 ```
 
 ### Maximum Value
@@ -260,7 +260,7 @@ WHERE count <= 10
 {"max": [{"var": "score1"}, {"var": "score2"}, {"var": "score3"}]}
 ```
 ```sql
-WHERE GREATEST(score1, score2, score3)
+GREATEST(score1, score2, score3)
 ```
 
 ### Minimum Value
@@ -269,7 +269,7 @@ WHERE GREATEST(score1, score2, score3)
 {"min": [{"var": "price1"}, {"var": "price2"}]}
 ```
 ```sql
-WHERE LEAST(price1, price2)
+LEAST(price1, price2)
 ```
 
 ### Addition
@@ -278,7 +278,7 @@ WHERE LEAST(price1, price2)
 {"+": [{"var": "price"}, {"var": "tax"}]}
 ```
 ```sql
-WHERE (price + tax)
+(price + tax)
 ```
 
 ### Subtraction
@@ -287,7 +287,7 @@ WHERE (price + tax)
 {"-": [{"var": "total"}, {"var": "discount"}]}
 ```
 ```sql
-WHERE (total - discount)
+(total - discount)
 ```
 
 ### Multiplication
@@ -296,7 +296,7 @@ WHERE (total - discount)
 {"*": [{"var": "price"}, 1.2]}
 ```
 ```sql
-WHERE (price * 1.2)
+(price * 1.2)
 ```
 
 ### Division
@@ -305,7 +305,7 @@ WHERE (price * 1.2)
 {"/": [{"var": "total"}, 2]}
 ```
 ```sql
-WHERE (total / 2)
+(total / 2)
 ```
 
 ### Modulo
@@ -314,7 +314,7 @@ WHERE (total / 2)
 {"%": [{"var": "count"}, 3]}
 ```
 ```sql
-WHERE (count % 3)
+(count % 3)
 ```
 
 ### Unary Minus (Negation)
@@ -323,7 +323,7 @@ WHERE (count % 3)
 {"-": [{"var": "value"}]}
 ```
 ```sql
-WHERE -value
+-value
 ```
 
 ### Unary Plus (Cast to Number)
@@ -332,7 +332,7 @@ WHERE -value
 {"+": ["-5"]}
 ```
 ```sql
-WHERE CAST(-5 AS NUMERIC)
+CAST(-5 AS NUMERIC)
 ```
 
 ### String Operands (Numeric Coercion)
@@ -346,10 +346,10 @@ String literals in arithmetic are coerced to numbers when valid, or safely quote
 {"+": ["hello", 1]}
 ```
 ```sql
-WHERE (42 + 1)
-WHERE (3 * 2)
-WHERE (3.14 + 1)
-WHERE ('hello' + 1)
+(42 + 1)
+(3 * 2)
+(3.14 + 1)
+('hello' + 1)
 ```
 
 Large integers are preserved without precision loss:
@@ -358,7 +358,7 @@ Large integers are preserved without precision loss:
 {"+": ["9223372036854775808", 1]}
 ```
 ```sql
-WHERE (9223372036854775808 + 1)
+(9223372036854775808 + 1)
 ```
 
 ## Array Operations
@@ -369,7 +369,7 @@ WHERE (9223372036854775808 + 1)
 {"in": [{"var": "country"}, ["US", "CA", "MX"]]}
 ```
 ```sql
-WHERE country IN ('US', 'CA', 'MX')
+country IN ('US', 'CA', 'MX')
 ```
 
 ### In Array with Type Coercion (Schema)
@@ -382,8 +382,8 @@ When a schema is provided, array elements are coerced to match the field type:
 {"in": [{"var": "amount"}, ["100", "200", "300"]]}
 ```
 ```sql
-WHERE sector_code IN ('5960', '9000')
-WHERE amount IN (100, 200, 300)
+sector_code IN ('5960', '9000')
+amount IN (100, 200, 300)
 ```
 
 ### String Containment
@@ -392,7 +392,7 @@ WHERE amount IN (100, 200, 300)
 {"in": ["hello", "hello world"]}
 ```
 ```sql
-WHERE POSITION('hello' IN 'hello world') > 0
+POSITION('hello' IN 'hello world') > 0
 ```
 
 ### Map Array
@@ -401,7 +401,7 @@ WHERE POSITION('hello' IN 'hello world') > 0
 {"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
 ```
 ```sql
-WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
+ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
 ```
 
 ### Filter Array
@@ -410,7 +410,7 @@ WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
 {"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
 ```
 ```sql
-WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 ```
 
 ### Reduce Array (SUM pattern)
@@ -419,7 +419,7 @@ WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 {"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}
 ```
 ```sql
-WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
+0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
 ```
 
 ### All Elements Satisfy Condition
@@ -428,7 +428,7 @@ WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
 {"all": [{"var": "ages"}, {">=": [{"var": ""}, 18]}]}
 ```
 ```sql
-WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
+NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
 ```
 
 ### Some Elements Satisfy Condition
@@ -437,7 +437,7 @@ WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
 {"some": [{"var": "statuses"}, {"==": [{"var": ""}, "active"]}]}
 ```
 ```sql
-WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
+EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
 ```
 
 ### No Elements Satisfy Condition
@@ -446,7 +446,7 @@ WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
 {"none": [{"var": "values"}, {"==": [{"var": ""}, "invalid"]}]}
 ```
 ```sql
-WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
+NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
 ```
 
 ### Merge Arrays
@@ -455,7 +455,7 @@ WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
 {"merge": [{"var": "array1"}, {"var": "array2"}]}
 ```
 ```sql
-WHERE ARRAY_CONCAT(array1, array2)
+ARRAY_CONCAT(array1, array2)
 ```
 
 ## String Operations
@@ -466,7 +466,7 @@ WHERE ARRAY_CONCAT(array1, array2)
 {"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
 ```
 ```sql
-WHERE CONCAT(firstName, ' ', lastName)
+CONCAT(firstName, ' ', lastName)
 ```
 
 ### Concatenate with Conditional (Nested If)
@@ -475,7 +475,7 @@ WHERE CONCAT(firstName, ' ', lastName)
 {"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}
 ```
 ```sql
-WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
+CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
 ```
 
 ### Substring with Length
@@ -484,7 +484,7 @@ WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, '
 {"substr": [{"var": "email"}, 0, 10]}
 ```
 ```sql
-WHERE SUBSTR(email, 1, 10)
+SUBSTR(email, 1, 10)
 ```
 
 ### Substring without Length
@@ -493,7 +493,7 @@ WHERE SUBSTR(email, 1, 10)
 {"substr": [{"var": "email"}, 4]}
 ```
 ```sql
-WHERE SUBSTR(email, 5)
+SUBSTR(email, 5)
 ```
 
 ## Complex Nested Examples
@@ -504,7 +504,7 @@ WHERE SUBSTR(email, 5)
 {">": [{"+": [{"var": "base"}, {"*": [{"var": "bonus"}, 0.1]}]}, 1000]}
 ```
 ```sql
-WHERE (base + (bonus * 0.1)) > 1000
+(base + (bonus * 0.1)) > 1000
 ```
 
 ### Nested Conditions
@@ -519,7 +519,7 @@ WHERE (base + (bonus * 0.1)) > 1000
 ]}
 ```
 ```sql
-WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7))
+(transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7))
 ```
 
 ### Complex Conditional Logic
@@ -535,7 +535,7 @@ WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeD
 ]}
 ```
 ```sql
-WHERE CASE WHEN (age >= 18 AND country = 'US') THEN 'eligible' ELSE 'ineligible' END
+CASE WHEN (age >= 18 AND country = 'US') THEN 'eligible' ELSE 'ineligible' END
 ```
 
 ### Fraud Detection Example
@@ -552,7 +552,7 @@ WHERE CASE WHEN (age >= 18 AND country = 'US') THEN 'eligible' ELSE 'ineligible'
 ]}
 ```
 ```sql
-WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7 OR user.failedAttempts >= 3) AND user.country IN ('high_risk_1', 'high_risk_2'))
+(transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7 OR user.failedAttempts >= 3) AND user.country IN ('high_risk_1', 'high_risk_2'))
 ```
 
 ### Eligibility Check Example
@@ -573,50 +573,50 @@ WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeD
 ]}
 ```
 ```sql
-WHERE CASE WHEN (age >= 18 AND hasLicense = TRUE AND violations < 3) THEN 'approved' ELSE CASE WHEN age < 18 THEN 'too_young' ELSE 'rejected' END END
+CASE WHEN (age >= 18 AND hasLicense = TRUE AND violations < 3) THEN 'approved' ELSE CASE WHEN age < 18 THEN 'too_young' ELSE 'rejected' END END
 ```
 
 ## Parameterized Query Examples
 
-All examples above can be generated with bind parameter placeholders instead of inlined literals by using the `TranspileParameterized` family of methods.
+All predicate examples above can be generated with bind parameter placeholders instead of inlined literals by using the `TranspileParameterizedCondition` family of methods.
 
 ### Simple Parameterized Comparison
 
 ```go
-sql, params, _ := jsonlogic2sql.TranspileParameterized(
+sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectBigQuery,
     `{"==": [{"var": "status"}, "active"]}`,
 )
-// sql    = "WHERE status = @p1"
+// sql    = "status = @p1"
 // params = [{Name: "p1", Value: "active"}]
 ```
 
 ### Parameterized IN List
 
 ```go
-sql, params, _ := jsonlogic2sql.TranspileParameterized(
+sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectBigQuery,
     `{"in": [{"var": "country"}, ["US", "CA", "MX"]]}`,
 )
-// sql    = "WHERE country IN (@p1, @p2, @p3)"
+// sql    = "country IN (@p1, @p2, @p3)"
 // params = [{Name: "p1", Value: "US"}, {Name: "p2", Value: "CA"}, {Name: "p3", Value: "MX"}]
 ```
 
 ### Parameterized Nested Conditions (PostgreSQL)
 
 ```go
-sql, params, _ := jsonlogic2sql.TranspileParameterized(
+sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectPostgreSQL,
     `{"and": [{">": [{"var": "amount"}, 10000]}, {"==": [{"var": "status"}, "pending"]}]}`,
 )
-// sql    = "WHERE (amount > $1 AND status = $2)"
+// sql    = "(amount > $1 AND status = $2)"
 // params = [{Name: "p1", Value: 10000}, {Name: "p2", Value: "pending"}]
 ```
 
 ### Parameterized Condition (Without WHERE)
 
 ```go
-condition, params, _ := jsonlogic2sql.TranspileConditionParameterized(
+condition, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectBigQuery,
     `{">": [{"var": "amount"}, 1000]}`,
 )

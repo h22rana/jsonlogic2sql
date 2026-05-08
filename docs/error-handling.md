@@ -38,6 +38,7 @@ All errors are wrapped in a `TranspileError` type that includes:
 | E005 | `ErrArrayNotAllowed` | Array not allowed in context |
 | E006 | `ErrValidation` | General validation error |
 | E007 | `ErrInvalidJSON` | Invalid JSON syntax |
+| E008 | `ErrInvalidExpressionContext` | Value expression used where a predicate is required, or vice versa |
 
 #### Operator-specific Errors (E100-E199)
 
@@ -74,7 +75,7 @@ Nested array/custom-operator failures preserve full JSONPath context. This also 
 ### Method 1: Use Helper Function
 
 ```go
-sql, err := transpiler.Transpile(jsonLogic)
+sql, err := transpiler.TranspileCondition(jsonLogic)
 if err != nil {
     if tpErr, ok := jsonlogic2sql.AsTranspileError(err); ok {
         fmt.Printf("Error code: %s\n", tpErr.Code)    // e.g., "E100"
@@ -88,7 +89,7 @@ if err != nil {
 ### Method 2: Check Specific Error Code
 
 ```go
-sql, err := transpiler.Transpile(jsonLogic)
+sql, err := transpiler.TranspileCondition(jsonLogic)
 if err != nil {
     if jsonlogic2sql.IsErrorCode(err, jsonlogic2sql.ErrUnsupportedOperator) {
         // Handle unsupported operator specifically
@@ -100,7 +101,7 @@ if err != nil {
 ### Method 3: Use Standard errors.As
 
 ```go
-sql, err := transpiler.Transpile(jsonLogic)
+sql, err := transpiler.TranspileCondition(jsonLogic)
 if err != nil {
     var tpErr *jsonlogic2sql.TranspileError
     if errors.As(err, &tpErr) {
@@ -129,14 +130,14 @@ Error: [E302] at $.var (operator: var): operator error: field 'bad.field' is not
 ### Invalid JSON
 
 ```go
-_, err := transpiler.Transpile(`{invalid json}`)
+_, err := transpiler.TranspileCondition(`{invalid json}`)
 // Error: [E007]: invalid JSON: ...
 ```
 
 ### Unsupported Operator
 
 ```go
-_, err := transpiler.Transpile(`{"unknownOp": [1, 2]}`)
+_, err := transpiler.TranspileCondition(`{"unknownOp": [1, 2]}`)
 // Error: [E100] at $.unknownOp (operator: unknownOp): unsupported operator: unknownOp
 ```
 
@@ -151,7 +152,7 @@ if err != nil {
 }
 transpiler.SetSchema(schema)
 
-_, err := transpiler.Transpile(`{"==": [{"var": "unknown_field"}, "test"]}`)
+_, err := transpiler.TranspileCondition(`{"==": [{"var": "unknown_field"}, "test"]}`)
 // Error: [E201] at $.==.var (operator: var): field 'unknown_field' is not defined in schema
 ```
 
@@ -166,7 +167,7 @@ if err != nil {
 }
 transpiler.SetSchema(schema)
 
-_, err := transpiler.Transpile(`{"==": [{"var": "status"}, "invalid"]}`)
+_, err := transpiler.TranspileCondition(`{"==": [{"var": "status"}, "invalid"]}`)
 // Error: [E203]: invalid enum value 'invalid' for field 'status': allowed values are [active pending]
 ```
 
@@ -181,14 +182,21 @@ if err != nil {
 }
 transpiler.SetSchema(schema)
 
-_, err := transpiler.Transpile(`{"+": [{"var": "name"}, 10]}`)
+_, err := transpiler.TranspileValue(`{"+": [{"var": "name"}, 10]}`)
 // Error: [E200]: numeric operation on non-numeric field 'name' (type: string)
+```
+
+### Invalid Expression Context
+
+```go
+_, err := transpiler.TranspileCondition(`{"or": [false, "fallback"]}`)
+// Error: [E008]: expected predicate expression, got value expression
 ```
 
 ### Insufficient Arguments
 
 ```go
-_, err := transpiler.Transpile(`{">": [{"var": "amount"}]}`)
+_, err := transpiler.TranspileCondition(`{">": [{"var": "amount"}]}`)
 // Error: [E300] at $.> (operator: >): insufficient arguments
 ```
 

@@ -7,11 +7,21 @@ jsonlogic2sql can generate SQL with bind parameter placeholders instead of inlin
 ```go
 transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
-sql, params, err := transpiler.TranspileParameterized(
+sql, params, err := transpiler.TranspileParameterizedCondition(
     `{"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}`,
 )
-// sql    = "WHERE (status = @p1 AND amount > @p2)"
+// sql    = "(status = @p1 AND amount > @p2)"
 // params = [{Name: "p1", Value: "active"}, {Name: "p2", Value: 1000}]
+```
+
+For value-producing expressions, use `TranspileParameterizedValue`:
+
+```go
+sql, params, err := transpiler.TranspileParameterizedValue(
+    `{"cat": ["Order ", {"var": "status"}]}`,
+)
+// sql    = "CONCAT(@p1, status)"
+// params = [{Name: "p1", Value: "Order "}]
 ```
 
 ## Placeholder Styles by Dialect
@@ -29,22 +39,22 @@ The placeholder style is determined by the dialect:
 ### BigQuery
 
 ```go
-sql, params, _ := jsonlogic2sql.TranspileParameterized(
+sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectBigQuery,
     `{"==": [{"var": "email"}, "alice@example.com"]}`,
 )
-// sql    = "WHERE email = @p1"
+// sql    = "email = @p1"
 // params = [{Name: "p1", Value: "alice@example.com"}]
 ```
 
 ### PostgreSQL
 
 ```go
-sql, params, _ := jsonlogic2sql.TranspileParameterized(
+sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectPostgreSQL,
     `{"==": [{"var": "email"}, "alice@example.com"]}`,
 )
-// sql    = "WHERE email = $1"
+// sql    = "email = $1"
 // params = [{Name: "p1", Value: "alice@example.com"}]
 ```
 
@@ -88,14 +98,14 @@ The same rule applies to positional styles:
 
 ### Transpiler Methods
 
-| Method | Returns WHERE? | Description |
-|--------|:--------------:|-------------|
-| `TranspileParameterized(jsonLogic string)` | Yes | From JSON string |
-| `TranspileParameterizedFromMap(logic map[string]interface{})` | Yes | From pre-parsed map |
-| `TranspileParameterizedFromInterface(logic interface{})` | Yes | From any interface |
-| `TranspileConditionParameterized(jsonLogic string)` | No | Condition only (no WHERE) |
-| `TranspileConditionParameterizedFromMap(logic map[string]interface{})` | No | Condition only from map |
-| `TranspileConditionParameterizedFromInterface(logic interface{})` | No | Condition only from interface |
+| Method | Description |
+|--------|-------------|
+| `TranspileParameterizedCondition(jsonLogic string)` | Predicate SQL from a JSON string |
+| `TranspileParameterizedConditionFromMap(logic map[string]interface{})` | Predicate SQL from a pre-parsed map |
+| `TranspileParameterizedConditionFromInterface(logic interface{})` | Predicate SQL from any interface |
+| `TranspileParameterizedValue(jsonLogic string)` | Value SQL expression from a JSON string |
+| `TranspileParameterizedValueFromMap(logic map[string]interface{})` | Value SQL expression from a pre-parsed map |
+| `TranspileParameterizedValueFromInterface(logic interface{})` | Value SQL expression from any interface |
 
 All methods return `(string, []QueryParam, error)`.
 
@@ -104,9 +114,9 @@ All methods return `(string, []QueryParam, error)`.
 Each Transpiler method has a corresponding package-level function that takes a `Dialect` as the first argument:
 
 ```go
-sql, params, err := jsonlogic2sql.TranspileParameterized(dialect, jsonLogic)
-sql, params, err := jsonlogic2sql.TranspileConditionParameterized(dialect, jsonLogic)
-// ... and 4 more variants (FromMap, FromInterface)
+condition, params, err := jsonlogic2sql.TranspileParameterizedCondition(dialect, jsonLogic)
+value, params, err := jsonlogic2sql.TranspileParameterizedValue(dialect, jsonLogic)
+// ... plus FromMap and FromInterface variants for each mode
 ```
 
 ### QueryParam Type
@@ -150,10 +160,10 @@ if err != nil {
 }
 transpiler.SetSchema(schema)
 
-sql, params, _ := transpiler.TranspileParameterized(
+sql, params, _ := transpiler.TranspileParameterizedCondition(
     `{">=": [{"var": "amount"}, "50000"]}`,
 )
-// sql    = "WHERE amount >= @p1"
+// sql    = "amount >= @p1"
 // params = [{Name: "p1", Value: int64(50000)}]  // coerced from string
 ```
 
@@ -161,10 +171,10 @@ For equality and inequality, schema-aware numeric and boolean coercion happens
 before parameter collection:
 
 ```go
-sql, params, _ = transpiler.TranspileParameterized(
+sql, params, _ = transpiler.TranspileParameterizedCondition(
     `{"and": [{"==": [{"var": "amount"}, "010"]}, {"==": [{"var": "active"}, "0"]}]}`,
 )
-// sql    = "WHERE (amount = @p1 AND active = FALSE)"
+// sql    = "(amount = @p1 AND active = FALSE)"
 // params = [{Name: "p1", Value: int64(10)}]
 ```
 
@@ -173,10 +183,10 @@ The same equality coercion applies when the field is accessed with a defaulted
 order:
 
 ```go
-sql, params, _ = transpiler.TranspileParameterized(
+sql, params, _ = transpiler.TranspileParameterizedCondition(
     `{"==": [{"var": ["amount", 0]}, "50"]}`,
 )
-// sql    = "WHERE COALESCE(amount, @p1) = @p2"
+// sql    = "COALESCE(amount, @p1) = @p2"
 // params = [{Name: "p1", Value: int64(0)}, {Name: "p2", Value: int64(50)}]
 ```
 
@@ -185,7 +195,7 @@ sql, params, _ = transpiler.TranspileParameterized(
 ### BigQuery (Go)
 
 ```go
-sql, params, _ := transpiler.TranspileParameterized(jsonLogic)
+sql, params, _ := transpiler.TranspileParameterizedCondition(jsonLogic)
 
 query := client.Query(sql)
 for _, p := range params {
@@ -199,7 +209,7 @@ for _, p := range params {
 ### PostgreSQL (Go - pgx)
 
 ```go
-sql, params, _ := transpiler.TranspileParameterized(jsonLogic)
+sql, params, _ := transpiler.TranspileParameterizedCondition(jsonLogic)
 
 args := make([]interface{}, len(params))
 for i, p := range params {
@@ -213,7 +223,7 @@ rows, err := conn.Query(ctx, sql, args...)
 The ClickHouse driver uses `{name:Type}` natively, not `@p1`. You can adapt the named parameters:
 
 ```go
-sql, params, _ := transpiler.TranspileParameterized(jsonLogic)
+sql, params, _ := transpiler.TranspileParameterizedCondition(jsonLogic)
 
 // Convert @p1 → {p1:String}, @p2 → {p2:Int64}, etc.
 chSQL := sql
@@ -240,13 +250,13 @@ Custom operators must also keep placeholders as SQL expressions, not quoted stri
 
 ```go
 // Good: all args used
-transpiler.RegisterOperatorFunc("double", func(op string, args []interface{}) (string, error) {
-    return fmt.Sprintf("(%s * 2)", args[0]), nil // @p1 flows through
+transpiler.RegisterOperatorFunc("double", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+    return jsonlogic2sql.ValueSQL(fmt.Sprintf("(%s * 2)", args[0].SQL), jsonlogic2sql.ExpressionTypeNumber), nil // @p1 flows through
 })
 
 // Bad: dropping args causes E350
-transpiler.RegisterOperatorFunc("broken", func(op string, args []interface{}) (string, error) {
-    return "42", nil // discards args containing @p1 → E350 error
+transpiler.RegisterOperatorFunc("broken", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+    return jsonlogic2sql.ValueSQL("42", jsonlogic2sql.ExpressionTypeNumber), nil // discards args containing @p1 -> E350 error
 })
 ```
 
@@ -262,12 +272,12 @@ This typically occurs when a custom operator drops an argument. See [Error Handl
 
 ## Comparison: Inline vs Parameterized
 
-| Input | Inline (`Transpile`) | Parameterized (`TranspileParameterized`) |
+| Input | Inline Condition | Parameterized Condition |
 |-------|---------------------|------------------------------------------|
-| `{"==": [{"var": "email"}, "alice"]}` | `WHERE email = 'alice'` | `WHERE email = @p1` + `[{p1, "alice"}]` |
-| `{"in": [{"var": "x"}, [1, 2]]}` | `WHERE x IN (1, 2)` | `WHERE x IN (@p1, @p2)` + `[{p1, 1}, {p2, 2}]` |
-| `{"==": [{"var": "f"}, null]}` | `WHERE f IS NULL` | `WHERE f IS NULL` (no params) |
-| `{"==": [{"var": "f"}, true]}` | `WHERE f = TRUE` | `WHERE f = TRUE` (no params) |
+| `{"==": [{"var": "email"}, "alice"]}` | `email = 'alice'` | `email = @p1` + `[{p1, "alice"}]` |
+| `{"in": [{"var": "x"}, [1, 2]]}` | `x IN (1, 2)` | `x IN (@p1, @p2)` + `[{p1, 1}, {p2, 2}]` |
+| `{"==": [{"var": "f"}, null]}` | `f IS NULL` | `f IS NULL` (no params) |
+| `{"==": [{"var": "f"}, true]}` | `f = TRUE` | `f = TRUE` (no params) |
 
 ## See Also
 

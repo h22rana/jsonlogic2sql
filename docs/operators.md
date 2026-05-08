@@ -1,6 +1,9 @@
 # Supported Operators
 
 This document lists all JSON Logic operators supported by jsonlogic2sql.
+Examples show the SQL expression returned by the transpiler. Predicate examples
+use `TranspileCondition`; scalar and array-producing examples use
+`TranspileValue`.
 
 ## Data Access
 
@@ -16,7 +19,7 @@ This document lists all JSON Logic operators supported by jsonlogic2sql.
 {"var": "name"}
 ```
 ```sql
-WHERE name
+name
 ```
 
 > **Note:** JSONLogic's numeric `var` form, such as `{"var": 1}`, is not
@@ -29,7 +32,7 @@ WHERE name
 {"var": ["status", "pending"]}
 ```
 ```sql
-WHERE COALESCE(status, 'pending')
+COALESCE(status, 'pending')
 ```
 
 With a schema, equality and inequality comparisons against `[field, default]`
@@ -45,7 +48,7 @@ defaults are validated when enum values are configured.
 {"missing": "email"}
 ```
 ```sql
-WHERE email IS NULL
+email IS NULL
 ```
 
 ### Missing Field Check (Multiple)
@@ -54,7 +57,7 @@ WHERE email IS NULL
 {"missing": ["email", "phone"]}
 ```
 ```sql
-WHERE (email IS NULL OR phone IS NULL)
+(email IS NULL OR phone IS NULL)
 ```
 
 ### Missing Some Fields
@@ -63,7 +66,7 @@ WHERE (email IS NULL OR phone IS NULL)
 {"missing_some": [1, ["field1", "field2"]]}
 ```
 ```sql
-WHERE (field1 IS NULL OR field2 IS NULL)
+(field1 IS NULL OR field2 IS NULL)
 ```
 
 ## Logic and Boolean Operations
@@ -84,7 +87,7 @@ WHERE (field1 IS NULL OR field2 IS NULL)
 {"==": [{"var": "status"}, "active"]}
 ```
 ```sql
-WHERE status = 'active'
+status = 'active'
 ```
 
 ### Strict Equality
@@ -93,7 +96,7 @@ WHERE status = 'active'
 {"===": [{"var": "count"}, 5]}
 ```
 ```sql
-WHERE count = 5
+count = 5
 ```
 
 With a schema, strict equality folds field/literal type mismatches that are
@@ -103,7 +106,7 @@ known at transpile time:
 {"===": [{"var": "count"}, "5"]}
 ```
 ```sql
-WHERE FALSE
+FALSE
 ```
 
 ### Schema-Aware Equality Coercion
@@ -135,7 +138,7 @@ that JavaScript would coerce to the same number, such as `'05'`, `'5.0'`, or
 {"!=": [{"var": "status"}, "inactive"]}
 ```
 ```sql
-WHERE status != 'inactive'
+status != 'inactive'
 ```
 
 ### Equality with NULL
@@ -144,7 +147,7 @@ WHERE status != 'inactive'
 {"==": [{"var": "deleted_at"}, null]}
 ```
 ```sql
-WHERE deleted_at IS NULL
+deleted_at IS NULL
 ```
 
 ### Inequality with NULL
@@ -153,7 +156,7 @@ WHERE deleted_at IS NULL
 {"!=": [{"var": "field"}, null]}
 ```
 ```sql
-WHERE field IS NOT NULL
+field IS NOT NULL
 ```
 
 ### Opt-In Null-Safe Field Equality
@@ -164,7 +167,7 @@ By default, field-to-field equality uses ordinary SQL comparison:
 {"==": [{"var": "a"}, {"var": "b"}]}
 ```
 ```sql
-WHERE a = b
+a = b
 ```
 
 Set `NullSafeFieldEquality` or call `SetNullSafeFieldEquality(true)` to also
@@ -172,14 +175,14 @@ match rows where both compared fields are `NULL`, matching JSONLogic's
 `null == null` and `null === null` behavior:
 
 ```sql
-WHERE ((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))
+((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))
 ```
 
 For inequality, the opt-in fallback checks one-null-only rows plus the ordinary
 comparison:
 
 ```sql
-WHERE ((a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a != b))
+((a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a != b))
 ```
 
 This mode only applies when both operands are `var` expressions, including
@@ -192,7 +195,7 @@ schema coercion keep their existing SQL.
 {"!": [{"var": "isDeleted"}]}
 ```
 ```sql
-WHERE NOT (isDeleted)
+NOT (isDeleted)
 ```
 
 ### Double Negation (Boolean Conversion)
@@ -203,7 +206,7 @@ WHERE NOT (isDeleted)
 
 Without schema (generic truthiness check):
 ```sql
-WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
+(value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
 ```
 
 With schema, the `!!` operator generates type-appropriate SQL. See [Schema-Aware Truthiness](schema-validation.md#schema-aware-truthiness) for details.
@@ -217,7 +220,7 @@ With schema, the `!!` operator generates type-appropriate SQL. See [Schema-Aware
 ]}
 ```
 ```sql
-WHERE (amount > 5000 AND status = 'pending')
+(amount > 5000 AND status = 'pending')
 ```
 
 ### Logical OR
@@ -229,7 +232,7 @@ WHERE (amount > 5000 AND status = 'pending')
 ]}
 ```
 ```sql
-WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+(failedAttempts >= 5 OR country IN ('CN', 'RU'))
 ```
 
 ### Conditional Expression (if)
@@ -242,7 +245,7 @@ WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 ]}
 ```
 ```sql
-WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
+CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
 ```
 
 ## Numeric Operations
@@ -262,10 +265,10 @@ WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
 {"<=": [{"var": "count"}, 10]}
 ```
 ```sql
-WHERE amount > 1000
-WHERE score >= 80
-WHERE age < 65
-WHERE count <= 10
+amount > 1000
+score >= 80
+age < 65
+count <= 10
 ```
 
 ### Maximum/Minimum
@@ -275,8 +278,8 @@ WHERE count <= 10
 {"min": [{"var": "price1"}, {"var": "price2"}]}
 ```
 ```sql
-WHERE GREATEST(score1, score2, score3)
-WHERE LEAST(price1, price2)
+GREATEST(score1, score2, score3)
+LEAST(price1, price2)
 ```
 
 ### Arithmetic Operations
@@ -289,11 +292,11 @@ WHERE LEAST(price1, price2)
 {"%": [{"var": "count"}, 3]}
 ```
 ```sql
-WHERE (price + tax)
-WHERE (total - discount)
-WHERE (price * 1.2)
-WHERE (total / 2)
-WHERE (count % 3)
+(price + tax)
+(total - discount)
+(price * 1.2)
+(total / 2)
+(count % 3)
 ```
 
 ### String Operands in Arithmetic
@@ -312,9 +315,9 @@ When string literals appear in numeric operations, the transpiler coerces them f
 {"+": ["hello", 1]}
 ```
 ```sql
-WHERE (42 + 1)
-WHERE (3 * 2)
-WHERE ('hello' + 1)
+(42 + 1)
+(3 * 2)
+('hello' + 1)
 ```
 
 ### Unary Operations
@@ -324,8 +327,8 @@ WHERE ('hello' + 1)
 {"+": ["-5"]}
 ```
 ```sql
-WHERE -value
-WHERE CAST(-5 AS NUMERIC)
+-value
+CAST(-5 AS NUMERIC)
 ```
 
 ## Array Operations
@@ -343,7 +346,7 @@ WHERE CAST(-5 AS NUMERIC)
 {"in": [{"var": "country"}, ["US", "CA", "MX"]]}
 ```
 ```sql
-WHERE country IN ('US', 'CA', 'MX')
+country IN ('US', 'CA', 'MX')
 ```
 
 When the right-hand side is an array-typed field (with schema), `in` uses
@@ -357,7 +360,7 @@ When a schema is provided, array elements are automatically coerced to match the
 {"in": [{"var": "merchant_code"}, [5960, 9000]]}
 ```
 ```sql
-WHERE merchant_code IN ('5960', '9000')
+merchant_code IN ('5960', '9000')
 ```
 
 See [Type Coercion](schema-validation.md#type-coercion) for details.
@@ -368,7 +371,7 @@ See [Type Coercion](schema-validation.md#type-coercion) for details.
 {"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
 ```
 ```sql
-WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
+ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
 ```
 
 ### Filter Array
@@ -377,7 +380,7 @@ WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
 {"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
 ```
 ```sql
-WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 ```
 
 ### Reduce Array
@@ -386,7 +389,7 @@ WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 {"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}
 ```
 ```sql
-WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
+0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
 ```
 
 ### Nested Array Scope
@@ -402,13 +405,13 @@ Inside an inner lambda, `current` and `current.*` always refer to that inner ele
 ```
 ```sql
 -- BigQuery/Spanner
-WHERE (ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
+(ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
 -- PostgreSQL
-WHERE (CARDINALITY(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
+(CARDINALITY(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
 -- DuckDB
-WHERE (length(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
+(length(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
 -- ClickHouse
-WHERE (length(ages) > 0 AND arrayAll(elem -> elem >= 18, ages))
+(length(ages) > 0 AND arrayAll(elem -> elem >= 18, ages))
 ```
 
 > **Note:** The array length guard ensures JSONLogic spec compliance - `{"all": [[], condition]}` returns `false` (not `true`). Each dialect uses its native array length function: `ARRAY_LENGTH` (BigQuery/Spanner), `CARDINALITY` (PostgreSQL), `length` (DuckDB/ClickHouse).
@@ -419,7 +422,7 @@ WHERE (length(ages) > 0 AND arrayAll(elem -> elem >= 18, ages))
 {"some": [{"var": "statuses"}, {"==": [{"var": ""}, "active"]}]}
 ```
 ```sql
-WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
+EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
 ```
 
 ### No Elements Satisfy Condition
@@ -428,7 +431,7 @@ WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
 {"none": [{"var": "values"}, {"==": [{"var": ""}, "invalid"]}]}
 ```
 ```sql
-WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
+NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
 ```
 
 ### Merge Arrays
@@ -437,7 +440,7 @@ WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
 {"merge": [{"var": "array1"}, {"var": "array2"}]}
 ```
 ```sql
-WHERE ARRAY_CONCAT(array1, array2)
+ARRAY_CONCAT(array1, array2)
 ```
 
 ## String Operations
@@ -454,7 +457,7 @@ WHERE ARRAY_CONCAT(array1, array2)
 {"in": ["hello", "hello world"]}
 ```
 ```sql
-WHERE POSITION('hello' IN 'hello world') > 0
+POSITION('hello' IN 'hello world') > 0
 ```
 
 ### Concatenate Strings
@@ -463,7 +466,7 @@ WHERE POSITION('hello' IN 'hello world') > 0
 {"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
 ```
 ```sql
-WHERE CONCAT(firstName, ' ', lastName)
+CONCAT(firstName, ' ', lastName)
 ```
 
 ### Concatenate with Conditional
@@ -472,7 +475,7 @@ WHERE CONCAT(firstName, ' ', lastName)
 {"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}
 ```
 ```sql
-WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
+CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
 ```
 
 ### Substring with Length
@@ -481,7 +484,7 @@ WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, '
 {"substr": [{"var": "email"}, 0, 10]}
 ```
 ```sql
-WHERE SUBSTR(email, 1, 10)
+SUBSTR(email, 1, 10)
 ```
 
 ### Substring without Length
@@ -490,7 +493,7 @@ WHERE SUBSTR(email, 1, 10)
 {"substr": [{"var": "email"}, 4]}
 ```
 ```sql
-WHERE SUBSTR(email, 5)
+SUBSTR(email, 5)
 ```
 
 ## See Also

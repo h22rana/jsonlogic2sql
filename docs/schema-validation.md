@@ -28,14 +28,14 @@ func main() {
     transpiler.SetSchema(schema)
 
     // Valid field - works
-    sql, err := transpiler.Transpile(`{"==": [{"var": "order.status"}, "active"]}`)
+    sql, err := transpiler.TranspileCondition(`{"==": [{"var": "order.status"}, "active"]}`)
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE order.status = 'active'
+    fmt.Println(sql) // Output: order.status = 'active'
 
     // Invalid field - returns error
-    _, err = transpiler.Transpile(`{"==": [{"var": "invalid.field"}, "value"]}`)
+    _, err = transpiler.TranspileCondition(`{"==": [{"var": "invalid.field"}, "value"]}`)
     if err != nil {
         fmt.Println(err) // Output: field 'invalid.field' is not defined in schema
     }
@@ -120,19 +120,19 @@ transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 transpiler.SetSchema(schema)
 
 // Valid: numeric operation on integer field
-sql, _ := transpiler.Transpile(`{"+": [{"var": "amount"}, 10]}`)
-fmt.Println(sql) // Output: WHERE (amount + 10)
+sql, _ := transpiler.TranspileValue(`{"+": [{"var": "amount"}, 10]}`)
+fmt.Println(sql) // Output: (amount + 10)
 
 // Valid: array operation on array field
-sql, _ = transpiler.Transpile(`{"some": [{"var": "tags"}, {"==": [{"var": ""}, "important"]}]}`)
-fmt.Println(sql) // Output: WHERE EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem = 'important')
+sql, _ = transpiler.TranspileCondition(`{"some": [{"var": "tags"}, {"==": [{"var": ""}, "important"]}]}`)
+fmt.Println(sql) // Output: EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem = 'important')
 
 // Error: numeric operation on string field
-_, err := transpiler.Transpile(`{"+": [{"var": "name"}, 10]}`)
+_, err := transpiler.TranspileValue(`{"+": [{"var": "name"}, 10]}`)
 // Error: numeric operation on non-numeric field 'name' (type: string)
 
 // Error: array operation on non-array field
-_, err = transpiler.Transpile(`{"some": [{"var": "amount"}, {"==": [{"var": ""}, 0]}]}`)
+_, err = transpiler.TranspileCondition(`{"some": [{"var": "amount"}, {"==": [{"var": ""}, 0]}]}`)
 // Error: array operation on non-array field 'amount' (type: integer)
 ```
 
@@ -142,16 +142,16 @@ The `in` operator behavior depends on the field type:
 
 ```go
 // Array field: uses dialect-specific array membership syntax
-sql, _ := transpiler.Transpile(`{"in": ["admin", {"var": "tags"}]}`)
+sql, _ := transpiler.TranspileCondition(`{"in": ["admin", {"var": "tags"}]}`)
 fmt.Println(sql)
-// BigQuery/Spanner: WHERE 'admin' IN UNNEST(tags)
-// PostgreSQL:       WHERE 'admin' = ANY(tags)
-// DuckDB:           WHERE list_contains(tags, 'admin')
-// ClickHouse:       WHERE has(tags, 'admin')
+// BigQuery/Spanner: 'admin' IN UNNEST(tags)
+// PostgreSQL:       'admin' = ANY(tags)
+// DuckDB:           list_contains(tags, 'admin')
+// ClickHouse:       has(tags, 'admin')
 
 // String field: uses STRPOS for containment
-sql, _ = transpiler.Transpile(`{"in": ["hello", {"var": "name"}]}`)
-fmt.Println(sql) // Output: WHERE STRPOS(name, 'hello') > 0
+sql, _ = transpiler.TranspileCondition(`{"in": ["hello", {"var": "name"}]}`)
+fmt.Println(sql) // Output: STRPOS(name, 'hello') > 0
 ```
 
 ### In Operator Behavior Without Schema
@@ -177,10 +177,10 @@ When a schema is provided, the transpiler automatically coerces literal values t
 
 ```go
 // Schema: category_code is string type
-sql, _ := transpiler.Transpile(`{"in": [{"var": "category_code"}, [5960, 9000]]}`)
+sql, _ := transpiler.TranspileCondition(`{"in": [{"var": "category_code"}, [5960, 9000]]}`)
 fmt.Println(sql)
-// Output: WHERE category_code IN ('5960', '9000')
-// Without schema: WHERE category_code IN (5960, 9000) - would fail in BigQuery
+// Output: category_code IN ('5960', '9000')
+// Without schema: category_code IN (5960, 9000) - would fail in BigQuery
 ```
 
 For equality, this is a canonical string match. For example, `code == 5` emits
@@ -191,10 +191,10 @@ same number at runtime, such as `"05"`, `"5.0"`, or `" 5 "`.
 
 ```go
 // Schema: amount is integer type
-sql, _ := transpiler.Transpile(`{">=": [{"var": "amount"}, "50000"]}`)
+sql, _ := transpiler.TranspileCondition(`{">=": [{"var": "amount"}, "50000"]}`)
 fmt.Println(sql)
-// Output: WHERE amount >= 50000
-// Without schema: WHERE amount >= '50000'
+// Output: amount >= 50000
+// Without schema: amount >= '50000'
 ```
 
 For equality and inequality, numeric string literals follow JavaScript-like
@@ -202,13 +202,13 @@ For equality and inequality, numeric string literals follow JavaScript-like
 
 ```go
 // Schema: amount is integer type
-sql, _ = transpiler.Transpile(`{"==": [{"var": "amount"}, "010"]}`)
+sql, _ = transpiler.TranspileCondition(`{"==": [{"var": "amount"}, "010"]}`)
 fmt.Println(sql)
-// Output: WHERE amount = 10
+// Output: amount = 10
 
-sql, _ = transpiler.Transpile(`{"==": [{"var": "amount"}, "abc"]}`)
+sql, _ = transpiler.TranspileCondition(`{"==": [{"var": "amount"}, "abc"]}`)
 fmt.Println(sql)
-// Output: WHERE FALSE
+// Output: FALSE
 ```
 
 **Boolean Equality** - When a boolean field is compared with numeric or string
@@ -217,13 +217,13 @@ semantics:
 
 ```go
 // Schema: active is boolean type
-sql, _ := transpiler.Transpile(`{"==": [{"var": "active"}, "1"]}`)
+sql, _ := transpiler.TranspileCondition(`{"==": [{"var": "active"}, "1"]}`)
 fmt.Println(sql)
-// Output: WHERE active = TRUE
+// Output: active = TRUE
 
-sql, _ = transpiler.Transpile(`{"==": [{"var": "active"}, "2"]}`)
+sql, _ = transpiler.TranspileCondition(`{"==": [{"var": "active"}, "2"]}`)
 fmt.Println(sql)
-// Output: WHERE FALSE
+// Output: FALSE
 ```
 
 **Strict Equality** - With a schema, `===` and `!==` fold known field/literal type
@@ -231,9 +231,9 @@ mismatches before loose coercion:
 
 ```go
 // Schema: amount is integer type
-sql, _ = transpiler.Transpile(`{"===": [{"var": "amount"}, "5"]}`)
+sql, _ = transpiler.TranspileCondition(`{"===": [{"var": "amount"}, "5"]}`)
 fmt.Println(sql)
-// Output: WHERE FALSE
+// Output: FALSE
 ```
 
 Loose equality between string or enum-string fields and boolean literals is not
@@ -241,7 +241,7 @@ portable SQL and returns an error:
 
 ```go
 // Schema: code is string type
-_, err := transpiler.Transpile(`{"==": [{"var": "code"}, true]}`)
+_, err := transpiler.TranspileCondition(`{"==": [{"var": "code"}, true]}`)
 // Error: loose equality between string field "code" and boolean literal is not supported
 ```
 
@@ -251,9 +251,9 @@ values produced by overflow:
 
 ```go
 // Schema: code is string type
-sql, _ := transpiler.Transpile(`{"==": [{"var": "code"}, 1e400]}`)
+sql, _ := transpiler.TranspileCondition(`{"==": [{"var": "code"}, 1e400]}`)
 fmt.Println(sql)
-// Output: WHERE code = 'Infinity'
+// Output: code = 'Infinity'
 ```
 
 **Defaulted Variables** - Equality and inequality apply the same schema-aware
@@ -262,17 +262,17 @@ expression emitted by the `var` operator:
 
 ```go
 // Schema: price is integer type
-sql, _ = transpiler.Transpile(`{"==": [{"var": ["price", 0]}, "50"]}`)
+sql, _ = transpiler.TranspileCondition(`{"==": [{"var": ["price", 0]}, "50"]}`)
 fmt.Println(sql)
-// Output: WHERE COALESCE(price, 0) = 50
+// Output: COALESCE(price, 0) = 50
 
-sql, _ = transpiler.Transpile(`{"===": [{"var": ["price", 0]}, "50"]}`)
+sql, _ = transpiler.TranspileCondition(`{"===": [{"var": ["price", 0]}, "50"]}`)
 fmt.Println(sql)
-// Output: WHERE FALSE
+// Output: FALSE
 
-sql, _ = transpiler.Transpile(`{"===": [{"var": ["price", "50"]}, "50"]}`)
+sql, _ = transpiler.TranspileCondition(`{"===": [{"var": ["price", "50"]}, "50"]}`)
 fmt.Println(sql)
-// Output: WHERE COALESCE(price, '50') = '50'
+// Output: COALESCE(price, '50') = '50'
 ```
 
 Strict or value-space folds only happen when both the field value and the
@@ -285,9 +285,9 @@ Basic schema coercion applies to comparison operators (`==`, `!=`, `>`, `>=`, `<
 **Numeric String Coercion** - In numeric operations (`+`, `-`, `*`, `/`, `%`), string operands are coerced per JSONLogic's JavaScript-like semantics. Valid numeric strings are converted to numbers, whitespace is trimmed, and non-numeric strings are safely quoted:
 
 ```go
-sql, _ := transpiler.Transpile(`{"+": ["42", 1]}`)
+sql, _ := transpiler.TranspileValue(`{"+": ["42", 1]}`)
 fmt.Println(sql)
-// Output: WHERE (42 + 1)
+// Output: (42 + 1)
 // "42" coerced to number; "hello" would become 'hello'
 ```
 
@@ -305,7 +305,7 @@ When a schema is provided, the `!!` operator generates type-appropriate SQL to a
 
 Without a schema, the generic truthiness check is used:
 ```sql
-WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
+(value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
 ```
 
 ## Enum Type Support
@@ -326,15 +326,15 @@ transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 transpiler.SetSchema(schema)
 
 // Valid enum value - works
-sql, err := transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
-// Output: WHERE status = 'active'
+sql, err := transpiler.TranspileCondition(`{"==": [{"var": "status"}, "active"]}`)
+// Output: status = 'active'
 
 // Valid enum IN array - works
-sql, err = transpiler.Transpile(`{"in": [{"var": "status"}, ["active", "pending"]]}`)
-// Output: WHERE status IN ('active', 'pending')
+sql, err = transpiler.TranspileCondition(`{"in": [{"var": "status"}, ["active", "pending"]]}`)
+// Output: status IN ('active', 'pending')
 
 // Invalid enum value - returns error
-_, err = transpiler.Transpile(`{"==": [{"var": "status"}, "invalid"]}`)
+_, err = transpiler.TranspileCondition(`{"==": [{"var": "status"}, "invalid"]}`)
 // Error: invalid enum value 'invalid' for field 'status': allowed values are [active pending cancelled]
 ```
 
@@ -342,7 +342,7 @@ Visible enum defaults are also validated because they become literal SQL inside
 `COALESCE`:
 
 ```go
-_, err = transpiler.Transpile(`{"==": [{"var": ["status", "unknown"]}, "active"]}`)
+_, err = transpiler.TranspileCondition(`{"==": [{"var": ["status", "unknown"]}, "active"]}`)
 // Error: invalid enum value 'unknown' for field 'status': allowed values are [active pending cancelled]
 ```
 

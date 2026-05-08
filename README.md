@@ -1,6 +1,6 @@
 # JSON Logic to SQL Transpiler
 
-A Go library that converts JSON Logic expressions into SQL. This library provides a clean, type-safe API for transforming JSON Logic rules into SQL WHERE clauses or standalone conditions, with support for multiple SQL dialects.
+A Go library that converts JSON Logic expressions into SQL predicate and value expressions, with support for multiple SQL dialects.
 
 ## Features
 
@@ -32,15 +32,25 @@ import (
 )
 
 func main() {
-    sql, err := jsonlogic2sql.Transpile(
+    sql, err := jsonlogic2sql.TranspileCondition(
         jsonlogic2sql.DialectBigQuery,
         `{">": [{"var": "amount"}, 1000]}`,
     )
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE amount > 1000
+    fmt.Println(sql) // Output: amount > 1000
 }
+```
+
+Use `TranspileValue` for value-producing expressions such as arithmetic, string concatenation, `map`, `reduce`, or JSONLogic value fallback:
+
+```go
+sql, err := jsonlogic2sql.TranspileValue(
+    jsonlogic2sql.DialectBigQuery,
+    `{"or": [false, "fallback"]}`,
+)
+fmt.Println(sql) // Output: 'fallback'
 ```
 
 ### Parameterized Queries
@@ -54,14 +64,14 @@ import (
 )
 
 func main() {
-    sql, params, err := jsonlogic2sql.TranspileParameterized(
+    sql, params, err := jsonlogic2sql.TranspileParameterizedCondition(
         jsonlogic2sql.DialectBigQuery,
         `{"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}`,
     )
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql)    // Output: WHERE (status = @p1 AND amount > @p2)
+    fmt.Println(sql)    // Output: (status = @p1 AND amount > @p2)
     fmt.Println(params) // Output: [{p1 active} {p2 1000}]
 }
 ```
@@ -112,6 +122,8 @@ func main() {
 
 > **Identifier Quoting:** JSON Logic `var` names and schema field names should use raw, unquoted identifiers. The transpiler quotes invalid unquoted path segments automatically, for example `fixture.history.24h.events.total` becomes ``fixture.history.`24h`.events.total`` for BigQuery/Spanner/ClickHouse and `fixture.history."24h".events.total` for PostgreSQL/DuckDB. `NewSchema` returns an error when schema field names contain quote characters; use raw identifiers and let the transpiler apply dialect-specific quoting.
 
+> **Condition vs Value APIs:** `TranspileCondition` returns SQL predicates that callers can put after `WHERE`. `TranspileValue` returns SQL value expressions. Value-producing JSONLogic such as `{"or":[false,"fallback"]}` is valid in value mode, but is rejected in condition mode instead of generating non-portable SQL like `FALSE OR 'fallback'`.
+
 > **`in` Operator Inference:** Without a schema, `in` uses heuristics to infer string containment vs array membership. For deterministic behavior (especially with complex expressions), prefer schema-aware mode.
 
 ## Interactive REPL
@@ -122,20 +134,23 @@ make run
 
 ```
 [BigQuery] jsonlogic> {">": [{"var": "amount"}, 1000]}
-SQL: WHERE amount > 1000
+SQL: amount > 1000
 
 [BigQuery] jsonlogic> :params
 Parameterized mode: ON (output uses bind placeholders)
 
 [BigQuery] jsonlogic> {"==": [{"var": "status"}, "active"]}
-SQL:    WHERE status = @p1
+SQL:    status = @p1
 Params: [{p1: "active"}]
+
+[BigQuery] jsonlogic> :value
+Expression mode: value
 
 [BigQuery] jsonlogic> :dialect
 Select dialect: PostgreSQL
 
 [PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
-SQL: WHERE (a || b)
+SQL: (a || b)
 ```
 
 ## Development

@@ -19,7 +19,7 @@ jsonlogic2sql supports multiple SQL dialects, generating appropriate syntax for 
 transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
 // Or use convenience functions
-sql, err := jsonlogic2sql.Transpile(jsonlogic2sql.DialectPostgreSQL, jsonLogic)
+sql, err := jsonlogic2sql.TranspileCondition(jsonlogic2sql.DialectPostgreSQL, jsonLogic)
 ```
 
 ## Operator Compatibility by Dialect
@@ -85,18 +85,21 @@ You can create custom operators that generate different SQL per dialect:
 
 ```go
 transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
-    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
-        numerator := args[0].(string)
-        denominator := args[1].(string)
+    func(op string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
+        numerator := args[0].SQL
+        denominator := args[1].SQL
 
         switch dialect {
         case jsonlogic2sql.DialectBigQuery:
-            return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+            return jsonlogic2sql.ValueSQL(fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), jsonlogic2sql.ExpressionTypeNumber), nil
         case jsonlogic2sql.DialectClickHouse:
-            return fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), nil
+            return jsonlogic2sql.ValueSQL(fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), jsonlogic2sql.ExpressionTypeNumber), nil
         default:
-            return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
-                denominator, numerator, denominator), nil
+            return jsonlogic2sql.ValueSQL(
+                fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+                    denominator, numerator, denominator),
+                jsonlogic2sql.ExpressionTypeNumber,
+            ), nil
         }
     })
 ```

@@ -26,11 +26,11 @@ import (
 
 func main() {
     // Simple usage with dialect (required)
-    sql, err := jsonlogic2sql.Transpile(jsonlogic2sql.DialectBigQuery, `{">": [{"var": "amount"}, 1000]}`)
+    sql, err := jsonlogic2sql.TranspileCondition(jsonlogic2sql.DialectBigQuery, `{">": [{"var": "amount"}, 1000]}`)
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE amount > 1000
+    fmt.Println(sql) // Output: amount > 1000
 }
 ```
 
@@ -52,11 +52,11 @@ func main() {
     }
 
     // From JSON string
-    sql, err := transpiler.Transpile(`{"and": [{"==": [{"var": "status"}, "pending"]}, {">": [{"var": "amount"}, 5000]}]}`)
+    sql, err := transpiler.TranspileCondition(`{"and": [{"==": [{"var": "status"}, "pending"]}, {">": [{"var": "amount"}, 5000]}]}`)
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE (status = 'pending' AND amount > 5000)
+    fmt.Println(sql) // Output: (status = 'pending' AND amount > 5000)
 
     // From pre-parsed map
     logic := map[string]interface{}{
@@ -65,17 +65,18 @@ func main() {
             map[string]interface{}{"in": []interface{}{map[string]interface{}{"var": "country"}, []interface{}{"CN", "RU"}}},
         },
     }
-    sql, err = transpiler.TranspileFromMap(logic)
+    sql, err = transpiler.TranspileConditionFromMap(logic)
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+    fmt.Println(sql) // Output: (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 }
 ```
 
-### Getting SQL Without WHERE Prefix
+### Condition and Value Output
 
-Use `TranspileCondition` methods when you need to embed conditions in larger queries:
+`TranspileCondition` returns a boolean SQL predicate without the `WHERE`
+keyword. Use it for filters and join predicates:
 
 ```go
 // Returns just the condition without "WHERE"
@@ -87,6 +88,16 @@ condition, err := jsonlogic2sql.TranspileCondition(
 
 // Use in a custom query
 query := fmt.Sprintf("SELECT * FROM orders WHERE %s AND created_at > '2024-01-01'", condition)
+```
+
+Use `TranspileValue` when the JSONLogic root produces a scalar or array value:
+
+```go
+value, err := jsonlogic2sql.TranspileValue(
+    jsonlogic2sql.DialectBigQuery,
+    `{"or": [false, "fallback"]}`,
+)
+// value = "'fallback'"
 ```
 
 ## Choosing a Dialect
@@ -127,21 +138,21 @@ import (
 func main() {
     transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
 
-    sql, params, err := transpiler.TranspileParameterized(
+    sql, params, err := transpiler.TranspileParameterizedCondition(
         `{"==": [{"var": "status"}, "active"]}`,
     )
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql)    // Output: WHERE status = @p1
+    fmt.Println(sql)    // Output: status = @p1
     fmt.Println(params) // Output: [{p1 active}]
 
     // Or use the convenience function
-    sql, params, err = jsonlogic2sql.TranspileParameterized(
+    sql, params, err = jsonlogic2sql.TranspileParameterizedCondition(
         jsonlogic2sql.DialectPostgreSQL,
         `{">": [{"var": "amount"}, 1000]}`,
     )
-    fmt.Println(sql)    // Output: WHERE amount > $1
+    fmt.Println(sql)    // Output: amount > $1
     fmt.Println(params) // Output: [{p1 1000}]
 }
 ```

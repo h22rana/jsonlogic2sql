@@ -4,37 +4,13 @@ Complete API documentation for jsonlogic2sql.
 
 ## Functions
 
-### Transpile
-
-```go
-func Transpile(dialect Dialect, jsonLogic string) (string, error)
-```
-
-Converts a JSON Logic string to a SQL WHERE clause using the specified dialect.
-
-### TranspileFromMap
-
-```go
-func TranspileFromMap(dialect Dialect, logic map[string]interface{}) (string, error)
-```
-
-Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
-
-### TranspileFromInterface
-
-```go
-func TranspileFromInterface(dialect Dialect, logic interface{}) (string, error)
-```
-
-Converts any JSON Logic interface{} to a SQL WHERE clause.
-
 ### TranspileCondition
 
 ```go
 func TranspileCondition(dialect Dialect, jsonLogic string) (string, error)
 ```
 
-Converts a JSON Logic string to a SQL condition **without** the WHERE keyword. Useful for embedding conditions in larger queries.
+Converts a JSON Logic string to a SQL predicate expression without the `WHERE` keyword. Callers add `WHERE` themselves when building full queries.
 
 ### TranspileConditionFromMap
 
@@ -52,53 +28,77 @@ func TranspileConditionFromInterface(dialect Dialect, logic interface{}) (string
 
 Converts any JSON Logic interface{} to a SQL condition without WHERE.
 
-### TranspileParameterized
+### TranspileValue
 
 ```go
-func TranspileParameterized(dialect Dialect, jsonLogic string) (string, []QueryParam, error)
+func TranspileValue(dialect Dialect, jsonLogic string) (string, error)
 ```
 
-Converts a JSON Logic string to a SQL WHERE clause with bind parameter placeholders instead of inlined literals. Returns the SQL, collected parameters, and any error.
+Converts a JSON Logic string to a SQL value expression. Use this for value-producing JSONLogic such as arithmetic, string expressions, `map`, `reduce`, or value-returning `and`/`or`.
 
-### TranspileParameterizedFromMap
+### TranspileValueFromMap
 
 ```go
-func TranspileParameterizedFromMap(dialect Dialect, logic map[string]interface{}) (string, []QueryParam, error)
+func TranspileValueFromMap(dialect Dialect, logic map[string]interface{}) (string, error)
 ```
 
-Converts a pre-parsed JSON Logic map to a SQL WHERE clause with bind parameter placeholders.
+Converts a pre-parsed JSON Logic map to a SQL value expression.
 
-### TranspileParameterizedFromInterface
+### TranspileValueFromInterface
 
 ```go
-func TranspileParameterizedFromInterface(dialect Dialect, logic interface{}) (string, []QueryParam, error)
+func TranspileValueFromInterface(dialect Dialect, logic interface{}) (string, error)
 ```
 
-Converts any JSON Logic interface{} to a SQL WHERE clause with bind parameter placeholders.
+Converts any JSON Logic interface{} to a SQL value expression.
 
-### TranspileConditionParameterized
+### TranspileParameterizedCondition
 
 ```go
-func TranspileConditionParameterized(dialect Dialect, jsonLogic string) (string, []QueryParam, error)
+func TranspileParameterizedCondition(dialect Dialect, jsonLogic string) (string, []QueryParam, error)
 ```
 
 Converts a JSON Logic string to a SQL condition (without WHERE) with bind parameter placeholders.
 
-### TranspileConditionParameterizedFromMap
+### TranspileParameterizedConditionFromMap
 
 ```go
-func TranspileConditionParameterizedFromMap(dialect Dialect, logic map[string]interface{}) (string, []QueryParam, error)
+func TranspileParameterizedConditionFromMap(dialect Dialect, logic map[string]interface{}) (string, []QueryParam, error)
 ```
 
 Converts a pre-parsed JSON Logic map to a SQL condition (without WHERE) with bind parameter placeholders.
 
-### TranspileConditionParameterizedFromInterface
+### TranspileParameterizedConditionFromInterface
 
 ```go
-func TranspileConditionParameterizedFromInterface(dialect Dialect, logic interface{}) (string, []QueryParam, error)
+func TranspileParameterizedConditionFromInterface(dialect Dialect, logic interface{}) (string, []QueryParam, error)
 ```
 
 Converts any JSON Logic interface{} to a SQL condition (without WHERE) with bind parameter placeholders.
+
+### TranspileParameterizedValue
+
+```go
+func TranspileParameterizedValue(dialect Dialect, jsonLogic string) (string, []QueryParam, error)
+```
+
+Converts a JSON Logic string to a SQL value expression with bind parameter placeholders.
+
+### TranspileParameterizedValueFromMap
+
+```go
+func TranspileParameterizedValueFromMap(dialect Dialect, logic map[string]interface{}) (string, []QueryParam, error)
+```
+
+Converts a pre-parsed JSON Logic map to a parameterized SQL value expression.
+
+### TranspileParameterizedValueFromInterface
+
+```go
+func TranspileParameterizedValueFromInterface(dialect Dialect, logic interface{}) (string, []QueryParam, error)
+```
+
+Converts any JSON Logic interface{} to a parameterized SQL value expression.
 
 ### NewTranspiler
 
@@ -134,18 +134,18 @@ Main transpiler instance.
 
 | Method | Description |
 |--------|-------------|
-| `Transpile(jsonLogic string) (string, error)` | Convert JSON string to SQL with WHERE |
-| `TranspileFromMap(logic map[string]interface{}) (string, error)` | Convert map to SQL with WHERE |
-| `TranspileFromInterface(logic interface{}) (string, error)` | Convert interface to SQL with WHERE |
-| `TranspileCondition(jsonLogic string) (string, error)` | Convert JSON string to SQL without WHERE |
-| `TranspileConditionFromMap(logic map[string]interface{}) (string, error)` | Convert map to SQL without WHERE |
-| `TranspileConditionFromInterface(logic interface{}) (string, error)` | Convert interface to SQL without WHERE |
-| `TranspileParameterized(jsonLogic string) (string, []QueryParam, error)` | Convert JSON string to parameterized SQL with WHERE |
-| `TranspileParameterizedFromMap(logic map[string]interface{}) (string, []QueryParam, error)` | Convert map to parameterized SQL with WHERE |
-| `TranspileParameterizedFromInterface(logic interface{}) (string, []QueryParam, error)` | Convert interface to parameterized SQL with WHERE |
-| `TranspileConditionParameterized(jsonLogic string) (string, []QueryParam, error)` | Convert JSON string to parameterized SQL without WHERE |
-| `TranspileConditionParameterizedFromMap(logic map[string]interface{}) (string, []QueryParam, error)` | Convert map to parameterized SQL without WHERE |
-| `TranspileConditionParameterizedFromInterface(logic interface{}) (string, []QueryParam, error)` | Convert interface to parameterized SQL without WHERE |
+| `TranspileCondition(jsonLogic string) (string, error)` | Convert JSON string to SQL predicate |
+| `TranspileConditionFromMap(logic map[string]interface{}) (string, error)` | Convert map to SQL predicate |
+| `TranspileConditionFromInterface(logic interface{}) (string, error)` | Convert interface to SQL predicate |
+| `TranspileValue(jsonLogic string) (string, error)` | Convert JSON string to SQL value expression |
+| `TranspileValueFromMap(logic map[string]interface{}) (string, error)` | Convert map to SQL value expression |
+| `TranspileValueFromInterface(logic interface{}) (string, error)` | Convert interface to SQL value expression |
+| `TranspileParameterizedCondition(jsonLogic string) (string, []QueryParam, error)` | Convert JSON string to parameterized SQL predicate |
+| `TranspileParameterizedConditionFromMap(logic map[string]interface{}) (string, []QueryParam, error)` | Convert map to parameterized SQL predicate |
+| `TranspileParameterizedConditionFromInterface(logic interface{}) (string, []QueryParam, error)` | Convert interface to parameterized SQL predicate |
+| `TranspileParameterizedValue(jsonLogic string) (string, []QueryParam, error)` | Convert JSON string to parameterized SQL value expression |
+| `TranspileParameterizedValueFromMap(logic map[string]interface{}) (string, []QueryParam, error)` | Convert map to parameterized SQL value expression |
+| `TranspileParameterizedValueFromInterface(logic interface{}) (string, []QueryParam, error)` | Convert interface to parameterized SQL value expression |
 | `GetDialect() Dialect` | Get the configured dialect |
 | `SetSchema(schema *Schema)` | Set schema for field validation |
 | `SetNullSafeFieldEquality(enabled bool)` | Enable or disable null-safe field-to-field equality |
@@ -196,7 +196,56 @@ const (
 Function type for simple custom operator implementations.
 
 ```go
-type OperatorFunc func(operator string, args []interface{}) (string, error)
+type OperatorFunc func(operator string, args []OperatorArg) (OperatorResult, error)
+```
+
+Use `ValueSQL(sql, type)` for value-producing custom operators and
+`PredicateSQL(sql)` for boolean predicate custom operators.
+
+### OperatorArg
+
+Typed SQL argument passed to custom operators.
+
+```go
+type OperatorArg struct {
+    SQL  string
+    Kind ExpressionKind
+    Type ExpressionType
+}
+```
+
+### OperatorResult
+
+Typed SQL result returned by custom operators.
+
+```go
+type OperatorResult struct {
+    SQL  string
+    Kind ExpressionKind
+    Type ExpressionType
+}
+```
+
+### ExpressionKind
+
+```go
+const (
+    ExpressionKindValue
+    ExpressionKindPredicate
+)
+```
+
+### ExpressionType
+
+```go
+const (
+    ExpressionTypeUnknown
+    ExpressionTypeNull
+    ExpressionTypeBoolean
+    ExpressionTypeString
+    ExpressionTypeNumber
+    ExpressionTypeArray
+)
 ```
 
 ### OperatorHandler
@@ -205,7 +254,7 @@ Interface for custom operator implementations that need state.
 
 ```go
 type OperatorHandler interface {
-    ToSQL(operator string, args []interface{}) (string, error)
+    ToSQL(operator string, args []OperatorArg) (OperatorResult, error)
 }
 ```
 
@@ -214,7 +263,7 @@ type OperatorHandler interface {
 Function type for dialect-aware custom operator implementations.
 
 ```go
-type DialectAwareOperatorFunc func(operator string, args []interface{}, dialect Dialect) (string, error)
+type DialectAwareOperatorFunc func(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error)
 ```
 
 ### DialectAwareOperatorHandler
@@ -223,7 +272,7 @@ Interface for dialect-aware custom operator implementations.
 
 ```go
 type DialectAwareOperatorHandler interface {
-    ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error)
+    ToSQLWithDialect(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error)
 }
 ```
 

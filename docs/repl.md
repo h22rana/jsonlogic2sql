@@ -19,10 +19,10 @@ On startup, the REPL will prompt for an optional schema path. Leave it empty to 
 
 ```
 jsonlogic> {">": [{"var": "amount"}, 1000]}
-SQL: WHERE amount > 1000
+SQL: amount > 1000
 
 jsonlogic> {"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "count"}, 5]}]}
-SQL: WHERE (status = 'active' AND count > 5)
+SQL: (status = 'active' AND count > 5)
 ```
 
 ## Commands
@@ -32,6 +32,9 @@ SQL: WHERE (status = 'active' AND count > 5)
 | `:help` | Show available commands |
 | `:examples` | Show example JSON Logic expressions |
 | `:dialect` | Change the SQL dialect |
+| `:mode condition\|value` | Switch expression mode |
+| `:condition` | Use predicate/condition output mode |
+| `:value` | Use value-expression output mode |
 | `:params` | Toggle parameterized query output (bind placeholders) |
 | `:schema <path>` | Load a schema JSON file for validation |
 | `:file <path>` | Read JSON Logic from a file |
@@ -53,7 +56,13 @@ Select dialect:
 Enter choice (1-5): 3
 
 [PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
-SQL: WHERE (a || b)
+Error: [E008] at $.merge (operator: merge): expected predicate expression, got value expression
+
+[PostgreSQL] jsonlogic> :value
+Expression mode: value
+
+[PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
+SQL: (a || b)
 ```
 
 The prompt shows the current dialect in brackets.
@@ -67,14 +76,14 @@ Use `:params` to toggle parameterized query mode. When enabled, the output uses 
 Parameterized mode: ON (output uses bind placeholders)
 
 [BigQuery] jsonlogic> {"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}
-SQL:    WHERE (status = @p1 AND amount > @p2)
+SQL:    (status = @p1 AND amount > @p2)
 Params: [{p1: "active"}, {p2: 1000}]
 
 [BigQuery] jsonlogic> :params
 Parameterized mode: OFF (output uses inlined literals)
 
 [BigQuery] jsonlogic> {"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}
-SQL: WHERE (status = 'active' AND amount > 1000)
+SQL: (status = 'active' AND amount > 1000)
 ```
 
 Placeholder styles vary by dialect (`@p1` for BigQuery/Spanner/ClickHouse, `$1` for PostgreSQL/DuckDB). See [Parameterized Queries](parameterized-queries.md) for details.
@@ -98,7 +107,7 @@ echo '{"and": [...very large JSON...]}' > input.json
 
 # In the REPL, load it with :file
 [BigQuery] jsonlogic> :file input.json
-SQL: WHERE (...)
+SQL: (...)
 ```
 
 ## Loading a Schema
@@ -122,15 +131,15 @@ Example JSON Logic expressions:
 
 1. Simple Comparison
    JSON: {">": [{"var": "amount"}, 1000]}
-   SQL:  WHERE amount > 1000
+   SQL:  amount > 1000
 
 2. Equality Check
    JSON: {"==": [{"var": "status"}, "active"]}
-   SQL:  WHERE status = 'active'
+   SQL:  status = 'active'
 
 3. Logical AND
    JSON: {"and": [{">": [{"var": "a"}, 10]}, {"<": [{"var": "b"}, 20]}]}
-   SQL:  WHERE (a > 10 AND b < 20)
+   SQL:  (a > 10 AND b < 20)
 
 ...
 ```
