@@ -241,6 +241,16 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 		t.Run(d.name, func(t *testing.T) {
 			config := NewOperatorConfig(d.dialect, nil)
 			op := NewArrayOperator(config)
+			literal123 := "[1, 2, 3]"
+			literal1234 := "[1, 2, 3, 4]"
+			literal12345 := "[1, 2, 3, 4, 5]"
+			literal10s := "[10, 20, 30]"
+			if d.dialect == dialect.DialectPostgreSQL {
+				literal123 = "ARRAY[1, 2, 3]"
+				literal1234 = "ARRAY[1, 2, 3, 4]"
+				literal12345 = "ARRAY[1, 2, 3, 4, 5]"
+				literal10s = "ARRAY[10, 20, 30]"
+			}
 
 			tests := []struct {
 				name     string
@@ -254,7 +264,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					name:     "map with literal array",
 					operator: "map",
 					args:     []any{[]any{1, 2, 3}, map[string]any{"+": []any{map[string]any{"var": "item"}, 1}}},
-					expected: "ARRAY(SELECT (elem + 1) FROM UNNEST([1, 2, 3]) AS elem)",
+					expected: fmt.Sprintf("ARRAY(SELECT (elem + 1) FROM UNNEST(%s) AS elem)", literal123),
 					hasError: false,
 				},
 				{
@@ -277,7 +287,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					name:     "filter with literal array",
 					operator: "filter",
 					args:     []any{[]any{1, 2, 3, 4, 5}, map[string]any{">": []any{map[string]any{"var": "item"}, 2}}},
-					expected: "ARRAY(SELECT elem FROM UNNEST([1, 2, 3, 4, 5]) AS elem WHERE elem > 2)",
+					expected: fmt.Sprintf("ARRAY(SELECT elem FROM UNNEST(%s) AS elem WHERE elem > 2)", literal12345),
 					hasError: false,
 				},
 				{
@@ -300,7 +310,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					name:     "reduce with SUM pattern",
 					operator: "reduce",
 					args:     []any{[]any{1, 2, 3, 4}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 0},
-					expected: "0 + COALESCE((SELECT SUM(elem) FROM UNNEST([1, 2, 3, 4]) AS elem), 0)",
+					expected: fmt.Sprintf("0 + COALESCE((SELECT SUM(elem) FROM UNNEST(%s) AS elem), 0)", literal1234),
 					hasError: false,
 				},
 				{
@@ -335,7 +345,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					name:     "reduce with non-zero initial value",
 					operator: "reduce",
 					args:     []any{[]any{10, 20, 30}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 100},
-					expected: "100 + COALESCE((SELECT SUM(elem) FROM UNNEST([10, 20, 30]) AS elem), 0)",
+					expected: fmt.Sprintf("100 + COALESCE((SELECT SUM(elem) FROM UNNEST(%s) AS elem), 0)", literal10s),
 					hasError: false,
 				},
 				// Reduce with current.field patterns (accessing object field)

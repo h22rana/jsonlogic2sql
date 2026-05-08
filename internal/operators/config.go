@@ -2,6 +2,7 @@ package operators
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 	"github.com/h22rana/jsonlogic2sql/internal/params"
@@ -111,6 +112,18 @@ func (c *OperatorConfig) ArrayLengthFunc(expr string) string {
 		return fmt.Sprintf("ARRAY_LENGTH(%s)", expr)
 	}
 	return fmt.Sprintf("ARRAY_LENGTH(%s)", expr)
+}
+
+// ArrayLiteral renders a SQL array/list literal for the configured dialect.
+func (c *OperatorConfig) ArrayLiteral(elements []string) string {
+	body := strings.Join(elements, ", ")
+	switch c.GetDialect() {
+	case dialect.DialectPostgreSQL:
+		return fmt.Sprintf("ARRAY[%s]", body)
+	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectDuckDB, dialect.DialectClickHouse:
+		return fmt.Sprintf("[%s]", body)
+	}
+	return fmt.Sprintf("[%s]", body)
 }
 
 // SetExpressionParser sets the callback for parsing nested expressions.

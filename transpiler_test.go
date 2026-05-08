@@ -1870,6 +1870,14 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create transpiler: %v", err)
 			}
+			literal123 := "[1, 2, 3]"
+			literal12345 := "[1, 2, 3, 4, 5]"
+			literal10s := "[10, 20, 30]"
+			if d.dialect == DialectPostgreSQL {
+				literal123 = "ARRAY[1, 2, 3]"
+				literal12345 = "ARRAY[1, 2, 3, 4, 5]"
+				literal10s = "ARRAY[10, 20, 30]"
+			}
 
 			tests := []struct {
 				name     string
@@ -1890,7 +1898,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				{
 					name:     "map with literal array",
 					input:    `{"map": [[1, 2, 3], {"+": [{"var": "item"}, 10]}]}`,
-					expected: "ARRAY(SELECT (elem + 10) FROM UNNEST([1, 2, 3]) AS elem)",
+					expected: fmt.Sprintf("ARRAY(SELECT (elem + 10) FROM UNNEST(%s) AS elem)", literal123),
 				},
 
 				// Filter operator tests
@@ -1907,7 +1915,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				{
 					name:     "filter with literal array",
 					input:    `{"filter": [[1, 2, 3, 4, 5], {">=": [{"var": "item"}, 3]}]}`,
-					expected: "ARRAY(SELECT elem FROM UNNEST([1, 2, 3, 4, 5]) AS elem WHERE elem >= 3)",
+					expected: fmt.Sprintf("ARRAY(SELECT elem FROM UNNEST(%s) AS elem WHERE elem >= 3)", literal12345),
 				},
 
 				// Reduce operator tests - SUM pattern
@@ -1924,7 +1932,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				{
 					name:     "reduce with literal array and SUM pattern",
 					input:    `{"reduce": [[10, 20, 30], {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`,
-					expected: "0 + COALESCE((SELECT SUM(elem) FROM UNNEST([10, 20, 30]) AS elem), 0)",
+					expected: fmt.Sprintf("0 + COALESCE((SELECT SUM(elem) FROM UNNEST(%s) AS elem), 0)", literal10s),
 				},
 
 				// Reduce operator tests - MIN pattern

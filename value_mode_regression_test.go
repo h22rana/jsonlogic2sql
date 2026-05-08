@@ -211,6 +211,98 @@ func TestTranspileValue_CatStringifiesBuiltInPredicate(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
+	tests := []struct {
+		name      string
+		logic     string
+		wantSQL   func(Dialect) string
+		wantParam func(Dialect) string
+		params    []QueryParam
+	}{
+		{
+			name:  "root array literal",
+			logic: `[1,2]`,
+			wantSQL: func(d Dialect) string {
+				if d == DialectPostgreSQL {
+					return "ARRAY[1, 2]"
+				}
+				return "[1, 2]"
+			},
+			wantParam: func(d Dialect) string {
+				if d == DialectPostgreSQL {
+					return fmt.Sprintf("ARRAY[%s, %s]", testPlaceholder(d, 1), testPlaceholder(d, 2))
+				}
+				return fmt.Sprintf("[%s, %s]", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(2)}},
+		},
+		{
+			name:  "map source array literal",
+			logic: `{"map":[[1,2],{"+":[{"var":"item"},1]}]}`,
+			wantSQL: func(d Dialect) string {
+				switch d {
+				case DialectPostgreSQL:
+					return "ARRAY(SELECT (elem + 1) FROM UNNEST(ARRAY[1, 2]) AS elem)"
+				case DialectClickHouse:
+					return "arrayMap(elem -> (elem + 1), [1, 2])"
+				default:
+					return "ARRAY(SELECT (elem + 1) FROM UNNEST([1, 2]) AS elem)"
+				}
+			},
+			wantParam: func(d Dialect) string {
+				switch d {
+				case DialectPostgreSQL:
+					return fmt.Sprintf("ARRAY(SELECT (elem + %s) FROM UNNEST(ARRAY[%s, %s]) AS elem)",
+						testPlaceholder(d, 3), testPlaceholder(d, 1), testPlaceholder(d, 2))
+				case DialectClickHouse:
+					return fmt.Sprintf("arrayMap(elem -> (elem + %s), [%s, %s])",
+						testPlaceholder(d, 3), testPlaceholder(d, 1), testPlaceholder(d, 2))
+				default:
+					return fmt.Sprintf("ARRAY(SELECT (elem + %s) FROM UNNEST([%s, %s]) AS elem)",
+						testPlaceholder(d, 3), testPlaceholder(d, 1), testPlaceholder(d, 2))
+				}
+			},
+			params: []QueryParam{
+				{Name: "p1", Value: float64(1)},
+				{Name: "p2", Value: float64(2)},
+				{Name: "p3", Value: float64(1)},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if want := tt.wantSQL(d); got != want {
+						t.Fatalf("TranspileValue() = %q, want %q", got, want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.params) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_CatStringifiesCustomPredicate(t *testing.T) {
 	tr, err := NewTranspiler(DialectBigQuery)
 	if err != nil {
@@ -383,9 +475,9 @@ func TestTranspileParameterizedValue_TruthinessDoesNotLeakSkippedParams(t *testi
 			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(0)}, {Name: "p3", Value: float64(2)}},
 		},
 		{
-			name:    "speculative predicate parse rollback before value fallback",
+			name:    "predicate condition with boolean constant keeps placeholder references",
 			logic:   `{"if":[{"or":[{"==":[{"var":"status"},"active"]},true]},"yes","no"]}`,
-			wantSQL: "CASE WHEN CASE WHEN status = @p1 THEN status = @p1 ELSE TRUE END IS TRUE THEN @p2 ELSE @p3 END",
+			wantSQL: "CASE WHEN (status = @p1 OR TRUE) THEN @p2 ELSE @p3 END",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: "active"},
 				{Name: "p2", Value: "yes"},

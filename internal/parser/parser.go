@@ -177,6 +177,21 @@ func predicateResult(sql string) expressionResult {
 	return expressionResult{OperatorResult: operators.PredicateSQL(sql)}
 }
 
+func booleanPredicateResult(value bool) expressionResult {
+	if value {
+		return expressionResult{
+			OperatorResult: operators.PredicateSQL("TRUE"),
+			truthKnown:     true,
+			truthy:         true,
+		}
+	}
+	return expressionResult{
+		OperatorResult: operators.PredicateSQL("FALSE"),
+		truthKnown:     true,
+		truthy:         false,
+	}
+}
+
 func valueResult(sql string, typ operators.ExpressionType) expressionResult {
 	return expressionResult{OperatorResult: operators.ValueSQL(sql, typ)}
 }
@@ -275,7 +290,7 @@ func (p *Parser) arrayLiteralToSQL(arr []interface{}) (string, error) {
 		}
 		parts[i] = sql
 	}
-	return fmt.Sprintf("[%s]", strings.Join(parts, ", ")), nil
+	return p.config.ArrayLiteral(parts), nil
 }
 
 func (p *Parser) arrayLiteralToSQLParam(arr []interface{}, pc *params.ParamCollector) (string, error) {
@@ -287,7 +302,7 @@ func (p *Parser) arrayLiteralToSQLParam(arr []interface{}, pc *params.ParamColle
 		}
 		parts[i] = sql
 	}
-	return fmt.Sprintf("[%s]", strings.Join(parts, ", ")), nil
+	return p.config.ArrayLiteral(parts), nil
 }
 
 func literalTypeAndTruth(value interface{}) (operators.ExpressionType, bool, bool) {
@@ -441,6 +456,9 @@ func (p *Parser) parsePrimitiveValueParam(expr interface{}, path string, pc *par
 }
 
 func (p *Parser) parseExpressionPredicate(expr interface{}, path string) (expressionResult, error) {
+	if b, ok := expr.(bool); ok {
+		return booleanPredicateResult(b), nil
+	}
 	if p.isPrimitive(expr) {
 		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, "predicate", "value")
 	}
@@ -692,21 +710,32 @@ func (p *Parser) parsePredicateLogical(operator string, args []interface{}, path
 	if len(args) == 0 {
 		return expressionResult{}, tperrors.NewInsufficientArgs(operator, path, 1, 0)
 	}
-	parts := make([]string, len(args))
-	joiner := " AND "
-	if operator == "or" {
-		joiner = " OR "
-	}
+	parts := make([]string, 0, len(args))
 	for i, arg := range args {
 		argPath := tperrors.BuildArrayPath(path, i)
 		res, err := p.parseExpressionPredicate(arg, argPath)
 		if err != nil {
 			return expressionResult{}, err
 		}
-		parts[i] = res.SQL
+		if res.truthKnown {
+			if operator == "and" && res.truthy {
+				continue
+			}
+			if operator == "or" && !res.truthy {
+				continue
+			}
+		}
+		parts = append(parts, res.SQL)
+	}
+	if len(parts) == 0 {
+		return booleanPredicateResult(operator == "and"), nil
 	}
 	if len(parts) == 1 {
 		return predicateResult(parts[0]), nil
+	}
+	joiner := " AND "
+	if operator == "or" {
+		joiner = " OR "
 	}
 	return predicateResult(fmt.Sprintf("(%s)", strings.Join(parts, joiner))), nil
 }
@@ -772,10 +801,7 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 
 func (p *Parser) parsePredicateIfOperand(expr interface{}, path string) (expressionResult, error) {
 	if b, ok := expr.(bool); ok {
-		if b {
-			return predicateResult("TRUE"), nil
-		}
-		return predicateResult("FALSE"), nil
+		return booleanPredicateResult(b), nil
 	}
 	return p.parseExpressionPredicate(expr, path)
 }
@@ -1320,6 +1346,9 @@ func (p *Parser) ParseValueParameterized(logic interface{}) (string, []params.Qu
 }
 
 func (p *Parser) parseExpressionPredicateParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
+	if b, ok := expr.(bool); ok {
+		return booleanPredicateResult(b), nil
+	}
 	if p.isPrimitive(expr) {
 		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, "predicate", "value")
 	}
@@ -1577,20 +1606,31 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 	if len(args) == 0 {
 		return expressionResult{}, tperrors.NewInsufficientArgs(operator, path, 1, 0)
 	}
-	parts := make([]string, len(args))
-	joiner := " AND "
-	if operator == "or" {
-		joiner = " OR "
-	}
+	parts := make([]string, 0, len(args))
 	for i, arg := range args {
 		res, err := p.parseExpressionPredicateParam(arg, tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
-		parts[i] = res.SQL
+		if res.truthKnown {
+			if operator == "and" && res.truthy {
+				continue
+			}
+			if operator == "or" && !res.truthy {
+				continue
+			}
+		}
+		parts = append(parts, res.SQL)
+	}
+	if len(parts) == 0 {
+		return booleanPredicateResult(operator == "and"), nil
 	}
 	if len(parts) == 1 {
 		return predicateResult(parts[0]), nil
+	}
+	joiner := " AND "
+	if operator == "or" {
+		joiner = " OR "
 	}
 	return predicateResult(fmt.Sprintf("(%s)", strings.Join(parts, joiner))), nil
 }
@@ -1645,10 +1685,7 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 
 func (p *Parser) parsePredicateIfOperandParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
 	if b, ok := expr.(bool); ok {
-		if b {
-			return predicateResult("TRUE"), nil
-		}
-		return predicateResult("FALSE"), nil
+		return booleanPredicateResult(b), nil
 	}
 	return p.parseExpressionPredicateParam(expr, path, pc)
 }

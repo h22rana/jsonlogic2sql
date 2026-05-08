@@ -1032,11 +1032,18 @@ func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string
 			}
 			elements[i] = elementSQL
 		}
-		return fmt.Sprintf("[%s]", strings.Join(elements, ", ")), nil
+		return a.arrayLiteral(elements), nil
 	}
 
 	// Handle primitive values
 	return a.dataOp.valueToSQL(value)
+}
+
+func (a *ArrayOperator) arrayLiteral(elements []string) string {
+	if a.config != nil {
+		return a.config.ArrayLiteral(elements)
+	}
+	return fmt.Sprintf("[%s]", strings.Join(elements, ", "))
 }
 
 func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allowAccumulator bool, path string) (string, error) {
@@ -1959,7 +1966,7 @@ func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.Para
 			}
 			elements[i] = elementSQL
 		}
-		return fmt.Sprintf("[%s]", strings.Join(elements, ", ")), nil
+		return a.arrayLiteral(elements), nil
 	}
 
 	return a.dataOp.valueToSQLParam(value, pc)

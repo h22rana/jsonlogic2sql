@@ -67,6 +67,97 @@ func TestTranspileCondition_PredicateIfAcceptsBooleanConstants(t *testing.T) {
 	}
 }
 
+func TestTranspileCondition_BooleanConstantsArePredicates(t *testing.T) {
+	tests := []struct {
+		name      string
+		logic     string
+		want      func(Dialect) string
+		wantParam func(Dialect) string
+		params    []QueryParam
+	}{
+		{
+			name:  "root true",
+			logic: `true`,
+			want: func(Dialect) string {
+				return "TRUE"
+			},
+			wantParam: func(Dialect) string {
+				return "TRUE"
+			},
+		},
+		{
+			name:  "and skips true constant",
+			logic: `{"and":[true,{">":[{"var":"x"},0]}]}`,
+			want: func(Dialect) string {
+				return "x > 0"
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:  "or skips false constant",
+			logic: `{"or":[false,{">":[{"var":"x"},0]}]}`,
+			want: func(Dialect) string {
+				return "x > 0"
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:  "array predicate true constant",
+			logic: `{"some":[{"var":"items"},true]}`,
+			want: func(d Dialect) string {
+				if d == DialectClickHouse {
+					return "arrayExists(elem -> TRUE, items)"
+				}
+				return "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE TRUE)"
+			},
+			wantParam: func(d Dialect) string {
+				if d == DialectClickHouse {
+					return "arrayExists(elem -> TRUE, items)"
+				}
+				return "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE TRUE)"
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if want := tt.want(d); got != want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.params) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_RejectsValueOperandsInPredicateContexts(t *testing.T) {
 	tests := []struct {
 		name  string
