@@ -85,6 +85,40 @@ func TestTranspileValue_IfConditionsUseTruthiness(t *testing.T) {
 	if got != want {
 		t.Fatalf("TranspileValue() nested string if = %q, want %q", got, want)
 	}
+
+	got, err = tr.TranspileValue(`{"cat":[{"if":[{"var":"flag"},true,false]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileValue() nested boolean if error = %v", err)
+	}
+	want = "CONCAT(CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) THEN 'true' ELSE 'false' END)"
+	if got != want {
+		t.Fatalf("TranspileValue() nested boolean if = %q, want %q", got, want)
+	}
+}
+
+func TestTranspileValue_CatStringifiesCustomPredicate(t *testing.T) {
+	tr, err := NewTranspiler(DialectBigQuery)
+	if err != nil {
+		t.Fatalf("NewTranspiler() error = %v", err)
+	}
+	err = tr.RegisterOperatorFunc("isPositive", func(_ string, args []OperatorArg) (OperatorResult, error) {
+		if len(args) != 1 {
+			return OperatorResult{}, fmt.Errorf("isPositive requires exactly 1 argument")
+		}
+		return PredicateSQL(fmt.Sprintf("%s > 0", args[0].SQL)), nil
+	})
+	if err != nil {
+		t.Fatalf("RegisterOperatorFunc() error = %v", err)
+	}
+
+	got, err := tr.TranspileValue(`{"cat":[{"isPositive":[{"var":"amount"}]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileValue() error = %v", err)
+	}
+	want := "CONCAT(CASE WHEN amount > 0 THEN 'true' ELSE 'false' END)"
+	if got != want {
+		t.Fatalf("TranspileValue() = %q, want %q", got, want)
+	}
 }
 
 func TestTranspileParameterizedValue_NestedValueLogicalsRollbackSkippedParams(t *testing.T) {
@@ -221,6 +255,12 @@ func TestTranspileParameterizedValue_TruthinessDoesNotLeakSkippedParams(t *testi
 			logic:      `{"!":"x"}`,
 			wantSQL:    "NOT (TRUE)",
 			wantParams: []QueryParam{},
+		},
+		{
+			name:       "nested boolean if in cat stringifies without params",
+			logic:      `{"cat":[{"if":[{"var":"flag"},true,false]}]}`,
+			wantSQL:    "CONCAT(CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) THEN 'true' ELSE 'false' END)",
+			wantParams: nil,
 		},
 	}
 

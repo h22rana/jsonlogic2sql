@@ -67,12 +67,31 @@ type ProcessedValue struct {
 	// This lets comparison operators preserve field-to-field semantics for
 	// array-scoped vars without re-validating internal aliases as schema fields.
 	IsField bool
+	// HasExpressionInfo indicates that Kind and Type carry parser-derived
+	// expression metadata for this SQL value.
+	HasExpressionInfo bool
+	// Kind identifies whether Value is a value expression or predicate.
+	Kind ExpressionKind
+	// Type identifies the coarse SQL value type when known.
+	Type ExpressionType
 }
 
 // SQLResult creates a ProcessedValue marked as SQL.
 // Use this when returning generated SQL expressions from operators.
 func SQLResult(sql string) ProcessedValue {
 	return ProcessedValue{Value: sql, IsSQL: true}
+}
+
+// TypedSQLResult creates a ProcessedValue marked as SQL with expression
+// metadata preserved from the parser.
+func TypedSQLResult(sql string, kind ExpressionKind, typ ExpressionType) ProcessedValue {
+	return ProcessedValue{
+		Value:             sql,
+		IsSQL:             true,
+		HasExpressionInfo: true,
+		Kind:              kind,
+		Type:              typ,
+	}
 }
 
 // SQLFieldResult creates a ProcessedValue marked as a SQL field operand.

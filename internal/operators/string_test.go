@@ -73,7 +73,7 @@ func TestStringOperator_ToSQL(t *testing.T) {
 					},
 				},
 			},
-			expected: "CONCAT(CASE WHEN x > 0 THEN 'a' WHEN y < 0 THEN 'b' END = 'b')",
+			expected: "CONCAT(CASE WHEN (CASE WHEN x > 0 THEN 'a' WHEN y < 0 THEN 'b' END = 'b') THEN 'true' ELSE 'false' END)",
 			hasError: false,
 		},
 		{
@@ -1119,7 +1119,7 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ToSQLParam: %v", err)
 		}
-		wantSQL := "CONCAT(CASE WHEN x > @p1 THEN @p2 WHEN y < @p3 THEN @p4 END = @p5)"
+		wantSQL := "CONCAT(CASE WHEN (CASE WHEN x > @p1 THEN @p2 WHEN y < @p3 THEN @p4 END = @p5) THEN 'true' ELSE 'false' END)"
 		if sql != wantSQL {
 			t.Errorf("SQL = %q, want %q", sql, wantSQL)
 		}

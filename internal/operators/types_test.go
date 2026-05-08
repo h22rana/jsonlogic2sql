@@ -63,6 +63,25 @@ func TestSQLFieldResult(t *testing.T) {
 	}
 }
 
+func TestTypedSQLResult(t *testing.T) {
+	result := TypedSQLResult("amount > 0", ExpressionKindPredicate, ExpressionTypeBoolean)
+	if result.Value != "amount > 0" {
+		t.Errorf("TypedSQLResult().Value = %q, want %q", result.Value, "amount > 0")
+	}
+	if !result.IsSQL {
+		t.Error("TypedSQLResult().IsSQL = false, want true")
+	}
+	if !result.HasExpressionInfo {
+		t.Error("TypedSQLResult().HasExpressionInfo = false, want true")
+	}
+	if result.Kind != ExpressionKindPredicate {
+		t.Errorf("TypedSQLResult().Kind = %v, want %v", result.Kind, ExpressionKindPredicate)
+	}
+	if result.Type != ExpressionTypeBoolean {
+		t.Errorf("TypedSQLResult().Type = %v, want %v", result.Type, ExpressionTypeBoolean)
+	}
+}
+
 func TestLiteralResult(t *testing.T) {
 	tests := []struct {
 		name    string

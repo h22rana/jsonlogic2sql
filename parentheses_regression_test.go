@@ -21,7 +21,7 @@ func TestTranspile_ParenthesesNormalizationTrickyCases(t *testing.T) {
 			name:  "concat comparison with quoted closing parenthesis",
 			logic: `{"cat":[{"==":[{"var":"amount"},")"]}]}`,
 			value: true,
-			want:  "CONCAT(amount = ')')",
+			want:  "CONCAT(CASE WHEN amount = ')' THEN 'true' ELSE 'false' END)",
 		},
 		{
 			name:  "not preserves nested and precedence inside or",
@@ -65,7 +65,7 @@ func TestTranspileParameterized_ParenthesesNormalizationTrickyCases(t *testing.T
 	if err != nil {
 		t.Fatalf("TranspileParameterizedValue() error = %v", err)
 	}
-	if wantSQL := "CONCAT(amount = @p1)"; gotSQL != wantSQL {
+	if wantSQL := "CONCAT(CASE WHEN amount = @p1 THEN 'true' ELSE 'false' END)"; gotSQL != wantSQL {
 		t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", gotSQL, wantSQL)
 	}
 	if wantParams := []QueryParam{{Name: "p1", Value: ")"}}; !reflect.DeepEqual(gotParams, wantParams) {
@@ -88,5 +88,38 @@ func TestTranspileParameterized_ParenthesesNormalizationTrickyCases(t *testing.T
 	}
 	if !reflect.DeepEqual(gotParams, wantParams) {
 		t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+	}
+}
+
+func TestTranspileValue_CatComparisonStringifiesSchemaAwareBoolean(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+	tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+		Dialect: DialectBigQuery,
+		Schema:  schema,
+	})
+	if err != nil {
+		t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+	}
+
+	logic := `{"cat":[{"==":[{"var":"amount"},")"]}]}`
+	gotSQL, err := tr.TranspileValue(logic)
+	if err != nil {
+		t.Fatalf("TranspileValue() error = %v", err)
+	}
+	if wantSQL := "CONCAT('false')"; gotSQL != wantSQL {
+		t.Fatalf("TranspileValue() SQL = %q, want %q", gotSQL, wantSQL)
+	}
+
+	gotParamSQL, gotParams, err := tr.TranspileParameterizedValue(logic)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedValue() error = %v", err)
+	}
+	if wantSQL := "CONCAT('false')"; gotParamSQL != wantSQL {
+		t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", gotParamSQL, wantSQL)
+	}
+	if len(gotParams) != 0 {
+		t.Fatalf("params = %#v, want none", gotParams)
 	}
 }

@@ -481,7 +481,7 @@ func TestTranspile_StringNestedEqualitySemanticsWithSchema(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TranspileCondition() error = %v", err)
 			}
-			if wantSQL := "CONCAT(FALSE)"; gotSQL != wantSQL {
+			if wantSQL := "CONCAT('false')"; gotSQL != wantSQL {
 				t.Fatalf("TranspileCondition() SQL = %q, want %q", gotSQL, wantSQL)
 			}
 
@@ -489,7 +489,7 @@ func TestTranspile_StringNestedEqualitySemanticsWithSchema(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 			}
-			if wantSQL := "CONCAT(FALSE)"; gotParamSQL != wantSQL {
+			if wantSQL := "CONCAT('false')"; gotParamSQL != wantSQL {
 				t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", gotParamSQL, wantSQL)
 			}
 			assertParams(t, gotParams, nil)
@@ -508,7 +508,7 @@ func TestTranspile_StringNestedEqualityNoSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileCondition() error = %v", err)
 	}
-	if wantSQL := "CONCAT(amount = 'abc')"; gotSQL != wantSQL {
+	if wantSQL := "CONCAT(CASE WHEN amount = 'abc' THEN 'true' ELSE 'false' END)"; gotSQL != wantSQL {
 		t.Fatalf("TranspileCondition() SQL = %q, want %q", gotSQL, wantSQL)
 	}
 
@@ -516,7 +516,7 @@ func TestTranspile_StringNestedEqualityNoSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
-	if wantSQL := "CONCAT(amount = @p1)"; gotParamSQL != wantSQL {
+	if wantSQL := "CONCAT(CASE WHEN amount = @p1 THEN 'true' ELSE 'false' END)"; gotParamSQL != wantSQL {
 		t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", gotParamSQL, wantSQL)
 	}
 	assertParams(t, gotParams, []QueryParam{{Name: "p1", Value: "abc"}})

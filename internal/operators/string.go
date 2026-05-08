@@ -1,6 +1,7 @@
 package operators
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -85,6 +86,118 @@ func (s *StringOperator) extractFieldName(varName interface{}) string {
 	return ""
 }
 
+func (s *StringOperator) inferExpressionShape(value interface{}) (ExpressionKind, ExpressionType) {
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.IsSQL {
+			if pv.HasExpressionInfo {
+				return pv.Kind, pv.Type
+			}
+			return ExpressionKindValue, ExpressionTypeUnknown
+		}
+		return s.inferExpressionShape(pv.Value)
+	}
+
+	if typ, ok := primitiveExpressionType(value); ok {
+		return ExpressionKindValue, typ
+	}
+
+	if expr, ok := value.(map[string]interface{}); ok && len(expr) == 1 {
+		for op, args := range expr {
+			switch op {
+			case OpVar:
+				return ExpressionKindValue, s.varExpressionType(args)
+			case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", OpAll, OpSome, OpNone:
+				return ExpressionKindPredicate, ExpressionTypeBoolean
+			case "and", "or":
+				return ExpressionKindPredicate, ExpressionTypeBoolean
+			case "+", "-", "*", "/", "%", "max", "min":
+				return ExpressionKindValue, ExpressionTypeNumber
+			case "cat", "substr":
+				return ExpressionKindValue, ExpressionTypeString
+			case "if":
+				return ExpressionKindValue, s.inferIfExpressionType(args)
+			}
+		}
+	}
+
+	return ExpressionKindValue, ExpressionTypeUnknown
+}
+
+func (s *StringOperator) inferIfExpressionType(args interface{}) ExpressionType {
+	arr, ok := args.([]interface{})
+	if !ok || len(arr) < 2 {
+		return ExpressionTypeUnknown
+	}
+
+	var result ExpressionType
+	hasResult := false
+	for i := 1; i < len(arr); i += 2 {
+		_, typ := s.inferExpressionShape(arr[i])
+		result = mergeInferredTypes(result, typ, hasResult)
+		hasResult = true
+	}
+	if len(arr)%2 == 0 {
+		result = mergeInferredTypes(result, ExpressionTypeNull, hasResult)
+		hasResult = true
+	}
+	if !hasResult {
+		return ExpressionTypeUnknown
+	}
+	return result
+}
+
+func mergeInferredTypes(current, next ExpressionType, hasCurrent bool) ExpressionType {
+	if !hasCurrent {
+		return next
+	}
+	if current == ExpressionTypeNull {
+		return next
+	}
+	if next == ExpressionTypeNull {
+		return current
+	}
+	if current == next {
+		return current
+	}
+	return ExpressionTypeUnknown
+}
+
+func primitiveExpressionType(value interface{}) (ExpressionType, bool) {
+	switch value.(type) {
+	case string:
+		return ExpressionTypeString, true
+	case bool:
+		return ExpressionTypeBoolean, true
+	case nil:
+		return ExpressionTypeNull, true
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64, json.Number:
+		return ExpressionTypeNumber, true
+	default:
+		return ExpressionTypeUnknown, false
+	}
+}
+
+func (s *StringOperator) varExpressionType(args interface{}) ExpressionType {
+	fieldName := s.extractFieldName(args)
+	if fieldName == "" || s.schema() == nil {
+		return ExpressionTypeUnknown
+	}
+	switch {
+	case s.schema().IsBooleanType(fieldName):
+		return ExpressionTypeBoolean
+	case s.schema().IsStringType(fieldName), s.schema().IsEnumType(fieldName):
+		return ExpressionTypeString
+	case s.schema().IsNumericType(fieldName):
+		return ExpressionTypeNumber
+	case s.schema().IsArrayType(fieldName):
+		return ExpressionTypeArray
+	default:
+		return ExpressionTypeUnknown
+	}
+}
+
 // ToSQL converts a string operation to SQL.
 func (s *StringOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	if len(args) == 0 {
@@ -116,15 +229,45 @@ func (s *StringOperator) handleConcatenation(args []interface{}) (string, error)
 
 	operands := make([]string, len(args))
 	for i, arg := range args {
-		operand, err := s.valueToSQL(arg)
+		operand, err := s.valueToSQLForConcat(arg)
 		if err != nil {
 			return "", fmt.Errorf("invalid concatenation argument %d: %w", i, err)
 		}
-		operands[i] = StripRedundantOuterParens(operand)
+		operands[i] = operand
 	}
 
 	// Use CONCAT function for SQL concatenation
 	return fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), nil
+}
+
+func (s *StringOperator) valueToSQLForConcat(value interface{}) (string, error) {
+	sql, err := s.valueToSQL(value)
+	if err != nil {
+		return "", err
+	}
+	kind, typ := s.inferExpressionShape(value)
+	return s.stringifyConcatSQL(sql, kind, typ), nil
+}
+
+func (s *StringOperator) stringifyConcatSQL(sql string, kind ExpressionKind, typ ExpressionType) string {
+	if kind == ExpressionKindPredicate || typ == ExpressionTypeBoolean {
+		return s.booleanToStringSQL(sql)
+	}
+	return StripRedundantOuterParens(sql)
+}
+
+func (s *StringOperator) booleanToStringSQL(sql string) string {
+	switch strings.ToUpper(strings.TrimSpace(sql)) {
+	case "TRUE":
+		return "'true'"
+	case "FALSE":
+		return "'false'"
+	}
+	condition := StripRedundantOuterParens(sql)
+	if strings.HasPrefix(condition, "CASE ") {
+		condition = fmt.Sprintf("(%s)", condition)
+	}
+	return fmt.Sprintf("CASE WHEN %s THEN 'true' ELSE 'false' END", condition)
 }
 
 // handleSubstring converts substr operator to SQL.
@@ -533,13 +676,22 @@ func (s *StringOperator) handleConcatenationParam(args []interface{}, pc *params
 	}
 	operands := make([]string, len(args))
 	for i, arg := range args {
-		operand, err := s.valueToSQLParam(arg, pc)
+		operand, err := s.valueToSQLForConcatParam(arg, pc)
 		if err != nil {
 			return "", fmt.Errorf("invalid concatenation argument %d: %w", i, err)
 		}
-		operands[i] = StripRedundantOuterParens(operand)
+		operands[i] = operand
 	}
 	return fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), nil
+}
+
+func (s *StringOperator) valueToSQLForConcatParam(value interface{}, pc *params.ParamCollector) (string, error) {
+	sql, err := s.valueToSQLParam(value, pc)
+	if err != nil {
+		return "", err
+	}
+	kind, typ := s.inferExpressionShape(value)
+	return s.stringifyConcatSQL(sql, kind, typ), nil
 }
 
 // handleSubstringParam is the parameterized variant of handleSubstring. Keep in sync.
