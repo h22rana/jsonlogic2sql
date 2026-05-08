@@ -752,6 +752,12 @@ func (p *Parser) parsePredicateLogical(operator string, args []interface{}, path
 			if operator == "or" && !res.truthy {
 				continue
 			}
+			if operator == "and" && !res.truthy {
+				return booleanPredicateResult(false), nil
+			}
+			if operator == "or" && res.truthy {
+				return booleanPredicateResult(true), nil
+			}
 		}
 		parts = append(parts, res.SQL)
 	}
@@ -1653,6 +1659,7 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 	if len(args) == 0 {
 		return expressionResult{}, tperrors.NewInsufficientArgs(operator, path, 1, 0)
 	}
+	checkpoint := pc.Checkpoint()
 	parts := make([]string, 0, len(args))
 	for i, arg := range args {
 		res, err := p.parseExpressionPredicateParam(arg, tperrors.BuildArrayPath(path, i), pc)
@@ -1665,6 +1672,14 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 			}
 			if operator == "or" && !res.truthy {
 				continue
+			}
+			if operator == "and" && !res.truthy {
+				pc.Restore(checkpoint)
+				return booleanPredicateResult(false), nil
+			}
+			if operator == "or" && res.truthy {
+				pc.Restore(checkpoint)
+				return booleanPredicateResult(true), nil
 			}
 		}
 		parts = append(parts, res.SQL)

@@ -1065,10 +1065,9 @@ func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string
 
 	// Handle arrays
 	if arr, ok := value.([]interface{}); ok {
-		// Convert array elements to SQL literals
 		elements := make([]string, len(arr))
 		for i, elem := range arr {
-			elementSQL, err := a.dataOp.valueToSQL(elem)
+			elementSQL, err := a.valueExpressionToSQLWithContextAndPath(elem, false, tperrors.BuildArrayPath(path, i))
 			if err != nil {
 				return "", fmt.Errorf("invalid array element %d: %w", i, err)
 			}
@@ -2007,7 +2006,7 @@ func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.Para
 	if arr, ok := value.([]interface{}); ok {
 		elements := make([]string, len(arr))
 		for i, elem := range arr {
-			elementSQL, err := a.dataOp.valueToSQLParam(elem, pc)
+			elementSQL, err := a.valueExpressionToSQLParamWithContextAndPath(elem, pc, false, tperrors.BuildArrayPath(path, i))
 			if err != nil {
 				return "", fmt.Errorf("invalid array element %d: %w", i, err)
 			}

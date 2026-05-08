@@ -158,6 +158,78 @@ func TestTranspileCondition_BooleanConstantsArePredicates(t *testing.T) {
 	}
 }
 
+func TestTranspileCondition_DecisiveBooleanConstantsShortCircuit(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "x", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "and false skips later schema error",
+			logic: `{"and":[false,{">":[{"var":"missing"},1]}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "or true skips later schema error",
+			logic: `{"or":[true,{">":[{"var":"missing"},1]}]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "and false after dynamic operand rolls back params",
+			logic: `{"and":[{">":[{"var":"x"},1]},false,{">":[{"var":"missing"},1]}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "or true after dynamic operand rolls back params",
+			logic: `{"or":[{">":[{"var":"x"},1]},true,{">":[{"var":"missing"},1]}]}`,
+			want:  "TRUE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParam != tt.want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.want)
+					}
+					if len(gotParams) != 0 {
+						t.Fatalf("params = %#v, want none", gotParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_RejectsValueOperandsInPredicateContexts(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -64,6 +64,74 @@ func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_ArrayOperatorArrayLiteralElementsAsExpressions(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"map":[[{"var":"amount"},5],{"var":""}]}`
+
+	tests := []struct {
+		dialect   Dialect
+		want      string
+		wantParam string
+	}{
+		{
+			dialect:   DialectBigQuery,
+			want:      "ARRAY(SELECT elem FROM UNNEST([amount, 5]) AS elem)",
+			wantParam: "ARRAY(SELECT elem FROM UNNEST([amount, @p1]) AS elem)",
+		},
+		{
+			dialect:   DialectSpanner,
+			want:      "ARRAY(SELECT elem FROM UNNEST([amount, 5]) AS elem)",
+			wantParam: "ARRAY(SELECT elem FROM UNNEST([amount, @p1]) AS elem)",
+		},
+		{
+			dialect:   DialectPostgreSQL,
+			want:      "ARRAY(SELECT elem FROM UNNEST(ARRAY[amount, 5]) AS elem)",
+			wantParam: "ARRAY(SELECT elem FROM UNNEST(ARRAY[amount, $1]) AS elem)",
+		},
+		{
+			dialect:   DialectDuckDB,
+			want:      "ARRAY(SELECT elem FROM UNNEST([amount, 5]) AS elem)",
+			wantParam: "ARRAY(SELECT elem FROM UNNEST([amount, $1]) AS elem)",
+		},
+		{
+			dialect:   DialectClickHouse,
+			want:      "arrayMap(elem -> elem, [amount, 5])",
+			wantParam: "arrayMap(elem -> elem, [amount, @p1])",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dialect.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(tt.dialect)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
+			}
+
+			paramSQL, params, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if paramSQL != tt.wantParam {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", paramSQL, tt.wantParam)
+			}
+			if !reflect.DeepEqual(params, []QueryParam{{Name: "p1", Value: float64(5)}}) {
+				t.Fatalf("params = %#v, want p1=5", params)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_NestedValueLogicals(t *testing.T) {
 	tr, err := NewTranspiler(DialectBigQuery)
 	if err != nil {
@@ -662,14 +730,10 @@ func TestTranspileParameterizedValue_TruthinessDoesNotLeakSkippedParams(t *testi
 			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(0)}, {Name: "p3", Value: float64(2)}},
 		},
 		{
-			name:    "predicate condition with boolean constant keeps placeholder references",
-			logic:   `{"if":[{"or":[{"==":[{"var":"status"},"active"]},true]},"yes","no"]}`,
-			wantSQL: "CASE WHEN (status = @p1 OR TRUE) THEN @p2 ELSE @p3 END",
-			wantParams: []QueryParam{
-				{Name: "p1", Value: "active"},
-				{Name: "p2", Value: "yes"},
-				{Name: "p3", Value: "no"},
-			},
+			name:       "predicate condition with decisive boolean folds skipped placeholders",
+			logic:      `{"if":[{"or":[{"==":[{"var":"status"},"active"]},true]},"yes","no"]}`,
+			wantSQL:    "@p1",
+			wantParams: []QueryParam{{Name: "p1", Value: "yes"}},
 		},
 		{
 			name:       "parameterized not folds literal truthiness without leaked parameter",
