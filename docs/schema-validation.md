@@ -42,7 +42,7 @@ func main() {
 }
 ```
 
-**Note:** Field names must be raw, unquoted identifiers. The transpiler handles identifier quoting automatically based on the target dialect. `NewSchema`, `NewValidatedSchema`, `NewSchemaFromJSON`, and `NewSchemaFromFile` return construction-time errors for schema field names that contain quote characters (backtick, double quote, or single quote).
+**Note:** Field names must be raw, unquoted identifiers. The transpiler handles identifier quoting automatically based on the target dialect. `NewSchema`, `NewSchemaFromJSON`, and `NewSchemaFromFile` return construction-time errors for schema field names that contain quote characters (backtick, double quote, or single quote).
 
 ## Validated Schema Construction
 
@@ -364,7 +364,6 @@ SQL expression.
 // Schema creation
 schema, err := jsonlogic2sql.NewSchema(fields)
 err = jsonlogic2sql.ValidateSchemaFields(fields)
-schema, err = jsonlogic2sql.NewValidatedSchema(fields)
 schema, err = jsonlogic2sql.NewSchemaFromJSON(data)
 schema, err = jsonlogic2sql.NewSchemaFromFile(filepath)
 

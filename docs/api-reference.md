@@ -429,14 +429,6 @@ func ValidateSchemaFields(fields []FieldSchema) error
 
 Validate schema field definitions. Returns an error if any field name contains quote characters (backtick, double quote, or single quote). Field names must be raw, unquoted identifiers.
 
-### NewValidatedSchema
-
-```go
-func NewValidatedSchema(fields []FieldSchema) (*Schema, error)
-```
-
-Alias for `NewSchema`, kept for callers that already use the explicit validated constructor name.
-
 ### NewSchemaFromJSON
 
 ```go

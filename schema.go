@@ -74,12 +74,6 @@ func ValidateSchemaFields(fields []FieldSchema) error {
 	return nil
 }
 
-// NewValidatedSchema is an alias for NewSchema, kept for callers that already
-// use the explicit validated constructor name.
-func NewValidatedSchema(fields []FieldSchema) (*Schema, error) {
-	return NewSchema(fields)
-}
-
 // NewSchemaFromJSON creates a new schema from a JSON byte slice.
 func NewSchemaFromJSON(data []byte) (*Schema, error) {
 	var fields []FieldSchema

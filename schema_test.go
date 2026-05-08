@@ -334,10 +334,6 @@ func TestSchemaConstructors_RejectQuotedFieldNames(t *testing.T) {
 			if err == nil {
 				t.Errorf("NewSchema() expected error for quoted field name %q, got nil", tt.fields[0].Name)
 			}
-			_, err = NewValidatedSchema(tt.fields)
-			if err == nil {
-				t.Errorf("NewValidatedSchema() expected error for quoted field name %q, got nil", tt.fields[0].Name)
-			}
 		})
 	}
 }
@@ -360,19 +356,5 @@ func TestNewSchemaFromJSON_RejectsQuotedFieldNames(t *testing.T) {
 	_, err := NewSchemaFromJSON([]byte("[{\"name\":\"fixture.`24h`.events.total\",\"type\":\"integer\"}]"))
 	if err == nil {
 		t.Fatal("NewSchemaFromJSON() expected schema field validation error, got nil")
-	}
-}
-
-func TestNewValidatedSchema_AcceptsRawFieldNames(t *testing.T) {
-	schema, err := NewValidatedSchema([]FieldSchema{
-		{Name: "fixture.history.24h.events.total", Type: FieldTypeInteger},
-		{Name: "user.name", Type: FieldTypeString},
-		{Name: "tags", Type: FieldTypeArray},
-	})
-	if err != nil {
-		t.Fatalf("NewValidatedSchema() unexpected error for raw field names: %v", err)
-	}
-	if !schema.HasField("fixture.history.24h.events.total") {
-		t.Error("schema should have field fixture.history.24h.events.total")
 	}
 }
