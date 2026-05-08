@@ -373,6 +373,26 @@ func (p *Parser) truthinessSQL(res expressionResult) string {
 		res.SQL, res.SQL, res.SQL, res.SQL)
 }
 
+func valueOperandSQL(res expressionResult) string {
+	if res.Kind != operators.ExpressionKindPredicate || res.SQL == "TRUE" || res.SQL == "FALSE" {
+		return res.SQL
+	}
+	return fmt.Sprintf("(%s)", res.SQL)
+}
+
+func (p *Parser) parseTruthinessParam(expr interface{}, path string, pc *params.ParamCollector) (string, error) {
+	checkpoint := pc.Checkpoint()
+	res, err := p.parseExpressionAnyParam(expr, path, pc)
+	if err != nil {
+		return "", err
+	}
+	condition := p.truthinessSQL(res)
+	if res.Kind != operators.ExpressionKindPredicate && (res.truthKnown || res.Type == operators.ExpressionTypeNull) {
+		pc.Restore(checkpoint)
+	}
+	return condition, nil
+}
+
 func compatibleValueType(left, right expressionResult, path string) (operators.ExpressionType, error) {
 	leftType := valueTypeOf(left)
 	rightType := valueTypeOf(right)
@@ -616,7 +636,7 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
-		processedArgs, err := p.processArgs(arr, path)
+		processedArgs, err := p.processValueArgs(arr, path)
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -630,7 +650,11 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
-		sql, err := p.stringOp.ToSQL(operator, arr)
+		processedArgs, err := p.processValueArgs(arr, path)
+		if err != nil {
+			return expressionResult{}, err
+		}
+		sql, err := p.stringOp.ToSQL(operator, processedArgs)
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
@@ -754,10 +778,11 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 	}
 	typeSet := false
 	for i := 0; i < pairLimit; i += 2 {
-		cond, err := p.parseExpressionPredicate(args[i], tperrors.BuildArrayPath(path, i))
+		cond, err := p.parseExpressionAny(args[i], tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return expressionResult{}, err
 		}
+		condition := p.truthinessSQL(cond)
 		thenRes, err := p.parseExpressionValue(args[i+1], tperrors.BuildArrayPath(path, i+1))
 		if err != nil {
 			return expressionResult{}, err
@@ -772,7 +797,7 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 			}
 			resultType = typ
 		}
-		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", cond.SQL, thenRes.SQL))
+		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
 	elseSQL := "NULL"
 	if hasElse {
@@ -1038,6 +1063,93 @@ func (p *Parser) processArgs(args []interface{}, path string) ([]interface{}, er
 	}
 
 	return processed, nil
+}
+
+func (p *Parser) processValueArgs(args []interface{}, path string) ([]interface{}, error) {
+	processed := make([]interface{}, len(args))
+
+	for i, arg := range args {
+		processedArg, err := p.processValueArg(arg, path, i)
+		if err != nil {
+			return nil, err
+		}
+		processed[i] = processedArg
+	}
+
+	return processed, nil
+}
+
+func (p *Parser) processValueArg(arg interface{}, path string, index int) (interface{}, error) {
+	if p.isPrimitive(arg) {
+		return arg, nil
+	}
+	if exprMap, ok := arg.(map[string]interface{}); ok && len(exprMap) == 1 {
+		for operator, opArgs := range exprMap {
+			if operator == "and" || operator == "or" || (operator == "if" && p.valueIfNeedsValueParsing(opArgs)) {
+				res, err := p.parseExpressionValue(arg, tperrors.BuildArrayPath(path, index))
+				if err != nil {
+					return nil, err
+				}
+				return operators.SQLResult(valueOperandSQL(res)), nil
+			}
+		}
+	}
+	return p.processArg(arg, path, index)
+}
+
+func (p *Parser) valueIfNeedsValueParsing(args interface{}) bool {
+	arr, ok := args.([]interface{})
+	if !ok {
+		return false
+	}
+	pairLimit := len(arr)
+	if len(arr)%2 == 1 {
+		pairLimit = len(arr) - 1
+	}
+	for i := 0; i < pairLimit; i += 2 {
+		if !p.isPredicateLikeExpression(arr[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Parser) isPredicateLikeExpression(expr interface{}) bool {
+	if p.isPrimitive(expr) {
+		return false
+	}
+	if _, ok := expr.([]interface{}); ok {
+		return false
+	}
+	obj, ok := expr.(map[string]interface{})
+	if !ok || len(obj) != 1 {
+		return true
+	}
+	for operator, args := range obj {
+		switch operator {
+		case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!",
+			operators.OpAll, operators.OpSome, operators.OpNone:
+			return true
+		case "and", "or":
+			arr, ok := args.([]interface{})
+			if !ok {
+				return true
+			}
+			for _, arg := range arr {
+				if !p.isPredicateLikeExpression(arg) {
+					return false
+				}
+			}
+			return true
+		case "if":
+			return !p.valueIfNeedsValueParsing(args)
+		case "var", operators.OpMap, operators.OpFilter, operators.OpReduce, operators.OpMerge, "+", "-", "*", "/", "%", "max", "min", "cat", "substr":
+			return false
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // processArg processes a single argument, recursively handling custom operators.
@@ -1316,9 +1428,11 @@ func (p *Parser) parseExpressionAnyParam(expr interface{}, path string, pc *para
 			case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
 				return p.parseExpressionPredicateParam(expr, path, pc)
 			case "and", "or", "if":
+				checkpoint := pc.Checkpoint()
 				if res, err := p.parseExpressionPredicateParam(expr, path, pc); err == nil {
 					return res, nil
 				}
+				pc.Restore(checkpoint)
 				return p.parseExpressionValueParam(expr, path, pc)
 			default:
 				return p.parseExpressionValueParam(expr, path, pc)
@@ -1451,7 +1565,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
-		processedArgs, err := p.processArgsParam(arr, path, pc)
+		processedArgs, err := p.processValueArgsParam(arr, path, pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -1465,7 +1579,11 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
-		sql, err := p.stringOp.ToSQLParam(operator, arr, pc)
+		processedArgs, err := p.processValueArgsParam(arr, path, pc)
+		if err != nil {
+			return expressionResult{}, err
+		}
+		sql, err := p.stringOp.ToSQLParam(operator, processedArgs, pc)
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
@@ -1522,11 +1640,10 @@ func (p *Parser) parseNotPredicateParam(operator string, args interface{}, path 
 	if !ok {
 		return expressionResult{}, tperrors.NewTypeMismatch(operator, path, "exactly 1 argument", "multiple arguments")
 	}
-	res, err := p.parseExpressionAnyParam(arg, tperrors.BuildArrayPath(path, 0), pc)
+	condition, err := p.parseTruthinessParam(arg, tperrors.BuildArrayPath(path, 0), pc)
 	if err != nil {
 		return expressionResult{}, err
 	}
-	condition := p.truthinessSQL(res)
 	if double {
 		return predicateResult(condition), nil
 	}
@@ -1578,7 +1695,7 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 	}
 	typeSet := false
 	for i := 0; i < pairLimit; i += 2 {
-		cond, err := p.parseExpressionPredicateParam(args[i], tperrors.BuildArrayPath(path, i), pc)
+		condition, err := p.parseTruthinessParam(args[i], tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -1596,7 +1713,7 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 			}
 			resultType = typ
 		}
-		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", cond.SQL, thenRes.SQL))
+		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
 	elseSQL := "NULL"
 	if hasElse {
@@ -1622,6 +1739,7 @@ func (p *Parser) parseValueLogicalParam(operator string, args []interface{}, pat
 }
 
 func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{}, index int, path string, pc *params.ParamCollector) (expressionResult, error) {
+	checkpoint := pc.Checkpoint()
 	current, err := p.parseExpressionValueParam(args[index], tperrors.BuildArrayPath(path, index), pc)
 	if err != nil {
 		return expressionResult{}, err
@@ -1636,6 +1754,7 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 		if operator == "and" && !current.truthy {
 			return current, nil
 		}
+		pc.Restore(checkpoint)
 		return p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
 	}
 	condition := p.truthinessSQL(current)
@@ -1767,6 +1886,36 @@ func (p *Parser) processArgsParam(args []interface{}, path string, pc *params.Pa
 		processed[i] = processedArg
 	}
 	return processed, nil
+}
+
+func (p *Parser) processValueArgsParam(args []interface{}, path string, pc *params.ParamCollector) ([]interface{}, error) {
+	processed := make([]interface{}, len(args))
+	for i, arg := range args {
+		processedArg, err := p.processValueArgParam(arg, path, i, pc)
+		if err != nil {
+			return nil, err
+		}
+		processed[i] = processedArg
+	}
+	return processed, nil
+}
+
+func (p *Parser) processValueArgParam(arg interface{}, path string, index int, pc *params.ParamCollector) (interface{}, error) {
+	if p.isPrimitive(arg) {
+		return arg, nil
+	}
+	if exprMap, ok := arg.(map[string]interface{}); ok && len(exprMap) == 1 {
+		for operator, opArgs := range exprMap {
+			if operator == "and" || operator == "or" || (operator == "if" && p.valueIfNeedsValueParsing(opArgs)) {
+				res, err := p.parseExpressionValueParam(arg, tperrors.BuildArrayPath(path, index), pc)
+				if err != nil {
+					return nil, err
+				}
+				return operators.SQLResult(valueOperandSQL(res)), nil
+			}
+		}
+	}
+	return p.processArgParam(arg, path, index, pc)
 }
 
 // processArgParam is the parameterized variant of processArg. Keep in sync.

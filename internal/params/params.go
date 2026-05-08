@@ -39,11 +39,32 @@ type ParamCollector struct {
 	count  int
 }
 
+// Checkpoint captures a ParamCollector position for rollback when speculative
+// parsing emits placeholders that are not used in the final SQL.
+type Checkpoint struct {
+	count  int
+	length int
+}
+
 // NewParamCollector creates a ParamCollector for the given placeholder style.
 func NewParamCollector(style PlaceholderStyle) *ParamCollector {
 	return &ParamCollector{
 		style: style,
 	}
+}
+
+// Checkpoint returns the current collector position.
+func (pc *ParamCollector) Checkpoint() Checkpoint {
+	return Checkpoint{
+		count:  pc.count,
+		length: len(pc.params),
+	}
+}
+
+// Restore rolls the collector back to a previously captured checkpoint.
+func (pc *ParamCollector) Restore(checkpoint Checkpoint) {
+	pc.count = checkpoint.count
+	pc.params = pc.params[:checkpoint.length]
 }
 
 // StyleForDialect returns the default PlaceholderStyle for a SQL dialect.
