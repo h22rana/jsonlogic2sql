@@ -159,10 +159,11 @@ Main transpiler instance.
 | `ClearCustomOperators()` | Remove all custom operators |
 
 `TranspileValue*` returns standalone SQL value expressions. For PostgreSQL,
-standalone empty-array results such as `[]` are rejected because `ARRAY[]`
-requires an explicit element type that is not available from the JSONLogic value alone.
-Foldable expressions such as `{"or":[[],"fallback"]}` are still allowed because
-they do not emit the empty array literal.
+empty-array value results are rejected whenever the emitted SQL would contain
+an untyped `ARRAY[]`, because PostgreSQL requires an explicit element type that
+is not always available from the JSONLogic value alone. Foldable expressions
+such as `{"or":[[],"fallback"]}` are still allowed because they do not emit the
+empty array literal.
 
 ### TranspilerConfig
 

@@ -164,7 +164,7 @@ func (p *Parser) ParseValue(logic interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if p.isUnsupportedStandaloneEmptyArrayResult(res) {
+	if p.isUnsupportedPostgreSQLEmptyArrayResult(res) {
 		return "", tperrors.New(tperrors.ErrInvalidArgument, "", "$",
 			"empty PostgreSQL array literals require an explicit element type")
 	}
@@ -178,9 +178,73 @@ func (p *Parser) validateValueRoot(logic interface{}) error {
 	return p.validator.Validate(logic)
 }
 
-func (p *Parser) isUnsupportedStandaloneEmptyArrayResult(res expressionResult) bool {
-	arr, ok := res.rawLiteral.([]interface{})
-	return res.rawLiteralKnown && ok && len(arr) == 0 && p.config.GetDialect() == dialect.DialectPostgreSQL
+func (p *Parser) isUnsupportedPostgreSQLEmptyArrayResult(res expressionResult) bool {
+	return p.config.GetDialect() == dialect.DialectPostgreSQL && containsBarePostgreSQLEmptyArrayLiteral(res.SQL)
+}
+
+func containsBarePostgreSQLEmptyArrayLiteral(sql string) bool {
+	inSingleQuote := false
+	inDoubleQuote := false
+	inBacktick := false
+
+	for i := 0; i < len(sql); i++ {
+		ch := sql[i]
+
+		switch {
+		case inSingleQuote:
+			if ch == '\'' {
+				if i+1 < len(sql) && sql[i+1] == '\'' {
+					i++
+					continue
+				}
+				inSingleQuote = false
+			}
+			continue
+		case inDoubleQuote:
+			if ch == '"' {
+				if i+1 < len(sql) && sql[i+1] == '"' {
+					i++
+					continue
+				}
+				inDoubleQuote = false
+			}
+			continue
+		case inBacktick:
+			if ch == '`' {
+				inBacktick = false
+			}
+			continue
+		case ch == '\'':
+			inSingleQuote = true
+			continue
+		case ch == '"':
+			inDoubleQuote = true
+			continue
+		case ch == '`':
+			inBacktick = true
+			continue
+		}
+
+		if i+7 > len(sql) || !strings.EqualFold(sql[i:i+7], "ARRAY[]") {
+			continue
+		}
+		if i > 0 && isSQLIdentifierChar(sql[i-1]) {
+			continue
+		}
+		if i+7 < len(sql) && isSQLIdentifierChar(sql[i+7]) {
+			continue
+		}
+		return true
+	}
+
+	return false
+}
+
+func isSQLIdentifierChar(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') ||
+		(ch >= 'A' && ch <= 'Z') ||
+		(ch >= '0' && ch <= '9') ||
+		ch == '_'
 }
 
 type expressionResult struct {
@@ -306,6 +370,30 @@ func varFieldName(args interface{}) string {
 		}
 	}
 	return ""
+}
+
+func isEmptyArrayLiteralValue(value interface{}) bool {
+	arr, ok := value.([]interface{})
+	return ok && len(arr) == 0
+}
+
+func arrayValueOperatorReturnsEmptyLiteral(operator string, args []interface{}) bool {
+	switch operator {
+	case operators.OpMap, operators.OpFilter:
+		return len(args) > 0 && isEmptyArrayLiteralValue(args[0])
+	case operators.OpMerge:
+		if len(args) == 0 {
+			return false
+		}
+		for _, arg := range args {
+			if !isEmptyArrayLiteralValue(arg) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) literalToSQL(value interface{}) (string, error) {
@@ -736,6 +824,9 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		sql, err := p.arrayOp.ToSQLAtPath(operator, arr, path)
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
+		}
+		if arrayValueOperatorReturnsEmptyLiteral(operator, arr) {
+			return literalValueResultWithRaw(sql, operators.ExpressionTypeArray, false, []interface{}{}), nil
 		}
 		return valueResult(sql, operators.ExpressionTypeArray), nil
 	case operators.OpReduce:
@@ -1433,7 +1524,7 @@ func (p *Parser) ParseValueParameterized(logic interface{}) (string, []params.Qu
 	if err != nil {
 		return "", nil, err
 	}
-	if p.isUnsupportedStandaloneEmptyArrayResult(res) {
+	if p.isUnsupportedPostgreSQLEmptyArrayResult(res) {
 		return "", nil, tperrors.New(tperrors.ErrInvalidArgument, "", "$",
 			"empty PostgreSQL array literals require an explicit element type")
 	}
@@ -1685,6 +1776,9 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		sql, err := p.arrayOp.ToSQLParamAtPath(operator, arr, pc, path)
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
+		}
+		if arrayValueOperatorReturnsEmptyLiteral(operator, arr) {
+			return literalValueResultWithRaw(sql, operators.ExpressionTypeArray, false, []interface{}{}), nil
 		}
 		return valueResult(sql, operators.ExpressionTypeArray), nil
 	case operators.OpReduce:

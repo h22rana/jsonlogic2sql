@@ -540,6 +540,9 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
 	}
+	if isEmptyArrayLiteral(args[0]) {
+		return a.emptyArrayLiteralSQL()
+	}
 
 	// First argument: array
 	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
@@ -586,6 +589,9 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	// Validate that first argument is an array type
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
+	}
+	if isEmptyArrayLiteral(args[0]) {
+		return a.emptyArrayLiteralSQL()
 	}
 
 	// First argument: array
@@ -638,6 +644,15 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 		return "", err
 	}
 
+	// Third argument: initial value
+	initial, err := a.valueToSQLAtPath(args[2], a.argPath(2))
+	if err != nil {
+		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
+	}
+	if isEmptyArrayLiteral(args[0]) {
+		return initial, nil
+	}
+
 	// First argument: array
 	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
 	if err != nil {
@@ -646,12 +661,6 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 
 	// Second argument: reducer expression
 	reducerExpr := args[1]
-
-	// Third argument: initial value
-	initial, err := a.valueToSQLAtPath(args[2], a.argPath(2))
-	if err != nil {
-		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
-	}
 
 	alias := a.elemAlias()
 
@@ -978,14 +987,21 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 		}
 	}
 
-	// Convert all array arguments to SQL
-	arrays := make([]string, len(args))
+	// Convert non-empty array arguments to SQL. Empty literal arrays are the
+	// merge identity and PostgreSQL cannot render them without an element type.
+	arrays := make([]string, 0, len(args))
 	for i, arg := range args {
+		if isEmptyArrayLiteral(arg) {
+			continue
+		}
 		array, err := a.valueToSQLAtPath(arg, a.argPath(i))
 		if err != nil {
 			return "", fmt.Errorf("invalid merge array argument %d: %w", i, err)
 		}
-		arrays[i] = array
+		arrays = append(arrays, array)
+	}
+	if len(arrays) == 0 {
+		return a.emptyArrayLiteralSQL()
 	}
 
 	// Generate SQL based on dialect
@@ -1094,6 +1110,10 @@ func (a *ArrayOperator) arrayLiteral(elements []string) (string, error) {
 		return a.config.ArrayLiteral(elements)
 	}
 	return fmt.Sprintf("[%s]", strings.Join(elements, ", ")), nil
+}
+
+func (a *ArrayOperator) emptyArrayLiteralSQL() (string, error) {
+	return a.arrayLiteral(nil)
 }
 
 func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allowAccumulator bool, path string) (string, error) {
@@ -1723,6 +1743,9 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
 	}
+	if isEmptyArrayLiteral(args[0]) {
+		return a.emptyArrayLiteralSQL()
+	}
 	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
@@ -1758,6 +1781,9 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
 	}
+	if isEmptyArrayLiteral(args[0]) {
+		return a.emptyArrayLiteralSQL()
+	}
 	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
@@ -1791,15 +1817,18 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	if err := a.validateArrayOperand(args[0]); err != nil {
 		return "", err
 	}
+	initial, err := a.valueToSQLParamAtPath(args[2], pc, a.argPath(2))
+	if err != nil {
+		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
+	}
+	if isEmptyArrayLiteral(args[0]) {
+		return initial, nil
+	}
 	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
 	}
 	reducerExpr := args[1]
-	initial, err := a.valueToSQLParamAtPath(args[2], pc, a.argPath(2))
-	if err != nil {
-		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
-	}
 	alias := a.elemAlias()
 
 	if pattern := a.detectAggregatePattern(reducerExpr); pattern != nil {
@@ -1970,13 +1999,19 @@ func (a *ArrayOperator) handleMergeParam(args []interface{}, pc *params.ParamCol
 			return "", err
 		}
 	}
-	arrays := make([]string, len(args))
+	arrays := make([]string, 0, len(args))
 	for i, arg := range args {
+		if isEmptyArrayLiteral(arg) {
+			continue
+		}
 		array, err := a.valueToSQLParamAtPath(arg, pc, a.argPath(i))
 		if err != nil {
 			return "", fmt.Errorf("invalid merge array argument %d: %w", i, err)
 		}
-		arrays[i] = array
+		arrays = append(arrays, array)
+	}
+	if len(arrays) == 0 {
+		return a.emptyArrayLiteralSQL()
 	}
 
 	d := dialect.DialectUnspecified

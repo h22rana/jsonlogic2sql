@@ -62,11 +62,12 @@ Some operators generate different SQL based on the target dialect:
 | `in` (array) | `value IN UNNEST(array)` | `value IN UNNEST(array)` | `value = ANY(array)` | `list_contains(array, value)` | `has(array, value)` |
 | `in` (string) | `STRPOS(h, n) > 0` | `STRPOS(h, n) > 0` | `POSITION(n IN h) > 0` | `STRPOS(h, n) > 0` | `position(h, n) > 0` |
 
-PostgreSQL array literals use `ARRAY[...]`. Standalone empty-array results are
-rejected because PostgreSQL requires an explicit element type for `ARRAY[]` and
-the transpiler does not have enough type context for a standalone `[]` value.
-Foldable contexts that do not need to emit the empty array, such as value
-fallbacks and empty-array `all`/`some`/`none` predicates, can still fold normally.
+PostgreSQL array literals use `ARRAY[...]`. Empty-array value results are
+rejected whenever the emitted SQL would contain an untyped `ARRAY[]`, because
+PostgreSQL requires an explicit element type and the transpiler does not always
+have enough type context. Foldable contexts that do not need to emit the empty
+array, such as value fallbacks and empty-array `all`/`some`/`none` predicates,
+can still fold normally.
 
 ## SQL Function Reference by Dialect
 
