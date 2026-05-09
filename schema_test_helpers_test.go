@@ -7,3 +7,15 @@ func mustNewSchema(fields []FieldSchema) *Schema {
 	}
 	return schema
 }
+
+type testSchemaMode struct {
+	name   string
+	schema *Schema
+}
+
+func allSchemaModes(schema *Schema) []testSchemaMode {
+	return []testSchemaMode{
+		{name: "schema-less"},
+		{name: "schema-aware", schema: schema},
+	}
+}
