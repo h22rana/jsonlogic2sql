@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -386,6 +387,45 @@ func TestParamsModeToggle(t *testing.T) {
 	paramsMode = !paramsMode
 	if paramsMode {
 		t.Error("expected paramsMode to be false after second toggle")
+	}
+}
+
+func TestSelectExpressionMode(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "default condition", input: "\n", want: false},
+		{name: "condition number", input: "1\n", want: false},
+		{name: "condition name", input: "condition\n", want: false},
+		{name: "predicate alias", input: "predicate\n", want: false},
+		{name: "value number", input: "2\n", want: true},
+		{name: "value name", input: "value\n", want: true},
+		{name: "invalid defaults condition", input: "other\n", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanner := bufio.NewScanner(strings.NewReader(tt.input))
+			if got := selectExpressionMode(scanner); got != tt.want {
+				t.Fatalf("selectExpressionMode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExpressionModeName(t *testing.T) {
+	origMode := valueMode
+	defer func() { valueMode = origMode }()
+
+	valueMode = false
+	if got := expressionModeName(); got != modeCondition {
+		t.Fatalf("expressionModeName() = %q, want %q", got, modeCondition)
+	}
+	valueMode = true
+	if got := expressionModeName(); got != modeValue {
+		t.Fatalf("expressionModeName() = %q, want %q", got, modeValue)
 	}
 }
 

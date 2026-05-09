@@ -13,7 +13,13 @@ go build -o bin/repl ./cmd/repl
 ./bin/repl
 ```
 
-On startup, the REPL will prompt for an optional schema path. Leave it empty to skip.
+On startup, the REPL prompts for:
+
+1. SQL dialect
+2. expression mode (`condition` by default, or `value`)
+3. optional schema path
+
+Leave the schema path empty to skip schema validation.
 
 ## Basic Usage
 

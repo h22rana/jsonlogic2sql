@@ -239,6 +239,39 @@ func selectDialect(scanner *bufio.Scanner) jsonlogic2sql.Dialect {
 	return dialects[choice-1].dialect
 }
 
+func selectExpressionMode(scanner *bufio.Scanner) bool {
+	fmt.Println("Select expression mode:")
+	fmt.Println("  1. Condition/predicate")
+	fmt.Println("  2. Value")
+	fmt.Print("\nEnter choice [1-2] (default: 1 for condition): ")
+
+	if !scanner.Scan() {
+		return false
+	}
+
+	input := strings.TrimSpace(scanner.Text())
+	if input == "" {
+		return false
+	}
+
+	switch strings.ToLower(input) {
+	case "1", modeCondition, "predicate":
+		return false
+	case "2", modeValue:
+		return true
+	default:
+		fmt.Println("Invalid choice, defaulting to condition")
+		return false
+	}
+}
+
+func expressionModeName() string {
+	if valueMode {
+		return modeValue
+	}
+	return modeCondition
+}
+
 // getDialectName returns the display name for a dialect.
 func getDialectName(d jsonlogic2sql.Dialect) string {
 	for _, dialect := range dialects {
@@ -264,8 +297,9 @@ func main() {
 
 	// Prompt user to select dialect
 	currentDialect = selectDialect(scanner)
-	fmt.Printf("\nUsing %s dialect\n", getDialectName(currentDialect))
-	fmt.Println("Type ':help' for commands, ':quit' to exit")
+	fmt.Println()
+
+	valueMode = selectExpressionMode(scanner)
 	fmt.Println()
 
 	currentSchema = promptSchema(scanner)
@@ -281,6 +315,10 @@ func main() {
 
 	// Register all custom operators
 	registerCustomOperators(transpiler)
+
+	fmt.Printf("\nUsing %s dialect | Mode: %s\n", getDialectName(currentDialect), expressionModeName())
+	fmt.Println("Type ':help' for commands, ':quit' to exit")
+	fmt.Println()
 
 	for {
 		fmt.Printf("[%s] jsonlogic> ", getDialectName(currentDialect))
@@ -422,10 +460,10 @@ func handleCommand(input string, transpiler *jsonlogic2sql.Transpiler, scanner *
 		handleModeCommand(parts)
 	case ":condition":
 		valueMode = false
-		fmt.Println("Expression mode: condition")
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
 	case ":value":
 		valueMode = true
-		fmt.Println("Expression mode: value")
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
 	case ":schema":
 		handleSchemaCommand(parts, transpiler)
 	case ":file":
@@ -445,20 +483,16 @@ func handleCommand(input string, transpiler *jsonlogic2sql.Transpiler, scanner *
 
 func handleModeCommand(parts []string) {
 	if len(parts) < 2 {
-		mode := modeCondition
-		if valueMode {
-			mode = modeValue
-		}
-		fmt.Printf("Expression mode: %s\n", mode)
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
 		return
 	}
 	switch parts[1] {
 	case modeCondition, "predicate":
 		valueMode = false
-		fmt.Println("Expression mode: condition")
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
 	case modeValue:
 		valueMode = true
-		fmt.Println("Expression mode: value")
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
 	default:
 		fmt.Println("Usage: :mode condition|value")
 	}
