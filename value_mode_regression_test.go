@@ -73,111 +73,239 @@ func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
 	}
 }
 
-func TestTranspileValue_PostgreSQLEmptyArrayFoldableContexts(t *testing.T) {
-	tr, err := NewTranspiler(DialectPostgreSQL)
-	if err != nil {
-		t.Fatalf("NewTranspiler() error = %v", err)
-	}
+func TestTranspileValue_EmptyArrayFoldableContextsAllDialects(t *testing.T) {
+	t.Parallel()
 
-	valueLogic := `{"or":[[],"fallback"]}`
-	got, err := tr.TranspileValue(valueLogic)
-	if err != nil {
-		t.Fatalf("TranspileValue() error = %v", err)
-	}
-	if got != "'fallback'" {
-		t.Fatalf("TranspileValue() = %q, want %q", got, "'fallback'")
-	}
-
-	gotParam, gotParams, err := tr.TranspileParameterizedValue(valueLogic)
-	if err != nil {
-		t.Fatalf("TranspileParameterizedValue() error = %v", err)
-	}
-	if gotParam != "$1" {
-		t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, "$1")
-	}
-	if want := []QueryParam{{Name: "p1", Value: "fallback"}}; !reflect.DeepEqual(gotParams, want) {
-		t.Fatalf("params = %#v, want %#v", gotParams, want)
-	}
-
-	derivedEmptyFallbacks := []string{
+	valueFallbacks := []string{
+		`{"or":[[],"fallback"]}`,
 		`{"or":[{"map":[[],{"var":"missing"}]},"fallback"]}`,
 		`{"or":[{"filter":[[],true]},"fallback"]}`,
 		`{"or":[{"merge":[[]]},"fallback"]}`,
 	}
-	for _, logic := range derivedEmptyFallbacks {
-		t.Run(logic, func(t *testing.T) {
-			fallbackSQL, fallbackErr := tr.TranspileValue(logic)
-			if fallbackErr != nil {
-				t.Fatalf("TranspileValue() error = %v", fallbackErr)
-			}
-			if fallbackSQL != "'fallback'" {
-				t.Fatalf("TranspileValue() = %q, want %q", fallbackSQL, "'fallback'")
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
 			}
 
-			fallbackParamSQL, fallbackParams, fallbackErr := tr.TranspileParameterizedValue(logic)
-			if fallbackErr != nil {
-				t.Fatalf("TranspileParameterizedValue() error = %v", fallbackErr)
+			for _, logic := range valueFallbacks {
+				t.Run(logic, func(t *testing.T) {
+					got, valueErr := tr.TranspileValue(logic)
+					if valueErr != nil {
+						t.Fatalf("TranspileValue() error = %v", valueErr)
+					}
+					if got != "'fallback'" {
+						t.Fatalf("TranspileValue() = %q, want %q", got, "'fallback'")
+					}
+
+					gotParam, gotParams, paramErr := tr.TranspileParameterizedValue(logic)
+					if paramErr != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", paramErr)
+					}
+					if want := testPlaceholder(d, 1); gotParam != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+					}
+					if want := []QueryParam{{Name: "p1", Value: "fallback"}}; !reflect.DeepEqual(gotParams, want) {
+						t.Fatalf("params = %#v, want %#v", gotParams, want)
+					}
+				})
 			}
-			if fallbackParamSQL != "$1" {
-				t.Fatalf("TranspileParameterizedValue() = %q, want %q", fallbackParamSQL, "$1")
+
+			conditionLogic := `{"all":[[],true]}`
+			got, err := tr.TranspileCondition(conditionLogic)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
 			}
-			if want := []QueryParam{{Name: "p1", Value: "fallback"}}; !reflect.DeepEqual(fallbackParams, want) {
-				t.Fatalf("params = %#v, want %#v", fallbackParams, want)
+			if got != "FALSE" {
+				t.Fatalf("TranspileCondition() = %q, want %q", got, "FALSE")
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedCondition(conditionLogic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			if gotParam != "FALSE" {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, "FALSE")
+			}
+			if len(gotParams) != 0 {
+				t.Fatalf("params = %#v, want none", gotParams)
+			}
+
+			emptyReturningLogic := `{"and":[[],"fallback"]}`
+			got, err = tr.TranspileValue(emptyReturningLogic)
+			gotParam, gotParams, paramErr := tr.TranspileParameterizedValue(emptyReturningLogic)
+			if d == DialectPostgreSQL {
+				if !IsErrorCode(err, ErrInvalidArgument) {
+					t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
+				}
+				if !IsErrorCode(paramErr, ErrInvalidArgument) {
+					t.Fatalf("TranspileParameterizedValue() error = %v, want %s", paramErr, ErrInvalidArgument)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if got != "[]" {
+				t.Fatalf("TranspileValue() = %q, want %q", got, "[]")
+			}
+			if paramErr != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", paramErr)
+			}
+			if gotParam != "[]" {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, "[]")
+			}
+			if len(gotParams) != 0 {
+				t.Fatalf("params = %#v, want none", gotParams)
 			}
 		})
-	}
-
-	conditionLogic := `{"all":[[],true]}`
-	got, err = tr.TranspileCondition(conditionLogic)
-	if err != nil {
-		t.Fatalf("TranspileCondition() error = %v", err)
-	}
-	if got != "FALSE" {
-		t.Fatalf("TranspileCondition() = %q, want %q", got, "FALSE")
-	}
-
-	gotParam, gotParams, err = tr.TranspileParameterizedCondition(conditionLogic)
-	if err != nil {
-		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
-	}
-	if gotParam != "FALSE" {
-		t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, "FALSE")
-	}
-	if len(gotParams) != 0 {
-		t.Fatalf("params = %#v, want none", gotParams)
-	}
-
-	emptyReturningLogic := `{"and":[[],"fallback"]}`
-	if _, err = tr.TranspileValue(emptyReturningLogic); !IsErrorCode(err, ErrInvalidArgument) {
-		t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
-	}
-	if _, _, err = tr.TranspileParameterizedValue(emptyReturningLogic); !IsErrorCode(err, ErrInvalidArgument) {
-		t.Fatalf("TranspileParameterizedValue() error = %v, want %s", err, ErrInvalidArgument)
 	}
 }
 
-func TestTranspileValue_PostgreSQLEmptyArrayEmissionsRejected(t *testing.T) {
+func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		logic          string
+		rejectPostgres bool
+		wantSQL        func(Dialect) string
+		wantParamSQL   func(Dialect) string
+		wantParams     []QueryParam
+	}{
+		{
+			name:           "merge all empty",
+			logic:          `{"merge":[[]]}`,
+			rejectPostgres: true,
+			wantSQL: func(Dialect) string {
+				return "[]"
+			},
+			wantParamSQL: func(Dialect) string {
+				return "[]"
+			},
+		},
+		{
+			name:           "map empty source",
+			logic:          `{"map":[[],{"var":""}]}`,
+			rejectPostgres: true,
+			wantSQL: func(Dialect) string {
+				return "[]"
+			},
+			wantParamSQL: func(Dialect) string {
+				return "[]"
+			},
+		},
+		{
+			name:           "filter empty source",
+			logic:          `{"filter":[[],true]}`,
+			rejectPostgres: true,
+			wantSQL: func(Dialect) string {
+				return "[]"
+			},
+			wantParamSQL: func(Dialect) string {
+				return "[]"
+			},
+		},
+		{
+			name:           "nested empty array literal",
+			logic:          `[[]]`,
+			rejectPostgres: true,
+			wantSQL: func(Dialect) string {
+				return "[[]]"
+			},
+			wantParamSQL: func(Dialect) string {
+				return "[[]]"
+			},
+		},
+		{
+			name:  "merge skips empty identity",
+			logic: `{"merge":[[],[1]]}`,
+			wantSQL: func(d Dialect) string {
+				switch d {
+				case DialectPostgreSQL:
+					return "ARRAY[1]"
+				case DialectClickHouse:
+					return "arrayConcat([1])"
+				default:
+					return "ARRAY_CONCAT([1])"
+				}
+			},
+			wantParamSQL: func(d Dialect) string {
+				switch d {
+				case DialectPostgreSQL:
+					return fmt.Sprintf("ARRAY[%s]", testPlaceholder(d, 1))
+				case DialectClickHouse:
+					return fmt.Sprintf("arrayConcat([%s])", testPlaceholder(d, 1))
+				default:
+					return fmt.Sprintf("ARRAY_CONCAT([%s])", testPlaceholder(d, 1))
+				}
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+		{
+			name:  "reduce empty source returns initial",
+			logic: `{"reduce":[[],{"cat":[{"var":"accumulator"},{"var":"current"}]},"init"]}`,
+			wantSQL: func(Dialect) string {
+				return "'init'"
+			},
+			wantParamSQL: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "init"}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					gotParam, gotParams, paramErr := tr.TranspileParameterizedValue(tt.logic)
+					if d == DialectPostgreSQL && tt.rejectPostgres {
+						if !IsErrorCode(err, ErrInvalidArgument) {
+							t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
+						}
+						if !IsErrorCode(paramErr, ErrInvalidArgument) {
+							t.Fatalf("TranspileParameterizedValue() error = %v, want %s", paramErr, ErrInvalidArgument)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if want := tt.wantSQL(d); got != want {
+						t.Fatalf("TranspileValue() = %q, want %q", got, want)
+					}
+					if paramErr != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", paramErr)
+					}
+					if want := tt.wantParamSQL(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_PostgreSQLEmptyArrayScannerSkipsStringLiterals(t *testing.T) {
 	tr, err := NewTranspiler(DialectPostgreSQL)
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
-	}
-
-	rejected := []string{
-		`{"merge":[[]]}`,
-		`{"map":[[],{"var":""}]}`,
-		`{"filter":[[],true]}`,
-		`[[]]`,
-	}
-
-	for _, logic := range rejected {
-		t.Run(logic, func(t *testing.T) {
-			if _, valueErr := tr.TranspileValue(logic); !IsErrorCode(valueErr, ErrInvalidArgument) {
-				t.Fatalf("TranspileValue() error = %v, want %s", valueErr, ErrInvalidArgument)
-			}
-			if _, _, paramErr := tr.TranspileParameterizedValue(logic); !IsErrorCode(paramErr, ErrInvalidArgument) {
-				t.Fatalf("TranspileParameterizedValue() error = %v, want %s", paramErr, ErrInvalidArgument)
-			}
-		})
 	}
 
 	got, err := tr.TranspileValue(`"ARRAY[]"`)
@@ -196,44 +324,6 @@ func TestTranspileValue_PostgreSQLEmptyArrayEmissionsRejected(t *testing.T) {
 		t.Fatalf("TranspileParameterizedValue() string literal = %q, want %q", gotParam, "$1")
 	}
 	if want := []QueryParam{{Name: "p1", Value: "ARRAY[]"}}; !reflect.DeepEqual(gotParams, want) {
-		t.Fatalf("params = %#v, want %#v", gotParams, want)
-	}
-
-	got, err = tr.TranspileValue(`{"merge":[[],[1]]}`)
-	if err != nil {
-		t.Fatalf("TranspileValue() merge identity error = %v", err)
-	}
-	if got != "ARRAY[1]" {
-		t.Fatalf("TranspileValue() merge identity = %q, want %q", got, "ARRAY[1]")
-	}
-
-	gotParam, gotParams, err = tr.TranspileParameterizedValue(`{"merge":[[],[1]]}`)
-	if err != nil {
-		t.Fatalf("TranspileParameterizedValue() merge identity error = %v", err)
-	}
-	if gotParam != "ARRAY[$1]" {
-		t.Fatalf("TranspileParameterizedValue() merge identity = %q, want %q", gotParam, "ARRAY[$1]")
-	}
-	if want := []QueryParam{{Name: "p1", Value: float64(1)}}; !reflect.DeepEqual(gotParams, want) {
-		t.Fatalf("params = %#v, want %#v", gotParams, want)
-	}
-
-	got, err = tr.TranspileValue(`{"reduce":[[],{"cat":[{"var":"accumulator"},{"var":"current"}]},"init"]}`)
-	if err != nil {
-		t.Fatalf("TranspileValue() empty reduce error = %v", err)
-	}
-	if got != "'init'" {
-		t.Fatalf("TranspileValue() empty reduce = %q, want %q", got, "'init'")
-	}
-
-	gotParam, gotParams, err = tr.TranspileParameterizedValue(`{"reduce":[[],{"cat":[{"var":"accumulator"},{"var":"current"}]},"init"]}`)
-	if err != nil {
-		t.Fatalf("TranspileParameterizedValue() empty reduce error = %v", err)
-	}
-	if gotParam != "$1" {
-		t.Fatalf("TranspileParameterizedValue() empty reduce = %q, want %q", gotParam, "$1")
-	}
-	if want := []QueryParam{{Name: "p1", Value: "init"}}; !reflect.DeepEqual(gotParams, want) {
 		t.Fatalf("params = %#v, want %#v", gotParams, want)
 	}
 }
