@@ -166,6 +166,101 @@ func TestTranspileValue_EmptyArrayFoldableContextsAllDialects(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_EmptyArrayUnaryAndReduceShortCircuitAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+	schemaModes := allSchemaModes(schema)
+
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:    "double bang empty array folds false",
+			logic:   `{"!!":[[]]}`,
+			wantSQL: "FALSE",
+			wantParam: func(Dialect) string {
+				return "FALSE"
+			},
+		},
+		{
+			name:    "not empty array folds true",
+			logic:   `{"!":[[]]}`,
+			wantSQL: "TRUE",
+			wantParam: func(Dialect) string {
+				return "TRUE"
+			},
+		},
+		{
+			name:    "reduce falsy initial skips invalid reducer and falls through or",
+			logic:   `{"or":[{"reduce":[[],{"var":"missing"},""]},"fallback"]}`,
+			wantSQL: "'fallback'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
+		},
+		{
+			name:    "reduce truthy initial skips invalid reducer and wins or",
+			logic:   `{"or":[{"reduce":[[],{"var":"missing"},"seed"]},"fallback"]}`,
+			wantSQL: "'seed'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "seed"}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range schemaModes {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if got != tt.wantSQL {
+								t.Fatalf("TranspileValue() = %q, want %q", got, tt.wantSQL)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
 	t.Parallel()
 
@@ -325,6 +420,84 @@ func TestTranspileValue_PostgreSQLEmptyArrayScannerSkipsStringLiterals(t *testin
 	}
 	if want := []QueryParam{{Name: "p1", Value: "ARRAY[]"}}; !reflect.DeepEqual(gotParams, want) {
 		t.Fatalf("params = %#v, want %#v", gotParams, want)
+	}
+}
+
+func TestTranspileValue_PostgreSQLEmptyArrayScannerAllowsTypedSQL(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "arr", Type: FieldTypeArray},
+	})
+	schemaModes := allSchemaModes(schema)
+
+	for _, mode := range schemaModes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: DialectPostgreSQL,
+				Schema:  mode.schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			customSQL := map[string]string{
+				"typedArrayCast":      "CAST(ARRAY[] AS INT[])",
+				"typedArrayShorthand": "ARRAY[]::INT[]",
+				"untypedArray":        "ARRAY[]",
+			}
+			for name, sql := range customSQL {
+				err = tr.RegisterOperatorFunc(name, func(_ string, _ []OperatorArg) (OperatorResult, error) {
+					return ValueSQL(sql, ExpressionTypeArray), nil
+				})
+				if err != nil {
+					t.Fatalf("RegisterOperatorFunc(%q) error = %v", name, err)
+				}
+			}
+
+			for _, tt := range []struct {
+				name    string
+				logic   string
+				wantSQL string
+				wantErr ErrorCode
+			}{
+				{name: "cast typed array", logic: `{"typedArrayCast":[]}`, wantSQL: "CAST(ARRAY[] AS INT[])"},
+				{name: "shorthand typed array", logic: `{"typedArrayShorthand":[]}`, wantSQL: "ARRAY[]::INT[]"},
+				{name: "untyped array", logic: `{"untypedArray":[]}`, wantErr: ErrInvalidArgument},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if tt.wantErr != "" {
+						if !IsErrorCode(err, tt.wantErr) {
+							t.Fatalf("TranspileValue() error = %v, want %s", err, tt.wantErr)
+						}
+					} else if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					} else if got != tt.wantSQL {
+						t.Fatalf("TranspileValue() = %q, want %q", got, tt.wantSQL)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if tt.wantErr != "" {
+						if !IsErrorCode(err, tt.wantErr) {
+							t.Fatalf("TranspileParameterizedValue() error = %v, want %s", err, tt.wantErr)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if gotParam != tt.wantSQL {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, tt.wantSQL)
+					}
+					if len(gotParams) != 0 {
+						t.Fatalf("params = %#v, want none", gotParams)
+					}
+				})
+			}
+		})
 	}
 }
 

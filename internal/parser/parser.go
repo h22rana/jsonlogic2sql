@@ -155,10 +155,8 @@ func (p *Parser) ParseCondition(logic interface{}) (string, error) {
 
 // ParseValue converts a JSON Logic expression to a SQL value expression.
 func (p *Parser) ParseValue(logic interface{}) (string, error) {
-	if err := p.validateValueRoot(logic); err != nil {
-		return "", tperrors.NewValidationError(err)
-	}
-
+	// Value mode accepts arrays as values, including empty arrays nested below
+	// unary and logical operators, so parsing owns structural validation here.
 	res, err := p.parseExpressionValue(logic, "$")
 	if err != nil {
 		return "", err
@@ -168,13 +166,6 @@ func (p *Parser) ParseValue(logic interface{}) (string, error) {
 			"empty PostgreSQL array literals require an explicit element type")
 	}
 	return res.SQL, nil
-}
-
-func (p *Parser) validateValueRoot(logic interface{}) error {
-	if _, ok := logic.([]interface{}); ok {
-		return nil
-	}
-	return p.validator.Validate(logic)
 }
 
 func (p *Parser) isUnsupportedPostgreSQLEmptyArrayResult(res expressionResult) bool {
@@ -224,19 +215,79 @@ func containsBarePostgreSQLEmptyArrayLiteral(sql string) bool {
 			continue
 		}
 
-		if i+7 > len(sql) || !strings.EqualFold(sql[i:i+7], "ARRAY[]") {
+		if i+len("ARRAY[]") > len(sql) || !strings.EqualFold(sql[i:i+len("ARRAY[]")], "ARRAY[]") {
 			continue
 		}
 		if i > 0 && isSQLIdentifierChar(sql[i-1]) {
 			continue
 		}
-		if i+7 < len(sql) && isSQLIdentifierChar(sql[i+7]) {
+		if i+len("ARRAY[]") < len(sql) && isSQLIdentifierChar(sql[i+len("ARRAY[]")]) {
+			continue
+		}
+		if isTypedPostgreSQLEmptyArrayLiteral(sql, i) {
 			continue
 		}
 		return true
 	}
 
 	return false
+}
+
+func isTypedPostgreSQLEmptyArrayLiteral(sql string, start int) bool {
+	end := start + len("ARRAY[]")
+	next := skipSQLSpaces(sql, end)
+	if strings.HasPrefix(sql[next:], "::") {
+		return true
+	}
+	return isCastPostgreSQLEmptyArrayLiteral(sql, start, end)
+}
+
+func isCastPostgreSQLEmptyArrayLiteral(sql string, start, end int) bool {
+	open := skipSQLSpacesBackward(sql, start-1)
+	if open < 0 || sql[open] != '(' {
+		return false
+	}
+
+	wordEnd := skipSQLSpacesBackward(sql, open-1) + 1
+	if wordEnd <= 0 {
+		return false
+	}
+	wordStart := wordEnd - 1
+	for wordStart >= 0 && isSQLIdentifierChar(sql[wordStart]) {
+		wordStart--
+	}
+	if !strings.EqualFold(sql[wordStart+1:wordEnd], "CAST") {
+		return false
+	}
+
+	return hasSQLWordAt(sql, skipSQLSpaces(sql, end), "AS")
+}
+
+func skipSQLSpaces(sql string, pos int) int {
+	for pos < len(sql) && (sql[pos] == ' ' || sql[pos] == '\t' || sql[pos] == '\n' || sql[pos] == '\r') {
+		pos++
+	}
+	return pos
+}
+
+func skipSQLSpacesBackward(sql string, pos int) int {
+	for pos >= 0 && (sql[pos] == ' ' || sql[pos] == '\t' || sql[pos] == '\n' || sql[pos] == '\r') {
+		pos--
+	}
+	return pos
+}
+
+func hasSQLWordAt(sql string, pos int, word string) bool {
+	if pos+len(word) > len(sql) || !strings.EqualFold(sql[pos:pos+len(word)], word) {
+		return false
+	}
+	if pos > 0 && isSQLIdentifierChar(sql[pos-1]) {
+		return false
+	}
+	if pos+len(word) < len(sql) && isSQLIdentifierChar(sql[pos+len(word)]) {
+		return false
+	}
+	return true
 }
 
 func isSQLIdentifierChar(ch byte) bool {
@@ -843,6 +894,9 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
+		}
+		if len(arr) == 3 && isEmptyArrayLiteralValue(arr[0]) {
+			return p.parseExpressionValue(arr[2], tperrors.BuildArrayPath(path, 2))
 		}
 		sql, err := p.arrayOp.ToSQLAtPath(operator, arr, path)
 		if err != nil {
@@ -1523,10 +1577,6 @@ func (p *Parser) ParseConditionParameterized(logic interface{}) (string, []param
 // ParseValueParameterized converts a JSON Logic expression to a parameterized
 // SQL value expression.
 func (p *Parser) ParseValueParameterized(logic interface{}) (string, []params.QueryParam, error) {
-	if err := p.validateValueRoot(logic); err != nil {
-		return "", nil, tperrors.NewValidationError(err)
-	}
-
 	style := params.StyleForDialect(p.config.GetDialect())
 	pc := params.NewParamCollector(style)
 
@@ -1795,6 +1845,9 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
+		}
+		if len(arr) == 3 && isEmptyArrayLiteralValue(arr[0]) {
+			return p.parseExpressionValueParam(arr[2], tperrors.BuildArrayPath(path, 2), pc)
 		}
 		sql, err := p.arrayOp.ToSQLParamAtPath(operator, arr, pc, path)
 		if err != nil {
