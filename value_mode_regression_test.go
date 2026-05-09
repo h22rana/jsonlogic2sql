@@ -328,6 +328,143 @@ func TestTranspileValue_PostgreSQLEmptyArrayScannerSkipsStringLiterals(t *testin
 	}
 }
 
+func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+	schemaModes := []struct {
+		name   string
+		schema *Schema
+	}{
+		{name: "schema-less"},
+		{name: "schema-aware", schema: schema},
+	}
+
+	valueCases := []struct {
+		name       string
+		logic      string
+		want       string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "or keeps tiny non-zero number",
+			logic: `{"or":[1e-400,"fallback"]}`,
+			want:  "1e-400",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "1e-400"}},
+		},
+		{
+			name:  "or skips unreachable field after tiny non-zero number",
+			logic: `{"or":[1e-400,{"var":"missing"}]}`,
+			want:  "1e-400",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "1e-400"}},
+		},
+		{
+			name:  "if treats tiny non-zero number as truthy",
+			logic: `{"if":[1e-400,"yes",{"var":"missing"}]}`,
+			want:  "'yes'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "yes"}},
+		},
+	}
+
+	conditionCases := []struct {
+		name      string
+		logic     string
+		want      string
+		wantParam string
+	}{
+		{
+			name:      "double bang tiny non-zero number",
+			logic:     `{"!!":1e-400}`,
+			want:      "TRUE",
+			wantParam: "TRUE",
+		},
+		{
+			name:      "not tiny non-zero number",
+			logic:     `{"!":1e-400}`,
+			want:      "FALSE",
+			wantParam: "FALSE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range schemaModes {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range valueCases {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+
+					for _, tt := range conditionCases {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileCondition() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+							}
+							if gotParam != tt.wantParam {
+								t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.wantParam)
+							}
+							if len(gotParams) != 0 {
+								t.Fatalf("params = %#v, want none", gotParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_ArrayValueFallbackStringLiteralsNotRewritten(t *testing.T) {
 	t.Parallel()
 

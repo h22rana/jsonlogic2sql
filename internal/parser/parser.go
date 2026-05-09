@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
@@ -450,8 +449,7 @@ func literalTypeAndTruth(value interface{}) (operators.ExpressionType, bool, boo
 func isZeroLiteral(value interface{}) bool {
 	switch v := value.(type) {
 	case json.Number:
-		f, err := strconv.ParseFloat(v.String(), 64)
-		return err == nil && f == 0
+		return isZeroJSONNumberLiteral(v.String())
 	case float32:
 		return v == 0
 	case float64:
@@ -479,6 +477,18 @@ func isZeroLiteral(value interface{}) bool {
 	default:
 		return false
 	}
+}
+
+func isZeroJSONNumberLiteral(s string) bool {
+	if exponent := strings.IndexAny(s, "eE"); exponent >= 0 {
+		s = s[:exponent]
+	}
+	for _, ch := range s {
+		if ch >= '1' && ch <= '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Parser) truthinessSQL(res expressionResult) string {
