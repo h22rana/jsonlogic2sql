@@ -550,10 +550,8 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
 
-	// Second argument: transformation expression - rewrite element vars before SQL generation
-	rewritten := a.rewriteElementVars(args[1])
 	valueScoped := a.withValueSemantics(true)
-	transformation, err := valueScoped.expressionToSQLWithContextAndPath(rewritten, false, a.argPath(1))
+	transformation, err := valueScoped.valueExpressionToSQLWithContextAndPath(args[1], false, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
 	}
@@ -1750,9 +1748,8 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
-	rewritten := a.rewriteElementVars(args[1])
 	valueScoped := a.withValueSemantics(true)
-	transformation, err := valueScoped.expressionToSQLParamWithContextAndPath(rewritten, pc, false, a.argPath(1))
+	transformation, err := valueScoped.valueExpressionToSQLParamWithContextAndPath(args[1], pc, false, a.argPath(1))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
 	}

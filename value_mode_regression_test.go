@@ -774,6 +774,112 @@ func TestTranspileValue_ArrayOperatorArrayLiteralElementsAsExpressions(t *testin
 	}
 }
 
+func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "arr", Type: FieldTypeArray},
+	})
+
+	arrayLiteral := func(d Dialect, elem string) string {
+		if d == DialectPostgreSQL {
+			return fmt.Sprintf("ARRAY[%s]", elem)
+		}
+		return fmt.Sprintf("[%s]", elem)
+	}
+	mapSQL := func(d Dialect, transformation string) string {
+		if d == DialectClickHouse {
+			return fmt.Sprintf("arrayMap(elem -> %s, arr)", transformation)
+		}
+		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", transformation)
+	}
+
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    func(Dialect) string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "direct array literal",
+			logic: `{"map":[{"var":"arr"},[{"var":"current"}]]}`,
+			wantSQL: func(d Dialect) string {
+				return mapSQL(d, arrayLiteral(d, "elem"))
+			},
+			wantParam: func(d Dialect) string {
+				return mapSQL(d, arrayLiteral(d, "elem"))
+			},
+			wantParams: []QueryParam{},
+		},
+		{
+			name:  "array literal with value logical",
+			logic: `{"map":[{"var":"arr"},[{"or":[0,{"var":"current"}]}]]}`,
+			wantSQL: func(d Dialect) string {
+				return mapSQL(d, arrayLiteral(d, "elem"))
+			},
+			wantParam: func(d Dialect) string {
+				return mapSQL(d, arrayLiteral(d, "elem"))
+			},
+			wantParams: []QueryParam{},
+		},
+		{
+			name:  "array literal with defaulted current",
+			logic: `{"map":[{"var":"arr"},[{"var":["current","fallback"]}]]}`,
+			wantSQL: func(d Dialect) string {
+				return mapSQL(d, arrayLiteral(d, "COALESCE(elem, 'fallback')"))
+			},
+			wantParam: func(d Dialect) string {
+				return mapSQL(d, arrayLiteral(d, fmt.Sprintf("COALESCE(elem, %s)", testPlaceholder(d, 1))))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if want := tt.wantSQL(d); got != want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !regressionParamsEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_NestedValueLogicals(t *testing.T) {
 	tr, err := NewTranspiler(DialectBigQuery)
 	if err != nil {
