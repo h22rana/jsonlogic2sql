@@ -1,6 +1,9 @@
 package jsonlogic2sql
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // BenchmarkSimpleComparison benchmarks a simple equality comparison.
 func BenchmarkSimpleComparison(b *testing.B) {
@@ -169,5 +172,253 @@ func BenchmarkTranspileConditionFromMap(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		_, _ = tr.TranspileConditionFromMap(input)
+	}
+}
+
+// BenchmarkTranspileParameterizedCondition targets bind collection, placeholder
+// validation, and predicate parsing in the common WHERE-clause path.
+func BenchmarkTranspileParameterizedCondition(b *testing.B) {
+	tr := mustBenchmarkTranspiler(b, DialectBigQuery)
+	input := `{"and":[{">=":[{"var":"age"},18]},{"in":[{"var":"status"},["active","pending","review"]]},{"==":[{"var":"verified"},true]}]}`
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, _, err := tr.TranspileParameterizedCondition(input); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkTranspileParameterizedValue covers value-mode CASE/concat output plus
+// bind collection, which exercises a different parser path than conditions.
+func BenchmarkTranspileParameterizedValue(b *testing.B) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeNumber},
+		{Name: "nickname", Type: FieldTypeString},
+	})
+	tr := mustBenchmarkTranspilerWithConfig(b, &TranspilerConfig{
+		Dialect: DialectBigQuery,
+		Schema:  schema,
+	})
+	input := `{"cat":[{"if":[{">":[{"var":"amount"},100]},"high","low"]},":",{"or":["",{"var":"nickname"},"anonymous"]}]}`
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, _, err := tr.TranspileParameterizedValue(input); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkTranspileValueFallbackWithSchema(b *testing.B) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "nickname", Type: FieldTypeString},
+	})
+	tr := mustBenchmarkTranspilerWithConfig(b, &TranspilerConfig{
+		Dialect: DialectBigQuery,
+		Schema:  schema,
+	})
+	input := `{"or":["",{"var":"nickname"},"anonymous"]}`
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := tr.TranspileValue(input); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkNullSafeFieldEquality(b *testing.B) {
+	tr := mustBenchmarkTranspilerWithConfig(b, &TranspilerConfig{
+		Dialect:               DialectBigQuery,
+		NullSafeFieldEquality: true,
+	})
+	input := `{"and":[{"==":[{"var":"left"},{"var":"right"}]},{"!==":[{"var":["primary",null]},{"var":["secondary",null]}]}]}`
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := tr.TranspileCondition(input); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCustomOperators(b *testing.B) {
+	tr := mustBenchmarkTranspiler(b, DialectBigQuery)
+	registerBenchmarkCustomOperators(b, tr)
+
+	benchmarks := map[string]string{
+		"Condition": `{"and":[{">":[{"strlen":[{"var":"name"}]},3]},{"isPositive":[{"var":"score"}]}]}`,
+		"Value":     `{"cat":[{"lower":[{"var":"name"}]},"-",{"if":[{"isPositive":[{"var":"score"}]},"positive","other"]}]}`,
+	}
+
+	for name, input := range benchmarks {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				var err error
+				if name == "Condition" {
+					_, err = tr.TranspileCondition(input)
+				} else {
+					_, err = tr.TranspileValue(input)
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkArrayMapValueLambda(b *testing.B) {
+	tr := mustBenchmarkTranspiler(b, DialectBigQuery)
+	input := `{"map":[{"var":"items"},{"if":[{">":[{"var":"current.score"},0]},{"var":"current.score"},0]}]}`
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := tr.TranspileValue(input); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkParameterizedArrayScopedDefaults(b *testing.B) {
+	tr := mustBenchmarkTranspiler(b, DialectBigQuery)
+	input := `{"map":[{"var":"items"},{"cat":[{"var":["current.label","unknown"]},"-",{"var":["current.code","na"]}]}]}`
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, _, err := tr.TranspileParameterizedValue(input); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkParameterizedValueDialects(b *testing.B) {
+	input := `{"map":[{"filter":[{"var":"items"},{">":[{"var":"current.score"},10]}]},{"cat":[{"var":["current.label","unknown"]},":",{"var":"current.score"}]}]}`
+
+	for _, d := range benchmarkDialects() {
+		b.Run(d.name, func(b *testing.B) {
+			tr := mustBenchmarkTranspiler(b, d.dialect)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, _, err := tr.TranspileParameterizedValue(input); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkConditionInputForms(b *testing.B) {
+	tr := mustBenchmarkTranspiler(b, DialectBigQuery)
+	jsonInput := `{"and":[{">=":[{"var":"age"},18]},{"==":[{"var":"status"},"active"]}]}`
+	mapInput := map[string]interface{}{
+		"and": []interface{}{
+			map[string]interface{}{">=": []interface{}{map[string]interface{}{"var": "age"}, 18}},
+			map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "status"}, "active"}},
+		},
+	}
+
+	b.Run("JSONString", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			if _, err := tr.TranspileCondition(jsonInput); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Map", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			if _, err := tr.TranspileConditionFromMap(mapInput); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Interface", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			if _, err := tr.TranspileConditionFromInterface(mapInput); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+type benchmarkDialectCase struct {
+	name    string
+	dialect Dialect
+}
+
+func benchmarkDialects() []benchmarkDialectCase {
+	return []benchmarkDialectCase{
+		{"BigQuery", DialectBigQuery},
+		{"Spanner", DialectSpanner},
+		{"PostgreSQL", DialectPostgreSQL},
+		{"DuckDB", DialectDuckDB},
+		{"ClickHouse", DialectClickHouse},
+	}
+}
+
+func mustBenchmarkTranspiler(b *testing.B, d Dialect) *Transpiler {
+	b.Helper()
+	tr, err := NewTranspiler(d)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return tr
+}
+
+func mustBenchmarkTranspilerWithConfig(b *testing.B, config *TranspilerConfig) *Transpiler {
+	b.Helper()
+	tr, err := NewTranspilerWithConfig(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return tr
+}
+
+func registerBenchmarkCustomOperators(b *testing.B, tr *Transpiler) {
+	b.Helper()
+
+	if err := tr.RegisterOperatorFunc("strlen", func(_ string, args []OperatorArg) (OperatorResult, error) {
+		if len(args) != 1 {
+			return OperatorResult{}, fmt.Errorf("strlen requires exactly 1 argument")
+		}
+		return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	if err := tr.RegisterOperatorFunc("lower", func(_ string, args []OperatorArg) (OperatorResult, error) {
+		if len(args) != 1 {
+			return OperatorResult{}, fmt.Errorf("lower requires exactly 1 argument")
+		}
+		return ValueSQL(fmt.Sprintf("LOWER(%s)", args[0].SQL), ExpressionTypeString), nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	if err := tr.RegisterOperatorFunc("isPositive", func(_ string, args []OperatorArg) (OperatorResult, error) {
+		if len(args) != 1 {
+			return OperatorResult{}, fmt.Errorf("isPositive requires exactly 1 argument")
+		}
+		return PredicateSQL(fmt.Sprintf("%s > 0", args[0].SQL)), nil
+	}); err != nil {
+		b.Fatal(err)
 	}
 }
