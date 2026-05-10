@@ -525,7 +525,7 @@ func isRenderedArrayScopeSource(value interface{}) bool {
 // Generates: ARRAY(SELECT transformation FROM UNNEST(array) AS elem).
 // For ClickHouse: Uses arrayMap or subquery with arrayJoin.
 func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("map requires exactly 2 arguments")
 	}
 
@@ -537,43 +537,35 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	}
 
 	// Validate that first argument is an array type
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return a.emptyArrayLiteralSQL()
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
+	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
 
 	valueScoped := a.withValueSemantics(true)
-	transformation, err := valueScoped.valueExpressionToSQLWithContextAndPath(args[1], false, a.argPath(1))
+	transformation, err := valueScoped.valueExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
 	}
 	transformation = a.replaceElementRefsInSQL(transformation)
 
 	alias := a.elemAlias()
-
-	// Generate SQL based on dialect
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("arrayMap(%s -> %s, %s)", alias, transformation, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s)", transformation, array, alias), nil
-	}
-	return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s)", transformation, array, alias), nil
+	return a.renderMapSQL(alias, transformation, array), nil
 }
 
 // handleFilter converts filter operator to SQL.
 // Generates: ARRAY(SELECT elem FROM UNNEST(array) AS elem WHERE condition).
 // For ClickHouse: Uses arrayFilter function.
 func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("filter requires exactly 2 arguments")
 	}
 
@@ -585,36 +577,28 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	}
 
 	// Validate that first argument is an array type
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return a.emptyArrayLiteralSQL()
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
+	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[1], a.argPath(1))
+	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
 	}
 	condition = a.replaceElementRefsInSQL(condition)
 
 	alias := a.elemAlias()
-
-	// Generate SQL based on dialect
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("arrayFilter(%s -> %s, %s)", alias, condition, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s WHERE %s)", alias, array, alias, condition), nil
-	}
-	return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s WHERE %s)", alias, array, alias, condition), nil
+	return a.renderFilterSQL(alias, array, condition), nil
 }
 
 // handleReduce converts reduce operator to SQL.
@@ -626,7 +610,7 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 // - General: (SELECT reducer FROM UNNEST(array) AS elem).
 // For ClickHouse: Uses arrayReduce function for aggregates.
 func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
-	if len(args) != 3 {
+	if len(args) != reduceOperatorArgCount {
 		return "", fmt.Errorf("reduce requires exactly 3 arguments")
 	}
 
@@ -638,27 +622,27 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	}
 
 	// Validate that first argument is an array type
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
 
 	// Third argument: initial value
-	initial, err := a.valueToSQLAtPath(args[2], a.argPath(2))
+	initial, err := a.valueToSQLAtPath(args[arrayReduceInitialArgIndex], a.argPath(arrayReduceInitialArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return initial, nil
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
+	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
 	}
 
 	// Second argument: reducer expression
-	reducerExpr := args[1]
+	reducerExpr := args[arrayExpressionArgIndex]
 
 	alias := a.elemAlias()
 
@@ -703,7 +687,7 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	// doesn't corrupt initial values containing "current"/"item" field names.
 	rewritten := a.rewriteElementVars(reducerExpr)
 	valueScoped := a.withValueSemantics(true)
-	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(rewritten, true, a.argPath(1))
+	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(rewritten, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
@@ -815,7 +799,7 @@ func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) (string, b
 // Generates: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE NOT (condition)).
 // For ClickHouse: Uses arrayAll function.
 func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("all requires exactly 2 arguments")
 	}
 
@@ -827,39 +811,31 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	}
 
 	// Validate that first argument is an array type
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return "FALSE", nil
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
+	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[1], a.argPath(1))
+	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
 	condition = a.replaceElementRefsInSQL(condition)
 
-	// Generate SQL based on dialect
 	// JSONLogic spec: {"all": [[], condition]} returns false (empty array = false).
 	// Without a guard, SQL NOT EXISTS on an empty UNNEST returns true (no rows to violate).
 	// We add an emptiness check: array must be non-null and non-empty.
-	lengthCheck := a.config.ArrayLengthFunc(array)
 	alias := a.elemAlias()
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("(%s > 0 AND arrayAll(%s -> %s, %s))", lengthCheck, alias, condition, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE NOT (%s)))", lengthCheck, array, alias, condition), nil
-	}
-	return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE NOT (%s)))", lengthCheck, array, alias, condition), nil
+	return a.renderAllSQL(alias, array, condition), nil
 }
 
 // handleSome converts some operator to SQL.
@@ -867,7 +843,7 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 // Generates: EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition).
 // For ClickHouse: Uses arrayExists function.
 func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("some requires exactly 2 arguments")
 	}
 
@@ -879,37 +855,28 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	}
 
 	// Validate that first argument is an array type
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return "FALSE", nil
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
+	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[1], a.argPath(1))
+	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
 	condition = a.replaceElementRefsInSQL(condition)
 
 	alias := a.elemAlias()
-
-	// Generate SQL based on dialect
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("arrayExists(%s -> %s, %s)", alias, condition, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		// Standard SQL: EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
-		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition), nil
-	}
-	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition), nil
+	return a.renderSomeSQL(alias, array, condition), nil
 }
 
 // handleNone converts none operator to SQL.
@@ -917,7 +884,7 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 // Generates: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition).
 // For ClickHouse: Uses NOT arrayExists function.
 func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("none requires exactly 2 arguments")
 	}
 
@@ -929,37 +896,28 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	}
 
 	// Validate that first argument is an array type
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return "TRUE", nil
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[0], a.argPath(0))
+	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[1], a.argPath(1))
+	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
 	condition = a.replaceElementRefsInSQL(condition)
 
 	alias := a.elemAlias()
-
-	// Generate SQL based on dialect
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("NOT arrayExists(%s -> %s, %s)", alias, condition, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		// Standard SQL: NOT EXISTS (SELECT 1 FROM UNNEST(array) AS elem WHERE condition)
-		return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition), nil
-	}
-	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition), nil
+	return a.renderNoneSQL(alias, array, condition), nil
 }
 
 // handleMerge converts merge operator to SQL.
@@ -998,34 +956,7 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 		}
 		arrays = append(arrays, array)
 	}
-	if len(arrays) == 0 {
-		return a.emptyArrayLiteralSQL()
-	}
-
-	// Generate SQL based on dialect
-	d := dialect.DialectUnspecified
-	if a.config != nil {
-		d = a.config.GetDialect()
-	}
-
-	switch d {
-	case dialect.DialectPostgreSQL:
-		// PostgreSQL: Use || operator for array concatenation
-		if len(arrays) == 1 {
-			return arrays[0], nil
-		}
-		return fmt.Sprintf("(%s)", strings.Join(arrays, " || ")), nil
-	case dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectDuckDB:
-		// BigQuery/Spanner/DuckDB: Use ARRAY_CONCAT function
-		return fmt.Sprintf("ARRAY_CONCAT(%s)", strings.Join(arrays, ", ")), nil
-	case dialect.DialectClickHouse:
-		// ClickHouse: Use arrayConcat function
-		return fmt.Sprintf("arrayConcat(%s)", strings.Join(arrays, ", ")), nil
-	case dialect.DialectUnspecified:
-		return "", fmt.Errorf("merge: dialect not specified")
-	default:
-		return "", fmt.Errorf("merge: unsupported dialect %s", d)
-	}
+	return a.renderMergeSQL(arrays)
 }
 
 // valueToSQL converts a value to SQL, handling var expressions, arrays, and literals.
@@ -1730,7 +1661,7 @@ func (a *ArrayOperator) ToSQLParamAtPath(operator string, args []interface{}, pc
 
 // handleMapParam is the parameterized variant of handleMap. Keep in sync.
 func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("map requires exactly 2 arguments")
 	}
 	if a.config != nil {
@@ -1738,36 +1669,29 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 			return "", err
 		}
 	}
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return a.emptyArrayLiteralSQL()
 	}
-	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
+	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
 	valueScoped := a.withValueSemantics(true)
-	transformation, err := valueScoped.valueExpressionToSQLParamWithContextAndPath(args[1], pc, false, a.argPath(1))
+	transformation, err := valueScoped.valueExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
 	}
 	transformation = a.replaceElementRefsInSQL(transformation)
 	alias := a.elemAlias()
-
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("arrayMap(%s -> %s, %s)", alias, transformation, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s)", transformation, array, alias), nil
-	}
-	return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s)", transformation, array, alias), nil
+	return a.renderMapSQL(alias, transformation, array), nil
 }
 
 // handleFilterParam is the parameterized variant of handleFilter. Keep in sync.
 func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("filter requires exactly 2 arguments")
 	}
 	if a.config != nil {
@@ -1775,35 +1699,28 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 			return "", err
 		}
 	}
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return a.emptyArrayLiteralSQL()
 	}
-	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
+	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
 	}
-	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[1], pc, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
 	}
 	condition = a.replaceElementRefsInSQL(condition)
 	alias := a.elemAlias()
-
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("arrayFilter(%s -> %s, %s)", alias, condition, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s WHERE %s)", alias, array, alias, condition), nil
-	}
-	return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s WHERE %s)", alias, array, alias, condition), nil
+	return a.renderFilterSQL(alias, array, condition), nil
 }
 
 // handleReduceParam is the parameterized variant of handleReduce. Keep in sync.
 func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) != 3 {
+	if len(args) != reduceOperatorArgCount {
 		return "", fmt.Errorf("reduce requires exactly 3 arguments")
 	}
 	if a.config != nil {
@@ -1811,21 +1728,21 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 			return "", err
 		}
 	}
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	initial, err := a.valueToSQLParamAtPath(args[2], pc, a.argPath(2))
+	initial, err := a.valueToSQLParamAtPath(args[arrayReduceInitialArgIndex], pc, a.argPath(arrayReduceInitialArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return initial, nil
 	}
-	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
+	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
 	}
-	reducerExpr := args[1]
+	reducerExpr := args[arrayExpressionArgIndex]
 	alias := a.elemAlias()
 
 	if pattern := a.detectAggregatePattern(reducerExpr); pattern != nil {
@@ -1856,7 +1773,7 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 
 	rewritten := a.rewriteElementVars(reducerExpr)
 	valueScoped := a.withValueSemantics(true)
-	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(rewritten, pc, true, a.argPath(1))
+	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(rewritten, pc, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
@@ -1874,7 +1791,7 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 
 // handleAllParam is the parameterized variant of handleAll. Keep in sync.
 func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("all requires exactly 2 arguments")
 	}
 	if a.config != nil {
@@ -1882,36 +1799,29 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 			return "", err
 		}
 	}
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return "FALSE", nil
 	}
-	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
+	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
-	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[1], pc, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
 	condition = a.replaceElementRefsInSQL(condition)
 
-	lengthCheck := a.config.ArrayLengthFunc(array)
 	alias := a.elemAlias()
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("(%s > 0 AND arrayAll(%s -> %s, %s))", lengthCheck, alias, condition, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE NOT (%s)))", lengthCheck, array, alias, condition), nil
-	}
-	return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE NOT (%s)))", lengthCheck, array, alias, condition), nil
+	return a.renderAllSQL(alias, array, condition), nil
 }
 
 // handleSomeParam is the parameterized variant of handleSome. Keep in sync.
 func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("some requires exactly 2 arguments")
 	}
 	if a.config != nil {
@@ -1919,35 +1829,28 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 			return "", err
 		}
 	}
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return "FALSE", nil
 	}
-	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
+	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
-	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[1], pc, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
 	condition = a.replaceElementRefsInSQL(condition)
 	alias := a.elemAlias()
-
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("arrayExists(%s -> %s, %s)", alias, condition, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition), nil
-	}
-	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition), nil
+	return a.renderSomeSQL(alias, array, condition), nil
 }
 
 // handleNoneParam is the parameterized variant of handleNone. Keep in sync.
 func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) != 2 {
+	if len(args) != binaryArrayOperatorArgCount {
 		return "", fmt.Errorf("none requires exactly 2 arguments")
 	}
 	if a.config != nil {
@@ -1955,30 +1858,23 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 			return "", err
 		}
 	}
-	if err := a.validateArrayOperand(args[0]); err != nil {
+	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	if isEmptyArrayLiteral(args[0]) {
+	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return "TRUE", nil
 	}
-	array, err := a.valueToSQLParamAtPath(args[0], pc, a.argPath(0))
+	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
-	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[1], pc, a.argPath(1))
+	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
 	condition = a.replaceElementRefsInSQL(condition)
 	alias := a.elemAlias()
-
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("NOT arrayExists(%s -> %s, %s)", alias, condition, array), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition), nil
-	}
-	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition), nil
+	return a.renderNoneSQL(alias, array, condition), nil
 }
 
 // handleMergeParam is the parameterized variant of handleMerge. Keep in sync.
@@ -2007,29 +1903,7 @@ func (a *ArrayOperator) handleMergeParam(args []interface{}, pc *params.ParamCol
 		}
 		arrays = append(arrays, array)
 	}
-	if len(arrays) == 0 {
-		return a.emptyArrayLiteralSQL()
-	}
-
-	d := dialect.DialectUnspecified
-	if a.config != nil {
-		d = a.config.GetDialect()
-	}
-	switch d {
-	case dialect.DialectPostgreSQL:
-		if len(arrays) == 1 {
-			return arrays[0], nil
-		}
-		return fmt.Sprintf("(%s)", strings.Join(arrays, " || ")), nil
-	case dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectDuckDB:
-		return fmt.Sprintf("ARRAY_CONCAT(%s)", strings.Join(arrays, ", ")), nil
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("arrayConcat(%s)", strings.Join(arrays, ", ")), nil
-	case dialect.DialectUnspecified:
-		return "", fmt.Errorf("merge: dialect not specified")
-	default:
-		return "", fmt.Errorf("merge: unsupported dialect %s", d)
-	}
+	return a.renderMergeSQL(arrays)
 }
 
 // valueToSQLParam is the parameterized variant of valueToSQL. Keep in sync.
