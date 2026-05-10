@@ -519,6 +519,76 @@ func TestTranspileCondition_TypedCustomPredicateTruthiness(t *testing.T) {
 	}
 }
 
+func TestTranspileCondition_MixedTypedCustomOperatorsAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "name", Type: FieldTypeString},
+		{Name: "score", Type: FieldTypeNumber},
+	})
+
+	logic := `{"and":[{">":[{"strlen":[{"var":"name"}]},3]},{"isPositive":[{"var":"score"}]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+					registerErr := tr.RegisterOperatorFunc("strlen", func(_ string, args []OperatorArg) (OperatorResult, error) {
+						if len(args) != 1 {
+							return OperatorResult{}, fmt.Errorf("strlen requires exactly 1 argument")
+						}
+						return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
+					})
+					if registerErr != nil {
+						t.Fatalf("RegisterOperatorFunc(strlen) error = %v", registerErr)
+					}
+					registerErr = tr.RegisterOperatorFunc("isPositive", func(_ string, args []OperatorArg) (OperatorResult, error) {
+						if len(args) != 1 {
+							return OperatorResult{}, fmt.Errorf("isPositive requires exactly 1 argument")
+						}
+						return PredicateSQL(fmt.Sprintf("%s > 0", args[0].SQL)), nil
+					})
+					if registerErr != nil {
+						t.Fatalf("RegisterOperatorFunc(isPositive) error = %v", registerErr)
+					}
+
+					got, err := tr.TranspileCondition(logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if want := "(LENGTH(name) > 3 AND score > 0)"; got != want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					wantParam := fmt.Sprintf("(LENGTH(name) > %s AND score > 0)", testPlaceholder(d, 1))
+					if gotParam != wantParam {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, wantParam)
+					}
+					wantParams := []QueryParam{{Name: "p1", Value: float64(3)}}
+					if !reflect.DeepEqual(gotParams, wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_StrictEqualityMismatchedTypedExpressions(t *testing.T) {
 	tests := []struct {
 		name  string
