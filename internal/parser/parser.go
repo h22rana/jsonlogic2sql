@@ -1342,24 +1342,16 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 
 // isBuiltInOperator checks if an operator is a built-in operator.
 func (p *Parser) isBuiltInOperator(operator string) bool {
-	builtInOps := map[string]bool{
-		// Data access
-		"var": true, "missing": true, "missing_some": true,
-		// Comparison
-		"==": true, "===": true, "!=": true, "!==": true,
-		">": true, ">=": true, "<": true, "<=": true, "in": true,
-		// Logical
-		"and": true, "or": true, "!": true, "!!": true, "if": true,
-		// Numeric
-		"+": true, "-": true, "*": true, "/": true, "%": true,
-		"max": true, "min": true,
-		// String
-		"cat": true, "substr": true,
-		// Array
-		"map": true, "filter": true, "reduce": true,
-		"all": true, "some": true, "none": true, "merge": true,
+	switch operator {
+	case "var", "missing", "missing_some",
+		"==", "===", "!=", "!==", ">", ">=", "<", "<=", "in",
+		"and", "or", "!", "!!", "if",
+		"+", "-", "*", "/", "%", "max", "min",
+		"cat", "substr",
+		"map", "filter", "reduce", "all", "some", "none", "merge":
+		return true
 	}
-	return builtInOps[operator]
+	return false
 }
 
 // isArrayOperator checks if an operator introduces/depends on array expression
