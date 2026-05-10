@@ -21,10 +21,6 @@ type CustomOperatorHandler interface {
 	ToSQL(operator string, args []operators.OperatorArg) (operators.OperatorResult, error)
 }
 
-type customOperatorContextHandler interface {
-	ToSQLInContext(operator string, args []operators.OperatorArg, kind operators.ExpressionKind) (operators.OperatorResult, error)
-}
-
 // CustomOperatorLookup is a function type for looking up custom operators.
 type CustomOperatorLookup func(operatorName string) (CustomOperatorHandler, bool)
 
@@ -658,18 +654,6 @@ func (p *Parser) parseTruthinessResultParam(expr interface{}, path string, pc *p
 	return res, condition, nil
 }
 
-func (p *Parser) customOperatorToSQL(
-	handler CustomOperatorHandler,
-	operator string,
-	args []operators.OperatorArg,
-	kind operators.ExpressionKind,
-) (operators.OperatorResult, error) {
-	if contextual, ok := handler.(customOperatorContextHandler); ok {
-		return contextual.ToSQLInContext(operator, args, kind)
-	}
-	return handler.ToSQL(operator, args)
-}
-
 func compatibleValueType(left, right expressionResult, path string) (operators.ExpressionType, error) {
 	leftType := valueTypeOf(left)
 	rightType := valueTypeOf(right)
@@ -815,7 +799,7 @@ func (p *Parser) parseOperatorPredicate(operator string, args interface{}, path 
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"failed to process custom operator arguments", err)
 			}
-			res, err := p.customOperatorToSQL(handler, operator, processedArgs, operators.ExpressionKindPredicate)
+			res, err := handler.ToSQL(operator, processedArgs)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
@@ -891,7 +875,7 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"failed to process custom operator arguments", err)
 			}
-			res, err := p.customOperatorToSQL(handler, operator, processedArgs, operators.ExpressionKindValue)
+			res, err := handler.ToSQL(operator, processedArgs)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
@@ -1223,35 +1207,6 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 		return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, current.SQL, rest.SQL), resultType), nil
 	}
 	return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, rest.SQL, current.SQL), resultType), nil
-}
-
-// parseExpression recursively parses JSON Logic expressions.
-// path is the JSONPath to the current expression for error reporting.
-func (p *Parser) parseExpression(expr interface{}, path string) (string, error) {
-	// Handle primitive values (should not happen in normal JSON Logic, but handle gracefully)
-	if p.isPrimitive(expr) {
-		return "", tperrors.NewPrimitiveNotAllowed(path)
-	}
-
-	// Handle arrays (should not happen in normal JSON Logic, but handle gracefully)
-	if _, ok := expr.([]interface{}); ok {
-		return "", tperrors.NewArrayNotAllowed(path)
-	}
-
-	// Handle objects (operators)
-	if obj, ok := expr.(map[string]interface{}); ok {
-		if len(obj) != 1 {
-			return "", tperrors.NewMultipleKeys(path)
-		}
-
-		for operator, args := range obj {
-			operatorPath := tperrors.BuildPath(path, operator, -1)
-			return p.parseOperator(operator, args, operatorPath)
-		}
-	}
-
-	return "", tperrors.New(tperrors.ErrInvalidExpression, "", path,
-		fmt.Sprintf("invalid expression type: %T", expr))
 }
 
 // wrapOperatorError wraps an operator error with TranspileError if it isn't already.
@@ -1782,7 +1737,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"failed to process custom operator arguments", err)
 			}
-			res, err := p.customOperatorToSQL(handler, operator, processedArgs, operators.ExpressionKindPredicate)
+			res, err := handler.ToSQL(operator, processedArgs)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
@@ -1866,7 +1821,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"failed to process custom operator arguments", err)
 			}
-			res, err := p.customOperatorToSQL(handler, operator, processedArgs, operators.ExpressionKindValue)
+			res, err := handler.ToSQL(operator, processedArgs)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)

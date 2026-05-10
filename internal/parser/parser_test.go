@@ -279,55 +279,6 @@ func TestParser_Parse(t *testing.T) {
 	}
 }
 
-func TestParser_parseExpression(t *testing.T) {
-	p := NewParser(nil)
-
-	tests := []struct {
-		name     string
-		input    interface{}
-		expected string
-		hasError bool
-	}{
-		{
-			name:     "simple comparison",
-			input:    map[string]interface{}{">": []interface{}{map[string]interface{}{"var": "amount"}, 1000}},
-			expected: "amount > 1000",
-			hasError: false,
-		},
-		{
-			name:     "primitive value",
-			input:    "hello",
-			expected: "",
-			hasError: true,
-		},
-		{
-			name:     "array value",
-			input:    []interface{}{1, 2, 3},
-			expected: "",
-			hasError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := p.parseExpression(tt.input, "$")
-
-			if tt.hasError {
-				if err == nil {
-					t.Errorf("parseExpression() expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("parseExpression() unexpected error = %v", err)
-				}
-				if result != tt.expected {
-					t.Errorf("parseExpression() = %v, expected %v", result, tt.expected)
-				}
-			}
-		})
-	}
-}
-
 func TestParser_parseOperator(t *testing.T) {
 	p := NewParser(nil)
 
@@ -436,25 +387,11 @@ func TestParser_isPrimitive(t *testing.T) {
 type mockCustomHandler struct {
 	toSQL          func(operator string, args []interface{}) (string, error)
 	forcePredicate bool
+	resultKind     operators.ExpressionKind
+	resultType     operators.ExpressionType
 }
 
 func (m *mockCustomHandler) ToSQL(operator string, args []operators.OperatorArg) (operators.OperatorResult, error) {
-	return m.toSQLResult(operator, args, operators.ExpressionKindPredicate)
-}
-
-func (m *mockCustomHandler) ToSQLInContext(
-	operator string,
-	args []operators.OperatorArg,
-	kind operators.ExpressionKind,
-) (operators.OperatorResult, error) {
-	return m.toSQLResult(operator, args, kind)
-}
-
-func (m *mockCustomHandler) toSQLResult(
-	operator string,
-	args []operators.OperatorArg,
-	kind operators.ExpressionKind,
-) (operators.OperatorResult, error) {
 	legacyArgs := make([]interface{}, len(args))
 	for i, arg := range args {
 		legacyArgs[i] = arg.SQL
@@ -463,10 +400,10 @@ func (m *mockCustomHandler) toSQLResult(
 	if err != nil {
 		return operators.OperatorResult{}, err
 	}
-	if kind == operators.ExpressionKindValue && !m.forcePredicate {
-		return operators.ValueSQL(sql, operators.ExpressionTypeUnknown), nil
+	if m.forcePredicate || m.resultKind == operators.ExpressionKindPredicate {
+		return operators.PredicateSQL(sql), nil
 	}
-	return operators.PredicateSQL(sql), nil
+	return operators.ValueSQL(sql, m.resultType), nil
 }
 
 // mockSchemaProvider implements operators.SchemaProvider for testing.
@@ -1599,27 +1536,6 @@ func TestParser_processArg_AdditionalBranches(t *testing.T) {
 			t.Error("processArg() result should contain '==' key")
 		}
 	})
-}
-
-// --- Tests for parseExpression with invalid type ---
-
-func TestParser_parseExpression_InvalidType(t *testing.T) {
-	p := NewParser(nil)
-
-	// Test with a type that is not primitive, not array, and not map
-	// A channel satisfies this
-	ch := make(chan int)
-	_, err := p.parseExpression(ch, "$")
-	if err == nil {
-		t.Fatal("parseExpression() expected error for channel type")
-	}
-	var tpErr *tperrors.TranspileError
-	if !errors.As(err, &tpErr) {
-		t.Fatalf("expected TranspileError, got %T: %v", err, err)
-	}
-	if tpErr.Code != tperrors.ErrInvalidExpression {
-		t.Errorf("error code = %q, expected %q", tpErr.Code, tperrors.ErrInvalidExpression)
-	}
 }
 
 // --- Tests for custom operator integrated in comparison context ---

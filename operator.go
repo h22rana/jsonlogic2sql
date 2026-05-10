@@ -159,10 +159,6 @@ type dialectAwareHandlerWrapper struct {
 }
 
 func (w *dialectAwareHandlerWrapper) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
-	return w.ToSQLInContext(operator, args, operators.ExpressionKindValue)
-}
-
-func (w *dialectAwareHandlerWrapper) ToSQLInContext(operator string, args []OperatorArg, _ operators.ExpressionKind) (OperatorResult, error) {
 	return w.handler.ToSQLWithDialect(operator, args, w.dialect)
 }
 
