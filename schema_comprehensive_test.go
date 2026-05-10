@@ -21,42 +21,42 @@ func setupTestTranspiler() *Transpiler {
 	transpiler, _ := NewTranspiler(DialectBigQuery)
 
 	// startsWith operator: column LIKE 'value%'
-	transpiler.RegisterOperatorFunc("startsWith", func(op string, args []interface{}) (string, error) {
+	transpiler.RegisterOperatorFunc("startsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 2 {
-			return "", fmt.Errorf("startsWith requires exactly 2 arguments")
+			return OperatorResult{}, fmt.Errorf("startsWith requires exactly 2 arguments")
 		}
-		column := args[0].(string)
-		pattern := args[1].(string)
+		column := args[0].SQL
+		pattern := args[1].SQL
 		// Extract value from quoted string (e.g., "'T'" -> "T")
 		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
 			pattern = pattern[1 : len(pattern)-1]
 		}
-		return fmt.Sprintf("%s LIKE '%s%%'", column, pattern), nil
+		return PredicateSQL(fmt.Sprintf("%s LIKE '%s%%'", column, pattern)), nil
 	})
 
 	// endsWith operator: column LIKE '%value'
-	transpiler.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
+	transpiler.RegisterOperatorFunc("endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 2 {
-			return "", fmt.Errorf("endsWith requires exactly 2 arguments")
+			return OperatorResult{}, fmt.Errorf("endsWith requires exactly 2 arguments")
 		}
-		column := args[0].(string)
-		pattern := args[1].(string)
+		column := args[0].SQL
+		pattern := args[1].SQL
 		// Extract value from quoted string
 		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
 			pattern = pattern[1 : len(pattern)-1]
 		}
-		return fmt.Sprintf("%s LIKE '%%%s'", column, pattern), nil
+		return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s'", column, pattern)), nil
 	})
 
 	// contains operator: column LIKE '%value%'
-	transpiler.RegisterOperatorFunc("contains", func(op string, args []interface{}) (string, error) {
+	transpiler.RegisterOperatorFunc("contains", func(op string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 2 {
-			return "", fmt.Errorf("contains requires exactly 2 arguments")
+			return OperatorResult{}, fmt.Errorf("contains requires exactly 2 arguments")
 		}
 
 		var column, pattern string
-		arg0Str, arg0IsStr := args[0].(string)
-		arg1Str, arg1IsStr := args[1].(string)
+		arg0Str := args[0].SQL
+		arg1Str := args[1].SQL
 
 		// Helper function to extract value from array string representation like "[T]"
 		extractFromArrayString := func(s string) string {
@@ -70,35 +70,29 @@ func setupTestTranspiler() *Transpiler {
 			return s
 		}
 
-		if arg0IsStr && arg1IsStr {
-			if strings.HasPrefix(arg1Str, "[") && strings.HasSuffix(arg1Str, "]") {
-				column = arg0Str
-				pattern = extractFromArrayString(arg1Str)
-			} else if strings.HasPrefix(arg0Str, "[") && strings.HasSuffix(arg0Str, "]") {
-				column = arg1Str
-				pattern = extractFromArrayString(arg0Str)
-			} else {
-				arg0Quoted := len(arg0Str) >= 2 && arg0Str[0] == '\'' && arg0Str[len(arg0Str)-1] == '\''
-				arg1Quoted := len(arg1Str) >= 2 && arg1Str[0] == '\'' && arg1Str[len(arg1Str)-1] == '\''
-
-				if arg0Quoted && !arg1Quoted {
-					column = arg1Str
-					pattern = arg0Str
-				} else {
-					column = arg0Str
-					pattern = arg1Str
-				}
-			}
+		if strings.HasPrefix(arg1Str, "[") && strings.HasSuffix(arg1Str, "]") {
+			column = arg0Str
+			pattern = extractFromArrayString(arg1Str)
+		} else if strings.HasPrefix(arg0Str, "[") && strings.HasSuffix(arg0Str, "]") {
+			column = arg1Str
+			pattern = extractFromArrayString(arg0Str)
 		} else {
-			column = args[0].(string)
-			pattern = args[1].(string)
-			pattern = extractFromArrayString(pattern)
+			arg0Quoted := len(arg0Str) >= 2 && arg0Str[0] == '\'' && arg0Str[len(arg0Str)-1] == '\''
+			arg1Quoted := len(arg1Str) >= 2 && arg1Str[0] == '\'' && arg1Str[len(arg1Str)-1] == '\''
+
+			if arg0Quoted && !arg1Quoted {
+				column = arg1Str
+				pattern = arg0Str
+			} else {
+				column = arg0Str
+				pattern = arg1Str
+			}
 		}
 
 		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
 			pattern = pattern[1 : len(pattern)-1]
 		}
-		return fmt.Sprintf("%s LIKE '%%%s%%'", column, pattern), nil
+		return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s%%'", column, pattern)), nil
 	})
 
 	return transpiler

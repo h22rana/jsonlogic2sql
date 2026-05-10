@@ -151,7 +151,11 @@ func TestParseContainsArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			col, pat := parseContainsArgs(tt.args)
+			args := make([]jsonlogic2sql.OperatorArg, len(tt.args))
+			for i, arg := range tt.args {
+				args[i] = jsonlogic2sql.OperatorArg{SQL: arg.(string)}
+			}
+			col, pat := parseContainsArgs(args)
 			if col != tt.wantColumn || pat != tt.wantPat {
 				t.Errorf("parseContainsArgs() = (%q, %q), want (%q, %q)",
 					col, pat, tt.wantColumn, tt.wantPat)

@@ -138,18 +138,14 @@ func (t *Transpiler) GetDialect() Dialect {
 //	transpiler.RegisterOperator("length", &LengthOperator{})
 //	sql, _ := transpiler.TranspileValue(`{"length": [{"var": "email"}]}`)
 //	// Output: LENGTH(email)
-func (t *Transpiler) RegisterOperator(name string, handler any) error {
+func (t *Transpiler) RegisterOperator(name string, handler OperatorHandler) error {
 	if err := validateOperatorName(name); err != nil {
 		return err
 	}
-	switch h := handler.(type) {
-	case OperatorHandler:
-		t.customOperators.Register(name, h)
-	case LegacyOperatorHandler:
-		t.customOperators.Register(name, &legacyHandlerWrapper{handler: h})
-	default:
-		return fmt.Errorf("unsupported operator handler type %T", handler)
+	if handler == nil {
+		return fmt.Errorf("operator handler must not be nil")
 	}
+	t.customOperators.Register(name, handler)
 	return nil
 }
 
@@ -168,12 +164,12 @@ func (t *Transpiler) RegisterOperator(name string, handler any) error {
 //	})
 //	sql, _ := transpiler.TranspileValue(`{"length": [{"var": "email"}]}`)
 //	// Output: LENGTH(email)
-func (t *Transpiler) RegisterOperatorFunc(name string, fn any) error {
+func (t *Transpiler) RegisterOperatorFunc(name string, fn OperatorFunc) error {
 	if err := validateOperatorName(name); err != nil {
 		return err
 	}
-	if err := validateOperatorFunc(fn); err != nil {
-		return err
+	if fn == nil {
+		return fmt.Errorf("operator function must not be nil")
 	}
 	t.customOperators.RegisterFunc(name, fn)
 	return nil
@@ -190,12 +186,12 @@ func (t *Transpiler) RegisterOperatorFunc(name string, fn any) error {
 //	sql, _ := transpiler.TranspileValue(`{"now": []}`)
 //	// BigQuery: CURRENT_TIMESTAMP()
 //	// Spanner: CURRENT_TIMESTAMP()
-func (t *Transpiler) RegisterDialectAwareOperator(name string, handler any) error {
+func (t *Transpiler) RegisterDialectAwareOperator(name string, handler DialectAwareOperatorHandler) error {
 	if err := validateOperatorName(name); err != nil {
 		return err
 	}
-	if err := validateDialectAwareOperatorHandler(handler); err != nil {
-		return err
+	if handler == nil {
+		return fmt.Errorf("dialect-aware operator handler must not be nil")
 	}
 	// Wrap in a handler that implements OperatorHandler for registry storage
 	wrapper := &dialectAwareHandlerWrapper{handler: handler, dialect: t.config.Dialect}
@@ -220,12 +216,12 @@ func (t *Transpiler) RegisterDialectAwareOperator(name string, handler any) erro
 //	        return jsonlogic2sql.OperatorResult{}, fmt.Errorf("unsupported dialect: %s", dialect)
 //	    }
 //	})
-func (t *Transpiler) RegisterDialectAwareOperatorFunc(name string, fn any) error {
+func (t *Transpiler) RegisterDialectAwareOperatorFunc(name string, fn DialectAwareOperatorFunc) error {
 	if err := validateOperatorName(name); err != nil {
 		return err
 	}
-	if err := validateDialectAwareOperatorFunc(fn); err != nil {
-		return err
+	if fn == nil {
+		return fmt.Errorf("dialect-aware operator function must not be nil")
 	}
 	t.customOperators.Register(name, &boundDialectAwareFuncHandler{fn: fn, dialect: t.config.Dialect})
 	return nil

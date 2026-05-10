@@ -208,6 +208,8 @@ type OperatorFunc func(operator string, args []OperatorArg) (OperatorResult, err
 
 Use `ValueSQL(sql, type)` for value-producing custom operators and
 `PredicateSQL(sql)` for boolean predicate custom operators.
+Raw string-returning legacy custom operator functions are not accepted; the
+result kind must be explicit so condition and value contexts can be validated.
 
 ### OperatorArg
 

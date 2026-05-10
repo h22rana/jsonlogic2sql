@@ -24,21 +24,21 @@ func transpileOperatorExpression(tr *Transpiler, logic string) (string, error) {
 // LengthOperator implements OperatorHandler for LENGTH SQL function.
 type LengthOperator struct{}
 
-func (l *LengthOperator) ToSQL(operator string, args []interface{}) (string, error) {
+func (l *LengthOperator) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
 	if len(args) != 1 {
-		return "", fmt.Errorf("length requires exactly 1 argument, got %d", len(args))
+		return OperatorResult{}, fmt.Errorf("length requires exactly 1 argument, got %d", len(args))
 	}
-	return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+	return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 }
 
 // UpperOperator implements OperatorHandler for UPPER SQL function.
 type UpperOperator struct{}
 
-func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, error) {
+func (u *UpperOperator) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
 	if len(args) != 1 {
-		return "", fmt.Errorf("upper requires exactly 1 argument, got %d", len(args))
+		return OperatorResult{}, fmt.Errorf("upper requires exactly 1 argument, got %d", len(args))
 	}
-	return fmt.Sprintf("UPPER(%s)", args[0]), nil
+	return ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), ExpressionTypeString), nil
 }
 
 // ConcatWithSeparatorOperator joins arguments with a separator.
@@ -46,15 +46,15 @@ type ConcatWithSeparatorOperator struct {
 	Separator string
 }
 
-func (c *ConcatWithSeparatorOperator) ToSQL(operator string, args []interface{}) (string, error) {
+func (c *ConcatWithSeparatorOperator) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
 	if len(args) < 2 {
-		return "", fmt.Errorf("concat_ws requires at least 2 arguments")
+		return OperatorResult{}, fmt.Errorf("concat_ws requires at least 2 arguments")
 	}
-	result := fmt.Sprintf("%s", args[0])
+	result := args[0].SQL
 	for i := 1; i < len(args); i++ {
-		result += fmt.Sprintf(" || '%s' || %s", c.Separator, args[i])
+		result += fmt.Sprintf(" || '%s' || %s", c.Separator, args[i].SQL)
 	}
-	return result, nil
+	return ValueSQL(result, ExpressionTypeString), nil
 }
 
 func TestOperatorRegistry(t *testing.T) {
@@ -73,8 +73,8 @@ func TestOperatorRegistry(t *testing.T) {
 
 	t.Run("RegisterFunc", func(t *testing.T) {
 		registry := NewOperatorRegistry()
-		registry.RegisterFunc("custom", func(op string, args []interface{}) (string, error) {
-			return "CUSTOM()", nil
+		registry.RegisterFunc("custom", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL("CUSTOM()", ExpressionTypeUnknown), nil
 		})
 
 		handler, ok := registry.Get("custom")
@@ -219,11 +219,11 @@ func TestValidateOperatorName(t *testing.T) {
 func TestTranspilerCustomOperators(t *testing.T) {
 	t.Run("RegisterOperatorFunc simple", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+		err := transpiler.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 1 {
-				return "", fmt.Errorf("length requires 1 argument")
+				return OperatorResult{}, fmt.Errorf("length requires 1 argument")
 			}
-			return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+			return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error registering operator: %v", err)
@@ -239,9 +239,9 @@ func TestTranspilerCustomOperators(t *testing.T) {
 		}
 	})
 
-	t.Run("RegisterOperatorFunc rejects unsupported function type", func(t *testing.T) {
+	t.Run("RegisterOperatorFunc rejects nil function", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("bad", 123)
+		err := transpiler.RegisterOperatorFunc("bad", nil)
 		if err == nil {
 			t.Fatal("RegisterOperatorFunc() expected error, got nil")
 		}
@@ -269,8 +269,8 @@ func TestTranspilerCustomOperators(t *testing.T) {
 
 	t.Run("custom operator with nested expression", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+		err := transpiler.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -289,8 +289,8 @@ func TestTranspilerCustomOperators(t *testing.T) {
 
 	t.Run("custom operator in comparison", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+		err := transpiler.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -340,16 +340,16 @@ func TestTranspilerCustomOperators(t *testing.T) {
 
 	t.Run("custom operator with multiple args", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("coalesce", func(op string, args []interface{}) (string, error) {
+		err := transpiler.RegisterOperatorFunc("coalesce", func(op string, args []OperatorArg) (OperatorResult, error) {
 			result := "COALESCE("
 			for i, arg := range args {
 				if i > 0 {
 					result += ", "
 				}
-				result += fmt.Sprintf("%s", arg)
+				result += arg.SQL
 			}
 			result += ")"
-			return result, nil
+			return ValueSQL(result, ExpressionTypeUnknown), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -367,8 +367,8 @@ func TestTranspilerCustomOperators(t *testing.T) {
 
 	t.Run("reject built-in operator override", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("and", func(op string, args []interface{}) (string, error) {
-			return "CUSTOM_AND", nil
+		err := transpiler.RegisterOperatorFunc("and", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return PredicateSQL("CUSTOM_AND"), nil
 		})
 		if err == nil {
 			t.Error("expected error when trying to override built-in operator")
@@ -426,11 +426,11 @@ func TestTranspilerCustomOperators(t *testing.T) {
 
 	t.Run("custom operator with literal argument", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("repeat", func(op string, args []interface{}) (string, error) {
+		err := transpiler.RegisterOperatorFunc("repeat", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("repeat requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("repeat requires 2 arguments")
 			}
-			return fmt.Sprintf("REPEAT(%s, %s)", args[0], args[1]), nil
+			return ValueSQL(fmt.Sprintf("REPEAT(%s, %s)", args[0].SQL, args[1].SQL), ExpressionTypeString), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -467,8 +467,8 @@ func TestTranspilerCustomOperators(t *testing.T) {
 func TestCustomOperatorEdgeCases(t *testing.T) {
 	t.Run("custom operator returning error", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		transpiler.RegisterOperatorFunc("failing", func(op string, args []interface{}) (string, error) {
-			return "", fmt.Errorf("intentional failure")
+		transpiler.RegisterOperatorFunc("failing", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return OperatorResult{}, fmt.Errorf("intentional failure")
 		})
 
 		_, err := transpiler.TranspileCondition(`{"failing": [{"var": "x"}]}`)
@@ -479,8 +479,8 @@ func TestCustomOperatorEdgeCases(t *testing.T) {
 
 	t.Run("custom operator with no arguments", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		transpiler.RegisterOperatorFunc("now", func(op string, args []interface{}) (string, error) {
-			return "NOW()", nil
+		transpiler.RegisterOperatorFunc("now", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL("NOW()", ExpressionTypeUnknown), nil
 		})
 
 		sql, err := transpileOperatorExpression(transpiler, `{"now": []}`)
@@ -495,8 +495,8 @@ func TestCustomOperatorEdgeCases(t *testing.T) {
 
 	t.Run("custom operator with single non-array argument", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		transpiler.RegisterOperatorFunc("single", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("SINGLE(%s)", args[0]), nil
+		transpiler.RegisterOperatorFunc("single", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("SINGLE(%s)", args[0].SQL), ExpressionTypeUnknown), nil
 		})
 
 		// When argument is not an array, it should still work
@@ -515,8 +515,8 @@ func TestCustomOperatorEdgeCases(t *testing.T) {
 func TestDialectAwareFuncHandler(t *testing.T) {
 	t.Run("ToSQL returns error requiring dialect", func(t *testing.T) {
 		handler := &dialectAwareFuncHandler{
-			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
-				return "TEST()", nil
+			fn: func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+				return ValueSQL("TEST()", ExpressionTypeUnknown), nil
 			},
 		}
 
@@ -532,8 +532,8 @@ func TestDialectAwareFuncHandler(t *testing.T) {
 
 	t.Run("ToSQLWithDialect delegates to wrapped function", func(t *testing.T) {
 		handler := &dialectAwareFuncHandler{
-			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
-				return fmt.Sprintf("DIALECT_%s(%s)", dialect.String(), args[0]), nil
+			fn: func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+				return ValueSQL(fmt.Sprintf("DIALECT_%s(%s)", dialect.String(), args[0].SQL), ExpressionTypeUnknown), nil
 			},
 		}
 
@@ -549,21 +549,23 @@ func TestDialectAwareFuncHandler(t *testing.T) {
 
 	t.Run("ToSQLWithDialect with multiple dialects", func(t *testing.T) {
 		handler := &dialectAwareFuncHandler{
-			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
+			fn: func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+				var sql string
 				switch dialect {
 				case DialectBigQuery:
-					return "BQ_FUNC()", nil
+					sql = "BQ_FUNC()"
 				case DialectSpanner:
-					return "SPANNER_FUNC()", nil
+					sql = "SPANNER_FUNC()"
 				case DialectPostgreSQL:
-					return "PG_FUNC()", nil
+					sql = "PG_FUNC()"
 				case DialectDuckDB:
-					return "DUCKDB_FUNC()", nil
+					sql = "DUCKDB_FUNC()"
 				case DialectClickHouse:
-					return "CH_FUNC()", nil
+					sql = "CH_FUNC()"
 				default:
-					return "", fmt.Errorf("unsupported dialect: %s", dialect)
+					return OperatorResult{}, fmt.Errorf("unsupported dialect: %s", dialect)
 				}
+				return ValueSQL(sql, ExpressionTypeUnknown), nil
 			},
 		}
 
@@ -591,8 +593,8 @@ func TestDialectAwareFuncHandler(t *testing.T) {
 
 	t.Run("ToSQLWithDialect passes error from wrapped function", func(t *testing.T) {
 		handler := &dialectAwareFuncHandler{
-			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
-				return "", fmt.Errorf("custom error from function")
+			fn: func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+				return OperatorResult{}, fmt.Errorf("custom error from function")
 			},
 		}
 
@@ -611,8 +613,8 @@ type DialectAwareTestHandler struct {
 	prefix string
 }
 
-func (d *DialectAwareTestHandler) ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error) {
-	return fmt.Sprintf("%s_%s(%s)", d.prefix, dialect.String(), args[0]), nil
+func (d *DialectAwareTestHandler) ToSQLWithDialect(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+	return ValueSQL(fmt.Sprintf("%s_%s(%s)", d.prefix, dialect.String(), args[0].SQL), ExpressionTypeUnknown), nil
 }
 
 // Test dialectAwareHandlerWrapper directly.
@@ -669,8 +671,8 @@ func TestDialectAwareHandlerWrapper(t *testing.T) {
 func TestOperatorRegistry_RegisterDialectAwareFunc(t *testing.T) {
 	t.Run("register and retrieve dialect-aware function", func(t *testing.T) {
 		registry := NewOperatorRegistry()
-		registry.RegisterDialectAwareFunc("now", func(op string, args []interface{}, dialect Dialect) (string, error) {
-			return fmt.Sprintf("NOW_%s()", dialect.String()), nil
+		registry.RegisterDialectAwareFunc("now", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("NOW_%s()", dialect.String()), ExpressionTypeUnknown), nil
 		})
 
 		handler, ok := registry.Get("now")
@@ -696,8 +698,8 @@ func TestOperatorRegistry_RegisterDialectAwareFunc(t *testing.T) {
 
 	t.Run("ToSQL on dialect-aware func returns error", func(t *testing.T) {
 		registry := NewOperatorRegistry()
-		registry.RegisterDialectAwareFunc("custom", func(op string, args []interface{}, dialect Dialect) (string, error) {
-			return "CUSTOM()", nil
+		registry.RegisterDialectAwareFunc("custom", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			return ValueSQL("CUSTOM()", ExpressionTypeUnknown), nil
 		})
 
 		handler, _ := registry.Get("custom")
@@ -711,15 +713,17 @@ func TestOperatorRegistry_RegisterDialectAwareFunc(t *testing.T) {
 func TestDialectAwareOperators(t *testing.T) {
 	t.Run("RegisterDialectAwareOperatorFunc with BigQuery", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterDialectAwareOperatorFunc("now", func(op string, args []interface{}, dialect Dialect) (string, error) {
+		err := transpiler.RegisterDialectAwareOperatorFunc("now", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			var sql string
 			switch dialect {
 			case DialectBigQuery:
-				return "CURRENT_TIMESTAMP()", nil
+				sql = "CURRENT_TIMESTAMP()"
 			case DialectSpanner:
-				return "CURRENT_TIMESTAMP()", nil
+				sql = "CURRENT_TIMESTAMP()"
 			default:
-				return "", fmt.Errorf("unsupported dialect: %s", dialect)
+				return OperatorResult{}, fmt.Errorf("unsupported dialect: %s", dialect)
 			}
+			return ValueSQL(sql, ExpressionTypeUnknown), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -737,15 +741,17 @@ func TestDialectAwareOperators(t *testing.T) {
 
 	t.Run("RegisterDialectAwareOperatorFunc with Spanner", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectSpanner)
-		err := transpiler.RegisterDialectAwareOperatorFunc("array_length", func(op string, args []interface{}, dialect Dialect) (string, error) {
+		err := transpiler.RegisterDialectAwareOperatorFunc("array_length", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			var sql string
 			switch dialect {
 			case DialectBigQuery:
-				return fmt.Sprintf("ARRAY_LENGTH(%s)", args[0]), nil
+				sql = fmt.Sprintf("ARRAY_LENGTH(%s)", args[0].SQL)
 			case DialectSpanner:
-				return fmt.Sprintf("ARRAY_LENGTH(%s)", args[0]), nil
+				sql = fmt.Sprintf("ARRAY_LENGTH(%s)", args[0].SQL)
 			default:
-				return "", fmt.Errorf("unsupported dialect: %s", dialect)
+				return OperatorResult{}, fmt.Errorf("unsupported dialect: %s", dialect)
 			}
+			return ValueSQL(sql, ExpressionTypeNumber), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -763,18 +769,20 @@ func TestDialectAwareOperators(t *testing.T) {
 
 	t.Run("dialect-aware operator with different output per dialect", func(t *testing.T) {
 		// Define a function that returns different SQL based on dialect
-		stringContainsOp := func(op string, args []interface{}, dialect Dialect) (string, error) {
+		stringContainsOp := func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("string_contains requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("string_contains requires 2 arguments")
 			}
+			var sql string
 			switch dialect {
 			case DialectBigQuery:
-				return fmt.Sprintf("STRPOS(%s, %s) > 0", args[0], args[1]), nil
+				sql = fmt.Sprintf("STRPOS(%s, %s) > 0", args[0].SQL, args[1].SQL)
 			case DialectSpanner:
-				return fmt.Sprintf("STRPOS(%s, %s) > 0", args[0], args[1]), nil
+				sql = fmt.Sprintf("STRPOS(%s, %s) > 0", args[0].SQL, args[1].SQL)
 			default:
-				return "", fmt.Errorf("unsupported dialect: %s", dialect)
+				return OperatorResult{}, fmt.Errorf("unsupported dialect: %s", dialect)
 			}
+			return PredicateSQL(sql), nil
 		}
 
 		// Test with BigQuery
@@ -802,8 +810,8 @@ func TestDialectAwareOperators(t *testing.T) {
 
 	t.Run("reject built-in operator override with dialect-aware", func(t *testing.T) {
 		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterDialectAwareOperatorFunc("and", func(op string, args []interface{}, dialect Dialect) (string, error) {
-			return "CUSTOM_AND", nil
+		err := transpiler.RegisterDialectAwareOperatorFunc("and", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			return PredicateSQL("CUSTOM_AND"), nil
 		})
 		if err == nil {
 			t.Error("expected error when trying to override built-in operator with dialect-aware function")
@@ -816,53 +824,53 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 	// Helper to create a transpiler with common custom operators
 	setupTranspiler := func(dialect Dialect) *Transpiler {
 		tr, _ := NewTranspiler(dialect)
-		tr.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("toLower", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 1 {
-				return "", fmt.Errorf("toLower requires 1 argument")
+				return OperatorResult{}, fmt.Errorf("toLower requires 1 argument")
 			}
-			return fmt.Sprintf("LOWER(%s)", args[0]), nil
+			return ValueSQL(fmt.Sprintf("LOWER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
-		tr.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("toUpper", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 1 {
-				return "", fmt.Errorf("toUpper requires 1 argument")
+				return OperatorResult{}, fmt.Errorf("toUpper requires 1 argument")
 			}
-			return fmt.Sprintf("UPPER(%s)", args[0]), nil
+			return ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
-		tr.RegisterOperatorFunc("startsWith", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("startsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("startsWith requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("startsWith requires 2 arguments")
 			}
-			return fmt.Sprintf("%s LIKE '%s%%'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE '%s%%'", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("!startsWith", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("!startsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("!startsWith requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("!startsWith requires 2 arguments")
 			}
-			return fmt.Sprintf("%s NOT LIKE '%s%%'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE '%s%%'", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("endsWith requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("endsWith requires 2 arguments")
 			}
-			return fmt.Sprintf("%s LIKE '%%%s'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s'", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("!endsWith", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("!endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("!endsWith requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("!endsWith requires 2 arguments")
 			}
-			return fmt.Sprintf("%s NOT LIKE '%%%s'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE '%%%s'", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("contains", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("contains", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("contains requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("contains requires 2 arguments")
 			}
-			return fmt.Sprintf("%s LIKE '%%%s%%'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s%%'", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("!contains", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("!contains", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("!contains requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("!contains requires 2 arguments")
 			}
-			return fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0].SQL, args[1].SQL)), nil
 		})
 		return tr
 	}
@@ -1085,17 +1093,17 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 	// Helper to create a transpiler with common custom operators
 	setupTranspiler := func(dialect Dialect) *Transpiler {
 		tr, _ := NewTranspiler(dialect)
-		tr.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("LOWER(%s)", args[0]), nil
+		tr.RegisterOperatorFunc("toLower", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("LOWER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
-		tr.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("UPPER(%s)", args[0]), nil
+		tr.RegisterOperatorFunc("toUpper", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
-		tr.RegisterOperatorFunc("!contains", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0], args[1]), nil
+		tr.RegisterOperatorFunc("!contains", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("%s LIKE '%%%s'", args[0], args[1]), nil
+		tr.RegisterOperatorFunc("endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s'", args[0].SQL, args[1].SQL)), nil
 		})
 		return tr
 	}

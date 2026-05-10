@@ -1630,22 +1630,66 @@ func TestTranspileValue_CatStringifiesCustomPredicate(t *testing.T) {
 	}
 }
 
-func TestTranspileValue_LegacyCustomOperatorUsesValueContext(t *testing.T) {
+func TestTranspileValue_IfUsesTypedCustomPredicateCondition(t *testing.T) {
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			err = tr.RegisterOperatorFunc("isPositive", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				if len(args) != 1 {
+					return OperatorResult{}, fmt.Errorf("isPositive requires exactly 1 argument")
+				}
+				return PredicateSQL(fmt.Sprintf("%s > 0", args[0].SQL)), nil
+			})
+			if err != nil {
+				t.Fatalf("RegisterOperatorFunc() error = %v", err)
+			}
+
+			logic := `{"if":[{"isPositive":[{"var":"amount"}]},"yes","no"]}`
+			want := "CASE WHEN amount > 0 THEN 'yes' ELSE 'no' END"
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if got != want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, want)
+			}
+
+			gotParam, params, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			wantParam := fmt.Sprintf("CASE WHEN amount > 0 THEN %s ELSE %s END", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			if gotParam != wantParam {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: "yes"}, {Name: "p2", Value: "no"}}
+			if !reflect.DeepEqual(params, wantParams) {
+				t.Fatalf("params = %#v, want %#v", params, wantParams)
+			}
+		})
+	}
+}
+
+func TestTranspileValue_TypedCustomOperatorUsesValueContext(t *testing.T) {
 	tr, err := NewTranspiler(DialectPostgreSQL)
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
-	err = tr.RegisterDialectAwareOperatorFunc("safeDivideLegacy", func(_ string, args []any, _ Dialect) (string, error) {
+	err = tr.RegisterDialectAwareOperatorFunc("safeDivideTyped", func(_ string, args []OperatorArg, _ Dialect) (OperatorResult, error) {
 		if len(args) != 2 {
-			return "", fmt.Errorf("safeDivideLegacy requires exactly 2 arguments")
+			return OperatorResult{}, fmt.Errorf("safeDivideTyped requires exactly 2 arguments")
 		}
-		return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", args[1], args[0], args[1]), nil
+		sql := fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", args[1].SQL, args[0].SQL, args[1].SQL)
+		return ValueSQL(sql, ExpressionTypeNumber), nil
 	})
 	if err != nil {
 		t.Fatalf("RegisterDialectAwareOperatorFunc() error = %v", err)
 	}
 
-	logic := `{"cat":[{"safeDivideLegacy":[{"var":"total"},{"var":"count"}]}]}`
+	logic := `{"cat":[{"safeDivideTyped":[{"var":"total"},{"var":"count"}]}]}`
 	want := "CONCAT(CASE WHEN count = 0 THEN NULL ELSE total / count END)"
 
 	got, err := tr.TranspileValue(logic)

@@ -246,39 +246,39 @@ func TestRegressionMatrix_ComparisonLogicalNumeric_AllDialects(t *testing.T) {
 func registerMatrixCustomOps(t *testing.T, tr *Transpiler) {
 	t.Helper()
 
-	mustRegister := func(name string, f func(string, []interface{}) (string, error)) {
+	mustRegister := func(name string, f OperatorFunc) {
 		t.Helper()
 		if err := tr.RegisterOperatorFunc(name, f); err != nil {
 			t.Fatalf("RegisterOperatorFunc(%q) error: %v", name, err)
 		}
 	}
 
-	mustRegister("add2", func(_ string, args []interface{}) (string, error) {
+	mustRegister("add2", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 2 {
-			return "", fmt.Errorf("add2 expects 2 args")
+			return OperatorResult{}, fmt.Errorf("add2 expects 2 args")
 		}
-		return fmt.Sprintf("(%v + %v)", args[0], args[1]), nil
+		return ValueSQL(fmt.Sprintf("(%s + %s)", args[0].SQL, args[1].SQL), ExpressionTypeNumber), nil
 	})
 
-	mustRegister("between", func(_ string, args []interface{}) (string, error) {
+	mustRegister("between", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 3 {
-			return "", fmt.Errorf("between expects 3 args")
+			return OperatorResult{}, fmt.Errorf("between expects 3 args")
 		}
-		return fmt.Sprintf("(%v >= %v AND %v <= %v)", args[0], args[1], args[0], args[2]), nil
+		return PredicateSQL(fmt.Sprintf("(%s >= %s AND %s <= %s)", args[0].SQL, args[1].SQL, args[0].SQL, args[2].SQL)), nil
 	})
 
-	mustRegister("lower", func(_ string, args []interface{}) (string, error) {
+	mustRegister("lower", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 1 {
-			return "", fmt.Errorf("lower expects 1 arg")
+			return OperatorResult{}, fmt.Errorf("lower expects 1 arg")
 		}
-		return fmt.Sprintf("LOWER(%v)", args[0]), nil
+		return ValueSQL(fmt.Sprintf("LOWER(%s)", args[0].SQL), ExpressionTypeString), nil
 	})
 
-	mustRegister("mul", func(_ string, args []interface{}) (string, error) {
+	mustRegister("mul", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 2 {
-			return "", fmt.Errorf("mul expects 2 args")
+			return OperatorResult{}, fmt.Errorf("mul expects 2 args")
 		}
-		return fmt.Sprintf("(%v * %v)", args[0], args[1]), nil
+		return ValueSQL(fmt.Sprintf("(%s * %s)", args[0].SQL, args[1].SQL), ExpressionTypeNumber), nil
 	})
 }
 

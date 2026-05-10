@@ -305,36 +305,38 @@ func TestIdentifierQuotingRegression_NonASCIIDigitLeadingSchemaSegment(t *testin
 func registerIdentifierQuotingCustomOperators(t *testing.T, tr *Transpiler) {
 	t.Helper()
 
-	if err := tr.RegisterOperatorFunc("betweenInclusive", func(_ string, args []interface{}) (string, error) {
+	if err := tr.RegisterOperatorFunc("betweenInclusive", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 3 {
-			return "", fmt.Errorf("betweenInclusive expects 3 args")
+			return OperatorResult{}, fmt.Errorf("betweenInclusive expects 3 args")
 		}
-		return fmt.Sprintf("(%v BETWEEN %v AND %v)", args[0], args[1], args[2]), nil
+		return PredicateSQL(fmt.Sprintf("(%s BETWEEN %s AND %s)", args[0].SQL, args[1].SQL, args[2].SQL)), nil
 	}); err != nil {
 		t.Fatalf("RegisterOperatorFunc(betweenInclusive) error: %v", err)
 	}
 
-	if err := tr.RegisterOperatorFunc("isNonZero", func(_ string, args []interface{}) (string, error) {
+	if err := tr.RegisterOperatorFunc("isNonZero", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 1 {
-			return "", fmt.Errorf("isNonZero expects 1 arg")
+			return OperatorResult{}, fmt.Errorf("isNonZero expects 1 arg")
 		}
-		return fmt.Sprintf("(%v != 0)", args[0]), nil
+		return PredicateSQL(fmt.Sprintf("(%s != 0)", args[0].SQL)), nil
 	}); err != nil {
 		t.Fatalf("RegisterOperatorFunc(isNonZero) error: %v", err)
 	}
 
-	if err := tr.RegisterDialectAwareOperatorFunc("dialectMetricPresent", func(_ string, args []interface{}, d Dialect) (string, error) {
+	if err := tr.RegisterDialectAwareOperatorFunc("dialectMetricPresent", func(_ string, args []OperatorArg, d Dialect) (OperatorResult, error) {
 		if len(args) != 1 {
-			return "", fmt.Errorf("dialectMetricPresent expects 1 arg")
+			return OperatorResult{}, fmt.Errorf("dialectMetricPresent expects 1 arg")
 		}
+		var sql string
 		switch d {
 		case DialectPostgreSQL, DialectDuckDB:
-			return fmt.Sprintf("COALESCE(%v, 0) > 0", args[0]), nil
+			sql = fmt.Sprintf("COALESCE(%s, 0) > 0", args[0].SQL)
 		case DialectClickHouse:
-			return fmt.Sprintf("ifNull(%v, 0) > 0", args[0]), nil
+			sql = fmt.Sprintf("ifNull(%s, 0) > 0", args[0].SQL)
 		default:
-			return fmt.Sprintf("IFNULL(%v, 0) > 0", args[0]), nil
+			sql = fmt.Sprintf("IFNULL(%s, 0) > 0", args[0].SQL)
 		}
+		return PredicateSQL(sql), nil
 	}); err != nil {
 		t.Fatalf("RegisterDialectAwareOperatorFunc(dialectMetricPresent) error: %v", err)
 	}

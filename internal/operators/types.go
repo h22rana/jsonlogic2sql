@@ -36,6 +36,10 @@ type OperatorArg struct {
 	Type ExpressionType
 }
 
+func (a OperatorArg) String() string {
+	return a.SQL
+}
+
 // OperatorResult is the typed SQL representation returned by custom operators
 // and parser expression callbacks.
 type OperatorResult struct {

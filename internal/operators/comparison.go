@@ -1175,6 +1175,13 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityDecision, operator string, leftArg, rightArg interface{}) equalityDecision {
 	leftKind, leftTyped := expressionEqualityKind(leftArg)
 	rightKind, rightTyped := expressionEqualityKind(rightArg)
+	if leftTyped && rightTyped {
+		if isStrictEqualityOperator(operator) && leftKind != rightKind {
+			dec.handled = true
+			dec.constant = impossibleEqualityPredicateConstant(operator)
+		}
+		return dec
+	}
 	if leftTyped == rightTyped {
 		return dec
 	}

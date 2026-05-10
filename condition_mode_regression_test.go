@@ -417,24 +417,24 @@ func TestTranspileCondition_RejectsValueCustomOperator(t *testing.T) {
 	}
 }
 
-func TestTranspileCondition_LegacyCustomOperatorUsesPredicateContext(t *testing.T) {
+func TestTranspileCondition_TypedCustomOperatorUsesPredicateContext(t *testing.T) {
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
 			tr, err := NewTranspiler(d)
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
-			err = tr.RegisterOperatorFunc("isGreaterLegacy", func(_ string, args []any) (string, error) {
+			err = tr.RegisterOperatorFunc("isGreater", func(_ string, args []OperatorArg) (OperatorResult, error) {
 				if len(args) != 2 {
-					return "", fmt.Errorf("isGreaterLegacy requires exactly 2 arguments")
+					return OperatorResult{}, fmt.Errorf("isGreater requires exactly 2 arguments")
 				}
-				return fmt.Sprintf("%s>%s", args[0], args[1]), nil
+				return PredicateSQL(fmt.Sprintf("%s>%s", args[0].SQL, args[1].SQL)), nil
 			})
 			if err != nil {
 				t.Fatalf("RegisterOperatorFunc() error = %v", err)
 			}
 
-			logic := `{"isGreaterLegacy":[{"var":"amount"},10]}`
+			logic := `{"isGreater":[{"var":"amount"},10]}`
 			got, err := tr.TranspileCondition(logic)
 			if err != nil {
 				t.Fatalf("TranspileCondition() error = %v", err)
@@ -454,6 +454,117 @@ func TestTranspileCondition_LegacyCustomOperatorUsesPredicateContext(t *testing.
 			wantParams := []QueryParam{{Name: "p1", Value: float64(10)}}
 			if !reflect.DeepEqual(gotParams, wantParams) {
 				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_TypedCustomPredicateTruthiness(t *testing.T) {
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			err = tr.RegisterOperatorFunc("isPositive", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				if len(args) != 1 {
+					return OperatorResult{}, fmt.Errorf("isPositive requires exactly 1 argument")
+				}
+				return PredicateSQL(fmt.Sprintf("%s > 0", args[0].SQL)), nil
+			})
+			if err != nil {
+				t.Fatalf("RegisterOperatorFunc() error = %v", err)
+			}
+
+			tests := []struct {
+				name  string
+				logic string
+				want  string
+			}{
+				{
+					name:  "not custom predicate",
+					logic: `{"!":{"isPositive":[{"var":"amount"}]}}`,
+					want:  "NOT (amount > 0)",
+				},
+				{
+					name:  "double-not custom predicate",
+					logic: `{"!!":{"isPositive":[{"var":"amount"}]}}`,
+					want:  "amount > 0",
+				},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, params, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParam != tt.want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_StrictEqualityMismatchedTypedExpressions(t *testing.T) {
+	tests := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "strict equality folds string expression versus number expression",
+			logic: `{"===":[{"cat":["5"]},{"+":[2,3]}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "strict inequality folds string expression versus number expression",
+			logic: `{"!==":[{"cat":["5"]},{"+":[2,3]}]}`,
+			want:  "TRUE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, params, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParam != tt.want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want none", params)
+					}
+				})
 			}
 		})
 	}

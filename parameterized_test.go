@@ -738,11 +738,11 @@ func TestTranspileParameterized_CustomOperator(t *testing.T) {
 	}
 
 	// Register a custom "length" operator that wraps its argument
-	err = tp.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+	err = tp.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 1 {
-			return "", fmt.Errorf("length requires exactly 1 argument")
+			return OperatorResult{}, fmt.Errorf("length requires exactly 1 argument")
 		}
-		return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+		return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 	})
 	if err != nil {
 		t.Fatalf("RegisterOperatorFunc() error = %v", err)
@@ -785,11 +785,11 @@ func TestTranspileParameterized_CustomOperator_OutOfRangeFloatsPreserved(t *test
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
 
-			err = tp.RegisterOperatorFunc("id", func(op string, args []interface{}) (string, error) {
+			err = tp.RegisterOperatorFunc("id", func(op string, args []OperatorArg) (OperatorResult, error) {
 				if len(args) != 1 {
-					return "", fmt.Errorf("id requires exactly 1 argument")
+					return OperatorResult{}, fmt.Errorf("id requires exactly 1 argument")
 				}
-				return fmt.Sprintf("%s", args[0]), nil
+				return ValueSQL(args[0].SQL, args[0].Type), nil
 			})
 			if err != nil {
 				t.Fatalf("RegisterOperatorFunc() error = %v", err)
@@ -1275,8 +1275,8 @@ func TestTranspileParameterized_InCustomOperatorPlaceholder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
-	_ = tp.RegisterOperatorFunc("identity", func(_ string, args []any) (string, error) {
-		return fmt.Sprintf("%s", args[0]), nil
+	_ = tp.RegisterOperatorFunc("identity", func(_ string, args []OperatorArg) (OperatorResult, error) {
+		return ValueSQL(args[0].SQL, args[0].Type), nil
 	})
 
 	gotSQL, gotParams, err := tp.TranspileParameterizedCondition(`{"in": [{"identity": ["hello"]}, {"var": "col"}]}`)
@@ -1295,8 +1295,8 @@ func TestTranspileParameterized_CustomOperatorQuotedPlaceholderRejected(t *testi
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
-	_ = tp.RegisterOperatorFunc("quote", func(_ string, args []any) (string, error) {
-		return fmt.Sprintf("'%s'", args[0]), nil
+	_ = tp.RegisterOperatorFunc("quote", func(_ string, args []OperatorArg) (OperatorResult, error) {
+		return ValueSQL(fmt.Sprintf("'%s'", args[0].SQL), args[0].Type), nil
 	})
 
 	_, _, err = tp.TranspileParameterizedValue(`{"quote": ["hello"]}`)
@@ -1320,9 +1320,9 @@ func TestTranspileParameterized_CustomOperatorPlaceholderAsExpressionAllowed(t *
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
-	_ = tp.RegisterOperatorFunc("prefix", func(_ string, args []any) (string, error) {
+	_ = tp.RegisterOperatorFunc("prefix", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		// Valid: placeholder is used as a SQL expression, not inside a quoted literal.
-		return fmt.Sprintf("CONCAT('x-', %s)", args[0]), nil
+		return ValueSQL(fmt.Sprintf("CONCAT('x-', %s)", args[0].SQL), ExpressionTypeString), nil
 	})
 
 	sql, params, err := tp.TranspileParameterizedValue(`{"prefix": ["hello"]}`)
@@ -1355,11 +1355,11 @@ func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
 
-			_ = tp.RegisterOperatorFunc("identity", func(_ string, args []any) (string, error) {
-				return fmt.Sprintf("%s", args[0]), nil
+			_ = tp.RegisterOperatorFunc("identity", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				return ValueSQL(args[0].SQL, args[0].Type), nil
 			})
-			_ = tp.RegisterOperatorFunc("quote", func(_ string, args []any) (string, error) {
-				return fmt.Sprintf("'%s'", args[0]), nil
+			_ = tp.RegisterOperatorFunc("quote", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				return ValueSQL(fmt.Sprintf("'%s'", args[0].SQL), args[0].Type), nil
 			})
 
 			// Valid: placeholder stays as SQL expression and is bound.

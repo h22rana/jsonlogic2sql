@@ -390,11 +390,11 @@ func TestTranspiler_NullSafeFieldEquality_CustomOperatorInteraction(t *testing.T
 
 func registerNullSafeFieldEqualityCustomOperators(t *testing.T, tr *Transpiler) {
 	t.Helper()
-	if err := tr.RegisterOperatorFunc("lower", func(_ string, args []interface{}) (string, error) {
+	if err := tr.RegisterOperatorFunc("lower", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 1 {
-			return "", fmt.Errorf("lower expects 1 argument")
+			return OperatorResult{}, fmt.Errorf("lower expects 1 argument")
 		}
-		return fmt.Sprintf("LOWER(%v)", args[0]), nil
+		return ValueSQL(fmt.Sprintf("LOWER(%s)", args[0].SQL), ExpressionTypeString), nil
 	}); err != nil {
 		t.Fatalf("RegisterOperatorFunc(lower) error = %v", err)
 	}
@@ -921,8 +921,8 @@ func TestTranspile_SchemaStringEqualityCanonicalizesNonFiniteNumbers(t *testing.
 
 func TestTranspileConditionFromMap_CustomOperatorRejectsInvalidJSONNumberLiterals(t *testing.T) {
 	tr, _ := NewTranspiler(DialectBigQuery)
-	_ = tr.RegisterOperatorFunc("identity", func(_ string, args []interface{}) (string, error) {
-		return args[0].(string), nil
+	_ = tr.RegisterOperatorFunc("identity", func(_ string, args []OperatorArg) (OperatorResult, error) {
+		return ValueSQL(args[0].SQL, args[0].Type), nil
 	})
 
 	logic := map[string]interface{}{
@@ -2474,18 +2474,20 @@ func TestTranspiler_TranspileConditionFromInterfaceLegacyCases(t *testing.T) {
 // DialectAwareTestOperator implements DialectAwareOperatorHandler for testing.
 type DialectAwareTestOperator struct{}
 
-func (d *DialectAwareTestOperator) ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error) {
+func (d *DialectAwareTestOperator) ToSQLWithDialect(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
 	if len(args) != 1 {
-		return "", nil
+		return OperatorResult{}, nil
 	}
+	var sql string
 	switch dialect {
 	case DialectBigQuery:
-		return "BIGQUERY_" + args[0].(string), nil
+		sql = "BIGQUERY_" + args[0].SQL
 	case DialectSpanner:
-		return "SPANNER_" + args[0].(string), nil
+		sql = "SPANNER_" + args[0].SQL
 	default:
-		return "DEFAULT_" + args[0].(string), nil
+		sql = "DEFAULT_" + args[0].SQL
 	}
+	return ValueSQL(sql, ExpressionTypeUnknown), nil
 }
 
 func TestTranspiler_RegisterDialectAwareOperator(t *testing.T) {

@@ -69,11 +69,6 @@ func ValueSQL(sql string, typ ExpressionType) OperatorResult {
 //	}
 type OperatorFunc func(operator string, args []OperatorArg) (OperatorResult, error)
 
-// LegacyOperatorFunc is accepted temporarily by registration helpers so older
-// tests and callers can be migrated incrementally. New code should use
-// OperatorFunc and return PredicateSQL or ValueSQL explicitly.
-type LegacyOperatorFunc func(operator string, args []interface{}) (string, error)
-
 // DialectAwareOperatorFunc is a function type for dialect-aware custom operator implementations.
 // It receives the operator name, arguments, and the target SQL dialect.
 //
@@ -91,9 +86,6 @@ type LegacyOperatorFunc func(operator string, args []interface{}) (string, error
 //	}
 type DialectAwareOperatorFunc func(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error)
 
-// LegacyDialectAwareOperatorFunc is the pre-typed dialect-aware function shape.
-type LegacyDialectAwareOperatorFunc func(operator string, args []interface{}, dialect Dialect) (string, error)
-
 // OperatorHandler is an interface for custom operator implementations.
 // Implement this interface for more complex operators that need state.
 //
@@ -110,11 +102,6 @@ type OperatorHandler interface {
 	// ToSQL converts the operator and its arguments to SQL.
 	// The args slice contains typed SQL representations of each argument.
 	ToSQL(operator string, args []OperatorArg) (OperatorResult, error)
-}
-
-// LegacyOperatorHandler is the pre-typed custom handler shape.
-type LegacyOperatorHandler interface {
-	ToSQL(operator string, args []interface{}) (string, error)
 }
 
 // DialectAwareOperatorHandler is an interface for dialect-aware custom operator implementations.
@@ -140,64 +127,18 @@ type DialectAwareOperatorHandler interface {
 	ToSQLWithDialect(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error)
 }
 
-// LegacyDialectAwareOperatorHandler is the pre-typed dialect-aware handler shape.
-type LegacyDialectAwareOperatorHandler interface {
-	ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error)
-}
-
-type legacyHandlerWrapper struct {
-	handler LegacyOperatorHandler
-}
-
-func (w *legacyHandlerWrapper) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
-	return w.ToSQLInContext(operator, args, operators.ExpressionKindValue)
-}
-
-func (w *legacyHandlerWrapper) ToSQLInContext(operator string, args []OperatorArg, kind operators.ExpressionKind) (OperatorResult, error) {
-	sql, err := w.handler.ToSQL(operator, legacyArgs(args))
-	if err != nil {
-		return OperatorResult{}, err
-	}
-	return legacyOperatorResultForKind(sql, kind), nil
-}
-
 // funcHandler wraps an OperatorFunc to implement OperatorHandler.
 type funcHandler struct {
-	fn any
+	fn OperatorFunc
 }
 
 func (f *funcHandler) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
-	return f.ToSQLInContext(operator, args, operators.ExpressionKindValue)
-}
-
-func (f *funcHandler) ToSQLInContext(operator string, args []OperatorArg, kind operators.ExpressionKind) (OperatorResult, error) {
-	switch fn := f.fn.(type) {
-	case OperatorFunc:
-		return fn(operator, args)
-	case func(string, []OperatorArg) (OperatorResult, error):
-		return fn(operator, args)
-	case LegacyOperatorFunc:
-		legacyArgs := legacyArgs(args)
-		sql, err := fn(operator, legacyArgs)
-		if err != nil {
-			return OperatorResult{}, err
-		}
-		return legacyOperatorResultForKind(sql, kind), nil
-	case func(string, []interface{}) (string, error):
-		legacyArgs := legacyArgs(args)
-		sql, err := fn(operator, legacyArgs)
-		if err != nil {
-			return OperatorResult{}, err
-		}
-		return legacyOperatorResultForKind(sql, kind), nil
-	default:
-		return OperatorResult{}, fmt.Errorf("unsupported operator function type %T", f.fn)
-	}
+	return f.fn(operator, args)
 }
 
 // dialectAwareFuncHandler wraps a DialectAwareOperatorFunc to implement both OperatorHandler and DialectAwareOperatorHandler.
 type dialectAwareFuncHandler struct {
-	fn any
+	fn DialectAwareOperatorFunc
 }
 
 // ToSQL implements OperatorHandler but returns an error indicating dialect is required.
@@ -207,80 +148,13 @@ func (d *dialectAwareFuncHandler) ToSQL(operator string, _ []OperatorArg) (Opera
 }
 
 func (d *dialectAwareFuncHandler) ToSQLWithDialect(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
-	switch fn := d.fn.(type) {
-	case DialectAwareOperatorFunc:
-		return fn(operator, args, dialect)
-	case func(string, []OperatorArg, Dialect) (OperatorResult, error):
-		return fn(operator, args, dialect)
-	case LegacyDialectAwareOperatorFunc:
-		sql, err := fn(operator, legacyArgs(args), dialect)
-		if err != nil {
-			return OperatorResult{}, err
-		}
-		return legacyOperatorResultForKind(sql, operators.ExpressionKindValue), nil
-	case func(string, []interface{}, Dialect) (string, error):
-		sql, err := fn(operator, legacyArgs(args), dialect)
-		if err != nil {
-			return OperatorResult{}, err
-		}
-		return legacyOperatorResultForKind(sql, operators.ExpressionKindValue), nil
-	default:
-		return OperatorResult{}, fmt.Errorf("unsupported dialect-aware operator function type %T", d.fn)
-	}
-}
-
-func legacyArgs(args []OperatorArg) []interface{} {
-	out := make([]interface{}, len(args))
-	for i, arg := range args {
-		out[i] = arg.SQL
-	}
-	return out
-}
-
-func legacyOperatorResultForKind(sql string, kind operators.ExpressionKind) OperatorResult {
-	if kind == operators.ExpressionKindPredicate {
-		return PredicateSQL(sql)
-	}
-	return ValueSQL(sql, ExpressionTypeUnknown)
-}
-
-func validateOperatorFunc(fn any) error {
-	switch fn.(type) {
-	case OperatorFunc,
-		func(string, []OperatorArg) (OperatorResult, error),
-		LegacyOperatorFunc,
-		func(string, []interface{}) (string, error):
-		return nil
-	default:
-		return fmt.Errorf("unsupported operator function type %T", fn)
-	}
-}
-
-func validateDialectAwareOperatorFunc(fn any) error {
-	switch fn.(type) {
-	case DialectAwareOperatorFunc,
-		func(string, []OperatorArg, Dialect) (OperatorResult, error),
-		LegacyDialectAwareOperatorFunc,
-		func(string, []interface{}, Dialect) (string, error):
-		return nil
-	default:
-		return fmt.Errorf("unsupported dialect-aware operator function type %T", fn)
-	}
-}
-
-func validateDialectAwareOperatorHandler(handler any) error {
-	switch handler.(type) {
-	case DialectAwareOperatorHandler, LegacyDialectAwareOperatorHandler:
-		return nil
-	default:
-		return fmt.Errorf("unsupported dialect-aware operator handler type %T", handler)
-	}
+	return d.fn(operator, args, dialect)
 }
 
 // dialectAwareHandlerWrapper wraps a DialectAwareOperatorHandler to implement OperatorHandler.
 // It stores the dialect from the transpiler config and uses it when ToSQL is called.
 type dialectAwareHandlerWrapper struct {
-	handler any
+	handler DialectAwareOperatorHandler
 	dialect Dialect
 }
 
@@ -288,51 +162,17 @@ func (w *dialectAwareHandlerWrapper) ToSQL(operator string, args []OperatorArg) 
 	return w.ToSQLInContext(operator, args, operators.ExpressionKindValue)
 }
 
-func (w *dialectAwareHandlerWrapper) ToSQLInContext(operator string, args []OperatorArg, kind operators.ExpressionKind) (OperatorResult, error) {
-	switch handler := w.handler.(type) {
-	case DialectAwareOperatorHandler:
-		return handler.ToSQLWithDialect(operator, args, w.dialect)
-	case LegacyDialectAwareOperatorHandler:
-		sql, err := handler.ToSQLWithDialect(operator, legacyArgs(args), w.dialect)
-		if err != nil {
-			return OperatorResult{}, err
-		}
-		return legacyOperatorResultForKind(sql, kind), nil
-	default:
-		return OperatorResult{}, fmt.Errorf("unsupported dialect-aware operator handler type %T", w.handler)
-	}
+func (w *dialectAwareHandlerWrapper) ToSQLInContext(operator string, args []OperatorArg, _ operators.ExpressionKind) (OperatorResult, error) {
+	return w.handler.ToSQLWithDialect(operator, args, w.dialect)
 }
 
 type boundDialectAwareFuncHandler struct {
-	fn      any
+	fn      DialectAwareOperatorFunc
 	dialect Dialect
 }
 
 func (b *boundDialectAwareFuncHandler) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
-	return b.ToSQLInContext(operator, args, operators.ExpressionKindValue)
-}
-
-func (b *boundDialectAwareFuncHandler) ToSQLInContext(operator string, args []OperatorArg, kind operators.ExpressionKind) (OperatorResult, error) {
-	switch typed := b.fn.(type) {
-	case DialectAwareOperatorFunc:
-		return typed(operator, args, b.dialect)
-	case func(string, []OperatorArg, Dialect) (OperatorResult, error):
-		return typed(operator, args, b.dialect)
-	case LegacyDialectAwareOperatorFunc:
-		sql, err := typed(operator, legacyArgs(args), b.dialect)
-		if err != nil {
-			return OperatorResult{}, err
-		}
-		return legacyOperatorResultForKind(sql, kind), nil
-	case func(string, []interface{}, Dialect) (string, error):
-		sql, err := typed(operator, legacyArgs(args), b.dialect)
-		if err != nil {
-			return OperatorResult{}, err
-		}
-		return legacyOperatorResultForKind(sql, kind), nil
-	default:
-		return OperatorResult{}, fmt.Errorf("unsupported dialect-aware operator function type %T", b.fn)
-	}
+	return b.fn(operator, args, b.dialect)
 }
 
 // OperatorRegistry manages custom operator registrations.
@@ -356,19 +196,10 @@ func NewOperatorRegistry() *OperatorRegistry {
 //
 //	registry := NewOperatorRegistry()
 //	registry.Register("length", &LengthOperator{})
-func (r *OperatorRegistry) Register(operatorName string, handler any) {
+func (r *OperatorRegistry) Register(operatorName string, handler OperatorHandler) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	switch h := handler.(type) {
-	case OperatorHandler:
-		r.handlers[operatorName] = h
-	case LegacyOperatorHandler:
-		r.handlers[operatorName] = &legacyHandlerWrapper{handler: h}
-	default:
-		r.handlers[operatorName] = &funcHandler{fn: func(string, []OperatorArg) (OperatorResult, error) {
-			return OperatorResult{}, fmt.Errorf("unsupported operator handler type %T", handler)
-		}}
-	}
+	r.handlers[operatorName] = handler
 }
 
 // RegisterFunc adds a custom operator function to the registry.
@@ -380,7 +211,7 @@ func (r *OperatorRegistry) Register(operatorName string, handler any) {
 //	registry.RegisterFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
 //	    return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 //	})
-func (r *OperatorRegistry) RegisterFunc(operatorName string, fn any) {
+func (r *OperatorRegistry) RegisterFunc(operatorName string, fn OperatorFunc) {
 	r.Register(operatorName, &funcHandler{fn: fn})
 }
 
@@ -393,7 +224,7 @@ func (r *OperatorRegistry) RegisterFunc(operatorName string, fn any) {
 //	registry.RegisterDialectAwareFunc("now", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
 //	    return ValueSQL("CURRENT_TIMESTAMP()", ExpressionTypeUnknown), nil
 //	})
-func (r *OperatorRegistry) RegisterDialectAwareFunc(operatorName string, fn any) {
+func (r *OperatorRegistry) RegisterDialectAwareFunc(operatorName string, fn DialectAwareOperatorFunc) {
 	r.Register(operatorName, &dialectAwareFuncHandler{fn: fn})
 }
 

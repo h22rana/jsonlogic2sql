@@ -12,72 +12,72 @@ func registerArrayEdgeCustomOperators(t *testing.T, tr *Transpiler) {
 
 	registrations := []struct {
 		name string
-		fn   any
+		fn   OperatorFunc
 	}{
 		{
 			name: "double",
-			fn: func(_ string, args []interface{}) (string, error) {
+			fn: func(_ string, args []OperatorArg) (OperatorResult, error) {
 				if len(args) != 1 {
-					return "", fmt.Errorf("double requires 1 argument")
+					return OperatorResult{}, fmt.Errorf("double requires 1 argument")
 				}
-				return fmt.Sprintf("(%v * 2)", args[0]), nil
+				return ValueSQL(fmt.Sprintf("(%s * 2)", args[0].SQL), ExpressionTypeNumber), nil
 			},
 		},
 		{
 			name: "plus",
-			fn: func(_ string, args []interface{}) (string, error) {
+			fn: func(_ string, args []OperatorArg) (OperatorResult, error) {
 				if len(args) != 2 {
-					return "", fmt.Errorf("plus requires 2 arguments")
+					return OperatorResult{}, fmt.Errorf("plus requires 2 arguments")
 				}
-				return fmt.Sprintf("(%v + %v)", args[0], args[1]), nil
+				return ValueSQL(fmt.Sprintf("(%s + %s)", args[0].SQL, args[1].SQL), ExpressionTypeNumber), nil
 			},
 		},
 		{
 			name: "gte",
-			fn: func(_ string, args []interface{}) (string, error) {
+			fn: func(_ string, args []OperatorArg) (OperatorResult, error) {
 				if len(args) != 2 {
-					return "", fmt.Errorf("gte requires 2 arguments")
+					return OperatorResult{}, fmt.Errorf("gte requires 2 arguments")
 				}
-				return fmt.Sprintf("(%v >= %v)", args[0], args[1]), nil
+				return PredicateSQL(fmt.Sprintf("(%s >= %s)", args[0].SQL, args[1].SQL)), nil
 			},
 		},
 		{
 			name: "isPositive",
-			fn: func(_ string, args []interface{}) (string, error) {
+			fn: func(_ string, args []OperatorArg) (OperatorResult, error) {
 				if len(args) != 1 {
-					return "", fmt.Errorf("isPositive requires 1 argument")
+					return OperatorResult{}, fmt.Errorf("isPositive requires 1 argument")
 				}
-				return fmt.Sprintf("(%v > 0)", args[0]), nil
+				return PredicateSQL(fmt.Sprintf("(%s > 0)", args[0].SQL)), nil
 			},
 		},
 		{
 			name: "emit_item",
-			fn: func(_ string, args []interface{}) (string, error) {
+			fn: func(_ string, args []OperatorArg) (OperatorResult, error) {
 				if len(args) != 0 {
-					return "", fmt.Errorf("emit_item requires 0 arguments")
+					return OperatorResult{}, fmt.Errorf("emit_item requires 0 arguments")
 				}
 				// Intentional raw placeholder SQL to exercise post-SQL safety-net rewrite.
-				return "item", nil
+				return ValueSQL("item", ExpressionTypeUnknown), nil
 			},
 		},
 		{
 			name: "emit_current",
-			fn: func(_ string, args []interface{}) (string, error) {
+			fn: func(_ string, args []OperatorArg) (OperatorResult, error) {
 				if len(args) != 0 {
-					return "", fmt.Errorf("emit_current requires 0 arguments")
+					return OperatorResult{}, fmt.Errorf("emit_current requires 0 arguments")
 				}
 				// Intentional raw placeholder SQL to exercise post-SQL safety-net rewrite.
-				return "current", nil
+				return ValueSQL("current", ExpressionTypeUnknown), nil
 			},
 		},
 		{
 			name: "emit_current_balance",
-			fn: func(_ string, args []interface{}) (string, error) {
+			fn: func(_ string, args []OperatorArg) (OperatorResult, error) {
 				if len(args) != 0 {
-					return "", fmt.Errorf("emit_current_balance requires 0 arguments")
+					return OperatorResult{}, fmt.Errorf("emit_current_balance requires 0 arguments")
 				}
 				// Must remain untouched; contains current as substring, not as element placeholder.
-				return "current_balance", nil
+				return ValueSQL("current_balance", ExpressionTypeUnknown), nil
 			},
 		},
 	}

@@ -173,8 +173,8 @@ func TestCustomOperatorPathInsideArrayContexts_InlineAndParam(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
-	tr.RegisterOperatorFunc("oops", func(_ string, _ []interface{}) (string, error) {
-		return "", fmt.Errorf("boom")
+	tr.RegisterOperatorFunc("oops", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+		return OperatorResult{}, fmt.Errorf("boom")
 	})
 
 	cases := []struct {

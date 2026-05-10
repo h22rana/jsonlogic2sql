@@ -164,25 +164,25 @@ func TestRegressionMatrix_DataAccess_AllDialects(t *testing.T) {
 func registerDataAccessMatrixCustomOps(t *testing.T, tr *Transpiler) {
 	t.Helper()
 
-	mustRegister := func(name string, f func(string, []interface{}) (string, error)) {
+	mustRegister := func(name string, f OperatorFunc) {
 		t.Helper()
 		if err := tr.RegisterOperatorFunc(name, f); err != nil {
 			t.Fatalf("RegisterOperatorFunc(%q) error: %v", name, err)
 		}
 	}
 
-	mustRegister("isPresent", func(_ string, args []interface{}) (string, error) {
+	mustRegister("isPresent", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 1 {
-			return "", fmt.Errorf("isPresent expects 1 arg")
+			return OperatorResult{}, fmt.Errorf("isPresent expects 1 arg")
 		}
-		return fmt.Sprintf("(%v IS NOT NULL)", args[0]), nil
+		return PredicateSQL(fmt.Sprintf("(%s IS NOT NULL)", args[0].SQL)), nil
 	})
 
-	mustRegister("eqGuest", func(_ string, args []interface{}) (string, error) {
+	mustRegister("eqGuest", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 1 {
-			return "", fmt.Errorf("eqGuest expects 1 arg")
+			return OperatorResult{}, fmt.Errorf("eqGuest expects 1 arg")
 		}
-		return fmt.Sprintf("(%v = 'guest')", args[0]), nil
+		return PredicateSQL(fmt.Sprintf("(%s = 'guest')", args[0].SQL)), nil
 	})
 }
 

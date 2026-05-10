@@ -28,6 +28,10 @@ Use `ValueSQL` for scalar/value expressions and `PredicateSQL` for boolean
 predicates. This lets `TranspileCondition` reject value-only operators at the
 root while still allowing those operators inside comparisons.
 
+Custom operators must use this typed contract. Legacy handlers that return only
+a SQL string are no longer accepted because the transpiler cannot infer whether
+the SQL is a predicate or a value expression safely.
+
 ```go
 package main
 
