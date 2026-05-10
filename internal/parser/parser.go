@@ -959,7 +959,7 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		return valueResult(sql, operators.ExpressionTypeUnknown), nil
+		return valueResult(sql, p.inferReduceResultType(arr)), nil
 	default:
 		return expressionResult{}, tperrors.NewUnsupportedOperator(operator, path)
 	}
@@ -1901,7 +1901,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		return valueResult(sql, operators.ExpressionTypeUnknown), nil
+		return valueResult(sql, p.inferReduceResultType(arr)), nil
 	default:
 		return expressionResult{}, tperrors.NewUnsupportedOperator(operator, path)
 	}

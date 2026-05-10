@@ -397,6 +397,181 @@ func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_ReduceTruthinessUsesInferredTypeAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "arr", Type: FieldTypeArray},
+	})
+
+	reduceSumSQL := func(d Dialect, initial string) string {
+		if d == DialectClickHouse {
+			return fmt.Sprintf("%s + coalesce(arrayReduce('sum', arr), 0)", initial)
+		}
+		return fmt.Sprintf("%s + COALESCE((SELECT SUM(elem) FROM UNNEST(arr) AS elem), 0)", initial)
+	}
+	numericTruthiness := func(expr string) string {
+		return fmt.Sprintf("(%s IS NOT NULL AND %s != 0)", expr, expr)
+	}
+
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    func(Dialect) string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "or tests numeric reduce with numeric truthiness",
+			logic: `{"or":[{"reduce":[{"var":"arr"},{"+":[{"var":"accumulator"},{"var":"current"}]},0]},5]}`,
+			wantSQL: func(d Dialect) string {
+				reduce := reduceSumSQL(d, "0")
+				return fmt.Sprintf("CASE WHEN %s THEN %s ELSE 5 END", numericTruthiness(reduce), reduce)
+			},
+			wantParam: func(d Dialect) string {
+				reduce := reduceSumSQL(d, testPlaceholder(d, 1))
+				return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", numericTruthiness(reduce), reduce, testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(0)}, {Name: "p2", Value: float64(5)}},
+		},
+		{
+			name:  "and tests numeric reduce with numeric truthiness",
+			logic: `{"and":[{"reduce":[{"var":"arr"},{"+":[{"var":"accumulator"},{"var":"current"}]},0]},5]}`,
+			wantSQL: func(d Dialect) string {
+				reduce := reduceSumSQL(d, "0")
+				return fmt.Sprintf("CASE WHEN %s THEN 5 ELSE %s END", numericTruthiness(reduce), reduce)
+			},
+			wantParam: func(d Dialect) string {
+				reduce := reduceSumSQL(d, testPlaceholder(d, 1))
+				return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", numericTruthiness(reduce), testPlaceholder(d, 2), reduce)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(0)}, {Name: "p2", Value: float64(5)}},
+		},
+		{
+			name:  "if tests numeric reduce with numeric truthiness",
+			logic: `{"if":[{"reduce":[{"var":"arr"},{"+":[{"var":"accumulator"},{"var":"current"}]},0]},"nonzero","zero"]}`,
+			wantSQL: func(d Dialect) string {
+				reduce := reduceSumSQL(d, "0")
+				return fmt.Sprintf("CASE WHEN %s THEN 'nonzero' ELSE 'zero' END", numericTruthiness(reduce))
+			},
+			wantParam: func(d Dialect) string {
+				reduce := reduceSumSQL(d, testPlaceholder(d, 1))
+				return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END",
+					numericTruthiness(reduce), testPlaceholder(d, 2), testPlaceholder(d, 3))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(0)},
+				{Name: "p2", Value: "nonzero"},
+				{Name: "p3", Value: "zero"},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if want := tt.wantSQL(d); got != want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, want)
+							}
+							if strings.Contains(got, "!= FALSE") || strings.Contains(got, "!= ''") {
+								t.Fatalf("TranspileValue() used mixed-type truthiness for numeric reduce: %s", got)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if strings.Contains(gotParam, "!= FALSE") || strings.Contains(gotParam, "!= ''") {
+								t.Fatalf("TranspileParameterizedValue() used mixed-type truthiness for numeric reduce: %s", gotParam)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_ReduceStringTruthinessUsesInferredTypeAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "arr", Type: FieldTypeArray},
+	})
+	logic := `{"or":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]},"fallback"]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					got, err := tr.TranspileValue(logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if !strings.Contains(got, "!= ''") {
+						t.Fatalf("TranspileValue() did not use string truthiness: %s", got)
+					}
+					if strings.Contains(got, "!= FALSE") || strings.Contains(got, "!= 0") {
+						t.Fatalf("TranspileValue() used mixed-type truthiness for string reduce: %s", got)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if !strings.Contains(gotParam, "!= ''") {
+						t.Fatalf("TranspileParameterizedValue() did not use string truthiness: %s", gotParam)
+					}
+					if strings.Contains(gotParam, "!= FALSE") || strings.Contains(gotParam, "!= 0") {
+						t.Fatalf("TranspileParameterizedValue() used mixed-type truthiness for string reduce: %s", gotParam)
+					}
+					wantParams := []QueryParam{{Name: "p1", Value: ""}, {Name: "p2", Value: "fallback"}}
+					if !reflect.DeepEqual(gotParams, wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_PostgreSQLEmptyArrayScannerSkipsStringLiterals(t *testing.T) {
 	tr, err := NewTranspiler(DialectPostgreSQL)
 	if err != nil {
