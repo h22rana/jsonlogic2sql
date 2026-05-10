@@ -523,31 +523,40 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 		wantParams []QueryParam
 	}{
 		{
-			name:  "or keeps tiny non-zero number",
+			name:  "or treats underflowed number as falsy",
 			logic: `{"or":[1e-400,"fallback"]}`,
-			want:  "1e-400",
+			want:  "'fallback'",
 			wantParam: func(d Dialect) string {
 				return testPlaceholder(d, 1)
 			},
-			wantParams: []QueryParam{{Name: "p1", Value: "1e-400"}},
+			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
 		{
-			name:  "or skips unreachable field after tiny non-zero number",
-			logic: `{"or":[1e-400,{"var":"missing"}]}`,
-			want:  "1e-400",
+			name:  "or treats extreme underflowed number as falsy",
+			logic: `{"or":[1e-9999,"fallback"]}`,
+			want:  "'fallback'",
 			wantParam: func(d Dialect) string {
 				return testPlaceholder(d, 1)
 			},
-			wantParams: []QueryParam{{Name: "p1", Value: "1e-400"}},
+			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
 		{
-			name:  "if treats tiny non-zero number as truthy",
-			logic: `{"if":[1e-400,"yes",{"var":"missing"}]}`,
-			want:  "'yes'",
+			name:  "or keeps minimum subnormal number truthy",
+			logic: `{"or":[5e-324,"fallback"]}`,
+			want:  "5e-324",
 			wantParam: func(d Dialect) string {
 				return testPlaceholder(d, 1)
 			},
-			wantParams: []QueryParam{{Name: "p1", Value: "yes"}},
+			wantParams: []QueryParam{{Name: "p1", Value: 5e-324}},
+		},
+		{
+			name:  "if treats underflowed number as falsy",
+			logic: `{"if":[1e-400,"yes","no"]}`,
+			want:  "'no'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "no"}},
 		},
 	}
 
@@ -558,14 +567,32 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 		wantParam string
 	}{
 		{
-			name:      "double bang tiny non-zero number",
+			name:      "double bang underflowed number",
 			logic:     `{"!!":1e-400}`,
+			want:      "FALSE",
+			wantParam: "FALSE",
+		},
+		{
+			name:      "not underflowed number",
+			logic:     `{"!":1e-400}`,
 			want:      "TRUE",
 			wantParam: "TRUE",
 		},
 		{
-			name:      "not tiny non-zero number",
-			logic:     `{"!":1e-400}`,
+			name:      "not extreme underflowed number",
+			logic:     `{"!":1e-9999}`,
+			want:      "TRUE",
+			wantParam: "TRUE",
+		},
+		{
+			name:      "double bang minimum subnormal number",
+			logic:     `{"!!":5e-324}`,
+			want:      "TRUE",
+			wantParam: "TRUE",
+		},
+		{
+			name:      "not minimum subnormal number",
+			logic:     `{"!":5e-324}`,
 			want:      "FALSE",
 			wantParam: "FALSE",
 		},

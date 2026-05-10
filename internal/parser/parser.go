@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
@@ -560,6 +561,13 @@ func isZeroLiteral(value interface{}) bool {
 }
 
 func isZeroJSONNumberLiteral(s string) bool {
+	f, err := strconv.ParseFloat(s, 64)
+	if err == nil || errors.Is(err, strconv.ErrRange) {
+		return f == 0
+	}
+
+	// Malformed json.Number values should already be rejected when rendered, but
+	// keep a conservative fallback for manually constructed values.
 	if exponent := strings.IndexAny(s, "eE"); exponent >= 0 {
 		s = s[:exponent]
 	}
