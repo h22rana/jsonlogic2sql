@@ -303,10 +303,10 @@ When a schema is provided, the `!!` operator generates type-appropriate SQL to a
 | Array (BigQuery/Spanner/PostgreSQL/DuckDB) | `{"!!": {"var": "tags"}}` | `(tags IS NOT NULL AND CARDINALITY(tags) > 0)` |
 | Array (ClickHouse) | `{"!!": {"var": "tags"}}` | `(tags IS NOT NULL AND length(tags) > 0)` |
 
-Without a schema, the generic truthiness check is used:
-```sql
-(value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
-```
+Without a schema, field truthiness is rejected with `ErrInvalidExpressionContext`
+instead of emitting non-portable mixed-type comparisons. Add field types to the
+schema before using a `var` operand directly in `!!`, `!`, value-mode `and` /
+`or`, or value-mode `if` conditions.
 
 ## Enum Type Support
 

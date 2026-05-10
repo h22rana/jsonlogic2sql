@@ -1125,14 +1125,14 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "logical not",
 			input:    `{"!": [{"var": "isDeleted"}]}`,
-			expected: "NOT (isDeleted IS NOT NULL AND isDeleted != FALSE AND isDeleted != 0 AND isDeleted != '')",
-			hasError: false,
+			expected: "",
+			hasError: true,
 		},
 		{
 			name:     "double negation",
 			input:    `{"!!": [{"var": "value"}]}`,
-			expected: "(value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')",
-			hasError: false,
+			expected: "",
+			hasError: true,
 		},
 		{
 			name:     "logical and",
@@ -1682,8 +1682,8 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "double NOT",
 			input:    `{"!": [{"!": [{"var": "flag"}]}]}`,
-			expected: "NOT (NOT (flag IS NOT NULL AND flag != FALSE AND flag != 0 AND flag != ''))",
-			hasError: false,
+			expected: "",
+			hasError: true,
 		},
 
 		// Five-value chained comparison
@@ -1778,8 +1778,8 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "or with literals",
 			input:    `{"or": [false, {"var": "flag"}, true]}`,
-			expected: "CASE WHEN (flag IS NOT NULL AND flag != FALSE AND flag != 0 AND flag != '') THEN flag ELSE TRUE END",
-			hasError: false,
+			expected: "",
+			hasError: true,
 		},
 
 		// And with falsy values

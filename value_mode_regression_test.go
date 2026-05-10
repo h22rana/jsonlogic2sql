@@ -1210,6 +1210,114 @@ func TestTranspileValue_DynamicLogicalTruthinessWithSchema(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_SchemaLessUnknownTruthinessRejectedAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "nickname", Type: FieldTypeString},
+		{Name: "flag", Type: FieldTypeBoolean},
+	})
+
+	schemaLessValueCases := []string{
+		`{"or":[{"var":"nickname"},"unknown"]}`,
+		`{"and":[{"var":"nickname"},"known"]}`,
+		`{"if":[{"var":"nickname"},"yes","no"]}`,
+	}
+	schemaLessConditionCases := []string{
+		`{"!!":{"var":"nickname"}}`,
+		`{"!":{"var":"nickname"}}`,
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			schemaLess, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			for _, logic := range schemaLessValueCases {
+				t.Run("schema-less/value/"+logic, func(t *testing.T) {
+					if _, valueErr := schemaLess.TranspileValue(logic); !IsErrorCode(valueErr, ErrInvalidExpressionContext) {
+						t.Fatalf("TranspileValue() error = %v, want %s", valueErr, ErrInvalidExpressionContext)
+					}
+					sql, params, paramErr := schemaLess.TranspileParameterizedValue(logic)
+					if !IsErrorCode(paramErr, ErrInvalidExpressionContext) {
+						t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+							paramErr, ErrInvalidExpressionContext, sql, params)
+					}
+				})
+			}
+			for _, logic := range schemaLessConditionCases {
+				t.Run("schema-less/condition/"+logic, func(t *testing.T) {
+					if _, conditionErr := schemaLess.TranspileCondition(logic); !IsErrorCode(conditionErr, ErrInvalidExpressionContext) {
+						t.Fatalf("TranspileCondition() error = %v, want %s", conditionErr, ErrInvalidExpressionContext)
+					}
+					sql, params, paramErr := schemaLess.TranspileParameterizedCondition(logic)
+					if !IsErrorCode(paramErr, ErrInvalidExpressionContext) {
+						t.Fatalf("TranspileParameterizedCondition() error = %v, want %s (SQL %q params %#v)",
+							paramErr, ErrInvalidExpressionContext, sql, params)
+					}
+				})
+			}
+
+			schemaAware, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			got, err := schemaAware.TranspileValue(`{"or":[{"var":"nickname"},"unknown"]}`)
+			if err != nil {
+				t.Fatalf("schema-aware TranspileValue(or) error = %v", err)
+			}
+			if want := "CASE WHEN (nickname IS NOT NULL AND nickname != '') THEN nickname ELSE 'unknown' END"; got != want {
+				t.Fatalf("schema-aware TranspileValue(or) = %q, want %q", got, want)
+			}
+
+			gotParam, gotParams, err := schemaAware.TranspileParameterizedValue(`{"or":[{"var":"nickname"},"unknown"]}`)
+			if err != nil {
+				t.Fatalf("schema-aware TranspileParameterizedValue(or) error = %v", err)
+			}
+			if want := fmt.Sprintf("CASE WHEN (nickname IS NOT NULL AND nickname != '') THEN nickname ELSE %s END", testPlaceholder(d, 1)); gotParam != want {
+				t.Fatalf("schema-aware TranspileParameterizedValue(or) = %q, want %q", gotParam, want)
+			}
+			if want := []QueryParam{{Name: "p1", Value: "unknown"}}; !reflect.DeepEqual(gotParams, want) {
+				t.Fatalf("schema-aware params = %#v, want %#v", gotParams, want)
+			}
+
+			got, err = schemaAware.TranspileValue(`{"if":[{"var":"flag"},"yes","no"]}`)
+			if err != nil {
+				t.Fatalf("schema-aware TranspileValue(if) error = %v", err)
+			}
+			if want := "CASE WHEN flag IS TRUE THEN 'yes' ELSE 'no' END"; got != want {
+				t.Fatalf("schema-aware TranspileValue(if) = %q, want %q", got, want)
+			}
+
+			gotCond, err := schemaAware.TranspileCondition(`{"!!":{"var":"nickname"}}`)
+			if err != nil {
+				t.Fatalf("schema-aware TranspileCondition(!!) error = %v", err)
+			}
+			if want := "(nickname IS NOT NULL AND nickname != '')"; gotCond != want {
+				t.Fatalf("schema-aware TranspileCondition(!!) = %q, want %q", gotCond, want)
+			}
+
+			gotParamCond, gotCondParams, err := schemaAware.TranspileParameterizedCondition(`{"!!":{"var":"nickname"}}`)
+			if err != nil {
+				t.Fatalf("schema-aware TranspileParameterizedCondition(!!) error = %v", err)
+			}
+			if want := "(nickname IS NOT NULL AND nickname != '')"; gotParamCond != want {
+				t.Fatalf("schema-aware TranspileParameterizedCondition(!!) = %q, want %q", gotParamCond, want)
+			}
+			if len(gotCondParams) != 0 {
+				t.Fatalf("schema-aware condition params = %#v, want none", gotCondParams)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_CatStringifiesBuiltInPredicate(t *testing.T) {
 	logic := `{"cat":[{"==":[{"var":"amount"},10]}]}`
 
@@ -1732,7 +1840,7 @@ func TestTranspileValue_ArrayPredicateContextsRejectValueLogicals(t *testing.T) 
 }
 
 func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing.T) {
-	logic := `{"map":[{"var":"items"},{"if":[{"var":["current","fallback"]},"yes","no"]}]}`
+	logic := `{"map":[{"var":"items"},{"cat":[{"var":["current","fallback"]}]}]}`
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
@@ -1753,8 +1861,6 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing
 			}
 			wantParams := []QueryParam{
 				{Name: "p1", Value: "fallback"},
-				{Name: "p2", Value: "yes"},
-				{Name: "p3", Value: "no"},
 			}
 			if !reflect.DeepEqual(gotParams, wantParams) {
 				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)

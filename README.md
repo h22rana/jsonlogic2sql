@@ -124,6 +124,8 @@ func main() {
 
 > **Condition vs Value APIs:** `TranspileCondition` returns SQL predicates that callers can put after `WHERE`. `TranspileValue` returns SQL value expressions. Value-producing JSONLogic such as `{"or":[false,"fallback"]}` is valid in value mode, but is rejected in condition mode instead of generating non-portable SQL like `FALSE OR 'fallback'`.
 
+> **Truthiness Requires Types for Fields:** JSONLogic truthiness for fields depends on the field type. In schema-less mode, dynamic field truthiness such as `{"or":[{"var":"nickname"},"unknown"]}` or `{"!!":{"var":"nickname"}}` returns `ErrInvalidExpressionContext` instead of emitting mixed-type SQL comparisons. Provide a schema for type-aware truthiness SQL.
+
 > **`in` Operator Inference:** Without a schema, `in` uses heuristics to infer string containment vs array membership. For deterministic behavior (especially with complex expressions), prefer schema-aware mode.
 
 ## Interactive REPL

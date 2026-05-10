@@ -195,7 +195,8 @@ schema coercion keep their existing SQL.
 {"!": [{"var": "isDeleted"}]}
 ```
 ```sql
-NOT (isDeleted)
+-- With schema: isDeleted is boolean
+NOT (isDeleted IS TRUE)
 ```
 
 ### Double Negation (Boolean Conversion)
@@ -204,12 +205,11 @@ NOT (isDeleted)
 {"!!": [{"var": "value"}]}
 ```
 
-Without schema (generic truthiness check):
-```sql
-(value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
-```
-
-With schema, the `!!` operator generates type-appropriate SQL. See [Schema-Aware Truthiness](schema-validation.md#schema-aware-truthiness) for details.
+Without schema, field truthiness is rejected because the transpiler cannot know
+whether `value` should be treated as a string, number, boolean, or array. With
+schema, the `!!` operator generates type-appropriate SQL. See
+[Schema-Aware Truthiness](schema-validation.md#schema-aware-truthiness) for
+details.
 
 ### Logical AND
 

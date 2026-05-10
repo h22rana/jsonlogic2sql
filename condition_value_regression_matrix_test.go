@@ -39,27 +39,23 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 	schemaModes := allSchemaModes(schema)
 
 	valueCases := []struct {
-		name       string
-		logic      string
-		wantSQL    func(Dialect, bool) string
-		wantParam  func(Dialect, bool) string
-		wantParams []QueryParam
+		name          string
+		logic         string
+		schemaLessErr ErrorCode
+		wantSQL       func(Dialect, bool) string
+		wantParam     func(Dialect, bool) string
+		wantParams    []QueryParam
 	}{
 		{
-			name:  "if value condition uses truthiness",
-			logic: `{"if":[{"var":"flag"},"yes","no"]}`,
-			wantSQL: func(_ Dialect, schemaAware bool) string {
-				condition := "(flag IS NOT NULL AND flag != FALSE AND flag != 0 AND flag != '')"
-				if schemaAware {
-					condition = "flag IS TRUE"
-				}
+			name:          "if value condition uses typed truthiness",
+			logic:         `{"if":[{"var":"flag"},"yes","no"]}`,
+			schemaLessErr: ErrInvalidExpressionContext,
+			wantSQL: func(_ Dialect, _ bool) string {
+				condition := "flag IS TRUE"
 				return fmt.Sprintf("CASE WHEN %s THEN 'yes' ELSE 'no' END", condition)
 			},
-			wantParam: func(d Dialect, schemaAware bool) string {
-				condition := "(flag IS NOT NULL AND flag != FALSE AND flag != 0 AND flag != '')"
-				if schemaAware {
-					condition = "flag IS TRUE"
-				}
+			wantParam: func(d Dialect, _ bool) string {
+				condition := "flag IS TRUE"
 				return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, testPlaceholder(d, 1), testPlaceholder(d, 2))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "yes"}, {Name: "p2", Value: "no"}},
@@ -208,6 +204,17 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 					for _, tc := range valueCases {
 						t.Run("value/"+tc.name, func(t *testing.T) {
 							gotSQL, err := tr.TranspileValue(tc.logic)
+							if mode.schema == nil && tc.schemaLessErr != "" {
+								if !IsErrorCode(err, tc.schemaLessErr) {
+									t.Fatalf("TranspileValue() error = %v, want %s", err, tc.schemaLessErr)
+								}
+								gotParamSQL, gotParams, paramErr := tr.TranspileParameterizedValue(tc.logic)
+								if !IsErrorCode(paramErr, tc.schemaLessErr) {
+									t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+										paramErr, tc.schemaLessErr, gotParamSQL, gotParams)
+								}
+								return
+							}
 							if err != nil {
 								t.Fatalf("TranspileValue() error = %v", err)
 							}

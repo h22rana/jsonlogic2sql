@@ -301,6 +301,7 @@ type expressionResult struct {
 	operators.OperatorResult
 	truthKnown      bool
 	truthy          bool
+	fieldValue      bool
 	rawLiteralKnown bool
 	rawLiteral      interface{}
 }
@@ -336,6 +337,19 @@ func booleanPredicateResult(value bool) expressionResult {
 
 func valueResult(sql string, typ operators.ExpressionType) expressionResult {
 	return expressionResult{OperatorResult: operators.ValueSQL(sql, typ)}
+}
+
+func fieldValueResult(sql string, typ operators.ExpressionType) expressionResult {
+	res := valueResult(sql, typ)
+	res.fieldValue = true
+	return res
+}
+
+func fieldOrValueResult(sql string, typ operators.ExpressionType, isField bool) expressionResult {
+	if isField {
+		return fieldValueResult(sql, typ)
+	}
+	return valueResult(sql, typ)
 }
 
 func literalValueResult(sql string, typ operators.ExpressionType, truthy bool) expressionResult {
@@ -542,34 +556,38 @@ func isZeroJSONNumberLiteral(s string) bool {
 	return true
 }
 
-func (p *Parser) truthinessSQL(res expressionResult) string {
+func (p *Parser) truthinessSQL(res expressionResult, path string) (string, error) {
 	if res.Kind == operators.ExpressionKindPredicate {
-		return res.SQL
+		return res.SQL, nil
 	}
 	if res.truthKnown {
 		if res.truthy {
-			return "TRUE"
+			return "TRUE", nil
 		}
-		return "FALSE"
+		return "FALSE", nil
 	}
 	switch res.Type {
 	case operators.ExpressionTypeNull:
-		return "FALSE"
+		return "FALSE", nil
 	case operators.ExpressionTypeBoolean:
-		return fmt.Sprintf("%s IS TRUE", res.SQL)
+		return fmt.Sprintf("%s IS TRUE", res.SQL), nil
 	case operators.ExpressionTypeString:
-		return fmt.Sprintf("(%s IS NOT NULL AND %s != '')", res.SQL, res.SQL)
+		return fmt.Sprintf("(%s IS NOT NULL AND %s != '')", res.SQL, res.SQL), nil
 	case operators.ExpressionTypeNumber:
-		return fmt.Sprintf("(%s IS NOT NULL AND %s != 0)", res.SQL, res.SQL)
+		return fmt.Sprintf("(%s IS NOT NULL AND %s != 0)", res.SQL, res.SQL), nil
 	case operators.ExpressionTypeArray:
 		lengthCheck := p.config.ArrayLengthFunc(res.SQL)
-		return fmt.Sprintf("(%s IS NOT NULL AND %s > 0)", res.SQL, lengthCheck)
+		return fmt.Sprintf("(%s IS NOT NULL AND %s > 0)", res.SQL, lengthCheck), nil
 	case operators.ExpressionTypeUnknown:
+		if res.fieldValue {
+			return "", tperrors.New(tperrors.ErrInvalidExpressionContext, "", path,
+				"truthiness requires a statically known field type; provide schema information")
+		}
 		return fmt.Sprintf("(%s IS NOT NULL AND %s != FALSE AND %s != 0 AND %s != '')",
-			res.SQL, res.SQL, res.SQL, res.SQL)
+			res.SQL, res.SQL, res.SQL, res.SQL), nil
 	}
 	return fmt.Sprintf("(%s IS NOT NULL AND %s != FALSE AND %s != 0 AND %s != '')",
-		res.SQL, res.SQL, res.SQL, res.SQL)
+		res.SQL, res.SQL, res.SQL, res.SQL), nil
 }
 
 func valueOperandSQL(res expressionResult) string {
@@ -589,7 +607,10 @@ func (p *Parser) parseTruthinessResultParam(expr interface{}, path string, pc *p
 	if err != nil {
 		return expressionResult{}, "", err
 	}
-	condition := p.truthinessSQL(res)
+	condition, err := p.truthinessSQL(res, path)
+	if err != nil {
+		return expressionResult{}, "", err
+	}
 	if res.truthKnown || (res.Kind != operators.ExpressionKindPredicate && res.Type == operators.ExpressionTypeNull) {
 		pc.Restore(checkpoint)
 	}
@@ -683,11 +704,16 @@ func (p *Parser) parseExpressionPredicate(expr interface{}, path string) (expres
 func (p *Parser) parseExpressionValue(expr interface{}, path string) (expressionResult, error) {
 	if pv, ok := expr.(operators.ProcessedValue); ok {
 		if pv.IsSQL {
-			typ := operators.ExpressionTypeUnknown
-			if pv.IsField {
-				typ = operators.ExpressionTypeUnknown
+			if pv.HasExpressionInfo {
+				res := resultFromOperator(operators.OperatorResult{
+					SQL:  pv.Value,
+					Kind: pv.Kind,
+					Type: pv.Type,
+				})
+				res.fieldValue = pv.IsField
+				return res, nil
 			}
-			return valueResult(pv.Value, typ), nil
+			return fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField), nil
 		}
 		return p.parseExpressionValue(pv.Value, path)
 	}
@@ -834,7 +860,7 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		return valueResult(sql, p.fieldExpressionType(varFieldName(args))), nil
+		return fieldValueResult(sql, p.fieldExpressionType(varFieldName(args))), nil
 	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
 		return p.parseOperatorPredicate(operator, args, path)
 	case "and", "or":
@@ -967,7 +993,10 @@ func (p *Parser) parseNotPredicate(operator string, args interface{}, path strin
 	if err != nil {
 		return expressionResult{}, err
 	}
-	condition := p.truthinessSQL(res)
+	condition, err := p.truthinessSQL(res, path)
+	if err != nil {
+		return expressionResult{}, err
+	}
 	if double {
 		if res.truthKnown {
 			return booleanPredicateResult(res.truthy), nil
@@ -1065,7 +1094,10 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 		if err != nil {
 			return expressionResult{}, err
 		}
-		condition := p.truthinessSQL(cond)
+		condition, err := p.truthinessSQL(cond, tperrors.BuildArrayPath(path, i))
+		if err != nil {
+			return expressionResult{}, err
+		}
 		if cond.truthKnown && !cond.truthy {
 			continue
 		}
@@ -1128,7 +1160,10 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 		}
 		return p.parseValueLogicalFrom(operator, args, index+1, path)
 	}
-	condition := p.truthinessSQL(current)
+	condition, err := p.truthinessSQL(current, tperrors.BuildArrayPath(path, index))
+	if err != nil {
+		return expressionResult{}, err
+	}
 	rest, err := p.parseValueLogicalFrom(operator, args, index+1, path)
 	if err != nil {
 		return expressionResult{}, err
@@ -1628,7 +1663,16 @@ func (p *Parser) parseExpressionPredicateParam(expr interface{}, path string, pc
 func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
 	if pv, ok := expr.(operators.ProcessedValue); ok {
 		if pv.IsSQL {
-			return valueResult(pv.Value, operators.ExpressionTypeUnknown), nil
+			if pv.HasExpressionInfo {
+				res := resultFromOperator(operators.OperatorResult{
+					SQL:  pv.Value,
+					Kind: pv.Kind,
+					Type: pv.Type,
+				})
+				res.fieldValue = pv.IsField
+				return res, nil
+			}
+			return fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField), nil
 		}
 		return p.parseExpressionValueParam(pv.Value, path, pc)
 	}
@@ -1785,7 +1829,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		return valueResult(sql, p.fieldExpressionType(varFieldName(args))), nil
+		return fieldValueResult(sql, p.fieldExpressionType(varFieldName(args))), nil
 	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
 		return p.parseOperatorPredicateParam(operator, args, path, pc)
 	case "and", "or":
@@ -2071,7 +2115,10 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 		pc.Restore(checkpoint)
 		return p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
 	}
-	condition := p.truthinessSQL(current)
+	condition, err := p.truthinessSQL(current, tperrors.BuildArrayPath(path, index))
+	if err != nil {
+		return expressionResult{}, err
+	}
 	rest, err := p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
 	if err != nil {
 		return expressionResult{}, err

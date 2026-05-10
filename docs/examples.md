@@ -128,7 +128,8 @@ field IS NOT NULL
 {"!": [{"var": "isDeleted"}]}
 ```
 ```sql
-NOT (isDeleted)
+-- With schema: isDeleted is boolean
+NOT (isDeleted IS TRUE)
 ```
 
 ### Logical NOT (without array wrapper)
@@ -137,7 +138,8 @@ NOT (isDeleted)
 {"!": {"var": "isDeleted"}}
 ```
 ```sql
-NOT (isDeleted)
+-- With schema: isDeleted is boolean
+NOT (isDeleted IS TRUE)
 ```
 
 ### Logical NOT (literal)
@@ -155,8 +157,8 @@ NOT (TRUE)
 {"!!": [{"var": "value"}]}
 ```
 ```sql
--- Without schema (generic truthiness check):
-(value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
+-- Without schema:
+-- error: field truthiness requires schema/type information
 
 -- With schema (type-appropriate SQL)
 ```

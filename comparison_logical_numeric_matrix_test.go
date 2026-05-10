@@ -28,15 +28,17 @@ func TestRegressionMatrix_ComparisonLogicalNumeric_AllDialects(t *testing.T) {
 	}
 
 	type regressionCase struct {
-		name      string
-		logic     string
-		valueRoot bool
+		name          string
+		logic         string
+		valueRoot     bool
+		schemaLessErr ErrorCode
 	}
 
 	cases := []regressionCase{
 		{
-			name:  "builtin_deep_mix",
-			logic: `{"and":[{">=":[{"+":[{"var":"profile.age"},5]},21]},{"<":[{"var":"profile.score"},{"max":[80,{"*":[2,10]}]}]},{"!==":[{"var":"profile.name"},null]},{"==":[{"if":[{"!!":[{"var":"flags.active"}]},"Y","N"]},"Y"]}]}`,
+			name:          "builtin_deep_mix",
+			logic:         `{"and":[{">=":[{"+":[{"var":"profile.age"},5]},21]},{"<":[{"var":"profile.score"},{"max":[80,{"*":[2,10]}]}]},{"!==":[{"var":"profile.name"},null]},{"==":[{"if":[{"!!":[{"var":"flags.active"}]},"Y","N"]},"Y"]}]}`,
+			schemaLessErr: ErrInvalidExpressionContext,
 		},
 		{
 			name:  "chained_compare",
@@ -96,6 +98,40 @@ func TestRegressionMatrix_ComparisonLogicalNumeric_AllDialects(t *testing.T) {
 								sql, err = tr.TranspileValue(tc.logic)
 							} else {
 								sql, err = tr.TranspileCondition(tc.logic)
+							}
+							if mode.schema == nil && tc.schemaLessErr != "" {
+								if !IsErrorCode(err, tc.schemaLessErr) {
+									t.Fatalf("transpile error = %v, want %s", err, tc.schemaLessErr)
+								}
+								logicMap := parseJSONLogicMap(t, tc.logic)
+								if tc.valueRoot {
+									_, _, err = tr.TranspileParameterizedValue(tc.logic)
+									if !IsErrorCode(err, tc.schemaLessErr) {
+										t.Fatalf("parameterized transpile error = %v, want %s", err, tc.schemaLessErr)
+									}
+									_, _, err = tr.TranspileParameterizedValueFromMap(logicMap)
+									if !IsErrorCode(err, tc.schemaLessErr) {
+										t.Fatalf("parameterized from map error = %v, want %s", err, tc.schemaLessErr)
+									}
+									_, _, err = tr.TranspileParameterizedValueFromInterface(logicMap)
+									if !IsErrorCode(err, tc.schemaLessErr) {
+										t.Fatalf("parameterized from interface error = %v, want %s", err, tc.schemaLessErr)
+									}
+								} else {
+									_, _, err = tr.TranspileParameterizedCondition(tc.logic)
+									if !IsErrorCode(err, tc.schemaLessErr) {
+										t.Fatalf("parameterized transpile error = %v, want %s", err, tc.schemaLessErr)
+									}
+									_, _, err = tr.TranspileParameterizedConditionFromMap(logicMap)
+									if !IsErrorCode(err, tc.schemaLessErr) {
+										t.Fatalf("parameterized from map error = %v, want %s", err, tc.schemaLessErr)
+									}
+									_, _, err = tr.TranspileParameterizedConditionFromInterface(logicMap)
+									if !IsErrorCode(err, tc.schemaLessErr) {
+										t.Fatalf("parameterized from interface error = %v, want %s", err, tc.schemaLessErr)
+									}
+								}
+								return
 							}
 							if err != nil {
 								t.Fatalf("transpile error: %v", err)
