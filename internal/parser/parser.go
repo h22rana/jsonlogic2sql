@@ -1959,15 +1959,18 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 	checkpoint := pc.Checkpoint()
 	parts := make([]string, 0, len(args))
 	for i, arg := range args {
+		operandCheckpoint := pc.Checkpoint()
 		res, err := p.parseExpressionPredicateParam(arg, tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
 		if res.truthKnown {
 			if operator == "and" && res.truthy {
+				pc.Restore(operandCheckpoint)
 				continue
 			}
 			if operator == "or" && !res.truthy {
+				pc.Restore(operandCheckpoint)
 				continue
 			}
 			if operator == "and" && !res.truthy {
@@ -2027,12 +2030,17 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		pairLimit = len(args) - 1
 	}
 	for i := 0; i < pairLimit; i += 2 {
+		conditionCheckpoint := pc.Checkpoint()
 		cond, err := p.parsePredicateIfOperandParam(args[i], tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
 		if cond.truthKnown && !cond.truthy {
+			pc.Restore(conditionCheckpoint)
 			continue
+		}
+		if cond.truthKnown && cond.truthy {
+			pc.Restore(conditionCheckpoint)
 		}
 		thenRes, err := p.parsePredicateIfOperandParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
 		if err != nil {

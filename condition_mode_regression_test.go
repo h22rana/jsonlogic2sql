@@ -768,6 +768,99 @@ func TestTranspileCondition_LiteralPredicateResultsShortCircuit(t *testing.T) {
 	}
 }
 
+func TestTranspileParameterizedCondition_FoldedPredicateShortCircuitRollsBackParams(t *testing.T) {
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:    "and skips truthy literal comparison",
+			logic:   `{"and":[{"==":[1,1]},{">":[{"var":"x"},0]}]}`,
+			wantSQL: "x > 0",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:    "or skips falsy literal comparison",
+			logic:   `{"or":[{"==":[1,2]},{">":[{"var":"x"},0]}]}`,
+			wantSQL: "x > 0",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:    "if false condition skips condition params",
+			logic:   `{"if":[{"==":[1,2]},{">":[{"var":"x"},0]},{">":[{"var":"y"},0]}]}`,
+			wantSQL: "y > 0",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("y > %s", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:    "if true condition skips condition params",
+			logic:   `{"if":[{"==":[1,1]},{">":[{"var":"x"},0]},{">":[{"var":"y"},0]}]}`,
+			wantSQL: "x > 0",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:    "if true folded condition after dynamic branch preserves earlier params",
+			logic:   `{"if":[{">":[{"var":"a"},0]},{">":[{"var":"b"},0]},{"==":[1,1]},{">":[{"var":"c"},0]},{">":[{"var":"d"},0]}]}`,
+			wantSQL: "CASE WHEN a > 0 THEN b > 0 ELSE c > 0 END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN a > %s THEN b > %s ELSE c > %s END",
+					testPlaceholder(d, 1), testPlaceholder(d, 2), testPlaceholder(d, 3))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(0)},
+				{Name: "p2", Value: float64(0)},
+				{Name: "p3", Value: float64(0)},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.wantSQL {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.wantSQL)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_DoubleBangUsesValueTruthinessExplicitly(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "flag", Type: FieldTypeBoolean},
