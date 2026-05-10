@@ -519,6 +519,105 @@ func TestTranspileCondition_TypedCustomPredicateTruthiness(t *testing.T) {
 	}
 }
 
+func TestTranspileCondition_DefaultedVarMetadataSurvivesValueFolding(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "age", Type: FieldTypeInteger},
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active"}},
+	})
+
+	tests := []struct {
+		name          string
+		logic         string
+		want          string
+		wantParam     func(Dialect) string
+		params        []QueryParam
+		wantErr       bool
+		wantErrParams bool
+	}{
+		{
+			name:  "constant if keeps numeric defaulted field",
+			logic: `{"==":[{"if":[true,{"var":["age",1.5]},0]},1.5]}`,
+			want:  "COALESCE(age, 1.5) = 1.5",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("COALESCE(age, %s) = %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			params: []QueryParam{
+				{Name: "p1", Value: float64(1.5)},
+				{Name: "p2", Value: float64(1.5)},
+			},
+		},
+		{
+			name:  "constant logical keeps numeric defaulted field",
+			logic: `{"==":[{"or":[false,{"var":["age",1.5]}]},1.5]}`,
+			want:  "COALESCE(age, 1.5) = 1.5",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("COALESCE(age, %s) = %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			params: []QueryParam{
+				{Name: "p1", Value: float64(1.5)},
+				{Name: "p2", Value: float64(1.5)},
+			},
+		},
+		{
+			name:          "constant if validates enum default",
+			logic:         `{"==":[{"if":[true,{"var":["status","bogus"]},"active"]},"active"]}`,
+			wantErr:       true,
+			wantErrParams: true,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if tt.wantErr {
+						if err == nil {
+							t.Fatal("TranspileCondition() expected error")
+						}
+					} else {
+						if err != nil {
+							t.Fatalf("TranspileCondition() error = %v", err)
+						}
+						if got != tt.want {
+							t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+						}
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if tt.wantErrParams {
+						if err == nil {
+							t.Fatal("TranspileParameterizedCondition() expected error")
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.params) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_MixedTypedCustomOperatorsAllDialectsSchemaModes(t *testing.T) {
 	t.Parallel()
 

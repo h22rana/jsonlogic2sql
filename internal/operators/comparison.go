@@ -157,7 +157,7 @@ func (c *ComparisonOperator) extractFieldName(varName interface{}) string {
 
 func (c *ComparisonOperator) extractEqualityFieldOperand(value interface{}) (equalityFieldOperand, bool) {
 	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
-		return equalityFieldOperand{fieldName: pv.FieldName}, true
+		return equalityFieldOperandFromProcessedValue(pv), true
 	}
 	varExpr, ok := value.(map[string]interface{})
 	if !ok {
@@ -180,27 +180,39 @@ func (c *ComparisonOperator) extractEqualityFieldOperand(value interface{}) (equ
 		if name, ok := v[0].(string); ok {
 			operand := equalityFieldOperand{fieldName: name}
 			if len(v) > 1 {
-				operand.hasDefault = true
-				if literal, ok := equalityLiteralValue(v[1]); ok {
-					operand.defaultLiteral = literal
-					operand.defaultLiteralKnown = true
-				}
+				setEqualityFieldDefault(&operand, v[1])
 			}
 			return operand, true
 		}
 		if pv, ok := v[0].(ProcessedValue); ok && pv.IsSQL && pv.IsField {
-			operand := equalityFieldOperand{fieldName: pv.FieldName}
+			operand := equalityFieldOperandFromProcessedValue(pv)
 			if len(v) > 1 {
-				operand.hasDefault = true
-				if literal, ok := equalityLiteralValue(v[1]); ok {
-					operand.defaultLiteral = literal
-					operand.defaultLiteralKnown = true
-				}
+				setEqualityFieldDefault(&operand, v[1])
 			}
 			return operand, true
 		}
 	}
 	return equalityFieldOperand{}, false
+}
+
+func equalityFieldOperandFromProcessedValue(pv ProcessedValue) equalityFieldOperand {
+	operand := equalityFieldOperand{fieldName: pv.FieldName}
+	if pv.FieldHasDefault {
+		operand.hasDefault = true
+		if pv.FieldDefaultLiteralKnown {
+			operand.defaultLiteral = pv.FieldDefaultLiteral
+			operand.defaultLiteralKnown = true
+		}
+	}
+	return operand
+}
+
+func setEqualityFieldDefault(operand *equalityFieldOperand, defaultValue interface{}) {
+	operand.hasDefault = true
+	if literal, ok := equalityLiteralValue(defaultValue); ok {
+		operand.defaultLiteral = literal
+		operand.defaultLiteralKnown = true
+	}
 }
 
 func isEqualityOperator(operator string) bool {

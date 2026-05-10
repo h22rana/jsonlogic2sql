@@ -297,12 +297,15 @@ func isSQLIdentifierChar(ch byte) bool {
 
 type expressionResult struct {
 	operators.OperatorResult
-	truthKnown      bool
-	truthy          bool
-	fieldValue      bool
-	fieldName       string
-	rawLiteralKnown bool
-	rawLiteral      interface{}
+	truthKnown        bool
+	truthy            bool
+	fieldValue        bool
+	fieldName         string
+	fieldHasDefault   bool
+	fieldDefault      interface{}
+	fieldDefaultKnown bool
+	rawLiteralKnown   bool
+	rawLiteral        interface{}
 }
 
 func resultFromOperator(res operators.OperatorResult) expressionResult {
@@ -356,6 +359,30 @@ func fieldValueResult(sql string, typ operators.ExpressionType, fieldName ...str
 		res.fieldName = fieldName[0]
 	}
 	return res
+}
+
+func withVarDefaultMetadata(res expressionResult, args interface{}) expressionResult {
+	defaultValue, hasDefault, defaultKnown := varDefaultLiteral(args)
+	if !hasDefault {
+		return res
+	}
+	res.fieldHasDefault = true
+	if defaultKnown {
+		res.fieldDefault = defaultValue
+		res.fieldDefaultKnown = true
+	}
+	return res
+}
+
+func copyProcessedFieldMetadata(res *expressionResult, pv operators.ProcessedValue) {
+	if !pv.IsField {
+		return
+	}
+	res.fieldValue = true
+	res.fieldName = pv.FieldName
+	res.fieldHasDefault = pv.FieldHasDefault
+	res.fieldDefaultKnown = pv.FieldDefaultLiteralKnown
+	res.fieldDefault = pv.FieldDefaultLiteral
 }
 
 func fieldOrValueResult(sql string, typ operators.ExpressionType, isField bool, fieldName ...string) expressionResult {
@@ -447,6 +474,26 @@ func varFieldName(args interface{}) string {
 		}
 	}
 	return ""
+}
+
+func varDefaultLiteral(args interface{}) (interface{}, bool, bool) {
+	v, ok := args.([]interface{})
+	if !ok || len(v) < 2 {
+		return nil, false, false
+	}
+	defaultValue := v[1]
+	if pv, ok := defaultValue.(operators.ProcessedValue); ok {
+		if pv.IsSQL {
+			return nil, true, false
+		}
+		return pv.Value, true, true
+	}
+	switch defaultValue.(type) {
+	case map[string]interface{}, []interface{}:
+		return nil, true, false
+	default:
+		return defaultValue, true, true
+	}
 }
 
 func isEmptyArrayLiteralValue(value interface{}) bool {
@@ -622,6 +669,9 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	if res.fieldValue {
 		pv.IsField = true
 		pv.FieldName = res.fieldName
+		pv.FieldHasDefault = res.fieldHasDefault
+		pv.FieldDefaultLiteralKnown = res.fieldDefaultKnown
+		pv.FieldDefaultLiteral = res.fieldDefault
 	}
 	return pv
 }
@@ -736,11 +786,12 @@ func (p *Parser) parseExpressionValue(expr interface{}, path string) (expression
 					Kind: pv.Kind,
 					Type: pv.Type,
 				})
-				res.fieldValue = pv.IsField
-				res.fieldName = pv.FieldName
+				copyProcessedFieldMetadata(&res, pv)
 				return res, nil
 			}
-			return fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName), nil
+			res := fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName)
+			copyProcessedFieldMetadata(&res, pv)
+			return res, nil
 		}
 		return p.parseExpressionValue(pv.Value, path)
 	}
@@ -892,7 +943,7 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
 		fieldName := varFieldName(args)
-		return fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), nil
+		return withVarDefaultMetadata(fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), args), nil
 	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
 		return p.parseOperatorPredicate(operator, args, path)
 	case "and", "or":
@@ -1664,11 +1715,12 @@ func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *pa
 					Kind: pv.Kind,
 					Type: pv.Type,
 				})
-				res.fieldValue = pv.IsField
-				res.fieldName = pv.FieldName
+				copyProcessedFieldMetadata(&res, pv)
 				return res, nil
 			}
-			return fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName), nil
+			res := fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName)
+			copyProcessedFieldMetadata(&res, pv)
+			return res, nil
 		}
 		return p.parseExpressionValueParam(pv.Value, path, pc)
 	}
@@ -1834,7 +1886,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
 		fieldName := varFieldName(args)
-		return fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), nil
+		return withVarDefaultMetadata(fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), args), nil
 	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
 		return p.parseOperatorPredicateParam(operator, args, path, pc)
 	case "and", "or":

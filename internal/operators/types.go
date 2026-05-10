@@ -74,6 +74,14 @@ type ProcessedValue struct {
 	// FieldName is the original schema field name when IsField is true and the
 	// source field is known. Array-scoped aliases may leave this empty.
 	FieldName string
+	// FieldHasDefault indicates the field came from a JSONLogic var with a
+	// default value, such as {"var":["age", 18]}.
+	FieldHasDefault bool
+	// FieldDefaultLiteralKnown is true when FieldDefaultLiteral can be used for
+	// schema-aware equality folding and validation.
+	FieldDefaultLiteralKnown bool
+	// FieldDefaultLiteral is the raw JSONLogic default value when known.
+	FieldDefaultLiteral interface{}
 	// HasExpressionInfo indicates that Kind and Type carry parser-derived
 	// expression metadata for this SQL value.
 	HasExpressionInfo bool
