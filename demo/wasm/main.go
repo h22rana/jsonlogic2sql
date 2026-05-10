@@ -305,7 +305,7 @@ func getSamples(_ js.Value, _ []js.Value) interface{} {
 		{"name": "Null-safe fields", "mode": "condition", "jsonLogic": `{"==": [{"var": "primary_email"}, {"var": "backup_email"}]}`},
 		{"name": "Chained comparison", "mode": "condition", "jsonLogic": `{"<": [18, {"var": "age"}, 65]}`},
 		{"name": "Nested arithmetic", "mode": "condition", "jsonLogic": `{">": [{"+": [{"var": "base"}, {"*": [{"var": "bonus"}, 0.1]}]}, 1000]}`},
-		{"name": "Value fallback", "mode": "value", "jsonLogic": `{"or": [false, {"var": "nickname"}, "unknown"]}`},
+		{"name": "Value fallback", "mode": "value", "jsonLogic": `{"or": [false, "", "unknown"]}`},
 		{"name": "Conditional value", "mode": "value", "jsonLogic": `{"if": [{">": [{"var": "age"}, 18]}, "adult", "minor"]}`},
 		{"name": "String value", "mode": "value", "jsonLogic": `{"cat": ["Order ", {"var": "status"}]}`},
 	}

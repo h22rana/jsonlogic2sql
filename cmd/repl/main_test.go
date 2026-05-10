@@ -937,3 +937,15 @@ func TestRegexpContainsBigQuery_Parameterized(t *testing.T) {
 		}
 	}
 }
+
+func TestReplExamplesTranspileInDefaultConditionMode(t *testing.T) {
+	tr := setupTestTranspiler(t)
+
+	for _, example := range replExamples() {
+		t.Run(example.name, func(t *testing.T) {
+			if _, err := tr.TranspileCondition(example.json); err != nil {
+				t.Fatalf("example %q does not transpile in condition mode: %v", example.json, err)
+			}
+		})
+	}
+}

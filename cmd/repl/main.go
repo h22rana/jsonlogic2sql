@@ -859,12 +859,14 @@ func showHelp() {
 	fmt.Println("Note: For large JSON inputs (>4KB), use :file to avoid terminal limits.")
 }
 
-func showExamples() {
-	examples := []struct {
-		name string
-		json string
-		sql  string
-	}{
+type replExample struct {
+	name string
+	json string
+	sql  string
+}
+
+func replExamples() []replExample {
+	return []replExample{
 		{
 			name: "Simple Comparison",
 			json: `{">": [{"var": "amount"}, 1000]}`,
@@ -886,9 +888,9 @@ func showExamples() {
 			sql:  "(transaction_amount > 10000 AND (user_verified = FALSE OR user_accountAgeDays < 7))",
 		},
 		{
-			name: "IF Statement",
-			json: `{"if": [{">": [{"var": "age"}, 18]}, "adult", "minor"]}`,
-			sql:  "CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END",
+			name: "IF Condition",
+			json: `{"if": [{">": [{"var": "age"}, 18]}, {"==": [{"var": "status"}, "adult"]}, {"==": [{"var": "status"}, "minor"]}]}`,
+			sql:  "CASE WHEN age > 18 THEN status = 'adult' ELSE status = 'minor' END",
 		},
 		{
 			name: "Missing Field Check",
@@ -906,7 +908,10 @@ func showExamples() {
 			sql:  "NOT (verified = TRUE)",
 		},
 	}
+}
 
+func showExamples() {
+	examples := replExamples()
 	fmt.Println("Example JSON Logic expressions:")
 	fmt.Println()
 
