@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -528,9 +529,9 @@ func isZeroLiteral(value interface{}) bool {
 	case json.Number:
 		return isZeroJSONNumberLiteral(v.String())
 	case float32:
-		return v == 0
+		return v == 0 || math.IsNaN(float64(v))
 	case float64:
-		return v == 0
+		return v == 0 || math.IsNaN(v)
 	case int:
 		return v == 0
 	case int8:

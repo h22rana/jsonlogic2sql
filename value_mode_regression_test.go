@@ -2,6 +2,7 @@ package jsonlogic2sql
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -828,6 +829,103 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 							}
 							if gotParam != tt.wantParam {
 								t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.wantParam)
+							}
+							if len(gotParams) != 0 {
+								t.Fatalf("params = %#v, want none", gotParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+	schemaModes := allSchemaModes(schema)
+
+	valueLogic := map[string]interface{}{
+		"or": []interface{}{math.NaN(), "fallback"},
+	}
+	conditionCases := []struct {
+		name  string
+		logic map[string]interface{}
+		want  string
+	}{
+		{
+			name:  "double bang native NaN",
+			logic: map[string]interface{}{"!!": math.NaN()},
+			want:  "FALSE",
+		},
+		{
+			name:  "not native NaN",
+			logic: map[string]interface{}{"!": math.NaN()},
+			want:  "TRUE",
+		},
+		{
+			name:  "float32 native NaN",
+			logic: map[string]interface{}{"!!": float32(math.NaN())},
+			want:  "FALSE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range schemaModes {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					got, err := tr.TranspileValueFromInterface(valueLogic)
+					if err != nil {
+						t.Fatalf("TranspileValueFromInterface() error = %v", err)
+					}
+					if got != "'fallback'" {
+						t.Fatalf("TranspileValueFromInterface() = %q, want %q", got, "'fallback'")
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValueFromInterface(valueLogic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValueFromInterface() error = %v", err)
+					}
+					if want := testPlaceholder(d, 1); gotParam != want {
+						t.Fatalf("TranspileParameterizedValueFromInterface() = %q, want %q", gotParam, want)
+					}
+					wantParams := []QueryParam{{Name: "p1", Value: "fallback"}}
+					if !reflect.DeepEqual(gotParams, wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+					}
+
+					for _, tt := range conditionCases {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileConditionFromInterface(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileConditionFromInterface() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileConditionFromInterface() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedConditionFromInterface(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedConditionFromInterface() error = %v", err)
+							}
+							if gotParam != tt.want {
+								t.Fatalf("TranspileParameterizedConditionFromInterface() = %q, want %q", gotParam, tt.want)
 							}
 							if len(gotParams) != 0 {
 								t.Fatalf("params = %#v, want none", gotParams)
