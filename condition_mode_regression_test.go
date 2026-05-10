@@ -520,6 +520,9 @@ func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
 					if want := tt.wantParam(d); gotParam != want {
 						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
 					}
+					if len(tt.wantParams) == 0 && len(gotParams) == 0 {
+						return
+					}
 					if !reflect.DeepEqual(gotParams, tt.wantParams) {
 						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
 					}
@@ -607,8 +610,157 @@ func TestTranspileCondition_SchemaAwareComparisonUsesFoldedValueLiterals(t *test
 					if want := tt.wantParam(d); gotParam != want {
 						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
 					}
+					if len(tt.wantParams) == 0 && len(gotParams) == 0 {
+						return
+					}
 					if !reflect.DeepEqual(gotParams, tt.wantParams) {
 						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_NestedValueOperandPreservesFieldMetadata(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "code", Type: FieldTypeString},
+		{Name: "flag", Type: FieldTypeBoolean},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:    "loose equality coerces literal for folded string field",
+			logic:   `{"==":[{"if":[true,{"var":"code"},"x"]},5]}`,
+			wantSQL: "code = '5'",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("code = %s", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "5"}},
+		},
+		{
+			name:    "loose equality coerces literal for dynamic string expression",
+			logic:   `{"==":[{"if":[{"var":"flag"},{"var":"code"},"5"]},5]}`,
+			wantSQL: "CASE WHEN flag IS TRUE THEN code ELSE '5' END = '5'",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN flag IS TRUE THEN code ELSE %s END = %s",
+					testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "5"}, {Name: "p2", Value: "5"}},
+		},
+		{
+			name:    "strict equality folds impossible folded string field comparison",
+			logic:   `{"===":[{"if":[true,{"var":"code"},"x"]},5]}`,
+			wantSQL: "FALSE",
+			wantParam: func(Dialect) string {
+				return "FALSE"
+			},
+			wantParams: nil,
+		},
+		{
+			name:    "strict equality folds impossible dynamic string expression",
+			logic:   `{"===":[{"if":[{"var":"flag"},{"var":"code"},"x"]},5]}`,
+			wantSQL: "FALSE",
+			wantParam: func(Dialect) string {
+				return "FALSE"
+			},
+			wantParams: []QueryParam{},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.wantSQL {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.wantSQL)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_LiteralPredicateResultsShortCircuit(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "code", Type: FieldTypeString},
+	})
+
+	tests := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "false literal comparison stops and before missing field",
+			logic: `{"and":[{"!=":[null,null]},{">":[{"var":"missing"},1]}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "true literal comparison stops or before missing field",
+			logic: `{"or":[{"==":[1,1]},{">":[{"var":"missing"},1]}]}`,
+			want:  "TRUE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParam != tt.want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.want)
+					}
+					if len(gotParams) != 0 {
+						t.Fatalf("params = %#v, want none", gotParams)
 					}
 				})
 			}

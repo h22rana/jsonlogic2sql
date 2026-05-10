@@ -131,6 +131,9 @@ func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator
 
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (c *ComparisonOperator) extractFieldNameFromValue(value interface{}) string {
+	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+		return pv.FieldName
+	}
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr[OpVar]; hasVar {
 			return c.extractFieldName(varName)
@@ -153,6 +156,9 @@ func (c *ComparisonOperator) extractFieldName(varName interface{}) string {
 }
 
 func (c *ComparisonOperator) extractEqualityFieldOperand(value interface{}) (equalityFieldOperand, bool) {
+	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+		return equalityFieldOperand{fieldName: pv.FieldName}, true
+	}
 	varExpr, ok := value.(map[string]interface{})
 	if !ok {
 		return equalityFieldOperand{}, false
@@ -183,7 +189,7 @@ func (c *ComparisonOperator) extractEqualityFieldOperand(value interface{}) (equ
 			return operand, true
 		}
 		if pv, ok := v[0].(ProcessedValue); ok && pv.IsSQL && pv.IsField {
-			operand := equalityFieldOperand{}
+			operand := equalityFieldOperand{fieldName: pv.FieldName}
 			if len(v) > 1 {
 				operand.hasDefault = true
 				if literal, ok := equalityLiteralValue(v[1]); ok {
@@ -260,6 +266,138 @@ func equalityPredicateConstant(operator string, left, right bool) bool {
 		return left != right
 	default:
 		return false
+	}
+}
+
+// FoldLiteralComparison returns the JSONLogic result for comparisons whose
+// operands are fully known literals. The boolean return after the result tells
+// callers whether folding was possible.
+func FoldLiteralComparison(operator string, args []interface{}) (bool, bool, error) {
+	if len(args) != 2 {
+		return false, false, nil
+	}
+
+	switch operator {
+	case "==", "===", "!=", "!==":
+		left, leftOK := equalityLiteralValue(args[0])
+		right, rightOK := equalityLiteralValue(args[1])
+		if !leftOK || !rightOK {
+			return false, false, nil
+		}
+		if equalityLiteralKind(left) == "" || equalityLiteralKind(right) == "" {
+			return false, false, nil
+		}
+		if err := validateEqualityJSONNumberLiteral(left); err != nil {
+			return false, false, err
+		}
+		if err := validateEqualityJSONNumberLiteral(right); err != nil {
+			return false, false, err
+		}
+
+		var equal bool
+		if isStrictEqualityOperator(operator) {
+			equal = equalityLiteralsStrictEqual(left, right)
+		} else {
+			equal = equalityLiteralsLooseEqual(left, right)
+		}
+		if operator == "!=" || operator == "!==" {
+			equal = !equal
+		}
+		return equal, true, nil
+	case ">", ">=", "<", "<=":
+		return foldLiteralOrderingComparison(operator, args[0], args[1])
+	case "in":
+		return foldLiteralInComparison(args[0], args[1])
+	default:
+		return false, false, nil
+	}
+}
+
+func foldLiteralOrderingComparison(operator string, leftArg, rightArg interface{}) (bool, bool, error) {
+	left, leftOK := equalityLiteralValue(leftArg)
+	right, rightOK := equalityLiteralValue(rightArg)
+	if !leftOK || !rightOK {
+		return false, false, nil
+	}
+	if equalityLiteralKind(left) == "" || equalityLiteralKind(right) == "" {
+		return false, false, nil
+	}
+
+	if leftString, ok := left.(string); ok {
+		if rightString, ok := right.(string); ok {
+			cmp := strings.Compare(leftString, rightString)
+			switch operator {
+			case ">":
+				return cmp > 0, true, nil
+			case ">=":
+				return cmp >= 0, true, nil
+			case "<":
+				return cmp < 0, true, nil
+			case "<=":
+				return cmp <= 0, true, nil
+			}
+		}
+	}
+
+	leftNumber, leftHandled, leftValid := jsNumberFromOrderingLiteral(left)
+	rightNumber, rightHandled, rightValid := jsNumberFromOrderingLiteral(right)
+	if !leftHandled || !rightHandled {
+		return false, false, nil
+	}
+	if !leftValid || !rightValid {
+		return false, true, nil
+	}
+
+	switch operator {
+	case ">":
+		return leftNumber.float > rightNumber.float, true, nil
+	case ">=":
+		return leftNumber.float >= rightNumber.float, true, nil
+	case "<":
+		return leftNumber.float < rightNumber.float, true, nil
+	case "<=":
+		return leftNumber.float <= rightNumber.float, true, nil
+	default:
+		return false, false, nil
+	}
+}
+
+func jsNumberFromOrderingLiteral(value interface{}) (jsNumberLiteral, bool, bool) {
+	if value == nil {
+		return newJSIntNumber(0), true, true
+	}
+	return jsNumberFromLiteral(value)
+}
+
+func foldLiteralInComparison(leftArg, rightArg interface{}) (bool, bool, error) {
+	left, leftOK := equalityLiteralValue(leftArg)
+	if !leftOK {
+		return false, false, nil
+	}
+	if equalityLiteralKind(left) == "" {
+		return false, false, nil
+	}
+
+	switch right := rightArg.(type) {
+	case string:
+		leftString, ok := left.(string)
+		if !ok {
+			return false, false, nil
+		}
+		return strings.Contains(right, leftString), true, nil
+	case []interface{}:
+		for _, item := range right {
+			itemLiteral, ok := equalityLiteralValue(item)
+			if !ok || equalityLiteralKind(itemLiteral) == "" {
+				return false, false, nil
+			}
+			if equalityLiteralsLooseEqual(left, itemLiteral) {
+				return true, true, nil
+			}
+		}
+		return false, true, nil
+	default:
+		return false, false, nil
 	}
 }
 
@@ -841,7 +979,7 @@ func (c *ComparisonOperator) validateEqualityFieldOperand(field equalityFieldOpe
 
 func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, rightArg interface{}) equalityDecision {
 	dec := equalityDecision{left: leftArg, right: rightArg}
-	if c.schema() == nil || !isEqualityOperator(operator) {
+	if !isEqualityOperator(operator) {
 		return dec
 	}
 
@@ -862,7 +1000,7 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 		}
 	}
 	if leftIsField == rightIsField {
-		return dec
+		return c.applyTypedExpressionEqualitySemantics(dec, operator, leftArg, rightArg)
 	}
 
 	field := leftField
@@ -882,7 +1020,7 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 
 	fieldKind := c.fieldEqualityKind(fieldName)
 	if fieldKind == "" {
-		return dec
+		return c.applyTypedExpressionEqualitySemantics(dec, operator, leftArg, rightArg)
 	}
 	dec.handled = true
 
@@ -1032,6 +1170,125 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 	}
 
 	return dec
+}
+
+func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityDecision, operator string, leftArg, rightArg interface{}) equalityDecision {
+	leftKind, leftTyped := expressionEqualityKind(leftArg)
+	rightKind, rightTyped := expressionEqualityKind(rightArg)
+	if leftTyped == rightTyped {
+		return dec
+	}
+
+	exprKind := leftKind
+	literalArg := rightArg
+	exprOnLeft := true
+	if !leftTyped {
+		exprKind = rightKind
+		literalArg = leftArg
+		exprOnLeft = false
+	}
+
+	literal, ok := equalityLiteralValue(literalArg)
+	if !ok {
+		return dec
+	}
+	if err := validateEqualityJSONNumberLiteral(literal); err != nil {
+		dec.handled = true
+		dec.unsupported = err
+		return dec
+	}
+	if literal == nil {
+		return dec
+	}
+
+	if isStrictEqualityOperator(operator) {
+		literalKind := equalityLiteralKind(literal)
+		if literalKind != "" && literalKind != exprKind {
+			dec.handled = true
+			dec.constant = impossibleEqualityPredicateConstant(operator)
+			return dec
+		}
+		if exprKind == "number" {
+			if _, isJSONNumber := literal.(json.Number); !isJSONNumber {
+				if _, handled, valid := jsNumberFromLiteral(literal); handled && !valid {
+					dec.handled = true
+					dec.constant = impossibleEqualityPredicateConstant(operator)
+					return dec
+				}
+			}
+		}
+		return dec
+	}
+
+	switch exprKind {
+	case "number":
+		n, handled, valid := jsNumberFromLiteral(literal)
+		if !handled {
+			return dec
+		}
+		dec.handled = true
+		if !valid {
+			dec.constant = impossibleEqualityPredicateConstant(operator)
+			return dec
+		}
+		c.setLiteralForFieldSide(&dec, exprOnLeft, n.value)
+	case "boolean":
+		n, handled, valid := jsNumberFromLiteral(literal)
+		if !handled {
+			return dec
+		}
+		dec.handled = true
+		if !valid {
+			dec.constant = impossibleEqualityPredicateConstant(operator)
+			return dec
+		}
+		switch n.float {
+		case 0:
+			c.setLiteralForFieldSide(&dec, exprOnLeft, false)
+		case 1:
+			c.setLiteralForFieldSide(&dec, exprOnLeft, true)
+		default:
+			dec.constant = impossibleEqualityPredicateConstant(operator)
+		}
+	case "string":
+		dec.handled = true
+		if _, ok := literal.(bool); ok {
+			dec.unsupported = fmt.Errorf("loose equality between string expression and boolean literal is not supported")
+			return dec
+		}
+		if equalityLiteralKind(literal) == "number" {
+			if canonical, handled, possible := stringFieldNumericLiteralString(literal); handled {
+				if !possible {
+					dec.constant = impossibleEqualityPredicateConstant(operator)
+					return dec
+				}
+				c.setLiteralForFieldSide(&dec, exprOnLeft, canonical)
+			}
+		}
+	}
+
+	return dec
+}
+
+func expressionEqualityKind(value interface{}) (string, bool) {
+	pv, ok := value.(ProcessedValue)
+	if !ok || !pv.IsSQL || !pv.HasExpressionInfo {
+		return "", false
+	}
+	if pv.Kind == ExpressionKindPredicate {
+		return "boolean", true
+	}
+	switch pv.Type {
+	case ExpressionTypeBoolean:
+		return "boolean", true
+	case ExpressionTypeString:
+		return "string", true
+	case ExpressionTypeNumber:
+		return "number", true
+	case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeArray:
+		return "", false
+	}
+	return "", false
 }
 
 func equalityLiteralForFieldSide(dec equalityDecision, fieldOnLeft bool) interface{} {

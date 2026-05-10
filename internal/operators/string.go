@@ -65,6 +65,9 @@ func (s *StringOperator) validateStringOperand(value interface{}) error {
 
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (s *StringOperator) extractFieldNameFromValue(value interface{}) string {
+	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+		return pv.FieldName
+	}
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr[OpVar]; hasVar {
 			return s.extractFieldName(varName)

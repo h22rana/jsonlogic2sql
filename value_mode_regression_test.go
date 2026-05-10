@@ -1210,6 +1210,122 @@ func TestTranspileValue_DynamicLogicalTruthinessWithSchema(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_LiteralPredicateFallbacksAllDialects(t *testing.T) {
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:    "or skips literal false predicate",
+			logic:   `{"or":[{"!=":[null,null]},"x"]}`,
+			wantSQL: "'x'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
+		},
+		{
+			name:    "and skips literal true predicate",
+			logic:   `{"and":[{"==":[1,1]},"x"]}`,
+			wantSQL: "'x'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
+		},
+		{
+			name:    "or skips literal false ordering predicate",
+			logic:   `{"or":[{">":[1,2]},"x"]}`,
+			wantSQL: "'x'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if got != tt.wantSQL {
+						t.Fatalf("TranspileValue() = %q, want %q", got, tt.wantSQL)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_NestedFieldMetadataPreservesSchemaValidation(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "code", Type: FieldTypeString},
+		{Name: "tags", Type: FieldTypeArray},
+	})
+
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "numeric op rejects folded string field",
+			logic: `{"+":[{"if":[true,{"var":"code"},"x"]},1]}`,
+		},
+		{
+			name:  "string op rejects folded array field",
+			logic: `{"cat":[{"if":[true,{"var":"tags"},[]]}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					if _, err := tr.TranspileValue(tt.logic); !IsErrorCode(err, ErrInvalidArgument) {
+						t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
+					}
+					sql, params, err := tr.TranspileParameterizedValue(tt.logic)
+					if !IsErrorCode(err, ErrInvalidArgument) {
+						t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+							err, ErrInvalidArgument, sql, params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_SchemaLessUnknownTruthinessRejectedAllDialects(t *testing.T) {
 	t.Parallel()
 

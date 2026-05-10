@@ -67,6 +67,9 @@ type ProcessedValue struct {
 	// This lets comparison operators preserve field-to-field semantics for
 	// array-scoped vars without re-validating internal aliases as schema fields.
 	IsField bool
+	// FieldName is the original schema field name when IsField is true and the
+	// source field is known. Array-scoped aliases may leave this empty.
+	FieldName string
 	// HasExpressionInfo indicates that Kind and Type carry parser-derived
 	// expression metadata for this SQL value.
 	HasExpressionInfo bool

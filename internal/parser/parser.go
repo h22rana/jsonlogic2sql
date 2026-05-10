@@ -302,6 +302,7 @@ type expressionResult struct {
 	truthKnown      bool
 	truthy          bool
 	fieldValue      bool
+	fieldName       string
 	rawLiteralKnown bool
 	rawLiteral      interface{}
 }
@@ -311,13 +312,24 @@ func resultFromOperator(res operators.OperatorResult) expressionResult {
 }
 
 func predicateResult(sql string) expressionResult {
-	switch strings.TrimSpace(sql) {
+	switch normalizedSQLBooleanConstant(sql) {
 	case "TRUE":
 		return booleanPredicateResult(true)
 	case "FALSE":
 		return booleanPredicateResult(false)
 	}
 	return expressionResult{OperatorResult: operators.PredicateSQL(sql)}
+}
+
+func normalizedSQLBooleanConstant(sql string) string {
+	switch strings.TrimSpace(sql) {
+	case "TRUE":
+		return "TRUE"
+	case "FALSE":
+		return "FALSE"
+	default:
+		return ""
+	}
 }
 
 func booleanPredicateResult(value bool) expressionResult {
@@ -339,15 +351,18 @@ func valueResult(sql string, typ operators.ExpressionType) expressionResult {
 	return expressionResult{OperatorResult: operators.ValueSQL(sql, typ)}
 }
 
-func fieldValueResult(sql string, typ operators.ExpressionType) expressionResult {
+func fieldValueResult(sql string, typ operators.ExpressionType, fieldName ...string) expressionResult {
 	res := valueResult(sql, typ)
 	res.fieldValue = true
+	if len(fieldName) > 0 {
+		res.fieldName = fieldName[0]
+	}
 	return res
 }
 
-func fieldOrValueResult(sql string, typ operators.ExpressionType, isField bool) expressionResult {
+func fieldOrValueResult(sql string, typ operators.ExpressionType, isField bool, fieldName ...string) expressionResult {
 	if isField {
-		return fieldValueResult(sql, typ)
+		return fieldValueResult(sql, typ, fieldName...)
 	}
 	return valueResult(sql, typ)
 }
@@ -598,7 +613,25 @@ func valueOperandSQL(res expressionResult) string {
 }
 
 func typedValueOperand(res expressionResult) operators.ProcessedValue {
-	return operators.TypedSQLResult(valueOperandSQL(res), res.Kind, valueTypeOf(res))
+	pv := operators.TypedSQLResult(valueOperandSQL(res), res.Kind, valueTypeOf(res))
+	if res.fieldValue {
+		pv.IsField = true
+		pv.FieldName = res.fieldName
+	}
+	return pv
+}
+
+func literalComparisonPredicateResult(operator string, args []interface{}, sql string) (expressionResult, error) {
+	res := predicateResult(sql)
+	truthy, known, err := operators.FoldLiteralComparison(operator, args)
+	if err != nil {
+		return expressionResult{}, err
+	}
+	if known {
+		res.truthKnown = true
+		res.truthy = truthy
+	}
+	return res, nil
 }
 
 func (p *Parser) parseTruthinessResultParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, string, error) {
@@ -711,9 +744,10 @@ func (p *Parser) parseExpressionValue(expr interface{}, path string) (expression
 					Type: pv.Type,
 				})
 				res.fieldValue = pv.IsField
+				res.fieldName = pv.FieldName
 				return res, nil
 			}
-			return fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField), nil
+			return fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName), nil
 		}
 		return p.parseExpressionValue(pv.Value, path)
 	}
@@ -806,7 +840,11 @@ func (p *Parser) parseOperatorPredicate(operator string, args interface{}, path 
 			return expressionResult{}, err
 		}
 		sql, err := p.comparisonOp.ToSQL(operator, processedArgs)
-		return predicateResult(sql), p.wrapOperatorError(operator, path, err)
+		if err != nil {
+			return expressionResult{}, p.wrapOperatorError(operator, path, err)
+		}
+		res, err := literalComparisonPredicateResult(operator, processedArgs, sql)
+		return res, p.wrapOperatorError(operator, path, err)
 	case "and", "or":
 		arr, ok := args.([]interface{})
 		if !ok {
@@ -860,7 +898,8 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		return fieldValueResult(sql, p.fieldExpressionType(varFieldName(args))), nil
+		fieldName := varFieldName(args)
+		return fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), nil
 	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
 		return p.parseOperatorPredicate(operator, args, path)
 	case "and", "or":
@@ -1670,9 +1709,10 @@ func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *pa
 					Type: pv.Type,
 				})
 				res.fieldValue = pv.IsField
+				res.fieldName = pv.FieldName
 				return res, nil
 			}
-			return fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField), nil
+			return fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName), nil
 		}
 		return p.parseExpressionValueParam(pv.Value, path, pc)
 	}
@@ -1766,12 +1806,20 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
+		checkpoint := pc.Checkpoint()
 		processedArgs, err := p.processValueArgsParam(arr, path, pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
 		sql, err := p.comparisonOp.ToSQLParam(operator, processedArgs, pc)
-		return predicateResult(sql), p.wrapOperatorError(operator, path, err)
+		if err != nil {
+			return expressionResult{}, p.wrapOperatorError(operator, path, err)
+		}
+		if normalizedSQLBooleanConstant(sql) != "" {
+			pc.Restore(checkpoint)
+		}
+		res, err := literalComparisonPredicateResult(operator, processedArgs, sql)
+		return res, p.wrapOperatorError(operator, path, err)
 	case "and", "or":
 		arr, ok := args.([]interface{})
 		if !ok {
@@ -1829,7 +1877,8 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		return fieldValueResult(sql, p.fieldExpressionType(varFieldName(args))), nil
+		fieldName := varFieldName(args)
+		return fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), nil
 	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
 		return p.parseOperatorPredicateParam(operator, args, path, pc)
 	case "and", "or":
