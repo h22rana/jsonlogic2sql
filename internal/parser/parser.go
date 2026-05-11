@@ -75,7 +75,10 @@ func NewParser(config *operators.OperatorConfig) *Parser {
 	})
 	config.SetValueExpressionParser(func(expr any, path string) (operators.OperatorResult, error) {
 		res, err := p.parseExpressionValue(expr, path)
-		return res.OperatorResult, err
+		if err != nil {
+			return operators.OperatorResult{}, err
+		}
+		return valueOperatorResult(res), nil
 	})
 	config.SetPredicateExpressionParser(func(expr any, path string) (operators.OperatorResult, error) {
 		res, err := p.parseExpressionPredicate(expr, path)
@@ -83,7 +86,10 @@ func NewParser(config *operators.OperatorConfig) *Parser {
 	})
 	config.SetParamValueExpressionParser(func(expr any, path string, pc *params.ParamCollector) (operators.OperatorResult, error) {
 		res, err := p.parseExpressionValueParam(expr, path, pc)
-		return res.OperatorResult, err
+		if err != nil {
+			return operators.OperatorResult{}, err
+		}
+		return valueOperatorResult(res), nil
 	})
 	config.SetParamPredicateExpressionParser(func(expr any, path string, pc *params.ParamCollector) (operators.OperatorResult, error) {
 		res, err := p.parseExpressionPredicateParam(expr, path, pc)
@@ -164,7 +170,7 @@ func (p *Parser) ParseValue(logic interface{}) (string, error) {
 		return "", tperrors.New(tperrors.ErrInvalidArgument, "", "$",
 			"empty PostgreSQL array literals require an explicit element type")
 	}
-	return res.SQL, nil
+	return valueSQL(res), nil
 }
 
 func (p *Parser) isUnsupportedPostgreSQLEmptyArrayResult(res expressionResult) bool {
@@ -540,7 +546,7 @@ func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, erro
 		if err != nil {
 			return "", fmt.Errorf("invalid array element %d: %w", i, err)
 		}
-		parts[i] = valueOperandSQL(res)
+		parts[i] = valueSQL(res)
 	}
 	return p.config.ArrayLiteral(parts)
 }
@@ -552,7 +558,7 @@ func (p *Parser) arrayLiteralToSQLParam(arr []interface{}, path string, pc *para
 		if err != nil {
 			return "", fmt.Errorf("invalid array element %d: %w", i, err)
 		}
-		parts[i] = valueOperandSQL(res)
+		parts[i] = valueSQL(res)
 	}
 	return p.config.ArrayLiteral(parts)
 }
@@ -699,6 +705,20 @@ func valueOperandSQL(res expressionResult) string {
 		return res.SQL
 	}
 	return fmt.Sprintf("(%s)", operators.StripRedundantOuterParens(res.SQL))
+}
+
+func valueSQL(res expressionResult) string {
+	if res.Kind == operators.ExpressionKindPredicate {
+		return operators.PredicateValueSQL(res.SQL)
+	}
+	return res.SQL
+}
+
+func valueOperatorResult(res expressionResult) operators.OperatorResult {
+	if res.Kind == operators.ExpressionKindPredicate {
+		return operators.ValueSQL(operators.PredicateValueSQL(res.SQL), operators.ExpressionTypeBoolean)
+	}
+	return res.OperatorResult
 }
 
 func typedValueOperand(res expressionResult) operators.ProcessedValue {
@@ -1251,9 +1271,9 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 			if len(parts) == 0 {
 				return thenRes, nil
 			}
-			return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL), resultType), nil
+			return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), valueSQL(thenRes)), resultType), nil
 		}
-		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
+		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, valueSQL(thenRes)))
 	}
 	elseSQL := "NULL"
 	if hasElse {
@@ -1267,7 +1287,7 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 		if err := mergeResultType(elseRes); err != nil {
 			return expressionResult{}, err
 		}
-		elseSQL = elseRes.SQL
+		elseSQL = valueSQL(elseRes)
 	}
 	if len(parts) == 0 {
 		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
@@ -1322,9 +1342,9 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 		return expressionResult{}, err
 	}
 	if operator == "or" {
-		return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, current.SQL, rest.SQL), resultType), nil
+		return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(current), valueSQL(rest)), resultType), nil
 	}
-	return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, rest.SQL, current.SQL), resultType), nil
+	return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(rest), valueSQL(current)), resultType), nil
 }
 
 // wrapOperatorError wraps an operator error with TranspileError if it isn't already.
@@ -1736,11 +1756,12 @@ func (p *Parser) ParseValueParameterized(logic interface{}) (string, []params.Qu
 			"empty PostgreSQL array literals require an explicit element type")
 	}
 
-	if vErr := params.ValidatePlaceholderRefs(res.SQL, pc.Params(), style); vErr != nil {
+	sql := valueSQL(res)
+	if vErr := params.ValidatePlaceholderRefs(sql, pc.Params(), style); vErr != nil {
 		return "", nil, vErr
 	}
 
-	return res.SQL, pc.Params(), nil
+	return sql, pc.Params(), nil
 }
 
 func (p *Parser) parseExpressionPredicateParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
@@ -2206,9 +2227,9 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 			if len(parts) == 0 {
 				return thenRes, nil
 			}
-			return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL), resultType), nil
+			return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), valueSQL(thenRes)), resultType), nil
 		}
-		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
+		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, valueSQL(thenRes)))
 	}
 	elseSQL := "NULL"
 	if hasElse {
@@ -2222,7 +2243,7 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 		if err := mergeResultType(elseRes); err != nil {
 			return expressionResult{}, err
 		}
-		elseSQL = elseRes.SQL
+		elseSQL = valueSQL(elseRes)
 	}
 	if len(parts) == 0 {
 		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
@@ -2279,9 +2300,9 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 		return expressionResult{}, err
 	}
 	if operator == "or" {
-		return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, current.SQL, rest.SQL), resultType), nil
+		return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(current), valueSQL(rest)), resultType), nil
 	}
-	return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, rest.SQL, current.SQL), resultType), nil
+	return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(rest), valueSQL(current)), resultType), nil
 }
 
 // parseOperatorParam is the parameterized variant of parseOperator. Keep in sync.

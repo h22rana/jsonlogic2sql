@@ -2332,6 +2332,192 @@ func TestTranspileValue_CatStringifiesBuiltInPredicate(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_PredicateResultsAreTwoValuedBooleansAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "x", Type: FieldTypeNumber},
+		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "arr", Type: FieldTypeArray},
+	})
+
+	predicateValue := "CASE WHEN x = 1 THEN TRUE ELSE FALSE END"
+	tests := []struct {
+		name       string
+		logic      string
+		want       func(Dialect) string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "root comparison value",
+			logic: `{"==":[{"var":"x"},1]}`,
+			want: func(Dialect) string {
+				return predicateValue
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN x = %s THEN TRUE ELSE FALSE END", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+		{
+			name:  "constant if branch returns comparison value",
+			logic: `{"if":[true,{"==":[{"var":"x"},1]},false]}`,
+			want: func(Dialect) string {
+				return predicateValue
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN x = %s THEN TRUE ELSE FALSE END", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+		{
+			name:  "and false branch returns comparison value",
+			logic: `{"and":[{"==":[{"var":"x"},1]},true]}`,
+			want: func(Dialect) string {
+				return fmt.Sprintf("CASE WHEN x = 1 THEN TRUE ELSE %s END", predicateValue)
+			},
+			wantParam: func(d Dialect) string {
+				placeholder := testPlaceholder(d, 1)
+				return fmt.Sprintf(
+					"CASE WHEN x = %s THEN TRUE ELSE CASE WHEN x = %s THEN TRUE ELSE FALSE END END",
+					placeholder,
+					placeholder,
+				)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+		{
+			name:  "array literal contains comparison value",
+			logic: `[{"==":[{"var":"x"},1]}]`,
+			want: func(d Dialect) string {
+				if d == DialectPostgreSQL {
+					return fmt.Sprintf("ARRAY[%s]", predicateValue)
+				}
+				return fmt.Sprintf("[%s]", predicateValue)
+			},
+			wantParam: func(d Dialect) string {
+				comparison := fmt.Sprintf("CASE WHEN x = %s THEN TRUE ELSE FALSE END", testPlaceholder(d, 1))
+				if d == DialectPostgreSQL {
+					return fmt.Sprintf("ARRAY[%s]", comparison)
+				}
+				return fmt.Sprintf("[%s]", comparison)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+		{
+			name:  "map transformation returns comparison value",
+			logic: `{"map":[{"var":"arr"},{"==":[{"var":"current"},1]}]}`,
+			want: func(d Dialect) string {
+				if d == DialectClickHouse {
+					return "arrayMap(elem -> CASE WHEN elem = 1 THEN TRUE ELSE FALSE END, arr)"
+				}
+				return "ARRAY(SELECT CASE WHEN elem = 1 THEN TRUE ELSE FALSE END FROM UNNEST(arr) AS elem)"
+			},
+			wantParam: func(d Dialect) string {
+				placeholder := testPlaceholder(d, 1)
+				if d == DialectClickHouse {
+					return fmt.Sprintf("arrayMap(elem -> CASE WHEN elem = %s THEN TRUE ELSE FALSE END, arr)", placeholder)
+				}
+				return fmt.Sprintf("ARRAY(SELECT CASE WHEN elem = %s THEN TRUE ELSE FALSE END FROM UNNEST(arr) AS elem)", placeholder)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if want := tt.want(d); got != want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_PredicateIfBranchesNormalizeBooleanValuesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "x", Type: FieldTypeNumber},
+		{Name: "flag", Type: FieldTypeBoolean},
+	})
+	logic := `{"if":[{"var":"flag"},{"==":[{"var":"x"},1]},false]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			want := "CASE WHEN flag IS TRUE THEN CASE WHEN x = 1 THEN TRUE ELSE FALSE END ELSE FALSE END"
+			if got != want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, want)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			wantParam := fmt.Sprintf(
+				"CASE WHEN flag IS TRUE THEN CASE WHEN x = %s THEN TRUE ELSE FALSE END ELSE FALSE END",
+				testPlaceholder(d, 1),
+			)
+			if gotParam != wantParam {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: float64(1)}}
+			if !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -2362,15 +2548,23 @@ func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 			logic: `[{"var":"amount"},1,{"==":[{"var":"status"},"ok"]}]`,
 			wantSQL: func(d Dialect) string {
 				if d == DialectPostgreSQL {
-					return "ARRAY[amount, 1, (status = 'ok')]"
+					return "ARRAY[amount, 1, CASE WHEN status = 'ok' THEN TRUE ELSE FALSE END]"
 				}
-				return "[amount, 1, (status = 'ok')]"
+				return "[amount, 1, CASE WHEN status = 'ok' THEN TRUE ELSE FALSE END]"
 			},
 			wantParam: func(d Dialect) string {
 				if d == DialectPostgreSQL {
-					return fmt.Sprintf("ARRAY[amount, %s, (status = %s)]", testPlaceholder(d, 1), testPlaceholder(d, 2))
+					return fmt.Sprintf(
+						"ARRAY[amount, %s, CASE WHEN status = %s THEN TRUE ELSE FALSE END]",
+						testPlaceholder(d, 1),
+						testPlaceholder(d, 2),
+					)
 				}
-				return fmt.Sprintf("[amount, %s, (status = %s)]", testPlaceholder(d, 1), testPlaceholder(d, 2))
+				return fmt.Sprintf(
+					"[amount, %s, CASE WHEN status = %s THEN TRUE ELSE FALSE END]",
+					testPlaceholder(d, 1),
+					testPlaceholder(d, 2),
+				)
 			},
 			params: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: "ok"}},
 		},
