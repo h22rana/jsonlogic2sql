@@ -293,6 +293,107 @@ func TestTranspileCondition_PredicateIfSkipsUnreachableBranches(t *testing.T) {
 	}
 }
 
+func TestTranspileCondition_CustomPredicateBooleanConstantsShortCircuitAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "x", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		want       string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "or skips unreachable value operand after custom true",
+			logic: `{"or":[{"alwaysTrue":[]},{"var":"missing"}]}`,
+			want:  "TRUE",
+			wantParam: func(Dialect) string {
+				return "TRUE"
+			},
+		},
+		{
+			name:  "and skips unreachable value operand after custom false",
+			logic: `{"and":[{"alwaysFalse":[]},{"var":"missing"}]}`,
+			want:  "FALSE",
+			wantParam: func(Dialect) string {
+				return "FALSE"
+			},
+		},
+		{
+			name:  "if skips unreachable then branch after custom false",
+			logic: `{"if":[{"alwaysFalse":[]},{"var":"missing"},{">":[{"var":"x"},0]}]}`,
+			want:  "x > 0",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+					registerBooleanConstantOperators(t, tr)
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileCondition() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func registerBooleanConstantOperators(t *testing.T, tr *Transpiler) {
+	t.Helper()
+
+	if err := tr.RegisterOperatorFunc("alwaysTrue", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+		return PredicateSQL("TRUE"), nil
+	}); err != nil {
+		t.Fatalf("RegisterOperatorFunc(alwaysTrue) error = %v", err)
+	}
+	if err := tr.RegisterOperatorFunc("alwaysFalse", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+		return PredicateSQL("FALSE"), nil
+	}); err != nil {
+		t.Fatalf("RegisterOperatorFunc(alwaysFalse) error = %v", err)
+	}
+}
+
 func TestTranspileCondition_BooleanConstantsArePredicates(t *testing.T) {
 	tests := []struct {
 		name      string

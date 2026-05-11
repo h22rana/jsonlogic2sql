@@ -311,6 +311,9 @@ type expressionResult struct {
 }
 
 func resultFromOperator(res operators.OperatorResult) expressionResult {
+	if res.Kind == operators.ExpressionKindPredicate {
+		return predicateResult(res.SQL)
+	}
 	return expressionResult{OperatorResult: res}
 }
 

@@ -2960,6 +2960,92 @@ func TestTranspileParameterizedValue_ArrayCustomPredicateKeepsTypeMetadata(t *te
 	}
 }
 
+func TestTranspileValue_CustomPredicateBooleanConstantsShortCircuitAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "x", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		want       string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "or returns custom true before invalid fallback",
+			logic: `{"or":[{"alwaysTrue":[]},{"var":"bad-name"}]}`,
+			want:  "TRUE",
+			wantParam: func(Dialect) string {
+				return "TRUE"
+			},
+		},
+		{
+			name:  "and returns custom false before invalid fallback",
+			logic: `{"and":[{"alwaysFalse":[]},{"var":"bad-name"}]}`,
+			want:  "FALSE",
+			wantParam: func(Dialect) string {
+				return "FALSE"
+			},
+		},
+		{
+			name:  "if returns then value before invalid else",
+			logic: `{"if":[{"alwaysTrue":[]},"ok",{"var":"bad-name"}]}`,
+			want:  "'ok'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+					registerBooleanConstantOperators(t, tr)
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func testPlaceholder(d Dialect, index int) string {
 	switch d {
 	case DialectPostgreSQL, DialectDuckDB:
