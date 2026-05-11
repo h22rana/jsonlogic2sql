@@ -1794,6 +1794,168 @@ func TestTranspileValue_NestedValueLogicals(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_NumericOperandsCoercePredicatesAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "arr", Type: FieldTypeArray},
+		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "x", Type: FieldTypeNumber},
+	})
+
+	arrayMapSQL := func(d Dialect, expr string) string {
+		if d == DialectClickHouse {
+			return fmt.Sprintf("arrayMap(elem -> %s, arr)", expr)
+		}
+		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", expr)
+	}
+
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    func(Dialect) string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "comparison predicate addition",
+			logic: `{"+":[{">":[{"var":"x"},1]},2]}`,
+			wantSQL: func(Dialect) string {
+				return "((CASE WHEN x > 1 THEN 1 ELSE 0 END) + 2)"
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("((CASE WHEN x > %s THEN 1 ELSE 0 END) + %s)",
+					testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(2)}},
+		},
+		{
+			name:  "boolean literal addition",
+			logic: `{"+":[true,false,2]}`,
+			wantSQL: func(Dialect) string {
+				return "(1 + 0 + 2)"
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("(1 + 0 + %s)", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(2)}},
+		},
+		{
+			name:  "custom predicate addition",
+			logic: `{"+":[{"isPositive":[{"var":"x"}]},2]}`,
+			wantSQL: func(Dialect) string {
+				return "((CASE WHEN x > 0 THEN 1 ELSE 0 END) + 2)"
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("((CASE WHEN x > 0 THEN 1 ELSE 0 END) + %s)", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(2)}},
+		},
+		{
+			name:  "custom boolean value addition",
+			logic: `{"+":[{"boolValue":[]},2]}`,
+			wantSQL: func(Dialect) string {
+				return "((CASE WHEN flag IS TRUE THEN 1 ELSE 0 END) + 2)"
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("((CASE WHEN flag IS TRUE THEN 1 ELSE 0 END) + %s)", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(2)}},
+		},
+		{
+			name:  "custom boolean case value addition",
+			logic: `{"+":[{"boolCase":[]},2]}`,
+			wantSQL: func(Dialect) string {
+				return "((CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) IS TRUE THEN 1 ELSE 0 END) + 2)"
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("((CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) IS TRUE THEN 1 ELSE 0 END) + %s)",
+					testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(2)}},
+		},
+		{
+			name:  "array scoped comparison predicate addition",
+			logic: `{"map":[{"var":"arr"},{"+":[{">":[{"var":""},1]},2]}]}`,
+			wantSQL: func(d Dialect) string {
+				return arrayMapSQL(d, "((CASE WHEN elem > 1 THEN 1 ELSE 0 END) + 2)")
+			},
+			wantParam: func(d Dialect) string {
+				return arrayMapSQL(d, fmt.Sprintf("((CASE WHEN elem > %s THEN 1 ELSE 0 END) + %s)",
+					testPlaceholder(d, 1), testPlaceholder(d, 2)))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(2)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+					if err := tr.RegisterOperatorFunc("isPositive", func(_ string, args []OperatorArg) (OperatorResult, error) {
+						if len(args) != 1 {
+							return OperatorResult{}, fmt.Errorf("isPositive requires exactly 1 argument")
+						}
+						return PredicateSQL(fmt.Sprintf("%s > 0", args[0].SQL)), nil
+					}); err != nil {
+						t.Fatalf("RegisterOperatorFunc() error = %v", err)
+					}
+					if err := tr.RegisterOperatorFunc("boolValue", func(_ string, args []OperatorArg) (OperatorResult, error) {
+						if len(args) != 0 {
+							return OperatorResult{}, fmt.Errorf("boolValue requires no arguments")
+						}
+						return ValueSQL("flag", ExpressionTypeBoolean), nil
+					}); err != nil {
+						t.Fatalf("RegisterOperatorFunc() error = %v", err)
+					}
+					if err := tr.RegisterOperatorFunc("boolCase", func(_ string, args []OperatorArg) (OperatorResult, error) {
+						if len(args) != 0 {
+							return OperatorResult{}, fmt.Errorf("boolCase requires no arguments")
+						}
+						return ValueSQL("CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END", ExpressionTypeBoolean), nil
+					}); err != nil {
+						t.Fatalf("RegisterOperatorFunc() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if want := tt.wantSQL(d); got != want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_IfConditionsUseTruthiness(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "flag", Type: FieldTypeBoolean},

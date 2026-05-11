@@ -525,7 +525,7 @@ func TestTranspile_StringNestedComparisonArithmeticPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileCondition() error = %v", err)
 	}
-	if wantSQL := "CONCAT((x = 1) + 1)"; gotSQL != wantSQL {
+	if wantSQL := "CONCAT((CASE WHEN x = 1 THEN 1 ELSE 0 END) + 1)"; gotSQL != wantSQL {
 		t.Fatalf("TranspileCondition() SQL = %q, want %q", gotSQL, wantSQL)
 	}
 
@@ -533,7 +533,7 @@ func TestTranspile_StringNestedComparisonArithmeticPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
-	if wantSQL := "CONCAT((x = @p1) + @p2)"; gotParamSQL != wantSQL {
+	if wantSQL := "CONCAT((CASE WHEN x = @p1 THEN 1 ELSE 0 END) + @p2)"; gotParamSQL != wantSQL {
 		t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", gotParamSQL, wantSQL)
 	}
 	assertParams(t, gotParams, []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(1)}})
@@ -544,7 +544,7 @@ func TestTranspile_StringNestedComparisonArithmeticPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileCondition() nested operands error = %v", err)
 	}
-	if wantSQL := "CONCAT(((a + 1) = (b * 2)) + 1)"; gotSQL != wantSQL {
+	if wantSQL := "CONCAT((CASE WHEN (a + 1) = (b * 2) THEN 1 ELSE 0 END) + 1)"; gotSQL != wantSQL {
 		t.Fatalf("TranspileCondition() nested operands SQL = %q, want %q", gotSQL, wantSQL)
 	}
 
@@ -552,7 +552,7 @@ func TestTranspile_StringNestedComparisonArithmeticPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() nested operands error = %v", err)
 	}
-	if wantSQL := "CONCAT(((a + @p1) = (b * @p2)) + @p3)"; gotParamSQL != wantSQL {
+	if wantSQL := "CONCAT((CASE WHEN (a + @p1) = (b * @p2) THEN 1 ELSE 0 END) + @p3)"; gotParamSQL != wantSQL {
 		t.Fatalf("TranspileParameterizedCondition() nested operands SQL = %q, want %q", gotParamSQL, wantSQL)
 	}
 	assertParams(t, gotParams, []QueryParam{

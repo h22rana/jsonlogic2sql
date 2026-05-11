@@ -303,15 +303,39 @@ func (n *NumericOperator) handleMin(args []interface{}) (string, error) {
 	return fmt.Sprintf("LEAST(%s)", strings.Join(operands, ", ")), nil
 }
 
+func numericBoolLiteral(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
+}
+
+func numericSQLFromProcessedValue(pv ProcessedValue) string {
+	if !pv.HasExpressionInfo {
+		return pv.Value
+	}
+	if pv.Kind == ExpressionKindPredicate {
+		return PredicateNumberSQL(pv.Value)
+	}
+	if pv.Type == ExpressionTypeBoolean {
+		return BooleanValueNumberSQL(pv.Value)
+	}
+	return pv.Value
+}
+
 // valueToSQL converts a value to SQL, handling var expressions and literals.
 func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 	// Handle ProcessedValue (pre-processed SQL from parser)
 	if pv, ok := value.(ProcessedValue); ok {
 		if pv.IsSQL {
-			return pv.Value, nil
+			return numericSQLFromProcessedValue(pv), nil
 		}
 		// It's a literal, convert it
 		return n.dataOp.valueToSQL(pv.Value)
+	}
+
+	if b, ok := value.(bool); ok {
+		return numericBoolLiteral(b), nil
 	}
 
 	// Handle plain strings: attempt numeric coercion per JSONLogic spec,
@@ -359,7 +383,7 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 					if err != nil {
 						return "", err
 					}
-					return parenthesizeComparisonSQL(sql), nil
+					return PredicateNumberSQL(sql), nil
 				case "+", "-", "*", "/", "%", "max", "min":
 					// Recursively process the arguments
 					processedArgs, err := n.processComplexArgs(arr)
@@ -372,10 +396,14 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 					// Handle if operator - delegate to logical operator
 					logicalOp := NewLogicalOperator(n.config)
 					return logicalOp.ToSQL("if", arr)
-				case "and", "or", "!":
+				case "and", "or", "!", "!!":
 					// Handle logical operators - delegate to logical operator
 					logicalOp := NewLogicalOperator(n.config)
-					return logicalOp.ToSQL(operator, arr)
+					sql, err := logicalOp.ToSQL(operator, arr)
+					if err != nil {
+						return "", err
+					}
+					return PredicateNumberSQL(sql), nil
 				case "reduce", "filter", "map", "some", "all", "none", "merge":
 					// Handle array operators - delegate to array operator
 					arrayOp := NewArrayOperator(n.config)
@@ -680,9 +708,13 @@ func (n *NumericOperator) handleMinParam(args []interface{}, pc *params.ParamCol
 func (n *NumericOperator) valueToSQLParam(value interface{}, pc *params.ParamCollector) (string, error) {
 	if pv, ok := value.(ProcessedValue); ok {
 		if pv.IsSQL {
-			return pv.Value, nil
+			return numericSQLFromProcessedValue(pv), nil
 		}
 		return n.dataOp.valueToSQLParam(pv.Value, pc)
+	}
+
+	if b, ok := value.(bool); ok {
+		return numericBoolLiteral(b), nil
 	}
 
 	if str, ok := value.(string); ok {
@@ -726,7 +758,7 @@ func (n *NumericOperator) valueToSQLParam(value interface{}, pc *params.ParamCol
 					if err != nil {
 						return "", err
 					}
-					return parenthesizeComparisonSQL(sql), nil
+					return PredicateNumberSQL(sql), nil
 				case "+", "-", "*", "/", "%", "max", "min":
 					processedArgs, err := n.processComplexArgsParam(arr, pc)
 					if err != nil {
@@ -736,9 +768,13 @@ func (n *NumericOperator) valueToSQLParam(value interface{}, pc *params.ParamCol
 				case "if":
 					logicalOp := NewLogicalOperator(n.config)
 					return logicalOp.ToSQLParam("if", arr, pc)
-				case "and", "or", "!":
+				case "and", "or", "!", "!!":
 					logicalOp := NewLogicalOperator(n.config)
-					return logicalOp.ToSQLParam(operator, arr, pc)
+					sql, err := logicalOp.ToSQLParam(operator, arr, pc)
+					if err != nil {
+						return "", err
+					}
+					return PredicateNumberSQL(sql), nil
 				case "reduce", "filter", "map", "some", "all", "none", "merge":
 					arrayOp := NewArrayOperator(n.config)
 					return arrayOp.ToSQLParam(operator, arr, pc)

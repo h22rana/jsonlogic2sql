@@ -1222,14 +1222,14 @@ func TestStringOperator_valueToSQLParam(t *testing.T) {
 			},
 		},
 		{
-			name: "comparison remains grouped inside parameterized arithmetic string context",
+			name: "comparison coerces to numeric inside parameterized arithmetic string context",
 			value: map[string]interface{}{
 				"+": []interface{}{
 					map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "x"}, 1}},
 					1,
 				},
 			},
-			wantSQL: "((x = @p1) + @p2)",
+			wantSQL: "((CASE WHEN x = @p1 THEN 1 ELSE 0 END) + @p2)",
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: 1},
 				{Name: "p2", Value: 1},

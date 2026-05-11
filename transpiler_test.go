@@ -1435,7 +1435,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested comparison in numeric",
 			input:    `{"+": [{">": [{"var": "a"}, 5]}, {"<": [{"var": "b"}, 10]}]}`,
-			expected: "((a > 5) + (b < 10))",
+			expected: "((CASE WHEN a > 5 THEN 1 ELSE 0 END) + (CASE WHEN b < 10 THEN 1 ELSE 0 END))",
 			hasError: false,
 		},
 		{
@@ -2728,7 +2728,7 @@ func TestNestedComparisonSchemaCoercion(t *testing.T) {
 		{
 			name:     "nested in numeric: coercion still applies",
 			input:    `{"+": [{"==": [{"var": "status"}, 123]}, 0]}`,
-			expected: "((status = '123') + 0)",
+			expected: "((CASE WHEN status = '123' THEN 1 ELSE 0 END) + 0)",
 		},
 		{
 			name:     "nested in if in numeric: coercion still applies",
@@ -2738,7 +2738,7 @@ func TestNestedComparisonSchemaCoercion(t *testing.T) {
 		{
 			name:     "nested: string coerced to number for integer field",
 			input:    `{"+": [{">": [{"var": "amount"}, "50"]}, 0]}`,
-			expected: "((amount > 50) + 0)",
+			expected: "((CASE WHEN amount > 50 THEN 1 ELSE 0 END) + 0)",
 		},
 	}
 

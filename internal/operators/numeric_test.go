@@ -26,6 +26,23 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 			hasError: false,
 		},
 		{
+			name:     "addition coerces boolean literals",
+			operator: "+",
+			args:     []interface{}{true, false, 2},
+			expected: "(1 + 0 + 2)",
+			hasError: false,
+		},
+		{
+			name:     "addition coerces predicate SQL",
+			operator: "+",
+			args: []interface{}{
+				TypedSQLResult("x > 1", ExpressionKindPredicate, ExpressionTypeBoolean),
+				2,
+			},
+			expected: "((CASE WHEN x > 1 THEN 1 ELSE 0 END) + 2)",
+			hasError: false,
+		},
+		{
 			name:     "addition with three numbers",
 			operator: "+",
 			args:     []interface{}{1, 2, 3},
@@ -825,7 +842,7 @@ func TestNumericOperator_valueToSQL_NestedComparison(t *testing.T) {
 	if err != nil {
 		t.Errorf("valueToSQL() unexpected error = %v", err)
 	}
-	expected := "(status = 'active')"
+	expected := "(CASE WHEN status = 'active' THEN 1 ELSE 0 END)"
 	if result != expected {
 		t.Errorf("valueToSQL() = %v, want %v", result, expected)
 	}
@@ -869,7 +886,7 @@ func TestNumericOperator_valueToSQL_NestedLogical(t *testing.T) {
 					map[string]interface{}{"<": []interface{}{map[string]interface{}{"var": "x"}, 100}},
 				},
 			},
-			expected: "(x > 0 AND x < 100)",
+			expected: "(CASE WHEN x > 0 AND x < 100 THEN 1 ELSE 0 END)",
 			hasError: false,
 		},
 		{
@@ -880,7 +897,7 @@ func TestNumericOperator_valueToSQL_NestedLogical(t *testing.T) {
 					map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "status"}, "b"}},
 				},
 			},
-			expected: "(status = 'a' OR status = 'b')",
+			expected: "(CASE WHEN status = 'a' OR status = 'b' THEN 1 ELSE 0 END)",
 			hasError: false,
 		},
 		{
@@ -890,7 +907,7 @@ func TestNumericOperator_valueToSQL_NestedLogical(t *testing.T) {
 					map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "x"}, 0}},
 				},
 			},
-			expected: "NOT (x = 0)",
+			expected: "(CASE WHEN NOT (x = 0) THEN 1 ELSE 0 END)",
 			hasError: false,
 		},
 	}
@@ -1157,6 +1174,27 @@ func TestNumericOperator_ToSQLParam(t *testing.T) {
 			},
 		},
 		{
+			name:     "addition coerces boolean literals",
+			operator: "+",
+			args:     []interface{}{true, false, 2},
+			wantSQL:  "(1 + 0 + @p1)",
+			wantParams: []params.QueryParam{
+				{Name: "p1", Value: 2},
+			},
+		},
+		{
+			name:     "addition coerces predicate SQL",
+			operator: "+",
+			args: []interface{}{
+				TypedSQLResult("x > 1", ExpressionKindPredicate, ExpressionTypeBoolean),
+				2,
+			},
+			wantSQL: "((CASE WHEN x > 1 THEN 1 ELSE 0 END) + @p1)",
+			wantParams: []params.QueryParam{
+				{Name: "p1", Value: 2},
+			},
+		},
+		{
 			name:     "addition with var and number",
 			operator: "+",
 			args:     []interface{}{map[string]interface{}{"var": "amount"}, 100},
@@ -1353,6 +1391,24 @@ func TestNumericOperator_valueToSQLParam(t *testing.T) {
 			name:       "ProcessedValue SQL",
 			input:      ProcessedValue{Value: "SUM(amount)", IsSQL: true},
 			wantSQL:    "SUM(amount)",
+			wantParams: nil,
+		},
+		{
+			name:       "ProcessedValue predicate SQL",
+			input:      TypedSQLResult("x > 1", ExpressionKindPredicate, ExpressionTypeBoolean),
+			wantSQL:    "(CASE WHEN x > 1 THEN 1 ELSE 0 END)",
+			wantParams: nil,
+		},
+		{
+			name:       "boolean literal true",
+			input:      true,
+			wantSQL:    "1",
+			wantParams: nil,
+		},
+		{
+			name:       "boolean literal false",
+			input:      false,
+			wantSQL:    "0",
 			wantParams: nil,
 		},
 		{
