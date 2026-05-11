@@ -178,6 +178,79 @@ func TestTranspileCondition_PredicateIfRejectsSchemaLessValueCondition(t *testin
 	}
 }
 
+func TestTranspileCondition_TruthinessOnlyExpressionsAllowMixedValueBranchesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name      string
+		logic     string
+		want      string
+		wantParam func(Dialect) string
+		params    []QueryParam
+	}{
+		{
+			name:  "predicate if condition folds mixed-type or truthiness",
+			logic: `{"if":[{"or":[{"var":"flag"},"x"]},{">":[{"var":"amount"},0]},false]}`,
+			want:  "amount > 0",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("amount > %s", testPlaceholder(d, 1))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:  "double not accepts mixed-type if truthiness",
+			logic: `{"!!":{"if":[{"var":"flag"},"x",0]}}`,
+			want:  "CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END",
+			wantParam: func(Dialect) string {
+				return "CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END"
+			},
+			params: []QueryParam{},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.params) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_PredicateIfSkipsUnreachableBranches(t *testing.T) {
 	t.Parallel()
 

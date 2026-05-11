@@ -1843,6 +1843,78 @@ func TestTranspileValue_IfConditionsUseTruthiness(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_TruthinessOnlyExpressionsAllowMixedValueBranchesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		want       string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "if condition folds mixed-type or truthiness",
+			logic: `{"if":[{"or":[{"var":"flag"},"x"]},"yes","no"]}`,
+			want:  "'yes'",
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "yes"}},
+		},
+		{
+			name:  "double not accepts mixed-type if truthiness",
+			logic: `{"!!":{"if":[{"var":"flag"},"x",0]}}`,
+			want:  "CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) THEN TRUE ELSE FALSE END",
+			wantParam: func(Dialect) string {
+				return "CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) THEN TRUE ELSE FALSE END"
+			},
+			wantParams: []QueryParam{},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_FoldedPredicateConditionsShortCircuit(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "code", Type: FieldTypeString},
