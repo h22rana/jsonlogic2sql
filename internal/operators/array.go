@@ -1340,6 +1340,9 @@ func (a *ArrayOperator) arrayScopeVarToSQL(varExpr interface{}) (string, bool, e
 		if len(arr) == 0 {
 			return "", false, nil
 		}
+		if err := validateVarArrayMaxEntries(arr); err != nil {
+			return "", true, err
+		}
 		varName, ok := arr[0].(string)
 		if !ok {
 			return "", false, nil
@@ -1388,6 +1391,9 @@ func (a *ArrayOperator) arrayInternalVarToSQL(varExpr interface{}) (string, bool
 	if arr, ok := varExpr.([]interface{}); ok {
 		if len(arr) == 0 {
 			return "", false, nil
+		}
+		if err := validateVarArrayMaxEntries(arr); err != nil {
+			return "", true, err
 		}
 		varName, ok := arr[0].(string)
 		if !ok {
@@ -2132,6 +2138,9 @@ func (a *ArrayOperator) arrayScopeVarToSQLParam(varExpr interface{}, pc *params.
 		if len(arr) == 0 {
 			return "", false, nil
 		}
+		if err := validateVarArrayMaxEntries(arr); err != nil {
+			return "", true, err
+		}
 		varName, ok := arr[0].(string)
 		if !ok {
 			return "", false, nil
@@ -2217,6 +2226,9 @@ func (a *ArrayOperator) arrayInternalVarToSQLParam(varExpr interface{}, pc *para
 	if arr, ok := varExpr.([]interface{}); ok {
 		if len(arr) == 0 {
 			return "", false, nil
+		}
+		if err := validateVarArrayMaxEntries(arr); err != nil {
+			return "", true, err
 		}
 		varName, ok := arr[0].(string)
 		if !ok {

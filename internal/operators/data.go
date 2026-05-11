@@ -27,8 +27,9 @@ type DataOperator struct {
 }
 
 const (
-	maxSafeJSInt = int64(1<<53 - 1)
-	minSafeJSInt = -maxSafeJSInt
+	maxSafeJSInt       = int64(1<<53 - 1)
+	minSafeJSInt       = -maxSafeJSInt
+	maxVarArrayEntries = 2
 )
 
 // NewDataOperator creates a new data operator with optional config.
@@ -55,6 +56,20 @@ func (d *DataOperator) columnNameForVar(varName string) (string, error) {
 		}
 	}
 	return columnName, nil
+}
+
+func validateVarArrayOperand(arr []interface{}) error {
+	if len(arr) == 0 {
+		return fmt.Errorf("var operator array cannot be empty")
+	}
+	return validateVarArrayMaxEntries(arr)
+}
+
+func validateVarArrayMaxEntries(arr []interface{}) error {
+	if len(arr) > maxVarArrayEntries {
+		return fmt.Errorf("var operator array accepts at most %d entries", maxVarArrayEntries)
+	}
+	return nil
 }
 
 // ToSQL converts a data operator to SQL.
@@ -98,8 +113,8 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 
 	// Handle array argument [varName, defaultValue]
 	if arr, ok := args[0].([]interface{}); ok {
-		if len(arr) == 0 {
-			return "", fmt.Errorf("var operator array cannot be empty")
+		if err := validateVarArrayOperand(arr); err != nil {
+			return "", err
 		}
 
 		if pv, ok := arr[0].(ProcessedValue); ok && pv.IsSQL {
@@ -387,8 +402,8 @@ func (d *DataOperator) handleVarParam(args []interface{}, pc *params.ParamCollec
 	}
 
 	if arr, ok := args[0].([]interface{}); ok {
-		if len(arr) == 0 {
-			return "", fmt.Errorf("var operator array cannot be empty")
+		if err := validateVarArrayOperand(arr); err != nil {
+			return "", err
 		}
 
 		if pv, ok := arr[0].(ProcessedValue); ok && pv.IsSQL {

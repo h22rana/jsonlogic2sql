@@ -78,6 +78,13 @@ func TestDataOperator_ToSQL(t *testing.T) {
 			hasError: true,
 		},
 		{
+			name:     "var with too many array entries",
+			operator: "var",
+			args:     []interface{}{[]interface{}{"amount", 0, 1}},
+			expected: "",
+			hasError: true,
+		},
+		{
 			name:     "var with non-string first arg",
 			operator: "var",
 			args:     []interface{}{[]interface{}{123, 0}},
@@ -720,6 +727,14 @@ func TestDataOperator_ToSQLParam(t *testing.T) {
 			name:        "var with empty array",
 			operator:    "var",
 			args:        []interface{}{[]interface{}{}},
+			expectedSQL: "",
+			wantParams:  nil,
+			hasError:    true,
+		},
+		{
+			name:        "var with too many array entries",
+			operator:    "var",
+			args:        []interface{}{[]interface{}{"amount", float64(0), float64(1)}},
 			expectedSQL: "",
 			wantParams:  nil,
 			hasError:    true,

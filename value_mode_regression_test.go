@@ -74,6 +74,75 @@ func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_RejectsMalformedVarOperandsAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "x", Type: FieldTypeNumber},
+		{Name: "items", Type: FieldTypeArray},
+	})
+
+	tests := []struct {
+		name  string
+		logic string
+		input interface{}
+	}{
+		{
+			name:  "root defaulted var has too many operands",
+			logic: `{"var":["x",1,2]}`,
+			input: map[string]interface{}{"var": []interface{}{"x", float64(1), float64(2)}},
+		},
+		{
+			name:  "array-scoped defaulted var has too many operands",
+			logic: `{"map":[{"var":"items"},{"var":["current",1,2]}]}`,
+			input: map[string]interface{}{
+				"map": []interface{}{
+					map[string]interface{}{"var": "items"},
+					map[string]interface{}{"var": []interface{}{"current", float64(1), float64(2)}},
+				},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							if _, err := tr.TranspileValue(tt.logic); !IsErrorCode(err, ErrInvalidArgument) {
+								t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
+							}
+							if _, err := tr.TranspileValueFromInterface(tt.input); !IsErrorCode(err, ErrInvalidArgument) {
+								t.Fatalf("TranspileValueFromInterface() error = %v, want %s", err, ErrInvalidArgument)
+							}
+
+							sql, params, err := tr.TranspileParameterizedValue(tt.logic)
+							if !IsErrorCode(err, ErrInvalidArgument) {
+								t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+									err, ErrInvalidArgument, sql, params)
+							}
+							if len(params) != 0 {
+								t.Fatalf("params = %#v, want none", params)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_EmptyArrayFoldableContextsAllDialects(t *testing.T) {
 	t.Parallel()
 
