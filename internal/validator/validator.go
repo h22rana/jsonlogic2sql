@@ -307,6 +307,9 @@ func (v *Validator) validateStandardOperator(operator string, args interface{}, 
 					Path:     path,
 				}
 			}
+			if argArr, ok := arr[0].([]interface{}); ok && len(argArr) == 0 {
+				return nil
+			}
 			// Validate the single argument recursively
 			return v.validateRecursive(arr[0], fmt.Sprintf("%s[0]", path))
 		}

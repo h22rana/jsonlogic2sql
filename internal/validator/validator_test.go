@@ -8,11 +8,8 @@ import (
 
 func TestNewValidator(t *testing.T) {
 	v := NewValidator()
-	if v == nil {
-		t.Fatal("NewValidator() returned nil")
-	}
-	if v.supportedOperators == nil {
-		t.Fatal("supportedOperators map is nil")
+	if v == nil || v.supportedOperators == nil {
+		t.Fatal("NewValidator() returned nil or has nil supportedOperators map")
 	}
 }
 
@@ -335,6 +332,16 @@ func TestValidateLogicalOperators(t *testing.T) {
 		{
 			name:     "valid not",
 			input:    map[string]interface{}{"!": []interface{}{true}},
+			expected: nil,
+		},
+		{
+			name:     "valid not empty array truthiness",
+			input:    map[string]interface{}{"!": []interface{}{[]interface{}{}}},
+			expected: nil,
+		},
+		{
+			name:     "valid double bang empty array truthiness",
+			input:    map[string]interface{}{"!!": []interface{}{[]interface{}{}}},
 			expected: nil,
 		},
 		{

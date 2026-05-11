@@ -1540,3 +1540,76 @@ func TestTranspileCondition_DoubleBangUsesValueTruthinessExplicitly(t *testing.T
 		})
 	}
 }
+
+func TestTranspileCondition_UnaryEmptyArrayTruthinessAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
+	})
+
+	tests := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "not empty array",
+			logic: `{"!":[[]]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "double bang empty array",
+			logic: `{"!!":[[]]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "nested in logical",
+			logic: `{"and":[{"!":[[]]},{"==":[1,1]}]}`,
+			want:  "TRUE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileCondition() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, params, err := tr.TranspileParameterizedCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+							}
+							if gotParam != tt.want {
+								t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.want)
+							}
+							if len(params) != 0 {
+								t.Fatalf("params = %#v, want none", params)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
