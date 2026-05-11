@@ -89,6 +89,9 @@ type ProcessedValue struct {
 	Kind ExpressionKind
 	// Type identifies the coarse SQL value type when known.
 	Type ExpressionType
+	// RequiresKnownTruthiness forces callers to reject truthiness checks when
+	// Type is unknown instead of emitting mixed-type fallback SQL.
+	RequiresKnownTruthiness bool
 }
 
 // SQLResult creates a ProcessedValue marked as SQL.

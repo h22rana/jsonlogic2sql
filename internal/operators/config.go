@@ -25,6 +25,10 @@ type TypedExpressionParser func(expr any, path string) (OperatorResult, error)
 // ParamTypedExpressionParser is the parameterized variant of TypedExpressionParser.
 type ParamTypedExpressionParser func(expr any, path string, pc *params.ParamCollector) (OperatorResult, error)
 
+// ValueTypeInferer returns the static value type for an expression when it can
+// be inferred without generating SQL.
+type ValueTypeInferer func(expr any, accumulatorType ExpressionType) ExpressionType
+
 // OperatorConfig holds shared configuration for all operators.
 // By using a shared config object, all operators automatically see
 // configuration changes without requiring individual SetSchema calls.
@@ -38,6 +42,7 @@ type OperatorConfig struct {
 	PredicateExpressionParser  TypedExpressionParser
 	ParamValueExpressionParser ParamTypedExpressionParser
 	ParamPredicateParser       ParamTypedExpressionParser
+	ValueTypeInferer           ValueTypeInferer
 }
 
 // NewOperatorConfig creates a new operator config with dialect and optional schema.
@@ -247,4 +252,25 @@ func (c *OperatorConfig) ParsePredicateExpressionParam(expr any, path string, pc
 		return OperatorResult{}, fmt.Errorf("parameterized predicate expression parser not configured")
 	}
 	return c.ParamPredicateParser(expr, path, pc)
+}
+
+// SetValueTypeInferer sets the callback used by operators that need parser
+// type inference without recursively rendering SQL.
+func (c *OperatorConfig) SetValueTypeInferer(inferer ValueTypeInferer) {
+	if c != nil {
+		c.ValueTypeInferer = inferer
+	}
+}
+
+// HasValueTypeInferer returns true if a value-type inference callback is configured.
+func (c *OperatorConfig) HasValueTypeInferer() bool {
+	return c != nil && c.ValueTypeInferer != nil
+}
+
+// InferValueExpressionType infers a value expression type through the configured parser callback.
+func (c *OperatorConfig) InferValueExpressionType(expr any, accumulatorType ExpressionType) ExpressionType {
+	if !c.HasValueTypeInferer() {
+		return ExpressionTypeUnknown
+	}
+	return c.ValueTypeInferer(expr, accumulatorType)
 }

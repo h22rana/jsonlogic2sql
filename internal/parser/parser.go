@@ -89,6 +89,7 @@ func NewParser(config *operators.OperatorConfig) *Parser {
 		res, err := p.parseExpressionPredicateParam(expr, path, pc)
 		return res.OperatorResult, err
 	})
+	config.SetValueTypeInferer(p.inferValueExpressionType)
 
 	return p
 }
@@ -297,15 +298,16 @@ func isSQLIdentifierChar(ch byte) bool {
 
 type expressionResult struct {
 	operators.OperatorResult
-	truthKnown        bool
-	truthy            bool
-	fieldValue        bool
-	fieldName         string
-	fieldHasDefault   bool
-	fieldDefault      interface{}
-	fieldDefaultKnown bool
-	rawLiteralKnown   bool
-	rawLiteral        interface{}
+	truthKnown              bool
+	truthy                  bool
+	fieldValue              bool
+	fieldName               string
+	fieldHasDefault         bool
+	fieldDefault            interface{}
+	fieldDefaultKnown       bool
+	rawLiteralKnown         bool
+	rawLiteral              interface{}
+	requiresKnownTruthiness bool
 }
 
 func resultFromOperator(res operators.OperatorResult) expressionResult {
@@ -674,6 +676,10 @@ func (p *Parser) truthinessSQL(res expressionResult, path string) (string, error
 		lengthCheck := p.config.ArrayLengthFunc(res.SQL)
 		return fmt.Sprintf("(%s IS NOT NULL AND %s > 0)", res.SQL, lengthCheck), nil
 	case operators.ExpressionTypeUnknown:
+		if res.requiresKnownTruthiness {
+			return "", tperrors.New(tperrors.ErrInvalidExpressionContext, "", path,
+				"truthiness requires a statically known accumulator type")
+		}
 		if res.fieldValue {
 			return "", tperrors.New(tperrors.ErrInvalidExpressionContext, "", path,
 				"truthiness requires a statically known field type; provide schema information")
@@ -694,6 +700,7 @@ func valueOperandSQL(res expressionResult) string {
 
 func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	pv := operators.TypedSQLResult(valueOperandSQL(res), res.Kind, valueTypeOf(res))
+	pv.RequiresKnownTruthiness = res.requiresKnownTruthiness
 	if res.fieldValue {
 		pv.IsField = true
 		pv.FieldName = res.fieldName
@@ -835,10 +842,12 @@ func (p *Parser) parseExpressionValue(expr interface{}, path string) (expression
 					Type: pv.Type,
 				})
 				copyProcessedFieldMetadata(&res, pv)
+				res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 				return res, nil
 			}
 			res := fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName)
 			copyProcessedFieldMetadata(&res, pv)
+			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 			return res, nil
 		}
 		return p.parseExpressionValue(pv.Value, path)
@@ -1770,10 +1779,12 @@ func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *pa
 					Type: pv.Type,
 				})
 				copyProcessedFieldMetadata(&res, pv)
+				res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 				return res, nil
 			}
 			res := fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName)
 			copyProcessedFieldMetadata(&res, pv)
+			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 			return res, nil
 		}
 		return p.parseExpressionValueParam(pv.Value, path, pc)

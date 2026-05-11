@@ -41,7 +41,9 @@ type ArrayOperator struct {
 	valueScope   bool
 	// valueSemantics means the current expression position returns a JSONLogic
 	// value, so and/or/if must preserve fallback values instead of boolean SQL.
-	valueSemantics bool
+	valueSemantics     bool
+	accumulatorType    ExpressionType
+	hasAccumulatorType bool
 }
 
 // NewArrayOperator creates a new ArrayOperator instance with optional config.
@@ -69,16 +71,18 @@ func (a *ArrayOperator) elemAlias() string {
 
 func (a *ArrayOperator) withChildScope() *ArrayOperator {
 	child := &ArrayOperator{
-		config:         a.config,
-		dataOp:         a.dataOp,
-		comparisonOp:   a.comparisonOp,
-		logicalOp:      a.logicalOp,
-		numericOp:      a.numericOp,
-		scopeDepth:     a.scopeDepth + 1,
-		visibleElems:   append([]string{}, a.visibleElems...),
-		exprPath:       a.exprPath,
-		valueScope:     a.valueScope,
-		valueSemantics: a.valueSemantics,
+		config:             a.config,
+		dataOp:             a.dataOp,
+		comparisonOp:       a.comparisonOp,
+		logicalOp:          a.logicalOp,
+		numericOp:          a.numericOp,
+		scopeDepth:         a.scopeDepth + 1,
+		visibleElems:       append([]string{}, a.visibleElems...),
+		exprPath:           a.exprPath,
+		valueScope:         a.valueScope,
+		valueSemantics:     a.valueSemantics,
+		accumulatorType:    a.accumulatorType,
+		hasAccumulatorType: a.hasAccumulatorType,
 	}
 	childAlias := child.elemAlias()
 	child.visibleElems = append(child.visibleElems, childAlias)
@@ -90,48 +94,72 @@ func (a *ArrayOperator) withPath(path string) *ArrayOperator {
 		path = "$"
 	}
 	child := &ArrayOperator{
-		config:         a.config,
-		dataOp:         a.dataOp,
-		comparisonOp:   a.comparisonOp,
-		logicalOp:      a.logicalOp,
-		numericOp:      a.numericOp,
-		scopeDepth:     a.scopeDepth,
-		visibleElems:   append([]string{}, a.visibleElems...),
-		exprPath:       path,
-		valueScope:     a.valueScope,
-		valueSemantics: a.valueSemantics,
+		config:             a.config,
+		dataOp:             a.dataOp,
+		comparisonOp:       a.comparisonOp,
+		logicalOp:          a.logicalOp,
+		numericOp:          a.numericOp,
+		scopeDepth:         a.scopeDepth,
+		visibleElems:       append([]string{}, a.visibleElems...),
+		exprPath:           path,
+		valueScope:         a.valueScope,
+		valueSemantics:     a.valueSemantics,
+		accumulatorType:    a.accumulatorType,
+		hasAccumulatorType: a.hasAccumulatorType,
 	}
 	return child
 }
 
 func (a *ArrayOperator) withValueScope(enabled bool) *ArrayOperator {
 	child := &ArrayOperator{
-		config:         a.config,
-		dataOp:         a.dataOp,
-		comparisonOp:   a.comparisonOp,
-		logicalOp:      a.logicalOp,
-		numericOp:      a.numericOp,
-		scopeDepth:     a.scopeDepth,
-		visibleElems:   append([]string{}, a.visibleElems...),
-		exprPath:       a.exprPath,
-		valueScope:     enabled,
-		valueSemantics: a.valueSemantics,
+		config:             a.config,
+		dataOp:             a.dataOp,
+		comparisonOp:       a.comparisonOp,
+		logicalOp:          a.logicalOp,
+		numericOp:          a.numericOp,
+		scopeDepth:         a.scopeDepth,
+		visibleElems:       append([]string{}, a.visibleElems...),
+		exprPath:           a.exprPath,
+		valueScope:         enabled,
+		valueSemantics:     a.valueSemantics,
+		accumulatorType:    a.accumulatorType,
+		hasAccumulatorType: a.hasAccumulatorType,
 	}
 	return child
 }
 
 func (a *ArrayOperator) withValueSemantics(enabled bool) *ArrayOperator {
 	child := &ArrayOperator{
-		config:         a.config,
-		dataOp:         a.dataOp,
-		comparisonOp:   a.comparisonOp,
-		logicalOp:      a.logicalOp,
-		numericOp:      a.numericOp,
-		scopeDepth:     a.scopeDepth,
-		visibleElems:   append([]string{}, a.visibleElems...),
-		exprPath:       a.exprPath,
-		valueScope:     a.valueScope,
-		valueSemantics: enabled,
+		config:             a.config,
+		dataOp:             a.dataOp,
+		comparisonOp:       a.comparisonOp,
+		logicalOp:          a.logicalOp,
+		numericOp:          a.numericOp,
+		scopeDepth:         a.scopeDepth,
+		visibleElems:       append([]string{}, a.visibleElems...),
+		exprPath:           a.exprPath,
+		valueScope:         a.valueScope,
+		valueSemantics:     enabled,
+		accumulatorType:    a.accumulatorType,
+		hasAccumulatorType: a.hasAccumulatorType,
+	}
+	return child
+}
+
+func (a *ArrayOperator) withAccumulatorType(typ ExpressionType) *ArrayOperator {
+	child := &ArrayOperator{
+		config:             a.config,
+		dataOp:             a.dataOp,
+		comparisonOp:       a.comparisonOp,
+		logicalOp:          a.logicalOp,
+		numericOp:          a.numericOp,
+		scopeDepth:         a.scopeDepth,
+		visibleElems:       append([]string{}, a.visibleElems...),
+		exprPath:           a.exprPath,
+		valueScope:         a.valueScope,
+		valueSemantics:     a.valueSemantics,
+		accumulatorType:    typ,
+		hasAccumulatorType: true,
 	}
 	return child
 }
@@ -145,6 +173,53 @@ func (a *ArrayOperator) currentPath() string {
 
 func (a *ArrayOperator) argPath(index int) string {
 	return tperrors.BuildArrayPath(a.currentPath(), index)
+}
+
+func (a *ArrayOperator) inferValueExpressionType(expr interface{}, accumulatorType ExpressionType) ExpressionType {
+	if a != nil && a.config != nil && a.config.HasValueTypeInferer() {
+		return a.config.InferValueExpressionType(expr, accumulatorType)
+	}
+	return inferLiteralValueExpressionType(expr)
+}
+
+func inferLiteralValueExpressionType(expr interface{}) ExpressionType {
+	if pv, ok := expr.(ProcessedValue); ok {
+		if pv.HasExpressionInfo {
+			if pv.Kind == ExpressionKindPredicate {
+				return ExpressionTypeBoolean
+			}
+			return pv.Type
+		}
+		if pv.IsSQL {
+			return ExpressionTypeUnknown
+		}
+		return inferLiteralValueExpressionType(pv.Value)
+	}
+	switch expr.(type) {
+	case nil:
+		return ExpressionTypeNull
+	case bool:
+		return ExpressionTypeBoolean
+	case string:
+		return ExpressionTypeString
+	case json.Number, float32, float64,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64:
+		return ExpressionTypeNumber
+	case []interface{}:
+		return ExpressionTypeArray
+	default:
+		return ExpressionTypeUnknown
+	}
+}
+
+func (a *ArrayOperator) accumulatorSQLResult() ProcessedValue {
+	if a != nil && a.hasAccumulatorType && a.accumulatorType != ExpressionTypeUnknown {
+		return TypedSQLResult(AccumulatorVar, ExpressionKindValue, a.accumulatorType)
+	}
+	result := TypedSQLResult(AccumulatorVar, ExpressionKindValue, ExpressionTypeUnknown)
+	result.RequiresKnownTruthiness = true
+	return result
 }
 
 func (a *ArrayOperator) isVisibleElemPath(name string) bool {
@@ -686,7 +761,8 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	// accumulator substitution must happen LAST so that the safety net
 	// doesn't corrupt initial values containing "current"/"item" field names.
 	rewritten := a.rewriteElementVars(reducerExpr)
-	valueScoped := a.withValueSemantics(true)
+	accumulatorType := a.inferValueExpressionType(args[arrayReduceInitialArgIndex], ExpressionTypeUnknown)
+	valueScoped := a.withValueSemantics(true).withAccumulatorType(accumulatorType)
 	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(rewritten, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
@@ -1434,7 +1510,7 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorWithContextAndPath(expr inte
 		if len(e) == 1 {
 			if varName, hasVar := e[OpVar]; hasVar {
 				if allowAccumulator && varName == AccumulatorVar {
-					return SQLResult(AccumulatorVar), nil
+					return a.accumulatorSQLResult(), nil
 				}
 				if sql, handled, err := a.arrayScopeVarToSQL(varName); handled || err != nil {
 					if err != nil {
@@ -1778,7 +1854,8 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	}
 
 	rewritten := a.rewriteElementVars(reducerExpr)
-	valueScoped := a.withValueSemantics(true)
+	accumulatorType := a.inferValueExpressionType(args[arrayReduceInitialArgIndex], ExpressionTypeUnknown)
+	valueScoped := a.withValueSemantics(true).withAccumulatorType(accumulatorType)
 	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(rewritten, pc, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
@@ -2273,7 +2350,7 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 		if len(e) == 1 {
 			if varName, hasVar := e[OpVar]; hasVar {
 				if allowAccumulator && varName == AccumulatorVar {
-					return SQLResult(AccumulatorVar), nil
+					return a.accumulatorSQLResult(), nil
 				}
 				if rewritten, handled, err := a.rewriteArrayScopeVarParam(varName); handled || err != nil {
 					if err != nil {

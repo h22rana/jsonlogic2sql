@@ -642,6 +642,211 @@ func TestTranspileValue_ReduceStringTruthinessUsesInferredTypeAllDialectsSchemaM
 	}
 }
 
+func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "arr", Type: FieldTypeArray},
+	})
+
+	renderReduce := func(d Dialect, reducer, initial string) string {
+		if d == DialectClickHouse {
+			return fmt.Sprintf("arrayFold((acc, elem) -> %s, arr, %s)", reducer, initial)
+		}
+		return fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer)
+	}
+
+	tests := []struct {
+		name             string
+		logic            string
+		wantReducer      func(initial string) string
+		wantInitial      string
+		wantParamReducer func(Dialect) string
+		wantParamInitial func(Dialect) string
+		wantParams       []QueryParam
+		forbidden        []string
+	}{
+		{
+			name:  "or tests numeric accumulator with numeric truthiness",
+			logic: `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},{"var":"current"}]},0]}`,
+			wantReducer: func(initial string) string {
+				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != 0) THEN %s ELSE elem END", initial, initial, initial)
+			},
+			wantInitial: "0",
+			wantParamReducer: func(d Dialect) string {
+				initial := testPlaceholder(d, 1)
+				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != 0) THEN %s ELSE elem END", initial, initial, initial)
+			},
+			wantParamInitial: func(d Dialect) string { return testPlaceholder(d, 1) },
+			wantParams:       []QueryParam{{Name: "p1", Value: float64(0)}},
+			forbidden:        []string{"!= FALSE", "!= ''"},
+		},
+		{
+			name:  "if tests string accumulator with string truthiness",
+			logic: `{"reduce":[{"var":"arr"},{"if":[{"var":"accumulator"},{"var":"accumulator"},{"var":"current"}]},""]}`,
+			wantReducer: func(initial string) string {
+				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != '') THEN %s ELSE elem END", initial, initial, initial)
+			},
+			wantInitial: "''",
+			wantParamReducer: func(d Dialect) string {
+				initial := testPlaceholder(d, 1)
+				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != '') THEN %s ELSE elem END", initial, initial, initial)
+			},
+			wantParamInitial: func(d Dialect) string { return testPlaceholder(d, 1) },
+			wantParams:       []QueryParam{{Name: "p1", Value: ""}},
+			forbidden:        []string{"!= FALSE", "!= 0"},
+		},
+		{
+			name:  "if tests boolean accumulator with boolean truthiness",
+			logic: `{"reduce":[{"var":"arr"},{"if":[{"var":"accumulator"},{"var":"accumulator"},{"var":"current"}]},false]}`,
+			wantReducer: func(initial string) string {
+				return fmt.Sprintf("CASE WHEN %s IS TRUE THEN %s ELSE elem END", initial, initial)
+			},
+			wantInitial: "FALSE",
+			wantParamReducer: func(Dialect) string {
+				return "CASE WHEN FALSE IS TRUE THEN FALSE ELSE elem END"
+			},
+			wantParamInitial: func(Dialect) string { return "FALSE" },
+			forbidden:        []string{"!= FALSE", "!= 0", "!= ''"},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							want := renderReduce(d, tt.wantReducer(tt.wantInitial), tt.wantInitial)
+							if got != want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, want)
+							}
+							for _, bad := range tt.forbidden {
+								if strings.Contains(got, bad) {
+									t.Fatalf("TranspileValue() used wrong accumulator truthiness %q in %s", bad, got)
+								}
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							wantParam := renderReduce(d, tt.wantParamReducer(d), tt.wantParamInitial(d))
+							if gotParam != wantParam {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
+							}
+							for _, bad := range tt.forbidden {
+								if strings.Contains(gotParam, bad) {
+									t.Fatalf("TranspileParameterizedValue() used wrong accumulator truthiness %q in %s", bad, gotParam)
+								}
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_ReduceAccumulatorTruthinessRejectsUnknownInitialTypeAllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},{"var":"current"}]},{"var":"seed"}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			got, valueErr := tr.TranspileValue(logic)
+			if !IsErrorCode(valueErr, ErrInvalidExpressionContext) {
+				t.Fatalf("TranspileValue() = %q, error = %v, want %s", got, valueErr, ErrInvalidExpressionContext)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if !IsErrorCode(err, ErrInvalidExpressionContext) {
+				t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want %s",
+					gotParam, gotParams, err, ErrInvalidExpressionContext)
+			}
+		})
+	}
+}
+
+func TestTranspileValue_ReduceAccumulatorTruthinessUsesSchemaInitialTypeAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "arr", Type: FieldTypeArray},
+		{Name: "seed", Type: FieldTypeNumber},
+	})
+	logic := `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},{"var":"current"}]},{"var":"seed"}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			reducer := "CASE WHEN (seed IS NOT NULL AND seed != 0) THEN seed ELSE elem END"
+			want := fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer)
+			if d == DialectClickHouse {
+				want = fmt.Sprintf("arrayFold((acc, elem) -> %s, arr, seed)", reducer)
+			}
+
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if got != want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, want)
+			}
+			if strings.Contains(got, "!= FALSE") || strings.Contains(got, "!= ''") {
+				t.Fatalf("TranspileValue() used mixed-type accumulator truthiness: %s", got)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if gotParam != want {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+			}
+			if len(gotParams) != 0 {
+				t.Fatalf("params = %#v, want none", gotParams)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_PostgreSQLEmptyArrayScannerSkipsStringLiterals(t *testing.T) {
 	tr, err := NewTranspiler(DialectPostgreSQL)
 	if err != nil {
