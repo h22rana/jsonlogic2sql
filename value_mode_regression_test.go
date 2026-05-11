@@ -1041,6 +1041,15 @@ func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 	valueLogic := map[string]interface{}{
 		"or": []interface{}{math.NaN(), "fallback"},
 	}
+	truthyValueLogic := map[string]interface{}{
+		"and": []interface{}{math.Inf(1), "fallback"},
+	}
+	ifNaNLogic := map[string]interface{}{
+		"if": []interface{}{math.NaN(), "yes", "no"},
+	}
+	ifInfLogic := map[string]interface{}{
+		"if": []interface{}{math.Inf(1), "yes", "no"},
+	}
 	conditionCases := []struct {
 		name  string
 		logic map[string]interface{}
@@ -1059,6 +1068,16 @@ func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 		{
 			name:  "float32 native NaN",
 			logic: map[string]interface{}{"!!": float32(math.NaN())},
+			want:  "FALSE",
+		},
+		{
+			name:  "double bang native infinity",
+			logic: map[string]interface{}{"!!": math.Inf(1)},
+			want:  "TRUE",
+		},
+		{
+			name:  "not native infinity",
+			logic: map[string]interface{}{"!": math.Inf(-1)},
 			want:  "FALSE",
 		},
 	}
@@ -1099,6 +1118,66 @@ func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 						t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
 					}
 
+					got, err = tr.TranspileValueFromInterface(truthyValueLogic)
+					if err != nil {
+						t.Fatalf("TranspileValueFromInterface(and Inf) error = %v", err)
+					}
+					if got != "'fallback'" {
+						t.Fatalf("TranspileValueFromInterface(and Inf) = %q, want %q", got, "'fallback'")
+					}
+
+					gotParam, gotParams, err = tr.TranspileParameterizedValueFromInterface(truthyValueLogic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValueFromInterface(and Inf) error = %v", err)
+					}
+					if want := testPlaceholder(d, 1); gotParam != want {
+						t.Fatalf("TranspileParameterizedValueFromInterface(and Inf) = %q, want %q", gotParam, want)
+					}
+					if wantParams := []QueryParam{{Name: "p1", Value: "fallback"}}; !reflect.DeepEqual(gotParams, wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+					}
+
+					for _, tt := range []struct {
+						name       string
+						logic      map[string]interface{}
+						want       string
+						wantParams []QueryParam
+					}{
+						{
+							name:       "if NaN condition",
+							logic:      ifNaNLogic,
+							want:       "'no'",
+							wantParams: []QueryParam{{Name: "p1", Value: "no"}},
+						},
+						{
+							name:       "if Inf condition",
+							logic:      ifInfLogic,
+							want:       "'yes'",
+							wantParams: []QueryParam{{Name: "p1", Value: "yes"}},
+						},
+					} {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValueFromInterface(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValueFromInterface() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileValueFromInterface() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValueFromInterface(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValueFromInterface() error = %v", err)
+							}
+							if want := testPlaceholder(d, 1); gotParam != want {
+								t.Fatalf("TranspileParameterizedValueFromInterface() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+
 					for _, tt := range conditionCases {
 						t.Run(tt.name, func(t *testing.T) {
 							got, err := tr.TranspileConditionFromInterface(tt.logic)
@@ -1118,6 +1197,96 @@ func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 							}
 							if len(gotParams) != 0 {
 								t.Fatalf("params = %#v, want none", gotParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_RejectsReturnedNativeNonFiniteFloatsAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name  string
+		logic interface{}
+	}{
+		{
+			name:  "root positive infinity",
+			logic: math.Inf(1),
+		},
+		{
+			name:  "root negative infinity",
+			logic: math.Inf(-1),
+		},
+		{
+			name:  "root NaN",
+			logic: math.NaN(),
+		},
+		{
+			name:  "float32 NaN",
+			logic: float32(math.NaN()),
+		},
+		{
+			name: "cat NaN",
+			logic: map[string]interface{}{
+				"cat": []interface{}{math.NaN()},
+			},
+		},
+		{
+			name: "array NaN",
+			logic: []interface{}{
+				math.NaN(),
+			},
+		},
+		{
+			name: "or returns infinity",
+			logic: map[string]interface{}{
+				"or": []interface{}{math.Inf(1), "fallback"},
+			},
+		},
+		{
+			name: "and returns NaN",
+			logic: map[string]interface{}{
+				"and": []interface{}{math.NaN(), "fallback"},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							if _, err := tr.TranspileValueFromInterface(tt.logic); !IsErrorCode(err, ErrInvalidArgument) {
+								t.Fatalf("TranspileValueFromInterface() error = %v, want %s", err, ErrInvalidArgument)
+							}
+							sql, params, err := tr.TranspileParameterizedValueFromInterface(tt.logic)
+							if !IsErrorCode(err, ErrInvalidArgument) {
+								t.Fatalf("TranspileParameterizedValueFromInterface() error = %v, want %s (SQL %q params %#v)",
+									err, ErrInvalidArgument, sql, params)
+							}
+							if len(params) != 0 {
+								t.Fatalf("params = %#v, want none", params)
 							}
 						})
 					}

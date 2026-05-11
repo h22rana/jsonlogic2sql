@@ -349,7 +349,15 @@ func (d *DataOperator) valueToSQL(value interface{}) (string, error) {
 		return numberLiteral, nil
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return fmt.Sprintf("%v", v), nil
-	case float32, float64:
+	case float32:
+		if err := ValidateFiniteNativeFloat(v); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%v", v), nil
+	case float64:
+		if err := ValidateFiniteNativeFloat(v); err != nil {
+			return "", err
+		}
 		return fmt.Sprintf("%v", v), nil
 	case bool:
 		if v {
@@ -518,8 +526,14 @@ func (d *DataOperator) valueToSQLParam(value interface{}, pc *params.ParamCollec
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return pc.Add(v), nil
 	case float32:
+		if err := ValidateFiniteNativeFloat(v); err != nil {
+			return "", err
+		}
 		return pc.Add(float64(v)), nil
 	case float64:
+		if err := ValidateFiniteNativeFloat(v); err != nil {
+			return "", err
+		}
 		return pc.Add(v), nil
 	case bool:
 		if v {
@@ -536,6 +550,26 @@ func (d *DataOperator) valueToSQLParam(value interface{}, pc *params.ParamCollec
 // ValueToSQLParam is the parameterized variant of ValueToSQL.
 func (d *DataOperator) ValueToSQLParam(value interface{}, pc *params.ParamCollector) (string, error) {
 	return d.valueToSQLParam(value, pc)
+}
+
+// ValidateFiniteNativeFloat rejects Go-native NaN/Infinity values before they
+// can be emitted as SQL literals or driver bind values.
+func ValidateFiniteNativeFloat(value interface{}) error {
+	switch v := value.(type) {
+	case float32:
+		return validateFiniteFloat64(float64(v))
+	case float64:
+		return validateFiniteFloat64(v)
+	default:
+		return nil
+	}
+}
+
+func validateFiniteFloat64(value float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return fmt.Errorf("non-finite float literal %v is not supported", value)
+	}
+	return nil
 }
 
 // jsonNumberParamValue converts a json.Number into a driver-friendly bind value.

@@ -623,6 +623,34 @@ func isZeroJSONNumberLiteral(s string) bool {
 	return true
 }
 
+func nonFiniteNativeFloatTruthResult(value interface{}) (expressionResult, bool) {
+	switch v := value.(type) {
+	case float32:
+		f := float64(v)
+		if math.IsNaN(f) {
+			return literalValueResultWithRaw("", operators.ExpressionTypeNumber, false, value), true
+		}
+		if math.IsInf(f, 0) {
+			return literalValueResultWithRaw("", operators.ExpressionTypeNumber, true, value), true
+		}
+	case float64:
+		if math.IsNaN(v) {
+			return literalValueResultWithRaw("", operators.ExpressionTypeNumber, false, value), true
+		}
+		if math.IsInf(v, 0) {
+			return literalValueResultWithRaw("", operators.ExpressionTypeNumber, true, value), true
+		}
+	}
+	return expressionResult{}, false
+}
+
+func nonFiniteNativeFloatValueError(value interface{}, path string) error {
+	if err := operators.ValidateFiniteNativeFloat(value); err != nil {
+		return tperrors.Wrap(tperrors.ErrInvalidArgument, "", path, "invalid literal", err)
+	}
+	return tperrors.New(tperrors.ErrInvalidArgument, "", path, fmt.Sprintf("invalid literal: %T is not non-finite", value))
+}
+
 func (p *Parser) truthinessSQL(res expressionResult, path string) (string, error) {
 	if res.Kind == operators.ExpressionKindPredicate {
 		return res.SQL, nil
@@ -689,7 +717,27 @@ func literalComparisonPredicateResult(operator string, args []interface{}, sql s
 	return res, nil
 }
 
+func (p *Parser) parseTruthinessResult(expr interface{}, path string) (expressionResult, string, error) {
+	if res, ok := nonFiniteNativeFloatTruthResult(expr); ok {
+		condition, err := p.truthinessSQL(res, path)
+		return res, condition, err
+	}
+	res, err := p.parseExpressionAny(expr, path)
+	if err != nil {
+		return expressionResult{}, "", err
+	}
+	condition, err := p.truthinessSQL(res, path)
+	if err != nil {
+		return expressionResult{}, "", err
+	}
+	return res, condition, nil
+}
+
 func (p *Parser) parseTruthinessResultParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, string, error) {
+	if res, ok := nonFiniteNativeFloatTruthResult(expr); ok {
+		condition, err := p.truthinessSQL(res, path)
+		return res, condition, err
+	}
 	checkpoint := pc.Checkpoint()
 	res, err := p.parseExpressionAnyParam(expr, path, pc)
 	if err != nil {
@@ -1072,11 +1120,7 @@ func (p *Parser) parseNotPredicate(operator string, args interface{}, path strin
 	if !ok {
 		return expressionResult{}, tperrors.NewTypeMismatch(operator, path, "exactly 1 argument", "multiple arguments")
 	}
-	res, err := p.parseExpressionAny(arg, tperrors.BuildArrayPath(path, 0))
-	if err != nil {
-		return expressionResult{}, err
-	}
-	condition, err := p.truthinessSQL(res, path)
+	res, condition, err := p.parseTruthinessResult(arg, tperrors.BuildArrayPath(path, 0))
 	if err != nil {
 		return expressionResult{}, err
 	}
@@ -1141,15 +1185,7 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 }
 
 func (p *Parser) parsePredicateIfCondition(expr interface{}, path string) (expressionResult, string, error) {
-	res, err := p.parseExpressionAny(expr, path)
-	if err != nil {
-		return expressionResult{}, "", err
-	}
-	condition, err := p.truthinessSQL(res, path)
-	if err != nil {
-		return expressionResult{}, "", err
-	}
-	return res, condition, nil
+	return p.parseTruthinessResult(expr, path)
 }
 
 func (p *Parser) parsePredicateIfOperand(expr interface{}, path string) (expressionResult, error) {
@@ -1185,11 +1221,7 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 		pairLimit = len(args) - 1
 	}
 	for i := 0; i < pairLimit; i += 2 {
-		cond, err := p.parseExpressionAny(args[i], tperrors.BuildArrayPath(path, i))
-		if err != nil {
-			return expressionResult{}, err
-		}
-		condition, err := p.truthinessSQL(cond, tperrors.BuildArrayPath(path, i))
+		cond, condition, err := p.parseTruthinessResult(args[i], tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -1239,7 +1271,17 @@ func (p *Parser) parseValueLogical(operator string, args []interface{}, path str
 }
 
 func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, index int, path string) (expressionResult, error) {
-	current, err := p.parseExpressionValue(args[index], tperrors.BuildArrayPath(path, index))
+	argPath := tperrors.BuildArrayPath(path, index)
+	if current, ok := nonFiniteNativeFloatTruthResult(args[index]); ok {
+		if index == len(args)-1 ||
+			(operator == "or" && current.truthy) ||
+			(operator == "and" && !current.truthy) {
+			return expressionResult{}, nonFiniteNativeFloatValueError(args[index], argPath)
+		}
+		return p.parseValueLogicalFrom(operator, args, index+1, path)
+	}
+
+	current, err := p.parseExpressionValue(args[index], argPath)
 	if err != nil {
 		return expressionResult{}, err
 	}
@@ -1255,7 +1297,7 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 		}
 		return p.parseValueLogicalFrom(operator, args, index+1, path)
 	}
-	condition, err := p.truthinessSQL(current, tperrors.BuildArrayPath(path, index))
+	condition, err := p.truthinessSQL(current, argPath)
 	if err != nil {
 		return expressionResult{}, err
 	}
@@ -2182,8 +2224,18 @@ func (p *Parser) parseValueLogicalParam(operator string, args []interface{}, pat
 }
 
 func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{}, index int, path string, pc *params.ParamCollector) (expressionResult, error) {
+	argPath := tperrors.BuildArrayPath(path, index)
+	if current, ok := nonFiniteNativeFloatTruthResult(args[index]); ok {
+		if index == len(args)-1 ||
+			(operator == "or" && current.truthy) ||
+			(operator == "and" && !current.truthy) {
+			return expressionResult{}, nonFiniteNativeFloatValueError(args[index], argPath)
+		}
+		return p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
+	}
+
 	checkpoint := pc.Checkpoint()
-	current, err := p.parseExpressionValueParam(args[index], tperrors.BuildArrayPath(path, index), pc)
+	current, err := p.parseExpressionValueParam(args[index], argPath, pc)
 	if err != nil {
 		return expressionResult{}, err
 	}
@@ -2200,7 +2252,7 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 		pc.Restore(checkpoint)
 		return p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
 	}
-	condition, err := p.truthinessSQL(current, tperrors.BuildArrayPath(path, index))
+	condition, err := p.truthinessSQL(current, argPath)
 	if err != nil {
 		return expressionResult{}, err
 	}

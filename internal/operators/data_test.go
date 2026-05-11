@@ -3,6 +3,7 @@ package operators
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -95,6 +96,13 @@ func TestDataOperator_ToSQL(t *testing.T) {
 			name:     "var with no args",
 			operator: "var",
 			args:     []interface{}{},
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "non-finite float literal",
+			operator: "var",
+			args:     []interface{}{[]interface{}{"amount", math.Inf(1)}},
 			expected: "",
 			hasError: true,
 		},
@@ -751,6 +759,14 @@ func TestDataOperator_ToSQLParam(t *testing.T) {
 			name:        "var with no args",
 			operator:    "var",
 			args:        []interface{}{},
+			expectedSQL: "",
+			wantParams:  nil,
+			hasError:    true,
+		},
+		{
+			name:        "non-finite float literal",
+			operator:    "var",
+			args:        []interface{}{[]interface{}{"amount", math.NaN()}},
 			expectedSQL: "",
 			wantParams:  nil,
 			hasError:    true,
