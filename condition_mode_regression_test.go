@@ -67,6 +67,117 @@ func TestTranspileCondition_PredicateIfAcceptsBooleanConstants(t *testing.T) {
 	}
 }
 
+func TestTranspileCondition_PredicateIfAcceptsSchemaTypedValueConditions(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "name", Type: FieldTypeString},
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name      string
+		logic     string
+		want      string
+		wantParam func(Dialect) string
+		params    []QueryParam
+	}{
+		{
+			name:  "boolean field condition",
+			logic: `{"if":[{"var":"flag"},{">":[{"var":"amount"},0]},false]}`,
+			want:  "CASE WHEN flag IS TRUE THEN amount > 0 ELSE FALSE END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN flag IS TRUE THEN amount > %s ELSE FALSE END", testPlaceholder(d, 1))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:  "string field condition",
+			logic: `{"if":[{"var":"name"},{">":[{"var":"amount"},0]},false]}`,
+			want:  "CASE WHEN (name IS NOT NULL AND name != '') THEN amount > 0 ELSE FALSE END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN (name IS NOT NULL AND name != '') THEN amount > %s ELSE FALSE END", testPlaceholder(d, 1))
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:  "numeric field condition",
+			logic: `{"if":[{"var":"amount"},{"==":[{"var":"flag"},true]},false]}`,
+			want:  "CASE WHEN (amount IS NOT NULL AND amount != 0) THEN flag = TRUE ELSE FALSE END",
+			wantParam: func(Dialect) string {
+				return "CASE WHEN (amount IS NOT NULL AND amount != 0) THEN flag = TRUE ELSE FALSE END"
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.params) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_PredicateIfRejectsSchemaLessValueCondition(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"if":[{"var":"flag"},{">":[{"var":"amount"},0]},false]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			if _, conditionErr := tr.TranspileCondition(logic); !IsErrorCode(conditionErr, ErrInvalidExpressionContext) {
+				t.Fatalf("TranspileCondition() error = %v, want %s", conditionErr, ErrInvalidExpressionContext)
+			}
+			sql, params, paramErr := tr.TranspileParameterizedCondition(logic)
+			if !IsErrorCode(paramErr, ErrInvalidExpressionContext) {
+				t.Fatalf("TranspileParameterizedCondition() error = %v, want %s (SQL %q params %#v)",
+					paramErr, ErrInvalidExpressionContext, sql, params)
+			}
+			if len(params) != 0 {
+				t.Fatalf("params = %#v, want none", params)
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_PredicateIfSkipsUnreachableBranches(t *testing.T) {
 	t.Parallel()
 

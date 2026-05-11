@@ -1104,7 +1104,7 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 		pairLimit = len(args) - 1
 	}
 	for i := 0; i < pairLimit; i += 2 {
-		cond, err := p.parsePredicateIfOperand(args[i], tperrors.BuildArrayPath(path, i))
+		cond, condition, err := p.parsePredicateIfCondition(args[i], tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -1121,7 +1121,7 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 			}
 			return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL)), nil
 		}
-		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", cond.SQL, thenRes.SQL))
+		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
 	elseSQL := "FALSE"
 	if hasElse {
@@ -1138,6 +1138,18 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 		return booleanPredicateResult(false), nil
 	}
 	return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL)), nil
+}
+
+func (p *Parser) parsePredicateIfCondition(expr interface{}, path string) (expressionResult, string, error) {
+	res, err := p.parseExpressionAny(expr, path)
+	if err != nil {
+		return expressionResult{}, "", err
+	}
+	condition, err := p.truthinessSQL(res, path)
+	if err != nil {
+		return expressionResult{}, "", err
+	}
+	return res, condition, nil
 }
 
 func (p *Parser) parsePredicateIfOperand(expr interface{}, path string) (expressionResult, error) {
@@ -2039,7 +2051,7 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 	}
 	for i := 0; i < pairLimit; i += 2 {
 		conditionCheckpoint := pc.Checkpoint()
-		cond, err := p.parsePredicateIfOperandParam(args[i], tperrors.BuildArrayPath(path, i), pc)
+		cond, condition, err := p.parsePredicateIfConditionParam(args[i], tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
@@ -2060,7 +2072,7 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 			}
 			return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL)), nil
 		}
-		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", cond.SQL, thenRes.SQL))
+		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
 	elseSQL := "FALSE"
 	if hasElse {
@@ -2077,6 +2089,14 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		return booleanPredicateResult(false), nil
 	}
 	return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL)), nil
+}
+
+func (p *Parser) parsePredicateIfConditionParam(
+	expr interface{},
+	path string,
+	pc *params.ParamCollector,
+) (expressionResult, string, error) {
+	return p.parseTruthinessResultParam(expr, path, pc)
 }
 
 func (p *Parser) parsePredicateIfOperandParam(expr interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
