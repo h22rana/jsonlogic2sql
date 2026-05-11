@@ -735,16 +735,14 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 }
 
 func literalComparisonPredicateResult(operator string, args []interface{}, sql string) (expressionResult, error) {
-	res := predicateResult(sql)
 	truthy, known, err := operators.FoldLiteralComparison(operator, args)
 	if err != nil {
 		return expressionResult{}, err
 	}
 	if known {
-		res.truthKnown = true
-		res.truthy = truthy
+		return booleanPredicateResult(truthy), nil
 	}
-	return res, nil
+	return predicateResult(sql), nil
 }
 
 func (p *Parser) parseTruthinessResult(expr interface{}, path string) (expressionResult, string, error) {
@@ -2175,10 +2173,10 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		if normalizedSQLBooleanConstant(sql) != "" {
+		res, err := literalComparisonPredicateResult(operator, processedArgs, sql)
+		if res.truthKnown {
 			pc.Restore(checkpoint)
 		}
-		res, err := literalComparisonPredicateResult(operator, processedArgs, sql)
 		return res, p.wrapOperatorError(operator, path, err)
 	case "and", "or":
 		arr, ok := args.([]interface{})

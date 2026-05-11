@@ -148,12 +148,11 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 			name:  "comparison operands use value semantics",
 			logic: `{"==":[{"if":["nonempty","x","y"]},"x"]}`,
 			wantSQL: func(Dialect, bool) string {
-				return "'x' = 'x'"
+				return "TRUE"
 			},
-			wantParam: func(d Dialect, _ bool) string {
-				return fmt.Sprintf("%s = %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			wantParam: func(Dialect, bool) string {
+				return "TRUE"
 			},
-			wantParams: []QueryParam{{Name: "p1", Value: "x"}, {Name: "p2", Value: "x"}},
 		},
 		{
 			name:  "parenthesized not preserves nested precedence",

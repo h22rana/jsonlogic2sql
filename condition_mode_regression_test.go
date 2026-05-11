@@ -1035,29 +1035,26 @@ func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
 		{
 			name:    "literal truthy if condition folds before comparison",
 			logic:   `{"==":[{"if":["nonempty","x","y"]},"x"]}`,
-			wantSQL: "'x' = 'x'",
-			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("%s = %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			wantSQL: "TRUE",
+			wantParam: func(Dialect) string {
+				return "TRUE"
 			},
-			wantParams: []QueryParam{{Name: "p1", Value: "x"}, {Name: "p2", Value: "x"}},
 		},
 		{
 			name:    "unreachable comparison operand branch is not parsed",
 			logic:   `{"<":[{"if":[false,{"var":"bad-name"},3]},4]}`,
-			wantSQL: "3 < 4",
-			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("%s < %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			wantSQL: "TRUE",
+			wantParam: func(Dialect) string {
+				return "TRUE"
 			},
-			wantParams: []QueryParam{{Name: "p1", Value: float64(3)}, {Name: "p2", Value: float64(4)}},
 		},
 		{
 			name:    "value logical fallback folds before comparison",
 			logic:   `{"==":[{"or":[0,5]},5]}`,
-			wantSQL: "5 = 5",
-			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("%s = %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			wantSQL: "TRUE",
+			wantParam: func(Dialect) string {
+				return "TRUE"
 			},
-			wantParams: []QueryParam{{Name: "p1", Value: float64(5)}, {Name: "p2", Value: float64(5)}},
 		},
 	}
 
@@ -1090,6 +1087,71 @@ func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
 					}
 					if !reflect.DeepEqual(gotParams, tt.wantParams) {
 						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_LiteralComparisonsEmitFoldedBooleansAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "null ordering coerces to known true",
+			logic: `{">":[null,-1]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "loose equality coerces number string",
+			logic: `{"==":[5,"5"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "strict equality keeps type mismatch false",
+			logic: `{"===":[5,"5"]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "literal in folds false",
+			logic: `{"in":["x",["a","b"]]}`,
+			want:  "FALSE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParam != tt.want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.want)
+					}
+					if len(gotParams) != 0 {
+						t.Fatalf("params = %#v, want none", gotParams)
 					}
 				})
 			}

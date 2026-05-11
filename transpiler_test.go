@@ -1550,13 +1550,13 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "both null equality",
 			input:    `{"==": [null, null]}`,
-			expected: "NULL IS NULL",
+			expected: "TRUE",
 			hasError: false,
 		},
 		{
 			name:     "both null inequality",
 			input:    `{"!=": [null, null]}`,
-			expected: "NULL IS NOT NULL",
+			expected: "FALSE",
 			hasError: false,
 		},
 		// Missing operator edge cases
@@ -1770,7 +1770,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "in with string for substring check",
 			input:    `{"in": ["test", "this is a test string"]}`,
-			expected: "STRPOS('this is a test string', 'test') > 0",
+			expected: "TRUE",
 			hasError: false,
 		},
 

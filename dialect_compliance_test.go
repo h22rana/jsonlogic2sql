@@ -407,11 +407,11 @@ func TestDialectSpecificStringFunctions(t *testing.T) {
 			name:  "in string containment with literal on right",
 			input: `{"in": ["test", "this is a test string"]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "STRPOS('this is a test string', 'test') > 0",
-				DialectSpanner:    "STRPOS('this is a test string', 'test') > 0",
-				DialectPostgreSQL: "POSITION('test' IN 'this is a test string') > 0",
-				DialectDuckDB:     "STRPOS('this is a test string', 'test') > 0",
-				DialectClickHouse: "position('this is a test string', 'test') > 0",
+				DialectBigQuery:   "TRUE",
+				DialectSpanner:    "TRUE",
+				DialectPostgreSQL: "TRUE",
+				DialectDuckDB:     "TRUE",
+				DialectClickHouse: "TRUE",
 			},
 		},
 		{
@@ -462,10 +462,10 @@ func TestEdgeCasesNullHandling(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"null == null", `{"==": [null, null]}`, "NULL IS NULL"},
-		{"null != null", `{"!=": [null, null]}`, "NULL IS NOT NULL"},
-		{"null === null", `{"===": [null, null]}`, "NULL IS NULL"},
-		{"null !== null", `{"!==": [null, null]}`, "NULL IS NOT NULL"},
+		{"null == null", `{"==": [null, null]}`, "TRUE"},
+		{"null != null", `{"!=": [null, null]}`, "FALSE"},
+		{"null === null", `{"===": [null, null]}`, "TRUE"},
+		{"null !== null", `{"!==": [null, null]}`, "FALSE"},
 		{"var == null", `{"==": [{"var": "field"}, null]}`, "field IS NULL"},
 		{"null == var", `{"==": [null, {"var": "field"}]}`, "field IS NULL"},
 		{"var != null", `{"!=": [{"var": "field"}, null]}`, "field IS NOT NULL"},
