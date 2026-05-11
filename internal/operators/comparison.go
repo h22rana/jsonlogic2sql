@@ -305,6 +305,9 @@ func FoldLiteralComparison(operator string, args []interface{}) (bool, bool, err
 		if err := validateEqualityJSONNumberLiteral(right); err != nil {
 			return false, false, err
 		}
+		if hasOverflowedJSONNumberLiteral(left, right) {
+			return false, false, nil
+		}
 
 		var equal bool
 		if isStrictEqualityOperator(operator) {
@@ -332,6 +335,9 @@ func foldLiteralOrderingComparison(operator string, leftArg, rightArg interface{
 		return false, false, nil
 	}
 	if equalityLiteralKind(left) == "" || equalityLiteralKind(right) == "" {
+		return false, false, nil
+	}
+	if hasOverflowedJSONNumberLiteral(left, right) {
 		return false, false, nil
 	}
 
@@ -379,6 +385,23 @@ func jsNumberFromOrderingLiteral(value interface{}) (jsNumberLiteral, bool, bool
 		return newJSIntNumber(0), true, true
 	}
 	return jsNumberFromLiteral(value)
+}
+
+func hasOverflowedJSONNumberLiteral(values ...interface{}) bool {
+	for _, value := range values {
+		num, ok := value.(json.Number)
+		if !ok {
+			continue
+		}
+		if _, err := normalizeJSONNumberLiteral(num); err != nil {
+			continue
+		}
+		f, _ := strconv.ParseFloat(num.String(), 64)
+		if math.IsInf(f, 0) {
+			return true
+		}
+	}
+	return false
 }
 
 func foldLiteralInComparison(leftArg, rightArg interface{}) (bool, bool, error) {

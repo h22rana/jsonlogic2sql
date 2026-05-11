@@ -910,6 +910,126 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_OverflowJSONNumberComparisonsDoNotShortCircuitAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		want       string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "equality remains dynamic",
+			logic: `{"if":[{"==":[1e400,1e400]},"yes","no"]}`,
+			want:  "CASE WHEN 1e400 = 1e400 THEN 'yes' ELSE 'no' END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf(
+					"CASE WHEN %s = %s THEN %s ELSE %s END",
+					testPlaceholder(d, 1),
+					testPlaceholder(d, 2),
+					testPlaceholder(d, 3),
+					testPlaceholder(d, 4),
+				)
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: "1e400"},
+				{Name: "p2", Value: "1e400"},
+				{Name: "p3", Value: "yes"},
+				{Name: "p4", Value: "no"},
+			},
+		},
+		{
+			name:  "inequality remains dynamic",
+			logic: `{"if":[{"!=":[1e400,1e400]},"yes","no"]}`,
+			want:  "CASE WHEN 1e400 != 1e400 THEN 'yes' ELSE 'no' END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf(
+					"CASE WHEN %s != %s THEN %s ELSE %s END",
+					testPlaceholder(d, 1),
+					testPlaceholder(d, 2),
+					testPlaceholder(d, 3),
+					testPlaceholder(d, 4),
+				)
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: "1e400"},
+				{Name: "p2", Value: "1e400"},
+				{Name: "p3", Value: "yes"},
+				{Name: "p4", Value: "no"},
+			},
+		},
+		{
+			name:  "ordering remains dynamic",
+			logic: `{"if":[{">":[1e400,1]},"yes","no"]}`,
+			want:  "CASE WHEN 1e400 > 1 THEN 'yes' ELSE 'no' END",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf(
+					"CASE WHEN %s > %s THEN %s ELSE %s END",
+					testPlaceholder(d, 1),
+					testPlaceholder(d, 2),
+					testPlaceholder(d, 3),
+					testPlaceholder(d, 4),
+				)
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: "1e400"},
+				{Name: "p2", Value: float64(1)},
+				{Name: "p3", Value: "yes"},
+				{Name: "p4", Value: "no"},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 	t.Parallel()
 

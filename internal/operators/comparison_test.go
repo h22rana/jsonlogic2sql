@@ -975,6 +975,47 @@ func TestJSNumberFromString(t *testing.T) {
 	}
 }
 
+func TestFoldLiteralComparison_OverflowJSONNumbersAreUnknown(t *testing.T) {
+	tests := []struct {
+		name     string
+		operator string
+		args     []interface{}
+	}{
+		{
+			name:     "equality",
+			operator: "==",
+			args:     []interface{}{json.Number("1e400"), json.Number("1e400")},
+		},
+		{
+			name:     "inequality",
+			operator: "!=",
+			args:     []interface{}{json.Number("1e400"), json.Number("1e400")},
+		},
+		{
+			name:     "strict equality",
+			operator: "===",
+			args:     []interface{}{json.Number("1e400"), json.Number("1e400")},
+		},
+		{
+			name:     "ordering",
+			operator: ">",
+			args:     []interface{}{json.Number("1e400"), json.Number("1")},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, known, err := FoldLiteralComparison(tt.operator, tt.args)
+			if err != nil {
+				t.Fatalf("FoldLiteralComparison() error = %v", err)
+			}
+			if known {
+				t.Fatal("FoldLiteralComparison() known = true, want false")
+			}
+		})
+	}
+}
+
 func TestComparisonOperator_ToSQL_EqualitySemanticsWithSchema(t *testing.T) {
 	schema := newComparisonSchemaProvider(map[string]string{
 		"amount":         "integer",
