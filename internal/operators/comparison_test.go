@@ -1016,6 +1016,48 @@ func TestFoldLiteralComparison_OverflowJSONNumbersAreUnknown(t *testing.T) {
 	}
 }
 
+func TestFoldLiteralComparison_ArrayMembershipUsesStrictEquality(t *testing.T) {
+	tests := []struct {
+		name string
+		args []interface{}
+		want bool
+	}{
+		{
+			name: "same number matches",
+			args: []interface{}{float64(1), []interface{}{float64(1)}},
+			want: true,
+		},
+		{
+			name: "string number does not match number",
+			args: []interface{}{"1", []interface{}{float64(1)}},
+		},
+		{
+			name: "false does not match zero",
+			args: []interface{}{false, []interface{}{float64(0)}},
+		},
+		{
+			name: "null matches null",
+			args: []interface{}{nil, []interface{}{nil}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, known, err := FoldLiteralComparison("in", tt.args)
+			if err != nil {
+				t.Fatalf("FoldLiteralComparison() error = %v", err)
+			}
+			if !known {
+				t.Fatal("FoldLiteralComparison() known = false, want true")
+			}
+			if got != tt.want {
+				t.Fatalf("FoldLiteralComparison() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestComparisonOperator_ToSQL_EqualitySemanticsWithSchema(t *testing.T) {
 	schema := newComparisonSchemaProvider(map[string]string{
 		"amount":         "integer",

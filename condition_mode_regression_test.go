@@ -1122,6 +1122,21 @@ func TestTranspileCondition_LiteralComparisonsEmitFoldedBooleansAllDialects(t *t
 			logic: `{"in":["x",["a","b"]]}`,
 			want:  "FALSE",
 		},
+		{
+			name:  "literal in array uses strict equality for string number",
+			logic: `{"in":["1",[1]]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "literal in array uses strict equality for boolean number",
+			logic: `{"in":[false,[0]]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "literal in array matches same numeric type",
+			logic: `{"in":[1,[1]]}`,
+			want:  "TRUE",
+		},
 	}
 
 	for _, d := range allDialects() {

@@ -426,7 +426,7 @@ func foldLiteralInComparison(leftArg, rightArg interface{}) (bool, bool, error) 
 			if !ok || equalityLiteralKind(itemLiteral) == "" {
 				return false, false, nil
 			}
-			if equalityLiteralsLooseEqual(left, itemLiteral) {
+			if equalityLiteralsStrictEqual(left, itemLiteral) {
 				return true, true, nil
 			}
 		}
