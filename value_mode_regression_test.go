@@ -2974,6 +2974,48 @@ func TestTranspileValue_CatStringifiesCustomPredicate(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_CatStringifiesLowercaseCaseBooleanValue(t *testing.T) {
+	logic := `{"cat":[{"lowerBool":[]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			err = tr.RegisterOperatorFunc("lowerBool", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				if len(args) != 0 {
+					return OperatorResult{}, fmt.Errorf("lowerBool requires no arguments")
+				}
+				return ValueSQL("case when flag then true else false end", ExpressionTypeBoolean), nil
+			})
+			if err != nil {
+				t.Fatalf("RegisterOperatorFunc() error = %v", err)
+			}
+
+			want := "CONCAT(CASE WHEN (case when flag then true else false end) THEN 'true' ELSE 'false' END)"
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if got != want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, want)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if gotParam != want {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+			}
+			if len(gotParams) != 0 {
+				t.Fatalf("params = %#v, want none", gotParams)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_IfUsesTypedCustomPredicateCondition(t *testing.T) {
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {

@@ -267,7 +267,7 @@ func (s *StringOperator) booleanToStringSQL(sql string) string {
 		return "'false'"
 	}
 	condition := StripRedundantOuterParens(sql)
-	if strings.HasPrefix(condition, "CASE ") {
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(condition)), "CASE ") {
 		condition = fmt.Sprintf("(%s)", condition)
 	}
 	return fmt.Sprintf("CASE WHEN %s THEN 'true' ELSE 'false' END", condition)
