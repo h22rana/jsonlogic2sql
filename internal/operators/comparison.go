@@ -560,6 +560,13 @@ func (operand equalityFieldOperand) defaultCanLooseEqual(literal interface{}) bo
 	return !operand.defaultLiteralKnown || equalityLiteralsLooseEqual(operand.defaultLiteral, literal)
 }
 
+func (operand equalityFieldOperand) defaultCanHaveStrictKind(kind string) bool {
+	if !operand.hasDefault {
+		return false
+	}
+	return !operand.defaultLiteralKnown || equalityLiteralKind(operand.defaultLiteral) == kind
+}
+
 func hasRadixPrefix(s string) bool {
 	if len(s) < 2 || s[0] != '0' {
 		return false
@@ -1048,15 +1055,27 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 	}
 	fieldName := field.fieldName
 
+	fieldKind := c.fieldEqualityKind(fieldName)
+	if fieldKind == "" {
+		return c.applyTypedExpressionEqualitySemantics(dec, operator, leftArg, rightArg)
+	}
+
+	if isStrictEqualityOperator(operator) {
+		if exprKind, exprTyped := expressionEqualityKind(literalArg); exprTyped && exprKind != fieldKind {
+			if field.defaultCanHaveStrictKind(exprKind) {
+				return dec
+			}
+			dec.handled = true
+			dec.constant = impossibleEqualityPredicateConstant(operator)
+			return dec
+		}
+	}
+
 	literal, ok := equalityLiteralValue(literalArg)
 	if !ok {
 		return dec
 	}
 
-	fieldKind := c.fieldEqualityKind(fieldName)
-	if fieldKind == "" {
-		return c.applyTypedExpressionEqualitySemantics(dec, operator, leftArg, rightArg)
-	}
 	dec.handled = true
 
 	if err := validateEqualityJSONNumberLiteral(literal); err != nil {
@@ -1472,12 +1491,13 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 
 	// Special handling for 'in' operator - right side should be an array
 	if operator == "in" {
-		leftSQL, err := c.valueToSQL(args[0])
+		leftArg := materializePredicateValueOperand(args[0])
+		leftSQL, err := c.valueToSQL(leftArg)
 		if err != nil {
 			return "", fmt.Errorf("invalid left operand: %w", err)
 		}
-		// Pass the original left arg for enum validation
-		return c.handleIn(leftSQL, args[1], args[0])
+		// Keep the left operand metadata available for enum validation.
+		return c.handleIn(leftSQL, args[1], leftArg)
 	}
 
 	// Apply type coercion based on schema
@@ -1509,6 +1529,10 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 		if err != nil {
 			return "", err
 		}
+	}
+	if isEqualityOperator(operator) {
+		leftArg = materializePredicateValueOperand(leftArg)
+		rightArg = materializePredicateValueOperand(rightArg)
 	}
 
 	leftSQL, err := c.valueToSQL(leftArg)
@@ -1689,6 +1713,17 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 func isSQLStringLiteral(sql string) bool {
 	trimmed := strings.TrimSpace(sql)
 	return len(trimmed) >= 2 && strings.HasPrefix(trimmed, "'") && strings.HasSuffix(trimmed, "'")
+}
+
+func materializePredicateValueOperand(value interface{}) interface{} {
+	pv, ok := value.(ProcessedValue)
+	if !ok || !pv.IsSQL || !pv.HasExpressionInfo || pv.Kind != ExpressionKindPredicate {
+		return value
+	}
+	pv.Value = PredicateValueSQL(pv.Value)
+	pv.Kind = ExpressionKindValue
+	pv.Type = ExpressionTypeBoolean
+	return pv
 }
 
 // isStringLikeInOperandNoSchema classifies whether the left operand of "in"
@@ -2073,7 +2108,7 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 	}
 
 	if operator == "in" {
-		return c.handleInParam(args[0], args[1], pc)
+		return c.handleInParam(materializePredicateValueOperand(args[0]), args[1], pc)
 	}
 
 	leftArg := args[0]
@@ -2103,6 +2138,10 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 		if err != nil {
 			return "", err
 		}
+	}
+	if isEqualityOperator(operator) {
+		leftArg = materializePredicateValueOperand(leftArg)
+		rightArg = materializePredicateValueOperand(rightArg)
 	}
 
 	leftSQL, err := c.valueToSQLParam(leftArg, pc)

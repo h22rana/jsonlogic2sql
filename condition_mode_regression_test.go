@@ -1024,6 +1024,79 @@ func TestTranspileCondition_StrictEqualityMismatchedTypedExpressions(t *testing.
 	}
 }
 
+func TestTranspileCondition_StrictEqualitySchemaFieldExpressionMismatches(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "num", Type: FieldTypeNumber},
+		{Name: "code", Type: FieldTypeString},
+	})
+
+	tests := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "numeric field strict equals string expression",
+			logic: `{"===":[{"var":"num"},{"cat":["5"]}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "numeric field strict not equals string expression",
+			logic: `{"!==":[{"var":"num"},{"cat":["5"]}]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "string expression strict equals numeric field",
+			logic: `{"===":[{"cat":["5"]},{"var":"num"}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "string field strict equals numeric expression",
+			logic: `{"===":[{"var":"code"},{"+":[2,3]}]}`,
+			want:  "FALSE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParam != tt.want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.want)
+					}
+					if len(gotParams) != 0 {
+						t.Fatalf("params = %#v, want none", gotParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1055,6 +1128,24 @@ func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
 			wantParam: func(Dialect) string {
 				return "TRUE"
 			},
+		},
+		{
+			name:    "nested predicate materializes before equality",
+			logic:   `{"==":[{">":[{"var":"x"},1]},false]}`,
+			wantSQL: "CASE WHEN x > 1 THEN TRUE ELSE FALSE END = FALSE",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN x > %s THEN TRUE ELSE FALSE END = FALSE", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+		{
+			name:    "nested predicate materializes before array membership",
+			logic:   `{"in":[{">":[{"var":"x"},1]},[false]]}`,
+			wantSQL: "CASE WHEN x > 1 THEN TRUE ELSE FALSE END IN (FALSE)",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CASE WHEN x > %s THEN TRUE ELSE FALSE END IN (FALSE)", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
 		},
 	}
 
