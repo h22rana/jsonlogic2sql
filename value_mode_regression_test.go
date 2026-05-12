@@ -2566,6 +2566,141 @@ func TestTranspileValue_CatStringifiesBuiltInPredicate(t *testing.T) {
 	}
 }
 
+func TestTranspileValue_CatStringifiesMixedLogicalBranchesAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "x", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		want       string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "if stringifies mixed string boolean branches",
+			logic: `{"cat":[{"if":[{"==":[{"var":"x"},1]},"yes",false]}]}`,
+			want:  "CONCAT(CASE WHEN x = 1 THEN 'yes' ELSE 'false' END)",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("CONCAT(CASE WHEN x = %s THEN %s ELSE 'false' END)",
+					testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: "yes"}},
+		},
+		{
+			name:  "or stringifies predicate fallback",
+			logic: `{"cat":[{"or":[{"==":[{"var":"x"},1]},"fallback"]}]}`,
+			want:  "CONCAT(CASE WHEN x = 1 THEN CASE WHEN x = 1 THEN 'true' ELSE 'false' END ELSE 'fallback' END)",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf(
+					"CONCAT(CASE WHEN x = %s THEN CASE WHEN x = %s THEN 'true' ELSE 'false' END ELSE %s END)",
+					testPlaceholder(d, 1), testPlaceholder(d, 2), testPlaceholder(d, 3),
+				)
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(1)},
+				{Name: "p2", Value: float64(1)},
+				{Name: "p3", Value: "fallback"},
+			},
+		},
+		{
+			name:  "and stringifies predicate fallback",
+			logic: `{"cat":[{"and":[{"==":[{"var":"x"},1]},"ok"]}]}`,
+			want:  "CONCAT(CASE WHEN x = 1 THEN 'ok' ELSE CASE WHEN x = 1 THEN 'true' ELSE 'false' END END)",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf(
+					"CONCAT(CASE WHEN x = %s THEN %s ELSE CASE WHEN x = %s THEN 'true' ELSE 'false' END END)",
+					testPlaceholder(d, 1), testPlaceholder(d, 3), testPlaceholder(d, 2),
+				)
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(1)},
+				{Name: "p2", Value: float64(1)},
+				{Name: "p3", Value: "ok"},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_CatStringifiedMixedBranchesRejectArrayFieldsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "tags", Type: FieldTypeArray},
+	})
+	logic := `{"cat":[{"if":[{"var":"flag"},{"var":"tags"},false]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			if _, valueErr := tr.TranspileValue(logic); !IsErrorCode(valueErr, ErrInvalidArgument) {
+				t.Fatalf("TranspileValue() error = %v, want %s", valueErr, ErrInvalidArgument)
+			}
+			gotSQL, gotParams, paramErr := tr.TranspileParameterizedValue(logic)
+			if !IsErrorCode(paramErr, ErrInvalidArgument) {
+				t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+					paramErr, ErrInvalidArgument, gotSQL, gotParams)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_PredicateResultsAreTwoValuedBooleansAllDialectsSchemaModes(t *testing.T) {
 	t.Parallel()
 

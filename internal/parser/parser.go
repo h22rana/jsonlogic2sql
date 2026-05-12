@@ -721,6 +721,27 @@ func valueOperatorResult(res expressionResult) operators.OperatorResult {
 	return res.OperatorResult
 }
 
+func catStringSQL(res expressionResult) string {
+	if res.Kind == operators.ExpressionKindPredicate || valueTypeOf(res) == operators.ExpressionTypeBoolean {
+		return booleanSQLStringValue(res.SQL)
+	}
+	return operators.StripRedundantOuterParens(valueSQL(res))
+}
+
+func booleanSQLStringValue(sql string) string {
+	switch strings.ToUpper(strings.TrimSpace(sql)) {
+	case "TRUE":
+		return "'true'"
+	case "FALSE":
+		return "'false'"
+	}
+	condition := operators.StripRedundantOuterParens(sql)
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(condition)), "CASE ") {
+		condition = fmt.Sprintf("(%s)", condition)
+	}
+	return fmt.Sprintf("CASE WHEN %s THEN 'true' ELSE 'false' END", condition)
+}
+
 func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	pv := operators.TypedSQLResult(valueOperandSQL(res), res.Kind, valueTypeOf(res))
 	pv.RequiresKnownTruthiness = res.requiresKnownTruthiness
@@ -1313,7 +1334,13 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
 		return valueResult(sql, operators.ExpressionTypeNumber), nil
-	case "cat", "substr":
+	case "cat":
+		arr, ok := args.([]interface{})
+		if !ok {
+			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
+		}
+		return p.parseCatValue(arr, path)
+	case "substr":
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
@@ -1606,6 +1633,187 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 		return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(current), valueSQL(rest)), resultType), nil
 	}
 	return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(rest), valueSQL(current)), resultType), nil
+}
+
+func (p *Parser) parseCatValue(args []interface{}, path string) (expressionResult, error) {
+	if len(args) == 0 {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpCat, path, 1, 0)
+	}
+	operands := make([]string, len(args))
+	for i, arg := range args {
+		res, err := p.parseCatStringExpression(arg, tperrors.BuildArrayPath(path, i))
+		if err != nil {
+			return expressionResult{}, err
+		}
+		operands[i] = res.SQL
+	}
+	return valueResult(fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), operators.ExpressionTypeString), nil
+}
+
+func (p *Parser) parseCatStringExpression(expr interface{}, path string) (expressionResult, error) {
+	res, err := p.parseExpressionValue(expr, path)
+	if err == nil {
+		return p.stringifiedCatResult(res, path)
+	}
+	if !isTranspileErrorCode(err, tperrors.ErrTypeMismatch) {
+		return expressionResult{}, err
+	}
+	operator, args, ok := singleOperatorExpression(expr)
+	if !ok {
+		return expressionResult{}, err
+	}
+	arr, ok := args.([]interface{})
+	if !ok {
+		return expressionResult{}, err
+	}
+	switch operator {
+	case operators.OpIf:
+		return p.parseStringifiedIf(arr, path)
+	case operators.OpAnd, operators.OpOr:
+		return p.parseStringifiedLogical(operator, arr, path)
+	default:
+		return expressionResult{}, err
+	}
+}
+
+func (p *Parser) stringifiedCatResult(res expressionResult, path string) (expressionResult, error) {
+	if err := p.validateCatStringifiableResult(res, path); err != nil {
+		return expressionResult{}, err
+	}
+	return valueResult(catStringSQL(res), operators.ExpressionTypeString), nil
+}
+
+func (p *Parser) validateCatStringifiableResult(res expressionResult, path string) error {
+	if p.config == nil || p.config.Schema == nil || !res.fieldValue || res.fieldName == "" {
+		return nil
+	}
+	fieldType := p.config.Schema.GetFieldType(res.fieldName)
+	if fieldType == "" {
+		return nil
+	}
+	if p.config.Schema.IsStringType(res.fieldName) || p.config.Schema.IsNumericType(res.fieldName) {
+		return nil
+	}
+	if p.config.Schema.IsArrayType(res.fieldName) || fieldType == "object" {
+		return tperrors.New(tperrors.ErrInvalidArgument, operators.OpCat, path,
+			fmt.Sprintf("string operation on incompatible field '%s' (type: %s)", res.fieldName, fieldType))
+	}
+	return nil
+}
+
+func (p *Parser) parseStringifiedIf(args []interface{}, path string) (expressionResult, error) {
+	if len(args) < 2 {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, 2, len(args))
+	}
+	var parts []string
+	pairLimit := len(args)
+	hasElse := len(args)%2 == 1
+	if hasElse {
+		pairLimit = len(args) - 1
+	}
+	for i := 0; i < pairLimit; i += 2 {
+		cond, condition, err := p.parseTruthinessResult(args[i], tperrors.BuildArrayPath(path, i))
+		if err != nil {
+			return expressionResult{}, err
+		}
+		if cond.truthKnown && !cond.truthy {
+			continue
+		}
+		thenRes, err := p.parseCatStringExpression(args[i+1], tperrors.BuildArrayPath(path, i+1))
+		if err != nil {
+			return expressionResult{}, err
+		}
+		if cond.truthKnown && cond.truthy {
+			if len(parts) == 0 {
+				return thenRes, nil
+			}
+			return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL),
+				operators.ExpressionTypeString), nil
+		}
+		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
+	}
+	elseSQL := "NULL"
+	if hasElse {
+		elseRes, err := p.parseCatStringExpression(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1))
+		if err != nil {
+			return expressionResult{}, err
+		}
+		if len(parts) == 0 {
+			return elseRes, nil
+		}
+		elseSQL = elseRes.SQL
+	}
+	if len(parts) == 0 {
+		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
+	}
+	return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL),
+		operators.ExpressionTypeString), nil
+}
+
+func (p *Parser) parseStringifiedLogical(operator string, args []interface{}, path string) (expressionResult, error) {
+	if len(args) == 0 {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operator, path, 1, 0)
+	}
+	return p.parseStringifiedLogicalFrom(operator, args, 0, path)
+}
+
+func (p *Parser) parseStringifiedLogicalFrom(operator string, args []interface{}, index int, path string) (expressionResult, error) {
+	argPath := tperrors.BuildArrayPath(path, index)
+	if current, ok := nonFiniteNativeFloatTruthResult(args[index]); ok {
+		if index == len(args)-1 ||
+			(operator == operators.OpOr && current.truthy) ||
+			(operator == operators.OpAnd && !current.truthy) {
+			return expressionResult{}, nonFiniteNativeFloatValueError(args[index], argPath)
+		}
+		return p.parseStringifiedLogicalFrom(operator, args, index+1, path)
+	}
+
+	current, condition, err := p.parseTruthinessResult(args[index], argPath)
+	if err != nil {
+		return expressionResult{}, err
+	}
+	if index == len(args)-1 {
+		return p.parseCatStringExpression(args[index], argPath)
+	}
+	if current.truthKnown {
+		if operator == operators.OpOr && current.truthy {
+			return p.parseCatStringExpression(args[index], argPath)
+		}
+		if operator == operators.OpAnd && !current.truthy {
+			return p.parseCatStringExpression(args[index], argPath)
+		}
+		return p.parseStringifiedLogicalFrom(operator, args, index+1, path)
+	}
+	currentString, err := p.parseCatStringExpression(args[index], argPath)
+	if err != nil {
+		return expressionResult{}, err
+	}
+	rest, err := p.parseStringifiedLogicalFrom(operator, args, index+1, path)
+	if err != nil {
+		return expressionResult{}, err
+	}
+	if operator == operators.OpOr {
+		return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, currentString.SQL, rest.SQL),
+			operators.ExpressionTypeString), nil
+	}
+	return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, rest.SQL, currentString.SQL),
+		operators.ExpressionTypeString), nil
+}
+
+func singleOperatorExpression(expr interface{}) (string, interface{}, bool) {
+	obj, ok := expr.(map[string]interface{})
+	if !ok || len(obj) != 1 {
+		return "", nil, false
+	}
+	for operator, args := range obj {
+		return operator, args, true
+	}
+	return "", nil, false
+}
+
+func isTranspileErrorCode(err error, code tperrors.ErrorCode) bool {
+	var tpErr *tperrors.TranspileError
+	return errors.As(err, &tpErr) && tpErr.Code == code
 }
 
 // wrapOperatorError wraps an operator error with TranspileError if it isn't already.
@@ -2265,7 +2473,13 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
 		return valueResult(sql, operators.ExpressionTypeNumber), nil
-	case "cat", "substr":
+	case "cat":
+		arr, ok := args.([]interface{})
+		if !ok {
+			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
+		}
+		return p.parseCatValueParam(arr, path, pc)
+	case "substr":
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
@@ -2564,6 +2778,172 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 		return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(current), valueSQL(rest)), resultType), nil
 	}
 	return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(rest), valueSQL(current)), resultType), nil
+}
+
+func (p *Parser) parseCatValueParam(args []interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
+	if len(args) == 0 {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpCat, path, 1, 0)
+	}
+	operands := make([]string, len(args))
+	for i, arg := range args {
+		res, err := p.parseCatStringExpressionParam(arg, tperrors.BuildArrayPath(path, i), pc)
+		if err != nil {
+			return expressionResult{}, err
+		}
+		operands[i] = res.SQL
+	}
+	return valueResult(fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), operators.ExpressionTypeString), nil
+}
+
+func (p *Parser) parseCatStringExpressionParam(
+	expr interface{},
+	path string,
+	pc *params.ParamCollector,
+) (expressionResult, error) {
+	checkpoint := pc.Checkpoint()
+	res, err := p.parseExpressionValueParam(expr, path, pc)
+	if err == nil {
+		return p.stringifiedCatResult(res, path)
+	}
+	if !isTranspileErrorCode(err, tperrors.ErrTypeMismatch) {
+		return expressionResult{}, err
+	}
+	operator, args, ok := singleOperatorExpression(expr)
+	if !ok {
+		return expressionResult{}, err
+	}
+	arr, ok := args.([]interface{})
+	if !ok {
+		return expressionResult{}, err
+	}
+	pc.Restore(checkpoint)
+	switch operator {
+	case operators.OpIf:
+		return p.parseStringifiedIfParam(arr, path, pc)
+	case operators.OpAnd, operators.OpOr:
+		return p.parseStringifiedLogicalParam(operator, arr, path, pc)
+	default:
+		return expressionResult{}, err
+	}
+}
+
+func (p *Parser) parseStringifiedIfParam(
+	args []interface{},
+	path string,
+	pc *params.ParamCollector,
+) (expressionResult, error) {
+	if len(args) < 2 {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, 2, len(args))
+	}
+	var parts []string
+	pairLimit := len(args)
+	hasElse := len(args)%2 == 1
+	if hasElse {
+		pairLimit = len(args) - 1
+	}
+	for i := 0; i < pairLimit; i += 2 {
+		cond, condition, err := p.parseTruthinessResultParam(args[i], tperrors.BuildArrayPath(path, i), pc)
+		if err != nil {
+			return expressionResult{}, err
+		}
+		if cond.truthKnown && !cond.truthy {
+			continue
+		}
+		thenRes, err := p.parseCatStringExpressionParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
+		if err != nil {
+			return expressionResult{}, err
+		}
+		if cond.truthKnown && cond.truthy {
+			if len(parts) == 0 {
+				return thenRes, nil
+			}
+			return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL),
+				operators.ExpressionTypeString), nil
+		}
+		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
+	}
+	elseSQL := "NULL"
+	if hasElse {
+		elseRes, err := p.parseCatStringExpressionParam(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1), pc)
+		if err != nil {
+			return expressionResult{}, err
+		}
+		if len(parts) == 0 {
+			return elseRes, nil
+		}
+		elseSQL = elseRes.SQL
+	}
+	if len(parts) == 0 {
+		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
+	}
+	return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL),
+		operators.ExpressionTypeString), nil
+}
+
+func (p *Parser) parseStringifiedLogicalParam(
+	operator string,
+	args []interface{},
+	path string,
+	pc *params.ParamCollector,
+) (expressionResult, error) {
+	if len(args) == 0 {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operator, path, 1, 0)
+	}
+	return p.parseStringifiedLogicalFromParam(operator, args, 0, path, pc)
+}
+
+func (p *Parser) parseStringifiedLogicalFromParam(
+	operator string,
+	args []interface{},
+	index int,
+	path string,
+	pc *params.ParamCollector,
+) (expressionResult, error) {
+	argPath := tperrors.BuildArrayPath(path, index)
+	if current, ok := nonFiniteNativeFloatTruthResult(args[index]); ok {
+		if index == len(args)-1 ||
+			(operator == operators.OpOr && current.truthy) ||
+			(operator == operators.OpAnd && !current.truthy) {
+			return expressionResult{}, nonFiniteNativeFloatValueError(args[index], argPath)
+		}
+		return p.parseStringifiedLogicalFromParam(operator, args, index+1, path, pc)
+	}
+
+	truthCheckpoint := pc.Checkpoint()
+	current, condition, err := p.parseTruthinessResultParam(args[index], argPath, pc)
+	if err != nil {
+		return expressionResult{}, err
+	}
+	if index == len(args)-1 {
+		pc.Restore(truthCheckpoint)
+		return p.parseCatStringExpressionParam(args[index], argPath, pc)
+	}
+	if current.truthKnown {
+		if operator == operators.OpOr && current.truthy {
+			pc.Restore(truthCheckpoint)
+			return p.parseCatStringExpressionParam(args[index], argPath, pc)
+		}
+		if operator == operators.OpAnd && !current.truthy {
+			pc.Restore(truthCheckpoint)
+			return p.parseCatStringExpressionParam(args[index], argPath, pc)
+		}
+		pc.Restore(truthCheckpoint)
+		return p.parseStringifiedLogicalFromParam(operator, args, index+1, path, pc)
+	}
+	currentString, err := p.parseCatStringExpressionParam(args[index], argPath, pc)
+	if err != nil {
+		return expressionResult{}, err
+	}
+	rest, err := p.parseStringifiedLogicalFromParam(operator, args, index+1, path, pc)
+	if err != nil {
+		return expressionResult{}, err
+	}
+	if operator == operators.OpOr {
+		return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, currentString.SQL, rest.SQL),
+			operators.ExpressionTypeString), nil
+	}
+	return valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, rest.SQL, currentString.SQL),
+		operators.ExpressionTypeString), nil
 }
 
 // parseOperatorParam is the parameterized variant of parseOperator. Keep in sync.
