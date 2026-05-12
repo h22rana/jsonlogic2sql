@@ -2701,6 +2701,90 @@ func TestTranspileValue_CatStringifiedMixedBranchesRejectArrayFieldsAllDialects(
 	}
 }
 
+func TestTranspileValue_CatRejectsStaticArrayValuesAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "items", Type: FieldTypeArray},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		schemaOnly bool
+	}{
+		{
+			name:  "array literal",
+			logic: `{"cat":[[1,2]]}`,
+		},
+		{
+			name:  "constant if selects array literal",
+			logic: `{"cat":[{"if":[true,[1],false]}]}`,
+		},
+		{
+			name:  "array producing map",
+			logic: `{"cat":[{"map":[[1],{"var":""}]}]}`,
+		},
+		{
+			name:  "custom array value",
+			logic: `{"cat":[{"arrayValue":[]}]}`,
+		},
+		{
+			name:       "schema array field",
+			logic:      `{"cat":[{"var":"items"}]}`,
+			schemaOnly: true,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+					err = tr.RegisterOperatorFunc("arrayValue", func(_ string, args []OperatorArg) (OperatorResult, error) {
+						if len(args) != 0 {
+							return OperatorResult{}, fmt.Errorf("arrayValue requires no arguments")
+						}
+						return ValueSQL("array_expr", ExpressionTypeArray), nil
+					})
+					if err != nil {
+						t.Fatalf("RegisterOperatorFunc() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						if tt.schemaOnly && mode.schema == nil {
+							continue
+						}
+						t.Run(tt.name, func(t *testing.T) {
+							if _, valueErr := tr.TranspileValue(tt.logic); !IsErrorCode(valueErr, ErrInvalidArgument) {
+								t.Fatalf("TranspileValue() error = %v, want %s", valueErr, ErrInvalidArgument)
+							}
+							gotSQL, gotParams, paramErr := tr.TranspileParameterizedValue(tt.logic)
+							if !IsErrorCode(paramErr, ErrInvalidArgument) {
+								t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+									paramErr, ErrInvalidArgument, gotSQL, gotParams)
+							}
+							if len(gotParams) != 0 {
+								t.Fatalf("params = %#v, want none on error", gotParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_PredicateResultsAreTwoValuedBooleansAllDialectsSchemaModes(t *testing.T) {
 	t.Parallel()
 

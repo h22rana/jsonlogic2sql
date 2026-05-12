@@ -1684,19 +1684,21 @@ func (p *Parser) stringifiedCatResult(res expressionResult, path string) (expres
 }
 
 func (p *Parser) validateCatStringifiableResult(res expressionResult, path string) error {
-	if p.config == nil || p.config.Schema == nil || !res.fieldValue || res.fieldName == "" {
-		return nil
+	if p.config != nil && p.config.Schema != nil && res.fieldValue && res.fieldName != "" {
+		fieldType := p.config.Schema.GetFieldType(res.fieldName)
+		if fieldType != "" {
+			if p.config.Schema.IsStringType(res.fieldName) || p.config.Schema.IsNumericType(res.fieldName) {
+				return nil
+			}
+			if p.config.Schema.IsArrayType(res.fieldName) || fieldType == "object" {
+				return tperrors.New(tperrors.ErrInvalidArgument, operators.OpCat, path,
+					fmt.Sprintf("string operation on incompatible field '%s' (type: %s)", res.fieldName, fieldType))
+			}
+		}
 	}
-	fieldType := p.config.Schema.GetFieldType(res.fieldName)
-	if fieldType == "" {
-		return nil
-	}
-	if p.config.Schema.IsStringType(res.fieldName) || p.config.Schema.IsNumericType(res.fieldName) {
-		return nil
-	}
-	if p.config.Schema.IsArrayType(res.fieldName) || fieldType == "object" {
+	if valueTypeOf(res) == operators.ExpressionTypeArray {
 		return tperrors.New(tperrors.ErrInvalidArgument, operators.OpCat, path,
-			fmt.Sprintf("string operation on incompatible field '%s' (type: %s)", res.fieldName, fieldType))
+			"string operation on incompatible array value")
 	}
 	return nil
 }
