@@ -1417,7 +1417,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested all in comparison",
 			input:    `{">": [{"all": [{"var": "scores"}, {">=": [{"var": "elem"}, 70]}]}, true]}`,
-			expected: "(ARRAY_LENGTH(scores) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem >= 70))) > TRUE",
+			expected: "(CASE WHEN ARRAY_LENGTH(scores) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem >= 70)) THEN 1 ELSE 0 END) > 1",
 			hasError: false,
 		},
 		{

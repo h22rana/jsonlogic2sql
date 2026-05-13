@@ -1098,6 +1098,8 @@ func TestTranspileCondition_StrictEqualitySchemaFieldExpressionMismatches(t *tes
 }
 
 func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{{Name: "x", Type: FieldTypeNumber}})
+
 	tests := []struct {
 		name       string
 		logic      string
@@ -1147,37 +1149,76 @@ func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
 		},
+		{
+			name:    "nested predicate coerces to number before ordering",
+			logic:   `{">":[{"==":[{"var":"x"},1]},0]}`,
+			wantSQL: "(CASE WHEN x = 1 THEN 1 ELSE 0 END) > 0",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("(CASE WHEN x = %s THEN 1 ELSE 0 END) > %s", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(1)},
+				{Name: "p2", Value: float64(0)},
+			},
+		},
+		{
+			name:    "chained comparison coerces nested predicate to number",
+			logic:   `{"<":[0,{"==":[{"var":"x"},1]},2]}`,
+			wantSQL: "(0 < (CASE WHEN x = 1 THEN 1 ELSE 0 END) AND (CASE WHEN x = 1 THEN 1 ELSE 0 END) < 2)",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("(%s < (CASE WHEN x = %s THEN 1 ELSE 0 END) AND (CASE WHEN x = %s THEN 1 ELSE 0 END) < %s)",
+					testPlaceholder(d, 2), testPlaceholder(d, 1), testPlaceholder(d, 1), testPlaceholder(d, 3))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(1)},
+				{Name: "p2", Value: float64(0)},
+				{Name: "p3", Value: float64(2)},
+			},
+		},
 	}
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
-			if err != nil {
-				t.Fatalf("NewTranspiler() error = %v", err)
-			}
-
-			for _, tt := range tests {
-				t.Run(tt.name, func(t *testing.T) {
-					got, err := tr.TranspileCondition(tt.logic)
+			for _, cfg := range []struct {
+				name   string
+				schema *Schema
+			}{
+				{name: "schema-less"},
+				{name: "schema-aware", schema: schema},
+			} {
+				t.Run(cfg.name, func(t *testing.T) {
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  cfg.schema,
+					})
 					if err != nil {
-						t.Fatalf("TranspileCondition() error = %v", err)
-					}
-					if got != tt.wantSQL {
-						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.wantSQL)
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
 					}
 
-					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
-					if err != nil {
-						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
-					}
-					if want := tt.wantParam(d); gotParam != want {
-						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
-					}
-					if len(tt.wantParams) == 0 && len(gotParams) == 0 {
-						return
-					}
-					if !reflect.DeepEqual(gotParams, tt.wantParams) {
-						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileCondition() error = %v", err)
+							}
+							if got != tt.wantSQL {
+								t.Fatalf("TranspileCondition() = %q, want %q", got, tt.wantSQL)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+							}
+							if len(tt.wantParams) == 0 && len(gotParams) == 0 {
+								return
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
 					}
 				})
 			}

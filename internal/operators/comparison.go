@@ -1726,6 +1726,30 @@ func materializePredicateValueOperand(value interface{}) interface{} {
 	return pv
 }
 
+func numericOrderingOperand(value interface{}) interface{} {
+	if b, ok := value.(bool); ok {
+		if b {
+			return int64(1)
+		}
+		return int64(0)
+	}
+	pv, ok := value.(ProcessedValue)
+	if !ok || !pv.IsSQL || !pv.HasExpressionInfo {
+		return value
+	}
+	switch {
+	case pv.Kind == ExpressionKindPredicate:
+		pv.Value = PredicateNumberSQL(pv.Value)
+	case pv.Type == ExpressionTypeBoolean:
+		pv.Value = BooleanValueNumberSQL(pv.Value)
+	default:
+		return value
+	}
+	pv.Kind = ExpressionKindValue
+	pv.Type = ExpressionTypeNumber
+	return pv
+}
+
 // isStringLikeInOperandNoSchema classifies whether the left operand of "in"
 // should be treated as a string in schema-less mode.
 //
@@ -1961,6 +1985,9 @@ func (c *ComparisonOperator) handleChainedComparison(operator string, args []int
 				coercedArgs[i] = c.coerceValueForComparison(arg, fieldName)
 			}
 		}
+	}
+	for i, arg := range coercedArgs {
+		coercedArgs[i] = numericOrderingOperand(arg)
 	}
 
 	// Convert all arguments to SQL
@@ -2447,6 +2474,9 @@ func (c *ComparisonOperator) handleChainedComparisonParam(operator string, args 
 				coercedArgs[i] = c.coerceValueForComparison(arg, fieldName)
 			}
 		}
+	}
+	for i, arg := range coercedArgs {
+		coercedArgs[i] = numericOrderingOperand(arg)
 	}
 
 	var sqlArgs []string
