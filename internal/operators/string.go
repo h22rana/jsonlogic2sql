@@ -139,7 +139,11 @@ func (s *StringOperator) inferIfExpressionType(args interface{}) ExpressionType 
 		result = mergeInferredTypes(result, typ, hasResult)
 		hasResult = true
 	}
-	if len(arr)%2 == 0 {
+	if len(arr)%2 == 1 {
+		_, typ := s.inferExpressionShape(arr[len(arr)-1])
+		result = mergeInferredTypes(result, typ, hasResult)
+		hasResult = true
+	} else {
 		result = mergeInferredTypes(result, ExpressionTypeNull, hasResult)
 		hasResult = true
 	}
@@ -244,12 +248,80 @@ func (s *StringOperator) handleConcatenation(args []interface{}) (string, error)
 }
 
 func (s *StringOperator) valueToSQLForConcat(value interface{}) (string, error) {
+	if sql, handled, err := s.ifExpressionToConcatSQL(value); handled || err != nil {
+		return sql, err
+	}
 	sql, err := s.valueToSQL(value)
 	if err != nil {
 		return "", err
 	}
 	kind, typ := s.inferExpressionShape(value)
 	return s.stringifyConcatSQL(sql, kind, typ), nil
+}
+
+func ifExpressionArgs(value interface{}) ([]interface{}, bool, error) {
+	expr, ok := value.(map[string]interface{})
+	if !ok || len(expr) != 1 {
+		return nil, false, nil
+	}
+	args, ok := expr[OpIf]
+	if !ok {
+		return nil, false, nil
+	}
+	arr, ok := args.([]interface{})
+	if !ok {
+		return nil, true, fmt.Errorf("if operation requires array of arguments")
+	}
+	return arr, true, nil
+}
+
+func (s *StringOperator) ifExpressionToConcatSQL(value interface{}) (string, bool, error) {
+	args, handled, err := ifExpressionArgs(value)
+	if !handled || err != nil {
+		return "", handled, err
+	}
+	sql, err := s.processStringifiedIfExpression(args)
+	return sql, true, err
+}
+
+func (s *StringOperator) processStringifiedIfExpression(args []interface{}) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("if operation requires at least 2 arguments (condition, then)")
+	}
+
+	var result strings.Builder
+	result.WriteString("CASE")
+
+	pairLimit := len(args)
+	hasElse := len(args)%2 == 1
+	if hasElse {
+		pairLimit = len(args) - 1
+	}
+
+	for i := 0; i < pairLimit; i += 2 {
+		condition, err := s.valueToSQL(args[i])
+		if err != nil {
+			return "", fmt.Errorf("invalid if condition: %w", err)
+		}
+
+		thenValue, err := s.valueToSQLForConcat(args[i+1])
+		if err != nil {
+			return "", fmt.Errorf("invalid if then value: %w", err)
+		}
+
+		result.WriteString(fmt.Sprintf(" WHEN %s THEN %s", condition, thenValue))
+	}
+
+	if hasElse {
+		elseValue, err := s.valueToSQLForConcat(args[len(args)-1])
+		if err != nil {
+			return "", fmt.Errorf("invalid if else value: %w", err)
+		}
+		result.WriteString(fmt.Sprintf(" ELSE %s", elseValue))
+	}
+
+	result.WriteString(" END")
+	return result.String(), nil
 }
 
 func (s *StringOperator) stringifyConcatSQL(sql string, kind ExpressionKind, typ ExpressionType) string {
@@ -689,12 +761,70 @@ func (s *StringOperator) handleConcatenationParam(args []interface{}, pc *params
 }
 
 func (s *StringOperator) valueToSQLForConcatParam(value interface{}, pc *params.ParamCollector) (string, error) {
+	if sql, handled, err := s.ifExpressionToConcatSQLParam(value, pc); handled || err != nil {
+		return sql, err
+	}
 	sql, err := s.valueToSQLParam(value, pc)
 	if err != nil {
 		return "", err
 	}
 	kind, typ := s.inferExpressionShape(value)
 	return s.stringifyConcatSQL(sql, kind, typ), nil
+}
+
+func (s *StringOperator) ifExpressionToConcatSQLParam(
+	value interface{},
+	pc *params.ParamCollector,
+) (string, bool, error) {
+	args, handled, err := ifExpressionArgs(value)
+	if !handled || err != nil {
+		return "", handled, err
+	}
+	sql, err := s.processStringifiedIfExpressionParam(args, pc)
+	return sql, true, err
+}
+
+func (s *StringOperator) processStringifiedIfExpressionParam(
+	args []interface{},
+	pc *params.ParamCollector,
+) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("if operation requires at least 2 arguments (condition, then)")
+	}
+
+	var result strings.Builder
+	result.WriteString("CASE")
+
+	pairLimit := len(args)
+	hasElse := len(args)%2 == 1
+	if hasElse {
+		pairLimit = len(args) - 1
+	}
+
+	for i := 0; i < pairLimit; i += 2 {
+		condition, err := s.valueToSQLParam(args[i], pc)
+		if err != nil {
+			return "", fmt.Errorf("invalid if condition: %w", err)
+		}
+
+		thenValue, err := s.valueToSQLForConcatParam(args[i+1], pc)
+		if err != nil {
+			return "", fmt.Errorf("invalid if then value: %w", err)
+		}
+
+		result.WriteString(fmt.Sprintf(" WHEN %s THEN %s", condition, thenValue))
+	}
+
+	if hasElse {
+		elseValue, err := s.valueToSQLForConcatParam(args[len(args)-1], pc)
+		if err != nil {
+			return "", fmt.Errorf("invalid if else value: %w", err)
+		}
+		result.WriteString(fmt.Sprintf(" ELSE %s", elseValue))
+	}
+
+	result.WriteString(" END")
+	return result.String(), nil
 }
 
 // handleSubstringParam is the parameterized variant of handleSubstring. Keep in sync.

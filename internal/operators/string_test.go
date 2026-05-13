@@ -77,6 +77,21 @@ func TestStringOperator_ToSQL(t *testing.T) {
 			hasError: false,
 		},
 		{
+			name:     "cat stringifies explicit if else branch",
+			operator: "cat",
+			args: []interface{}{
+				map[string]interface{}{
+					"if": []interface{}{
+						map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "x"}, 1}},
+						true,
+						"fallback",
+					},
+				},
+			},
+			expected: "CONCAT(CASE WHEN (x = 1) THEN 'true' ELSE 'fallback' END)",
+			hasError: false,
+		},
+		{
 			name:     "concatenation with no arguments",
 			operator: "cat",
 			args:     []interface{}{},
@@ -1131,6 +1146,34 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 			{Name: "p3", Value: 0},
 			{Name: "p4", Value: "b"},
 			{Name: "p5", Value: "b"},
+		}
+		if !reflect.DeepEqual(pc.Params(), wantParams) {
+			t.Errorf("Params = %#v, want %#v", pc.Params(), wantParams)
+		}
+	})
+
+	t.Run("cat stringifies explicit if else branch in parameterized mode", func(t *testing.T) {
+		op := NewStringOperator(nil)
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		sql, err := op.ToSQLParam("cat", []interface{}{
+			map[string]interface{}{
+				"if": []interface{}{
+					map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "x"}, 1}},
+					true,
+					"fallback",
+				},
+			},
+		}, pc)
+		if err != nil {
+			t.Fatalf("ToSQLParam: %v", err)
+		}
+		wantSQL := "CONCAT(CASE WHEN (x = @p1) THEN 'true' ELSE @p2 END)"
+		if sql != wantSQL {
+			t.Errorf("SQL = %q, want %q", sql, wantSQL)
+		}
+		wantParams := []params.QueryParam{
+			{Name: "p1", Value: 1},
+			{Name: "p2", Value: "fallback"},
 		}
 		if !reflect.DeepEqual(pc.Params(), wantParams) {
 			t.Errorf("Params = %#v, want %#v", pc.Params(), wantParams)
