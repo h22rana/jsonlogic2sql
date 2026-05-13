@@ -410,6 +410,13 @@ func literalValueResult(sql string, typ operators.ExpressionType, truthy bool) e
 	return res
 }
 
+func booleanValueResult(value bool) expressionResult {
+	if value {
+		return literalValueResult("TRUE", operators.ExpressionTypeBoolean, true)
+	}
+	return literalValueResult("FALSE", operators.ExpressionTypeBoolean, false)
+}
+
 func literalValueResultWithRaw(sql string, typ operators.ExpressionType, truthy bool, raw interface{}) expressionResult {
 	res := literalValueResult(sql, typ, truthy)
 	res.rawLiteralKnown = true
@@ -1306,8 +1313,12 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		}
 		fieldName := varFieldName(args)
 		return withVarDefaultMetadata(fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), args), nil
-	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
+	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", operators.OpAll, operators.OpSome, operators.OpNone:
 		return p.parseOperatorPredicate(operator, args, path)
+	case "!":
+		return p.parseNotValue(operator, args, path, false)
+	case "!!":
+		return p.parseNotValue(operator, args, path, true)
 	case "and", "or":
 		arr, ok := args.([]interface{})
 		if !ok {
@@ -1455,6 +1466,25 @@ func (p *Parser) parseNotPredicate(operator string, args interface{}, path strin
 	}
 	condition = operators.StripRedundantOuterParens(condition)
 	return predicateResult(fmt.Sprintf("NOT (%s)", condition)), nil
+}
+
+func (p *Parser) parseNotValue(operator string, args interface{}, path string, double bool) (expressionResult, error) {
+	arg, ok := unaryArg(args)
+	if !ok {
+		return expressionResult{}, tperrors.NewTypeMismatch(operator, path, "exactly 1 argument", "multiple arguments")
+	}
+	res, condition, err := p.parseTruthinessResult(arg, tperrors.BuildArrayPath(path, 0))
+	if err != nil {
+		return expressionResult{}, err
+	}
+	if res.truthKnown {
+		return booleanValueResult(res.truthy == double), nil
+	}
+	condition = operators.PredicateValueSQL(condition)
+	if double {
+		return valueResult(condition, operators.ExpressionTypeBoolean), nil
+	}
+	return valueResult(operators.PredicateValueSQL(fmt.Sprintf("NOT (%s)", condition)), operators.ExpressionTypeBoolean), nil
 }
 
 func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionResult, error) {
@@ -2447,8 +2477,12 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		}
 		fieldName := varFieldName(args)
 		return withVarDefaultMetadata(fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), args), nil
-	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
+	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", operators.OpAll, operators.OpSome, operators.OpNone:
 		return p.parseOperatorPredicateParam(operator, args, path, pc)
+	case "!":
+		return p.parseNotValueParam(operator, args, path, false, pc)
+	case "!!":
+		return p.parseNotValueParam(operator, args, path, true, pc)
 	case "and", "or":
 		arr, ok := args.([]interface{})
 		if !ok {
@@ -2591,6 +2625,31 @@ func (p *Parser) parseNotPredicateParam(operator string, args interface{}, path 
 	}
 	condition = operators.StripRedundantOuterParens(condition)
 	return predicateResult(fmt.Sprintf("NOT (%s)", condition)), nil
+}
+
+func (p *Parser) parseNotValueParam(
+	operator string,
+	args interface{},
+	path string,
+	double bool,
+	pc *params.ParamCollector,
+) (expressionResult, error) {
+	arg, ok := unaryArg(args)
+	if !ok {
+		return expressionResult{}, tperrors.NewTypeMismatch(operator, path, "exactly 1 argument", "multiple arguments")
+	}
+	res, condition, err := p.parseTruthinessResultParam(arg, tperrors.BuildArrayPath(path, 0), pc)
+	if err != nil {
+		return expressionResult{}, err
+	}
+	if res.truthKnown {
+		return booleanValueResult(res.truthy == double), nil
+	}
+	condition = operators.PredicateValueSQL(condition)
+	if double {
+		return valueResult(condition, operators.ExpressionTypeBoolean), nil
+	}
+	return valueResult(operators.PredicateValueSQL(fmt.Sprintf("NOT (%s)", condition)), operators.ExpressionTypeBoolean), nil
 }
 
 func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
