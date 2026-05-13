@@ -1226,6 +1226,124 @@ func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
 	}
 }
 
+func TestTranspileCondition_InRightHandValueExpressionsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{{Name: "flag", Type: FieldTypeBoolean}})
+
+	stringContainmentSQL := func(d Dialect, haystack, needle string) string {
+		switch d {
+		case DialectPostgreSQL:
+			return fmt.Sprintf("POSITION(%s IN %s) > 0", needle, haystack)
+		case DialectClickHouse:
+			return fmt.Sprintf("position(%s, %s) > 0", haystack, needle)
+		default:
+			return fmt.Sprintf("STRPOS(%s, %s) > 0", haystack, needle)
+		}
+	}
+	arrayLiteralSQL := func(d Dialect, first, second string) string {
+		if d == DialectPostgreSQL {
+			return fmt.Sprintf("ARRAY[%s, %s]", first, second)
+		}
+		return fmt.Sprintf("[%s, %s]", first, second)
+	}
+	arrayMembershipSQL := func(d Dialect, value, array string) string {
+		switch d {
+		case DialectPostgreSQL:
+			return fmt.Sprintf("%s = ANY(%s)", value, array)
+		case DialectDuckDB:
+			return fmt.Sprintf("list_contains(%s, %s)", array, value)
+		case DialectClickHouse:
+			return fmt.Sprintf("has(%s, %s)", array, value)
+		default:
+			return fmt.Sprintf("%s IN UNNEST(%s)", value, array)
+		}
+	}
+
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    func(Dialect) string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "string-producing rhs uses containment",
+			logic: `{"in":["b",{"cat":["abc"]}]}`,
+			wantSQL: func(d Dialect) string {
+				return stringContainmentSQL(d, "CONCAT('abc')", "'b'")
+			},
+			wantParam: func(d Dialect) string {
+				return stringContainmentSQL(d, fmt.Sprintf("CONCAT(%s)", testPlaceholder(d, 1)), testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: "abc"},
+				{Name: "p2", Value: "b"},
+			},
+		},
+		{
+			name:  "array-producing rhs uses dialect membership",
+			logic: `{"in":[1,{"if":[{"var":"flag"},[1,2],[3,4]]}]}`,
+			wantSQL: func(d Dialect) string {
+				array := fmt.Sprintf("CASE WHEN flag IS TRUE THEN %s ELSE %s END",
+					arrayLiteralSQL(d, "1", "2"),
+					arrayLiteralSQL(d, "3", "4"))
+				return arrayMembershipSQL(d, "1", array)
+			},
+			wantParam: func(d Dialect) string {
+				array := fmt.Sprintf("CASE WHEN flag IS TRUE THEN %s ELSE %s END",
+					arrayLiteralSQL(d, testPlaceholder(d, 1), testPlaceholder(d, 2)),
+					arrayLiteralSQL(d, testPlaceholder(d, 3), testPlaceholder(d, 4)))
+				return arrayMembershipSQL(d, testPlaceholder(d, 5), array)
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(1)},
+				{Name: "p2", Value: float64(2)},
+				{Name: "p3", Value: float64(3)},
+				{Name: "p4", Value: float64(4)},
+				{Name: "p5", Value: float64(1)},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if want := tt.wantSQL(d); got != want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_LiteralComparisonsEmitFoldedBooleansAllDialects(t *testing.T) {
 	t.Parallel()
 

@@ -1726,6 +1726,14 @@ func materializePredicateValueOperand(value interface{}) interface{} {
 	return pv
 }
 
+func valueExpressionOperandSQL(value interface{}) (string, ExpressionType, bool) {
+	pv, ok := value.(ProcessedValue)
+	if !ok || !pv.IsSQL || !pv.HasExpressionInfo || pv.Kind != ExpressionKindValue {
+		return "", ExpressionTypeUnknown, false
+	}
+	return pv.Value, pv.Type, true
+}
+
 func numericOrderingOperand(value interface{}) interface{} {
 	if b, ok := value.(bool); ok {
 		if b {
@@ -1882,6 +1890,15 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 				return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
 			}
 			// Otherwise, assume array membership
+			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
+		}
+	}
+
+	if rightSQL, rightType, ok := valueExpressionOperandSQL(rightValue); ok {
+		if rightType == ExpressionTypeString {
+			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+		}
+		if rightType == ExpressionTypeArray {
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 		}
 	}
@@ -2383,6 +2400,15 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 	leftSQL, err := c.valueToSQLParam(leftOriginal, pc)
 	if err != nil {
 		return "", fmt.Errorf("invalid left operand: %w", err)
+	}
+
+	if rightSQL, rightType, ok := valueExpressionOperandSQL(rightValue); ok {
+		if rightType == ExpressionTypeString {
+			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+		}
+		if rightType == ExpressionTypeArray {
+			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
+		}
 	}
 
 	if arr, ok := rightValue.([]interface{}); ok {
