@@ -465,6 +465,9 @@ func sqlBooleanConstant(sql string) (bool, bool) {
 func equalityLiteralValue(value interface{}) (interface{}, bool) {
 	if pv, ok := value.(ProcessedValue); ok {
 		if pv.IsSQL {
+			if typedNullExpression(pv) {
+				return nil, true
+			}
 			return nil, false
 		}
 		return pv.Value, true
@@ -1053,6 +1056,10 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 		literalArg = leftArg
 		fieldOnLeft = false
 	}
+	if typedNullExpression(literalArg) {
+		c.setLiteralForFieldSide(&dec, fieldOnLeft, nil)
+		literalArg = nil
+	}
 	fieldName := field.fieldName
 
 	fieldKind := c.fieldEqualityKind(fieldName)
@@ -1227,6 +1234,19 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 }
 
 func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityDecision, operator string, leftArg, rightArg interface{}) equalityDecision {
+	leftIsNull := typedNullExpression(leftArg)
+	rightIsNull := typedNullExpression(rightArg)
+	if leftIsNull || rightIsNull {
+		dec.handled = true
+		if leftIsNull {
+			dec.left = nil
+		}
+		if rightIsNull {
+			dec.right = nil
+		}
+		return dec
+	}
+
 	leftKind, leftTyped := expressionEqualityKind(leftArg)
 	rightKind, rightTyped := expressionEqualityKind(rightArg)
 	if leftTyped && rightTyped {
@@ -1340,16 +1360,26 @@ func expressionEqualityKind(value interface{}) (string, bool) {
 		return "boolean", true
 	}
 	switch pv.Type {
+	case ExpressionTypeNull:
+		return "null", true
 	case ExpressionTypeBoolean:
 		return "boolean", true
 	case ExpressionTypeString:
 		return "string", true
 	case ExpressionTypeNumber:
 		return "number", true
-	case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeArray:
+	case ExpressionTypeArray:
+		return "array", true
+	case ExpressionTypeUnknown:
 		return "", false
 	}
 	return "", false
+}
+
+func typedNullExpression(value interface{}) bool {
+	pv, ok := value.(ProcessedValue)
+	return ok && pv.IsSQL && pv.HasExpressionInfo &&
+		pv.Kind == ExpressionKindValue && pv.Type == ExpressionTypeNull
 }
 
 func equalityLiteralForFieldSide(dec equalityDecision, fieldOnLeft bool) interface{} {

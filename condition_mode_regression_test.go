@@ -989,6 +989,16 @@ func TestTranspileCondition_StrictEqualityMismatchedTypedExpressions(t *testing.
 			logic: `{"!==":[{"cat":["5"]},{"+":[2,3]}]}`,
 			want:  "TRUE",
 		},
+		{
+			name:  "strict equality folds array expression versus number literal",
+			logic: `{"===":[{"map":[[1,2],{"var":""}]},5]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "strict inequality folds array expression versus number literal",
+			logic: `{"!==":[{"map":[[1,2],{"var":""}]},5]}`,
+			want:  "TRUE",
+		},
 	}
 
 	for _, d := range allDialects() {
@@ -996,6 +1006,77 @@ func TestTranspileCondition_StrictEqualityMismatchedTypedExpressions(t *testing.
 			tr, err := NewTranspiler(d)
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tt.want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+					}
+
+					gotParam, params, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParam != tt.want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_NullTypedValueEqualityAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{{Name: "flag", Type: FieldTypeBoolean}})
+	nullExpr := `{"if":[{"var":"flag"},null,null]}`
+
+	tests := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "null expression equals non-null literal",
+			logic: fmt.Sprintf(`{"==":[%s,5]}`, nullExpr),
+			want:  "FALSE",
+		},
+		{
+			name:  "null expression does not equal non-null literal",
+			logic: fmt.Sprintf(`{"!=":[%s,5]}`, nullExpr),
+			want:  "TRUE",
+		},
+		{
+			name:  "null expression strictly equals null literal",
+			logic: fmt.Sprintf(`{"===":[%s,null]}`, nullExpr),
+			want:  "TRUE",
+		},
+		{
+			name:  "null expression strictly does not equal null literal",
+			logic: fmt.Sprintf(`{"!==":[%s,null]}`, nullExpr),
+			want:  "FALSE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
 			}
 
 			for _, tt := range tests {

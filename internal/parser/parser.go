@@ -2050,6 +2050,10 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 				if res.rawLiteralKnown {
 					return res.rawLiteral, nil
 				}
+				if res.Kind == operators.ExpressionKindValue && valueTypeOf(res) == operators.ExpressionTypeNull {
+					var nullLiteral interface{}
+					return nullLiteral, nil
+				}
 				return typedValueOperand(res), nil
 			}
 		}
@@ -3150,6 +3154,11 @@ func (p *Parser) processValueArgParam(arg interface{}, path string, index int, p
 				if res.rawLiteralKnown {
 					pc.Restore(checkpoint)
 					return res.rawLiteral, nil
+				}
+				if res.Kind == operators.ExpressionKindValue && valueTypeOf(res) == operators.ExpressionTypeNull {
+					pc.Restore(checkpoint)
+					var nullLiteral interface{}
+					return nullLiteral, nil
 				}
 				return typedValueOperand(res), nil
 			}
