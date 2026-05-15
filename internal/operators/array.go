@@ -246,6 +246,12 @@ func (a *ArrayOperator) accumulatorSQLResult() ProcessedValue {
 	return result
 }
 
+func (a *ArrayOperator) accumulatorSQLResultWithSQL(sql string) ProcessedValue {
+	result := a.accumulatorSQLResult()
+	result.Value = sql
+	return result
+}
+
 func (a *ArrayOperator) isVisibleElemPath(name string) bool {
 	for _, alias := range a.visibleElems {
 		if name == alias || strings.HasPrefix(name, alias+".") {
@@ -1040,6 +1046,11 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 	// Handle var expressions
 	if varExpr, ok := expr.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr[OpVar]; hasVar {
+			if allowAccumulator {
+				if rewritten, handled, err := a.rewriteAccumulatorVar(varName); handled || err != nil {
+					return rewritten.Value, err
+				}
+			}
 			if sql, handled, err := a.arrayScopeVarToSQL(varName); handled || err != nil {
 				return sql, err
 			}
@@ -1353,6 +1364,69 @@ func (a *ArrayOperator) rewriteScopedMissingFieldName(fieldName string, allowAcc
 	return SQLFieldResult(mapped), true, nil
 }
 
+func (a *ArrayOperator) rewriteAccumulatorVar(varExpr interface{}) (ProcessedValue, bool, error) {
+	if varName, ok := varExpr.(string); ok {
+		if varName == AccumulatorVar {
+			return a.accumulatorSQLResult(), true, nil
+		}
+		return ProcessedValue{}, false, nil
+	}
+
+	arr, ok := varExpr.([]interface{})
+	if !ok {
+		return ProcessedValue{}, false, nil
+	}
+	if len(arr) == 0 {
+		return ProcessedValue{}, false, nil
+	}
+	if err := validateVarArrayMaxEntries(arr); err != nil {
+		return ProcessedValue{}, true, err
+	}
+	varName, ok := arr[0].(string)
+	if !ok || varName != AccumulatorVar {
+		return ProcessedValue{}, false, nil
+	}
+	if len(arr) == 1 {
+		return a.accumulatorSQLResult(), true, nil
+	}
+	defaultSQL, err := a.dataOp.valueToSQL(arr[1])
+	if err != nil {
+		return ProcessedValue{}, true, fmt.Errorf("invalid default value: %w", err)
+	}
+	return a.accumulatorSQLResultWithSQL(fmt.Sprintf("COALESCE(%s, %s)", AccumulatorVar, defaultSQL)), true, nil
+}
+
+func (a *ArrayOperator) rewriteAccumulatorVarParam(varExpr interface{}) (interface{}, bool, error) {
+	if varName, ok := varExpr.(string); ok {
+		if varName == AccumulatorVar {
+			return a.accumulatorSQLResult(), true, nil
+		}
+		return nil, false, nil
+	}
+
+	arr, ok := varExpr.([]interface{})
+	if !ok {
+		return nil, false, nil
+	}
+	if len(arr) == 0 {
+		return nil, false, nil
+	}
+	if err := validateVarArrayMaxEntries(arr); err != nil {
+		return nil, true, err
+	}
+	varName, ok := arr[0].(string)
+	if !ok || varName != AccumulatorVar {
+		return nil, false, nil
+	}
+	if len(arr) == 1 {
+		return a.accumulatorSQLResult(), true, nil
+	}
+	rewritten := make([]interface{}, len(arr))
+	copy(rewritten, arr)
+	rewritten[0] = a.accumulatorSQLResult()
+	return map[string]interface{}{OpVar: rewritten}, true, nil
+}
+
 // arrayScopeVarToSQL resolves lambda-scoped var references before schema
 // validation. Element lambdas are relative to the current element; reduce
 // lambdas expose only JSONLogic's current/accumulator bindings.
@@ -1468,8 +1542,13 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorWithContextAndPath(expr inte
 	case map[string]interface{}:
 		if len(e) == 1 {
 			if varName, hasVar := e[OpVar]; hasVar {
-				if allowAccumulator && varName == AccumulatorVar {
-					return a.accumulatorSQLResult(), nil
+				if allowAccumulator {
+					if rewritten, handled, err := a.rewriteAccumulatorVar(varName); handled || err != nil {
+						if err != nil {
+							return nil, err
+						}
+						return rewritten, nil
+					}
 				}
 				if sql, handled, err := a.arrayScopeVarToSQL(varName); handled || err != nil {
 					if err != nil {
@@ -2019,6 +2098,19 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 
 	if varExpr, ok := expr.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr[OpVar]; hasVar {
+			if allowAccumulator {
+				if rewritten, handled, err := a.rewriteAccumulatorVarParam(varName); handled || err != nil {
+					if err != nil {
+						return "", err
+					}
+					if pv, ok := rewritten.(ProcessedValue); ok && pv.IsSQL {
+						return pv.Value, nil
+					}
+					if rewrittenVar, ok := rewritten.(map[string]interface{}); ok {
+						return a.dataOp.ToSQLParam(OpVar, []interface{}{rewrittenVar[OpVar]}, pc)
+					}
+				}
+			}
 			if sql, handled, err := a.arrayScopeVarToSQLParam(varName, pc); handled || err != nil {
 				return sql, err
 			}
@@ -2288,8 +2380,13 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 	case map[string]interface{}:
 		if len(e) == 1 {
 			if varName, hasVar := e[OpVar]; hasVar {
-				if allowAccumulator && varName == AccumulatorVar {
-					return a.accumulatorSQLResult(), nil
+				if allowAccumulator {
+					if rewritten, handled, err := a.rewriteAccumulatorVarParam(varName); handled || err != nil {
+						if err != nil {
+							return nil, err
+						}
+						return rewritten, nil
+					}
 				}
 				if rewritten, handled, err := a.rewriteArrayScopeVarParam(varName); handled || err != nil {
 					if err != nil {

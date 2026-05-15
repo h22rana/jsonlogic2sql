@@ -682,6 +682,26 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 			forbidden:        []string{"!= FALSE", "!= ''"},
 		},
 		{
+			name:  "or tests defaulted numeric accumulator with numeric truthiness",
+			logic: `{"reduce":[{"var":"arr"},{"or":[{"var":["accumulator",0]},{"var":"current"}]},0]}`,
+			wantReducer: func(initial string) string {
+				acc := fmt.Sprintf("COALESCE(%s, 0)", initial)
+				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != 0) THEN %s ELSE elem END", acc, acc, acc)
+			},
+			wantInitial: "0",
+			wantParamReducer: func(d Dialect) string {
+				initial := testPlaceholder(d, 1)
+				acc := fmt.Sprintf("COALESCE(%s, %s)", initial, testPlaceholder(d, 2))
+				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != 0) THEN %s ELSE elem END", acc, acc, acc)
+			},
+			wantParamInitial: func(d Dialect) string { return testPlaceholder(d, 1) },
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(0)},
+				{Name: "p2", Value: float64(0)},
+			},
+			forbidden: []string{"!= FALSE", "!= ''"},
+		},
+		{
 			name:  "if tests string accumulator with string truthiness",
 			logic: `{"reduce":[{"var":"arr"},{"if":[{"var":"accumulator"},{"var":"accumulator"},{"var":"current"}]},""]}`,
 			wantReducer: func(initial string) string {

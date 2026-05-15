@@ -494,6 +494,15 @@ func varFieldName(args interface{}) string {
 	return ""
 }
 
+func varProcessedExpression(args interface{}) (operators.ProcessedValue, bool) {
+	arr, ok := args.([]interface{})
+	if !ok || len(arr) == 0 {
+		return operators.ProcessedValue{}, false
+	}
+	pv, ok := arr[0].(operators.ProcessedValue)
+	return pv, ok && pv.IsSQL && pv.HasExpressionInfo
+}
+
 func varDefaultLiteral(args interface{}) (interface{}, bool, bool) {
 	v, ok := args.([]interface{})
 	if !ok || len(v) < 2 {
@@ -1310,6 +1319,15 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		sql, err := p.dataOp.ToSQL(operator, []interface{}{args})
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
+		}
+		if pv, ok := varProcessedExpression(args); ok {
+			res := resultFromOperator(operators.OperatorResult{
+				SQL:  sql,
+				Kind: pv.Kind,
+				Type: pv.Type,
+			})
+			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
+			return withVarDefaultMetadata(res, args), nil
 		}
 		fieldName := varFieldName(args)
 		return withVarDefaultMetadata(fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), args), nil
@@ -2478,6 +2496,15 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		sql, err := p.dataOp.ToSQLParam(operator, []interface{}{args}, pc)
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
+		}
+		if pv, ok := varProcessedExpression(args); ok {
+			res := resultFromOperator(operators.OperatorResult{
+				SQL:  sql,
+				Kind: pv.Kind,
+				Type: pv.Type,
+			})
+			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
+			return withVarDefaultMetadata(res, args), nil
 		}
 		fieldName := varFieldName(args)
 		return withVarDefaultMetadata(fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), args), nil
