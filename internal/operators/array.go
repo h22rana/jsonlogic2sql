@@ -1280,6 +1280,79 @@ func unsupportedArrayScopeVarError(varName string) error {
 	return fmt.Errorf("unsupported array-scope variable %q; use bare field names relative to the current element", varName)
 }
 
+func (a *ArrayOperator) rewriteScopedMissingFields(operator string, opArgs interface{}, allowAccumulator bool) (interface{}, bool, error) {
+	switch operator {
+	case OpMissing:
+		return a.rewriteScopedMissingFieldOperand(opArgs, allowAccumulator)
+	case OpMissingSome:
+		args, ok := opArgs.([]interface{})
+		if !ok || len(args) != 2 {
+			return nil, false, nil
+		}
+		fields, ok := args[1].([]interface{})
+		if !ok {
+			return nil, false, nil
+		}
+		rewrittenFields, changed, err := a.rewriteScopedMissingFieldList(fields, allowAccumulator)
+		if err != nil || !changed {
+			return nil, changed, err
+		}
+		rewrittenArgs := make([]interface{}, len(args))
+		copy(rewrittenArgs, args)
+		rewrittenArgs[1] = rewrittenFields
+		return rewrittenArgs, true, nil
+	default:
+		return nil, false, nil
+	}
+}
+
+func (a *ArrayOperator) rewriteScopedMissingFieldOperand(field interface{}, allowAccumulator bool) (interface{}, bool, error) {
+	switch v := field.(type) {
+	case string:
+		return a.rewriteScopedMissingFieldName(v, allowAccumulator)
+	case []interface{}:
+		return a.rewriteScopedMissingFieldList(v, allowAccumulator)
+	default:
+		return nil, false, nil
+	}
+}
+
+func (a *ArrayOperator) rewriteScopedMissingFieldList(fields []interface{}, allowAccumulator bool) ([]interface{}, bool, error) {
+	rewrittenFields := make([]interface{}, len(fields))
+	changed := false
+	for i, field := range fields {
+		fieldName, ok := field.(string)
+		if !ok {
+			rewrittenFields[i] = field
+			continue
+		}
+		rewritten, fieldChanged, err := a.rewriteScopedMissingFieldName(fieldName, allowAccumulator)
+		if err != nil {
+			return nil, false, err
+		}
+		rewrittenFields[i] = rewritten
+		changed = changed || fieldChanged
+	}
+	if !changed {
+		return nil, false, nil
+	}
+	return rewrittenFields, true, nil
+}
+
+func (a *ArrayOperator) rewriteScopedMissingFieldName(fieldName string, allowAccumulator bool) (interface{}, bool, error) {
+	if allowAccumulator && fieldName == AccumulatorVar {
+		return a.accumulatorSQLResult(), true, nil
+	}
+	mapped, handled, err := a.mapArrayScopeVar(fieldName)
+	if err != nil {
+		return nil, true, err
+	}
+	if !handled {
+		return fieldName, false, nil
+	}
+	return SQLFieldResult(mapped), true, nil
+}
+
 // arrayScopeVarToSQL resolves lambda-scoped var references before schema
 // validation. Element lambdas are relative to the current element; reduce
 // lambdas expose only JSONLogic's current/accumulator bindings.
@@ -1407,6 +1480,12 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorWithContextAndPath(expr inte
 				return e, nil
 			}
 			for opName, opArgs := range e {
+				if rewrittenArgs, handled, err := a.rewriteScopedMissingFields(opName, opArgs, allowAccumulator); handled || err != nil {
+					if err != nil {
+						return nil, err
+					}
+					return map[string]interface{}{opName: rewrittenArgs}, nil
+				}
 				if a.isArrayOperator(opName) {
 					arr, ok := opArgs.([]interface{})
 					if !ok {
@@ -2221,6 +2300,12 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 				return e, nil
 			}
 			for opName, opArgs := range e {
+				if rewrittenArgs, handled, err := a.rewriteScopedMissingFields(opName, opArgs, allowAccumulator); handled || err != nil {
+					if err != nil {
+						return nil, err
+					}
+					return map[string]interface{}{opName: rewrittenArgs}, nil
+				}
 				if a.isArrayOperator(opName) {
 					arr, ok := opArgs.([]interface{})
 					if !ok {

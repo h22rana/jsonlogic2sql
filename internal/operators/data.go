@@ -58,6 +58,16 @@ func (d *DataOperator) columnNameForVar(varName string) (string, error) {
 	return columnName, nil
 }
 
+func (d *DataOperator) columnNameForFieldOperand(field interface{}, typeErr string) (string, error) {
+	if pv, ok := field.(ProcessedValue); ok && pv.IsSQL {
+		return pv.Value, nil
+	}
+	if varName, ok := field.(string); ok {
+		return d.columnNameForVar(varName)
+	}
+	return "", fmt.Errorf("%s", typeErr)
+}
+
 func validateVarArrayOperand(arr []interface{}) error {
 	if len(arr) == 0 {
 		return fmt.Errorf("var operator array cannot be empty")
@@ -165,8 +175,15 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 	}
 
 	// Handle single string argument
-	if varName, ok := args[0].(string); ok {
-		columnName, err := d.columnNameForVar(varName)
+	if _, ok := args[0].(string); ok {
+		columnName, err := d.columnNameForFieldOperand(args[0], "missing operator argument must be a string or array of strings")
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s IS NULL", columnName), nil
+	}
+	if pv, ok := args[0].(ProcessedValue); ok && pv.IsSQL {
+		columnName, err := d.columnNameForFieldOperand(pv, "missing operator argument must be a string or array of strings")
 		if err != nil {
 			return "", err
 		}
@@ -180,12 +197,8 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 		}
 
 		var nullConditions []string
-		for _, varName := range varNames {
-			name, ok := varName.(string)
-			if !ok {
-				return "", fmt.Errorf("all variable names in missing must be strings")
-			}
-			columnName, err := d.columnNameForVar(name)
+		for _, field := range varNames {
+			columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing must be strings")
 			if err != nil {
 				return "", err
 			}
@@ -224,12 +237,8 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 	// For minCount = 1, use simpler OR syntax
 	if minCount == 1 {
 		var nullConditions []string
-		for _, varName := range varNames {
-			name, ok := varName.(string)
-			if !ok {
-				return "", fmt.Errorf("all variable names in missing_some must be strings")
-			}
-			columnName, err := d.columnNameForVar(name)
+		for _, field := range varNames {
+			columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing_some must be strings")
 			if err != nil {
 				return "", err
 			}
@@ -241,12 +250,8 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 	// For other minCount values, use the counting approach
 	// Convert variable names to column names and build CASE WHEN conditions to count NULLs
 	var caseStatements []string
-	for _, varName := range varNames {
-		name, ok := varName.(string)
-		if !ok {
-			return "", fmt.Errorf("all variable names in missing_some must be strings")
-		}
-		columnName, err := d.columnNameForVar(name)
+	for _, field := range varNames {
+		columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing_some must be strings")
 		if err != nil {
 			return "", err
 		}
@@ -473,12 +478,8 @@ func (d *DataOperator) handleMissingSomeParam(args []interface{}, pc *params.Par
 
 	if minCount == 1 {
 		var nullConditions []string
-		for _, varName := range varNames {
-			name, ok := varName.(string)
-			if !ok {
-				return "", fmt.Errorf("all variable names in missing_some must be strings")
-			}
-			columnName, err := d.columnNameForVar(name)
+		for _, field := range varNames {
+			columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing_some must be strings")
 			if err != nil {
 				return "", err
 			}
@@ -488,12 +489,8 @@ func (d *DataOperator) handleMissingSomeParam(args []interface{}, pc *params.Par
 	}
 
 	var caseStatements []string
-	for _, varName := range varNames {
-		name, ok := varName.(string)
-		if !ok {
-			return "", fmt.Errorf("all variable names in missing_some must be strings")
-		}
-		columnName, err := d.columnNameForVar(name)
+	for _, field := range varNames {
+		columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing_some must be strings")
 		if err != nil {
 			return "", err
 		}

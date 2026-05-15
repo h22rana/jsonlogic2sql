@@ -1764,6 +1764,11 @@ func valueExpressionOperandSQL(value interface{}) (string, ExpressionType, bool)
 	return pv.Value, pv.Type, true
 }
 
+func fieldExpressionOperandSQL(value interface{}) (ProcessedValue, bool) {
+	pv, ok := value.(ProcessedValue)
+	return pv, ok && pv.IsSQL && pv.IsField
+}
+
 func numericOrderingOperand(value interface{}) interface{} {
 	if b, ok := value.(bool); ok {
 		if b {
@@ -1924,13 +1929,12 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 		}
 	}
 
+	if rightField, ok := fieldExpressionOperandSQL(rightValue); ok {
+		return c.handleInSQLRight(leftSQL, leftOriginal, rightField.Value, rightField.FieldName, rightField.Type, rightField.HasExpressionInfo)
+	}
+
 	if rightSQL, rightType, ok := valueExpressionOperandSQL(rightValue); ok {
-		if rightType == ExpressionTypeString {
-			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
-		}
-		if rightType == ExpressionTypeArray {
-			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
-		}
+		return c.handleInSQLRight(leftSQL, leftOriginal, rightSQL, "", rightType, true)
 	}
 
 	// Check if right side is an array
@@ -1995,6 +1999,44 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 	}
 
 	return "", fmt.Errorf("in operator requires array, variable, string, or number as second argument")
+}
+
+func (c *ComparisonOperator) handleInSQLRight(
+	leftSQL string,
+	leftOriginal interface{},
+	rightSQL string,
+	fieldName string,
+	rightType ExpressionType,
+	hasRightType bool,
+) (string, error) {
+	if c.schema() != nil && fieldName != "" {
+		if c.schema().IsArrayType(fieldName) {
+			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
+		}
+		if c.schema().IsStringType(fieldName) {
+			coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
+			coercedLeftSQL, err := c.valueToSQL(coercedLeft)
+			if err != nil {
+				return "", fmt.Errorf("invalid left operand after coercion: %w", err)
+			}
+			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+		}
+	}
+
+	if hasRightType {
+		switch rightType {
+		case ExpressionTypeString:
+			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+		case ExpressionTypeArray:
+			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
+		case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+		}
+	}
+
+	if c.isStringLikeInOperandNoSchema(leftOriginal, nil, 0) || isSQLStringLiteral(leftSQL) {
+		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+	}
+	return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 }
 
 // handleChainedComparison handles chained comparisons like {"<": [10, {"var": "x"}, 20, 30]}
@@ -2426,6 +2468,10 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 		}
 	}
 
+	if rightField, ok := fieldExpressionOperandSQL(rightValue); ok {
+		return c.handleInSQLRightParam(leftOriginal, rightField.Value, rightField.FieldName, rightField.Type, rightField.HasExpressionInfo, pc)
+	}
+
 	// Generate leftSQL for all remaining paths (array, string, number on right side).
 	leftSQL, err := c.valueToSQLParam(leftOriginal, pc)
 	if err != nil {
@@ -2433,12 +2479,7 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 	}
 
 	if rightSQL, rightType, ok := valueExpressionOperandSQL(rightValue); ok {
-		if rightType == ExpressionTypeString {
-			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
-		}
-		if rightType == ExpressionTypeArray {
-			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
-		}
+		return c.handleInSQLRightParamWithLeftSQL(leftSQL, leftOriginal, rightSQL, "", rightType, true, pc)
 	}
 
 	if arr, ok := rightValue.([]interface{}); ok {
@@ -2499,6 +2540,59 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 	}
 
 	return "", fmt.Errorf("in operator requires array, variable, string, or number as second argument")
+}
+
+func (c *ComparisonOperator) handleInSQLRightParam(
+	leftOriginal interface{},
+	rightSQL string,
+	fieldName string,
+	rightType ExpressionType,
+	hasRightType bool,
+	pc *params.ParamCollector,
+) (string, error) {
+	if c.schema() != nil && fieldName != "" && c.schema().IsStringType(fieldName) {
+		coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
+		coercedLeftSQL, err := c.valueToSQLParam(coercedLeft, pc)
+		if err != nil {
+			return "", fmt.Errorf("invalid left operand after coercion: %w", err)
+		}
+		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+	}
+
+	leftSQL, err := c.valueToSQLParam(leftOriginal, pc)
+	if err != nil {
+		return "", fmt.Errorf("invalid left operand: %w", err)
+	}
+	return c.handleInSQLRightParamWithLeftSQL(leftSQL, leftOriginal, rightSQL, fieldName, rightType, hasRightType, pc)
+}
+
+func (c *ComparisonOperator) handleInSQLRightParamWithLeftSQL(
+	leftSQL string,
+	leftOriginal interface{},
+	rightSQL string,
+	fieldName string,
+	rightType ExpressionType,
+	hasRightType bool,
+	pc *params.ParamCollector,
+) (string, error) {
+	if c.schema() != nil && fieldName != "" && c.schema().IsArrayType(fieldName) {
+		return c.arrayMembershipSQL(leftSQL, rightSQL), nil
+	}
+
+	if hasRightType {
+		switch rightType {
+		case ExpressionTypeString:
+			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+		case ExpressionTypeArray:
+			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
+		case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+		}
+	}
+
+	if c.isStringLikeInOperandNoSchema(leftOriginal, pc, 0) {
+		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+	}
+	return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 }
 
 // handleChainedComparisonParam is the parameterized variant of handleChainedComparison. Keep in sync.
