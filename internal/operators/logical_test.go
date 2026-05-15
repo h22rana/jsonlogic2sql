@@ -899,7 +899,7 @@ func TestLogicalOperator_expressionToSQL_ArrayOperators(t *testing.T) {
 			input: map[string]interface{}{
 				"map": []interface{}{
 					map[string]interface{}{"var": "nums"},
-					map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "item"}, 1}},
+					map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": ""}, 1}},
 				},
 			},
 			expected: "ARRAY(SELECT (elem + 1) FROM UNNEST(nums) AS elem)",

@@ -12,7 +12,7 @@ A Go library that converts JSON Logic expressions into SQL predicate and value e
 - **Identifier Quoting**: Path segments such as `24h` and `7d` are quoted per dialect
 - **Structured Errors**: Error codes and JSONPath locations for debugging
 - **Regression Matrices**: Cross-dialect schema-aware/schema-less matrix tests for nested built-in and custom operator flows
-- **Array Scope Safety**: Nested array operators keep inner/outer element aliases distinct where required
+- **Array Scope Safety**: Array lambdas use JSONLogic element-relative vars while nested operators keep aliases distinct in generated SQL
 - **Library & CLI**: Both programmatic API and interactive REPL
 
 ## Quick Start

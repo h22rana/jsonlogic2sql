@@ -23,14 +23,14 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 		{
 			name:     "map with array and expression",
 			operator: "map",
-			args:     []interface{}{[]interface{}{1, 2, 3}, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "item"}, 1}}},
+			args:     []interface{}{[]interface{}{1, 2, 3}, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": ""}, 1}}},
 			expected: "ARRAY(SELECT (elem + 1) FROM UNNEST([1, 2, 3]) AS elem)",
 			hasError: false,
 		},
 		{
 			name:     "map with var array",
 			operator: "map",
-			args:     []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"*": []interface{}{map[string]interface{}{"var": "item"}, 2}}},
+			args:     []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"*": []interface{}{map[string]interface{}{"var": ""}, 2}}},
 			expected: "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
 			hasError: false,
 		},
@@ -46,14 +46,14 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 		{
 			name:     "filter with array and condition",
 			operator: "filter",
-			args:     []interface{}{[]interface{}{1, 2, 3, 4, 5}, map[string]interface{}{">": []interface{}{map[string]interface{}{"var": "item"}, 2}}},
+			args:     []interface{}{[]interface{}{1, 2, 3, 4, 5}, map[string]interface{}{">": []interface{}{map[string]interface{}{"var": ""}, 2}}},
 			expected: "ARRAY(SELECT elem FROM UNNEST([1, 2, 3, 4, 5]) AS elem WHERE elem > 2)",
 			hasError: false,
 		},
 		{
 			name:     "filter with var array",
 			operator: "filter",
-			args:     []interface{}{map[string]interface{}{"var": "scores"}, map[string]interface{}{">=": []interface{}{map[string]interface{}{"var": "item"}, 70}}},
+			args:     []interface{}{map[string]interface{}{"var": "scores"}, map[string]interface{}{">=": []interface{}{map[string]interface{}{"var": ""}, 70}}},
 			expected: "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem >= 70)",
 			hasError: false,
 		},
@@ -92,14 +92,14 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 		{
 			name:     "all with array and condition",
 			operator: "all",
-			args:     []interface{}{[]interface{}{10, 20, 30}, map[string]interface{}{">": []interface{}{map[string]interface{}{"var": "item"}, 5}}},
+			args:     []interface{}{[]interface{}{10, 20, 30}, map[string]interface{}{">": []interface{}{map[string]interface{}{"var": ""}, 5}}},
 			expected: "(ARRAY_LENGTH([10, 20, 30]) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST([10, 20, 30]) AS elem WHERE NOT (elem > 5)))",
 			hasError: false,
 		},
 		{
 			name:     "all with var array",
 			operator: "all",
-			args:     []interface{}{map[string]interface{}{"var": "ages"}, map[string]interface{}{">=": []interface{}{map[string]interface{}{"var": "item"}, 18}}},
+			args:     []interface{}{map[string]interface{}{"var": "ages"}, map[string]interface{}{">=": []interface{}{map[string]interface{}{"var": ""}, 18}}},
 			expected: "(ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
 			hasError: false,
 		},
@@ -115,14 +115,14 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 		{
 			name:     "some with array and condition",
 			operator: "some",
-			args:     []interface{}{[]interface{}{1, 2, 3, 4, 5}, map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "item"}, 3}}},
+			args:     []interface{}{[]interface{}{1, 2, 3, 4, 5}, map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": ""}, 3}}},
 			expected: "EXISTS (SELECT 1 FROM UNNEST([1, 2, 3, 4, 5]) AS elem WHERE elem = 3)",
 			hasError: false,
 		},
 		{
 			name:     "some with var array",
 			operator: "some",
-			args:     []interface{}{map[string]interface{}{"var": "statuses"}, map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "item"}, "active"}}},
+			args:     []interface{}{map[string]interface{}{"var": "statuses"}, map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": ""}, "active"}}},
 			expected: "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
 			hasError: false,
 		},
@@ -138,14 +138,14 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 		{
 			name:     "none with array and condition",
 			operator: "none",
-			args:     []interface{}{[]interface{}{1, 2, 3, 4, 5}, map[string]interface{}{"<": []interface{}{map[string]interface{}{"var": "item"}, 0}}},
+			args:     []interface{}{[]interface{}{1, 2, 3, 4, 5}, map[string]interface{}{"<": []interface{}{map[string]interface{}{"var": ""}, 0}}},
 			expected: "NOT EXISTS (SELECT 1 FROM UNNEST([1, 2, 3, 4, 5]) AS elem WHERE elem < 0)",
 			hasError: false,
 		},
 		{
 			name:     "none with var array",
 			operator: "none",
-			args:     []interface{}{map[string]interface{}{"var": "values"}, map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "item"}, "invalid"}}},
+			args:     []interface{}{map[string]interface{}{"var": "values"}, map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": ""}, "invalid"}}},
 			expected: "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
 			hasError: false,
 		},
@@ -263,21 +263,21 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 				{
 					name:     "map with literal array",
 					operator: "map",
-					args:     []any{[]any{1, 2, 3}, map[string]any{"+": []any{map[string]any{"var": "item"}, 1}}},
+					args:     []any{[]any{1, 2, 3}, map[string]any{"+": []any{map[string]any{"var": ""}, 1}}},
 					expected: fmt.Sprintf("ARRAY(SELECT (elem + 1) FROM UNNEST(%s) AS elem)", literal123),
 					hasError: false,
 				},
 				{
 					name:     "map with var array",
 					operator: "map",
-					args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": "item"}, 2}}},
+					args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": ""}, 2}}},
 					expected: "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
 					hasError: false,
 				},
 				{
 					name:     "map with complex transformation",
 					operator: "map",
-					args:     []any{map[string]any{"var": "prices"}, map[string]any{"-": []any{map[string]any{"var": "item"}, 10}}},
+					args:     []any{map[string]any{"var": "prices"}, map[string]any{"-": []any{map[string]any{"var": ""}, 10}}},
 					expected: "ARRAY(SELECT (elem - 10) FROM UNNEST(prices) AS elem)",
 					hasError: false,
 				},
@@ -286,21 +286,21 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 				{
 					name:     "filter with literal array",
 					operator: "filter",
-					args:     []any{[]any{1, 2, 3, 4, 5}, map[string]any{">": []any{map[string]any{"var": "item"}, 2}}},
+					args:     []any{[]any{1, 2, 3, 4, 5}, map[string]any{">": []any{map[string]any{"var": ""}, 2}}},
 					expected: fmt.Sprintf("ARRAY(SELECT elem FROM UNNEST(%s) AS elem WHERE elem > 2)", literal12345),
 					hasError: false,
 				},
 				{
 					name:     "filter with var array",
 					operator: "filter",
-					args:     []any{map[string]any{"var": "scores"}, map[string]any{">=": []any{map[string]any{"var": "item"}, 70}}},
+					args:     []any{map[string]any{"var": "scores"}, map[string]any{">=": []any{map[string]any{"var": ""}, 70}}},
 					expected: "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem >= 70)",
 					hasError: false,
 				},
 				{
 					name:     "filter with equality condition",
 					operator: "filter",
-					args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "active"}}},
+					args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": ""}, "active"}}},
 					expected: "ARRAY(SELECT elem FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
 					hasError: false,
 				},
@@ -382,7 +382,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 				{
 					name:     "all with condition",
 					operator: "all",
-					args:     []any{map[string]any{"var": "ages"}, map[string]any{">=": []any{map[string]any{"var": "item"}, 18}}},
+					args:     []any{map[string]any{"var": "ages"}, map[string]any{">=": []any{map[string]any{"var": ""}, 18}}},
 					expected: func() string {
 						switch d.dialect {
 						case dialect.DialectPostgreSQL:
@@ -403,7 +403,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 				{
 					name:     "some with condition",
 					operator: "some",
-					args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "active"}}},
+					args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": ""}, "active"}}},
 					expected: "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
 					hasError: false,
 				},
@@ -412,7 +412,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 				{
 					name:     "none with condition",
 					operator: "none",
-					args:     []any{map[string]any{"var": "values"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "invalid"}}},
+					args:     []any{map[string]any{"var": "values"}, map[string]any{"==": []any{map[string]any{"var": ""}, "invalid"}}},
 					expected: "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
 					hasError: false,
 				},
@@ -571,7 +571,7 @@ func TestArrayOperator_DialectValidation(t *testing.T) {
 			var args []any
 			switch operator {
 			case "map", "filter", "all", "some", "none":
-				args = []any{map[string]any{"var": "arr"}, map[string]any{"var": "item"}}
+				args = []any{map[string]any{"var": "arr"}, map[string]any{"var": ""}}
 			case "reduce":
 				args = []any{map[string]any{"var": "arr"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 0}
 			case "merge":
@@ -590,7 +590,7 @@ func TestArrayOperator_DialectValidation(t *testing.T) {
 		op := NewArrayOperator(config)
 
 		// Test map as representative
-		args := []any{map[string]any{"var": "arr"}, map[string]any{"+": []any{map[string]any{"var": "item"}, 1}}}
+		args := []any{map[string]any{"var": "arr"}, map[string]any{"+": []any{map[string]any{"var": ""}, 1}}}
 		_, err := op.ToSQL("map", args)
 		if err != nil {
 			t.Errorf("Unexpected error for BigQuery dialect: %v", err)
@@ -602,7 +602,7 @@ func TestArrayOperator_DialectValidation(t *testing.T) {
 		op := NewArrayOperator(config)
 
 		// Test map as representative
-		args := []any{map[string]any{"var": "arr"}, map[string]any{"+": []any{map[string]any{"var": "item"}, 1}}}
+		args := []any{map[string]any{"var": "arr"}, map[string]any{"+": []any{map[string]any{"var": ""}, 1}}}
 		_, err := op.ToSQL("map", args)
 		if err != nil {
 			t.Errorf("Unexpected error for Spanner dialect: %v", err)
@@ -691,7 +691,7 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "items"},
 				map[string]any{
 					"if": []any{
-						map[string]any{">": []any{map[string]any{"var": "item"}, 10}},
+						map[string]any{">": []any{map[string]any{"var": ""}, 10}},
 						"high",
 						"low",
 					},
@@ -707,7 +707,7 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "prices"},
 				map[string]any{
 					"+": []any{
-						map[string]any{"*": []any{map[string]any{"var": "item"}, 1.1}},
+						map[string]any{"*": []any{map[string]any{"var": ""}, 1.1}},
 						5,
 					},
 				},
@@ -720,7 +720,7 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 			operator: "map",
 			args: []any{
 				map[string]any{"var": "numbers"},
-				map[string]any{"-": []any{map[string]any{"var": "item"}}},
+				map[string]any{"-": []any{map[string]any{"var": ""}}},
 			},
 			expected: "ARRAY(SELECT (-elem) FROM UNNEST(numbers) AS elem)",
 			hasError: false,
@@ -734,8 +734,8 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "items"},
 				map[string]any{
 					"and": []any{
-						map[string]any{">": []any{map[string]any{"var": "item"}, 5}},
-						map[string]any{"<": []any{map[string]any{"var": "item"}, 100}},
+						map[string]any{">": []any{map[string]any{"var": ""}, 5}},
+						map[string]any{"<": []any{map[string]any{"var": ""}, 100}},
 					},
 				},
 			},
@@ -749,8 +749,8 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "statuses"},
 				map[string]any{
 					"or": []any{
-						map[string]any{"==": []any{map[string]any{"var": "item"}, "active"}},
-						map[string]any{"==": []any{map[string]any{"var": "item"}, "pending"}},
+						map[string]any{"==": []any{map[string]any{"var": ""}, "active"}},
+						map[string]any{"==": []any{map[string]any{"var": ""}, "pending"}},
 					},
 				},
 			},
@@ -764,7 +764,7 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "values"},
 				map[string]any{
 					"!": []any{
-						map[string]any{"==": []any{map[string]any{"var": "item"}, 0}},
+						map[string]any{"==": []any{map[string]any{"var": ""}, 0}},
 					},
 				},
 			},
@@ -778,11 +778,11 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "items"},
 				map[string]any{
 					"and": []any{
-						map[string]any{">": []any{map[string]any{"var": "item"}, 0}},
+						map[string]any{">": []any{map[string]any{"var": ""}, 0}},
 						map[string]any{
 							"or": []any{
-								map[string]any{"<": []any{map[string]any{"var": "item"}, 10}},
-								map[string]any{">": []any{map[string]any{"var": "item"}, 100}},
+								map[string]any{"<": []any{map[string]any{"var": ""}, 10}},
+								map[string]any{">": []any{map[string]any{"var": ""}, 100}},
 							},
 						},
 					},
@@ -846,8 +846,8 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "scores"},
 				map[string]any{
 					"and": []any{
-						map[string]any{">=": []any{map[string]any{"var": "item"}, 0}},
-						map[string]any{"<=": []any{map[string]any{"var": "item"}, 100}},
+						map[string]any{">=": []any{map[string]any{"var": ""}, 0}},
+						map[string]any{"<=": []any{map[string]any{"var": ""}, 100}},
 					},
 				},
 			},
@@ -861,8 +861,8 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "flags"},
 				map[string]any{
 					"or": []any{
-						map[string]any{"==": []any{map[string]any{"var": "item"}, true}},
-						map[string]any{"==": []any{map[string]any{"var": "item"}, 1}},
+						map[string]any{"==": []any{map[string]any{"var": ""}, true}},
+						map[string]any{"==": []any{map[string]any{"var": ""}, 1}},
 					},
 				},
 			},
@@ -876,8 +876,8 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"var": "temperatures"},
 				map[string]any{
 					"and": []any{
-						map[string]any{">": []any{map[string]any{"var": "item"}, 40}},
-						map[string]any{"<": []any{map[string]any{"var": "item"}, 50}},
+						map[string]any{">": []any{map[string]any{"var": ""}, 40}},
+						map[string]any{"<": []any{map[string]any{"var": ""}, 50}},
 					},
 				},
 			},
@@ -893,10 +893,10 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{
 					"filter": []any{
 						map[string]any{"var": "numbers"},
-						map[string]any{">": []any{map[string]any{"var": "item"}, 0}},
+						map[string]any{">": []any{map[string]any{"var": ""}, 0}},
 					},
 				},
-				map[string]any{"*": []any{map[string]any{"var": "item"}, 2}},
+				map[string]any{"*": []any{map[string]any{"var": ""}, 2}},
 			},
 			expected: "ARRAY(SELECT (elem * 2) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(numbers) AS elem WHERE elem > 0)) AS elem)",
 			hasError: false,
@@ -963,7 +963,7 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 		{
 			name:     "map with transformation",
 			operator: "map",
-			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": "item"}, 2}}},
+			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": ""}, 2}}},
 			expected: "arrayMap(elem -> (elem * 2), numbers)",
 			hasError: false,
 		},
@@ -971,7 +971,7 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 		{
 			name:     "filter with condition",
 			operator: "filter",
-			args:     []any{map[string]any{"var": "scores"}, map[string]any{">=": []any{map[string]any{"var": "item"}, 70}}},
+			args:     []any{map[string]any{"var": "scores"}, map[string]any{">=": []any{map[string]any{"var": ""}, 70}}},
 			expected: "arrayFilter(elem -> elem >= 70, scores)",
 			hasError: false,
 		},
@@ -1008,7 +1008,7 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 		{
 			name:     "all with condition",
 			operator: "all",
-			args:     []any{map[string]any{"var": "values"}, map[string]any{">": []any{map[string]any{"var": "item"}, 0}}},
+			args:     []any{map[string]any{"var": "values"}, map[string]any{">": []any{map[string]any{"var": ""}, 0}}},
 			expected: "(length(values) > 0 AND arrayAll(elem -> elem > 0, values))",
 			hasError: false,
 		},
@@ -1016,7 +1016,7 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 		{
 			name:     "some with condition",
 			operator: "some",
-			args:     []any{map[string]any{"var": "items"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "active"}}},
+			args:     []any{map[string]any{"var": "items"}, map[string]any{"==": []any{map[string]any{"var": ""}, "active"}}},
 			expected: "arrayExists(elem -> elem = 'active', items)",
 			hasError: false,
 		},
@@ -1024,7 +1024,7 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 		{
 			name:     "none with condition",
 			operator: "none",
-			args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": "item"}, "error"}}},
+			args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": ""}, "error"}}},
 			expected: "NOT arrayExists(elem -> elem = 'error', statuses)",
 			hasError: false,
 		},
@@ -1188,11 +1188,11 @@ func TestArrayOperator_ToSQLParam_DialectValidation(t *testing.T) {
 
 	minMapArgs := []interface{}{
 		[]interface{}{1, 2},
-		map[string]interface{}{"var": "item"},
+		map[string]interface{}{"var": ""},
 	}
 	minFilterArgs := []interface{}{
 		[]interface{}{1, 2, 3},
-		map[string]interface{}{">": []interface{}{map[string]interface{}{"var": "item"}, 0}},
+		map[string]interface{}{">": []interface{}{map[string]interface{}{"var": ""}, 0}},
 	}
 	minReduceArgs := []interface{}{
 		[]interface{}{1, 2},
@@ -1204,7 +1204,7 @@ func TestArrayOperator_ToSQLParam_DialectValidation(t *testing.T) {
 	}
 	minQuantifierArgs := []interface{}{
 		[]interface{}{1},
-		map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": "item"}, 1}},
+		map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": ""}, 1}},
 	}
 
 	tests := []struct {

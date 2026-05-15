@@ -368,7 +368,7 @@ See [Type Coercion](schema-validation.md#type-coercion) for details.
 ### Map Array
 
 ```json
-{"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
+{"map": [{"var": "numbers"}, {"+": [{"var": ""}, 1]}]}
 ```
 ```sql
 ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
@@ -377,7 +377,7 @@ ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
 ### Filter Array
 
 ```json
-{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+{"filter": [{"var": "scores"}, {">": [{"var": ""}, 70]}]}
 ```
 ```sql
 ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
@@ -394,9 +394,20 @@ ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 
 ### Nested Array Scope
 
-For nested array operators, the transpiler keeps inner and outer element scopes distinct (for example `elem`, `elem1`) when needed, so references like `item.base` in nested reducers resolve to the intended outer element.
+Inside `map`, `filter`, `all`, `some`, and `none` lambdas, bare vars resolve against the current element:
 
-Inside an inner lambda, `current` and `current.*` always refer to that inner element alias (for example `elem1`, `elem1.base`). Outer-element access in nested lambdas should use `item.*`.
+```json
+{"map": [{"var": "records"}, {"var": "type"}]}
+```
+```sql
+ARRAY(SELECT elem.type FROM UNNEST(records) AS elem)
+```
+
+Use `{"var": ""}` for the current element itself, and array-form vars for defaults, for example `{"var":["type","unknown"]}` -> `COALESCE(elem.type, 'unknown')`.
+
+The implementation-specific dotted aliases `.type`, `item.type`, `current.type`, and `elem.type` are not supported in these lambdas. In `reduce`, use official JSONLogic names: `{"var":"current"}`, `{"var":"current.type"}`, and `{"var":"accumulator"}`. The whole reduce scope (`{"var":""}`) is an object in JSONLogic and is not emitted as a scalar SQL expression.
+
+For nested array operators, the transpiler keeps inner and outer generated SQL aliases distinct (for example `elem`, `elem1`) when needed.
 
 ### All Elements Satisfy Condition
 

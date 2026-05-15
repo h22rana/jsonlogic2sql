@@ -47,7 +47,7 @@ Path segments that are not valid unquoted SQL identifiers (e.g. start with a dig
 | DuckDB | Double quote (`"`) | `fixture.history."24h".events.total` |
 | ClickHouse | Backtick (`` ` ``) | `` fixture.history.`24h`.events.total `` |
 
-Segments that only contain letters, digits, and underscores (and don't start with a digit) remain unquoted. The same per-segment quoting is applied inside array scopes such as `current.24h`/`item.24h` and before variable references are passed to custom operators.
+Segments that only contain letters, digits, and underscores (and don't start with a digit) remain unquoted. The same per-segment quoting is applied inside array lambdas such as `{"var":"24h"}`, inside reduce scopes such as `{"var":"current.24h"}`, and before variable references are passed to custom operators.
 
 ## Dialect-Specific SQL Generation
 

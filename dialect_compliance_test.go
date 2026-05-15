@@ -128,7 +128,7 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 	tests := []testCase{
 		{
 			name:  "map transformation",
-			input: `{"map": [{"var": "numbers"}, {"*": [{"var": "item"}, 2]}]}`,
+			input: `{"map": [{"var": "numbers"}, {"*": [{"var": ""}, 2]}]}`,
 			expected: map[Dialect]string{
 				DialectBigQuery:   "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
 				DialectSpanner:    "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
@@ -139,7 +139,7 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 		},
 		{
 			name:  "filter condition",
-			input: `{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}`,
+			input: `{"filter": [{"var": "scores"}, {">": [{"var": ""}, 70]}]}`,
 			expected: map[Dialect]string{
 				DialectBigQuery:   "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
 				DialectSpanner:    "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
@@ -150,7 +150,7 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 		},
 		{
 			name:  "all elements check",
-			input: `{"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}`,
+			input: `{"all": [{"var": "ages"}, {">=": [{"var": ""}, 18]}]}`,
 			expected: map[Dialect]string{
 				DialectBigQuery:   "(ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
 				DialectSpanner:    "(ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
@@ -161,7 +161,7 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 		},
 		{
 			name:  "some elements check",
-			input: `{"some": [{"var": "items"}, {"==": [{"var": "item"}, "active"]}]}`,
+			input: `{"some": [{"var": "items"}, {"==": [{"var": ""}, "active"]}]}`,
 			expected: map[Dialect]string{
 				DialectBigQuery:   "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
 				DialectSpanner:    "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
@@ -172,7 +172,7 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 		},
 		{
 			name:  "none elements check",
-			input: `{"none": [{"var": "values"}, {"==": [{"var": "item"}, "error"]}]}`,
+			input: `{"none": [{"var": "values"}, {"==": [{"var": ""}, "error"]}]}`,
 			expected: map[Dialect]string{
 				DialectBigQuery:   "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",
 				DialectSpanner:    "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",

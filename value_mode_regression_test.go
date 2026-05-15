@@ -94,7 +94,7 @@ func TestTranspileValue_RejectsMalformedVarOperandsAllDialectsSchemaModes(t *tes
 		},
 		{
 			name:  "array-scoped defaulted var has too many operands",
-			logic: `{"map":[{"var":"items"},{"var":["current",1,2]}]}`,
+			logic: `{"map":[{"var":"items"},{"var":["",1,2]}]}`,
 			input: map[string]interface{}{
 				"map": []interface{}{
 					map[string]interface{}{"var": "items"},
@@ -1738,7 +1738,7 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaModes(t *t
 	}{
 		{
 			name:  "direct array literal",
-			logic: `{"map":[{"var":"arr"},[{"var":"current"}]]}`,
+			logic: `{"map":[{"var":"arr"},[{"var":""}]]}`,
 			wantSQL: func(d Dialect) string {
 				return mapSQL(d, arrayLiteral(d, "elem"))
 			},
@@ -1749,7 +1749,7 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaModes(t *t
 		},
 		{
 			name:  "array literal with value logical",
-			logic: `{"map":[{"var":"arr"},[{"or":[0,{"var":"current"}]}]]}`,
+			logic: `{"map":[{"var":"arr"},[{"or":[0,{"var":""}]}]]}`,
 			wantSQL: func(d Dialect) string {
 				return mapSQL(d, arrayLiteral(d, "elem"))
 			},
@@ -1760,7 +1760,7 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaModes(t *t
 		},
 		{
 			name:  "array literal with defaulted current",
-			logic: `{"map":[{"var":"arr"},[{"var":["current","fallback"]}]]}`,
+			logic: `{"map":[{"var":"arr"},[{"var":["","fallback"]}]]}`,
 			wantSQL: func(d Dialect) string {
 				return mapSQL(d, arrayLiteral(d, "COALESCE(elem, 'fallback')"))
 			},
@@ -3013,7 +3013,7 @@ func TestTranspileValue_PredicateResultsAreTwoValuedBooleansAllDialectsSchemaMod
 		},
 		{
 			name:  "map transformation returns comparison value",
-			logic: `{"map":[{"var":"arr"},{"==":[{"var":"current"},1]}]}`,
+			logic: `{"map":[{"var":"arr"},{"==":[{"var":""},1]}]}`,
 			want: func(d Dialect) string {
 				if d == DialectClickHouse {
 					return "arrayMap(elem -> CASE WHEN elem = 1 THEN TRUE ELSE FALSE END, arr)"
@@ -3256,7 +3256,7 @@ func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 		},
 		{
 			name:  "map source array literal",
-			logic: `{"map":[[1,2],{"+":[{"var":"item"},1]}]}`,
+			logic: `{"map":[[1,2],{"+":[{"var":""},1]}]}`,
 			wantSQL: func(d Dialect) string {
 				switch d {
 				case DialectPostgreSQL:
@@ -3759,7 +3759,7 @@ func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *te
 }
 
 func TestTranspileValue_ArrayPredicateContextsRejectValueLogicals(t *testing.T) {
-	logic := `{"filter":[{"var":"items"},{"or":[0,{"==":[{"var":"current"},1]}]}]}`
+	logic := `{"filter":[{"var":"items"},{"or":[0,{"==":[{"var":""},1]}]}]}`
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
@@ -3785,7 +3785,7 @@ func TestTranspileValue_ArrayPredicateContextsRejectValueLogicals(t *testing.T) 
 }
 
 func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing.T) {
-	logic := `{"map":[{"var":"items"},{"cat":[{"var":["current","fallback"]}]}]}`
+	logic := `{"map":[{"var":"items"},{"cat":[{"var":["","fallback"]}]}]}`
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
@@ -3815,7 +3815,7 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing
 }
 
 func TestTranspileParameterizedValue_ArrayScopedDefaultSkippedByValueLogical(t *testing.T) {
-	logic := `{"map":[{"var":"items"},{"or":["x",{"var":["current","fallback"]}]}]}`
+	logic := `{"map":[{"var":"items"},{"or":["x",{"var":["","fallback"]}]}]}`
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
@@ -3845,7 +3845,7 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultSkippedByValueLogical(t *
 }
 
 func TestTranspileParameterizedValue_ArrayCustomPredicateKeepsTypeMetadata(t *testing.T) {
-	logic := `{"map":[{"var":"items"},{"cat":[{"gt":[{"var":"current"},0]}]}]}`
+	logic := `{"map":[{"var":"items"},{"cat":[{"gt":[{"var":""},0]}]}]}`
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {

@@ -11,21 +11,14 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
 
-// Patterns for replacing element references in pre-processed SQL strings.
-// These match "item"/"current"/"accumulator" only when they appear as standalone
-// identifiers (not as suffixes like "account.current" or substrings like "current_balance").
-// The pattern requires either start-of-string or a non-word non-dot character before the
-// keyword, and a word boundary after it. This prevents false positives on:
-//   - "current_balance" (underscore is a word char, no \b before "current")
-//   - "account.current" (dot before "current" is blocked by [^\w.])
-//
-// But correctly matches:
-//   - standalone "current" → "elem"
-//   - "current.field" → "elem.field" (dot AFTER is fine, matched by \b)
-//   - "(current + 1)" → "(elem + 1)" (paren is non-word non-dot)
-var (
-	elementRefPathPattern = regexp.MustCompile(`(^|[^\w.])((?:` + regexp.QuoteMeta(ItemVar) + `|` + regexp.QuoteMeta(CurrentVar) + `)(?:\.[A-Za-z0-9_]+)*)\b`)
-	accumulatorPattern    = regexp.MustCompile(`(^|[^\w.])` + regexp.QuoteMeta(AccumulatorVar) + `\b`)
+var accumulatorPattern = regexp.MustCompile(`(^|[^\w.])` + regexp.QuoteMeta(AccumulatorVar) + `\b`)
+
+type arrayLambdaScope int
+
+const (
+	arrayLambdaScopeNone arrayLambdaScope = iota
+	arrayLambdaScopeElement
+	arrayLambdaScopeReduce
 )
 
 // ArrayOperator handles array operations like map, filter, reduce, all, some, none, merge.
@@ -39,6 +32,7 @@ type ArrayOperator struct {
 	visibleElems []string
 	exprPath     string
 	valueScope   bool
+	lambdaScope  arrayLambdaScope
 	// valueSemantics means the current expression position returns a JSONLogic
 	// value, so and/or/if must preserve fallback values instead of boolean SQL.
 	valueSemantics     bool
@@ -63,6 +57,7 @@ func NewArrayOperator(config *OperatorConfig) *ArrayOperator {
 		visibleElems:   []string{ElemVar},
 		exprPath:       "$",
 		valueScope:     false,
+		lambdaScope:    arrayLambdaScopeNone,
 		valueSemantics: false,
 	}
 }
@@ -85,6 +80,7 @@ func (a *ArrayOperator) withChildScope() *ArrayOperator {
 		visibleElems:       append([]string{}, a.visibleElems...),
 		exprPath:           a.exprPath,
 		valueScope:         a.valueScope,
+		lambdaScope:        a.lambdaScope,
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -108,6 +104,7 @@ func (a *ArrayOperator) withPath(path string) *ArrayOperator {
 		visibleElems:       append([]string{}, a.visibleElems...),
 		exprPath:           path,
 		valueScope:         a.valueScope,
+		lambdaScope:        a.lambdaScope,
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -126,6 +123,7 @@ func (a *ArrayOperator) withValueScope(enabled bool) *ArrayOperator {
 		visibleElems:       append([]string{}, a.visibleElems...),
 		exprPath:           a.exprPath,
 		valueScope:         enabled,
+		lambdaScope:        a.lambdaScope,
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -144,6 +142,7 @@ func (a *ArrayOperator) withValueSemantics(enabled bool) *ArrayOperator {
 		visibleElems:       append([]string{}, a.visibleElems...),
 		exprPath:           a.exprPath,
 		valueScope:         a.valueScope,
+		lambdaScope:        a.lambdaScope,
 		valueSemantics:     enabled,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -162,9 +161,29 @@ func (a *ArrayOperator) withAccumulatorType(typ ExpressionType) *ArrayOperator {
 		visibleElems:       append([]string{}, a.visibleElems...),
 		exprPath:           a.exprPath,
 		valueScope:         a.valueScope,
+		lambdaScope:        a.lambdaScope,
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    typ,
 		hasAccumulatorType: true,
+	}
+	return child
+}
+
+func (a *ArrayOperator) withLambdaScope(scope arrayLambdaScope) *ArrayOperator {
+	child := &ArrayOperator{
+		config:             a.config,
+		dataOp:             a.dataOp,
+		comparisonOp:       a.comparisonOp,
+		logicalOp:          a.logicalOp,
+		numericOp:          a.numericOp,
+		scopeDepth:         a.scopeDepth,
+		visibleElems:       append([]string{}, a.visibleElems...),
+		exprPath:           a.exprPath,
+		valueScope:         a.valueScope,
+		lambdaScope:        scope,
+		valueSemantics:     a.valueSemantics,
+		accumulatorType:    a.accumulatorType,
+		hasAccumulatorType: a.hasAccumulatorType,
 	}
 	return child
 }
@@ -237,26 +256,13 @@ func (a *ArrayOperator) isVisibleElemPath(name string) bool {
 }
 
 func (a *ArrayOperator) shouldUseChildScope(op string, args []interface{}) bool {
-	// Use a child element alias only for nested reduce when reduce arguments
-	// reference the outer element alias. Other nested array operators keep the
-	// historical alias behavior to preserve existing SQL output expectations.
-	if op == OpReduce {
-		if len(args) > 2 && a.referencesVisibleElemAlias(args[2]) {
-			return true
-		}
-		if len(args) > 1 && len(args) > 0 && a.referencesVisibleElemAlias(args[0]) {
-			plain, dotted := a.elementRefUsage(args[1])
-			return plain && dotted
-		}
+	if !a.isArrayOperator(op) || len(args) == 0 {
 		return false
 	}
-	if op == OpMap || op == OpFilter || op == OpAll || op == OpSome || op == OpNone {
-		if len(args) > 1 && len(args) > 0 && a.referencesVisibleElemAlias(args[0]) {
-			plain, dotted := a.elementRefUsage(args[1])
-			return plain && dotted
-		}
+	if isRenderedArrayScopeSource(args[0]) || a.referencesVisibleElemAlias(args[0]) {
+		return true
 	}
-	return false
+	return op == OpReduce && len(args) > 2 && a.referencesVisibleElemAlias(args[2])
 }
 
 func (a *ArrayOperator) referencesVisibleElemAlias(expr interface{}) bool {
@@ -308,154 +314,6 @@ func (a *ArrayOperator) referencesVisibleElemAlias(expr interface{}) bool {
 		return false
 	default:
 		return false
-	}
-}
-
-// elementRefUsage reports whether an expression contains plain item/current refs
-// and dotted item./current. refs. Nested array lambdas are not traversed to avoid
-// crossing scope boundaries.
-func (a *ArrayOperator) elementRefUsage(expr interface{}) (plain, dotted bool) {
-	switch e := expr.(type) {
-	case map[string]interface{}:
-		if len(e) == 1 {
-			if varName, hasVar := e[OpVar]; hasVar {
-				switch v := varName.(type) {
-				case string:
-					switch {
-					case v == ItemVar || v == CurrentVar || v == "":
-						plain = true
-					case strings.HasPrefix(v, ItemVar+".") || strings.HasPrefix(v, CurrentVar+"."):
-						dotted = true
-					}
-				case []interface{}:
-					if len(v) > 0 {
-						if s, ok := v[0].(string); ok {
-							switch {
-							case s == ItemVar || s == CurrentVar || s == "":
-								plain = true
-							case strings.HasPrefix(s, ItemVar+".") || strings.HasPrefix(s, CurrentVar+"."):
-								dotted = true
-							}
-						}
-					}
-				}
-				return plain, dotted
-			}
-			for opName, opArgs := range e {
-				if a.isArrayOperator(opName) {
-					arr, ok := opArgs.([]interface{})
-					if !ok {
-						return false, false
-					}
-					if len(arr) > 0 {
-						p, d := a.elementRefUsage(arr[0])
-						plain = plain || p
-						dotted = dotted || d
-					}
-					if opName == OpReduce && len(arr) > 2 {
-						p, d := a.elementRefUsage(arr[2])
-						plain = plain || p
-						dotted = dotted || d
-					}
-					return plain, dotted
-				}
-			}
-		}
-		for _, v := range e {
-			p, d := a.elementRefUsage(v)
-			plain = plain || p
-			dotted = dotted || d
-		}
-		return plain, dotted
-	case []interface{}:
-		for _, v := range e {
-			p, d := a.elementRefUsage(v)
-			plain = plain || p
-			dotted = dotted || d
-		}
-		return plain, dotted
-	default:
-		return false, false
-	}
-}
-
-func (a *ArrayOperator) rewriteOuterDottedForNested(op string, args []interface{}, outerAlias string) []interface{} {
-	if op != OpMap && op != OpFilter && op != OpAll && op != OpSome && op != OpNone && op != OpReduce {
-		return args
-	}
-	if len(args) < 2 {
-		return args
-	}
-	newArgs := make([]interface{}, len(args))
-	copy(newArgs, args)
-	newArgs[1] = a.rewriteOuterDottedElementRefs(args[1], outerAlias)
-	return newArgs
-}
-
-// rewriteOuterDottedElementRefs rewrites dotted item references to an explicit
-// outer alias (e.g. item.base -> elem.base), while leaving current/current.*
-// untouched so inner-scope current semantics remain intact.
-// Nested array lambdas are not rewritten (only their source/initial outer-scope args).
-func (a *ArrayOperator) rewriteOuterDottedElementRefs(expr interface{}, outerAlias string) interface{} {
-	switch e := expr.(type) {
-	case map[string]interface{}:
-		if len(e) == 1 {
-			if varName, hasVar := e[OpVar]; hasVar {
-				if varStr, ok := varName.(string); ok {
-					switch {
-					case strings.HasPrefix(varStr, ItemVar+"."):
-						return map[string]interface{}{OpVar: outerAlias + varStr[len(ItemVar):]}
-					default:
-						return e
-					}
-				}
-				if varArr, ok := varName.([]interface{}); ok && len(varArr) > 0 {
-					if varStr, ok := varArr[0].(string); ok {
-						switch {
-						case strings.HasPrefix(varStr, ItemVar+"."):
-							newArr := make([]interface{}, len(varArr))
-							copy(newArr, varArr)
-							newArr[0] = outerAlias + varStr[len(ItemVar):]
-							return map[string]interface{}{OpVar: newArr}
-						default:
-							return e
-						}
-					}
-				}
-				return e
-			}
-			for opName, opArgs := range e {
-				if a.isArrayOperator(opName) {
-					if arr, ok := opArgs.([]interface{}); ok {
-						newArgs := make([]interface{}, len(arr))
-						copy(newArgs, arr)
-						if len(newArgs) > 0 {
-							newArgs[0] = a.rewriteOuterDottedElementRefs(arr[0], outerAlias)
-						}
-						if opName == OpReduce && len(newArgs) > 2 {
-							newArgs[2] = a.rewriteOuterDottedElementRefs(arr[2], outerAlias)
-						}
-						return map[string]interface{}{opName: newArgs}
-					}
-				}
-			}
-			for opName, opArgs := range e {
-				return map[string]interface{}{opName: a.rewriteOuterDottedElementRefs(opArgs, outerAlias)}
-			}
-		}
-		result := make(map[string]interface{}, len(e))
-		for k, v := range e {
-			result[k] = a.rewriteOuterDottedElementRefs(v, outerAlias)
-		}
-		return result
-	case []interface{}:
-		result := make([]interface{}, len(e))
-		for i, v := range e {
-			result[i] = a.rewriteOuterDottedElementRefs(v, outerAlias)
-		}
-		return result
-	default:
-		return expr
 	}
 }
 
@@ -565,17 +423,13 @@ func (a *ArrayOperator) ToSQL(operator string, args []interface{}) (string, erro
 func (a *ArrayOperator) ToSQLAtPath(operator string, args []interface{}, path string) (string, error) {
 	scoped := a.withPath(path)
 	if scoped.shouldUseRenderedSourceChildScope(operator, args) {
-		nestedArgs := scoped.rewriteOuterDottedForNested(operator, args, scoped.elemAlias())
-		return scoped.withChildScope().ToSQL(operator, nestedArgs)
+		return scoped.withChildScope().ToSQL(operator, args)
 	}
 	return scoped.ToSQL(operator, args)
 }
 
 func (a *ArrayOperator) shouldUseRenderedSourceChildScope(op string, args []interface{}) bool {
-	if len(args) == 0 || !a.shouldUseChildScope(op, args) {
-		return false
-	}
-	return isRenderedArrayScopeSource(args[0])
+	return a.shouldUseChildScope(op, args)
 }
 
 func isRenderedArrayScopeSource(value interface{}) bool {
@@ -630,12 +484,11 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
 
-	valueScoped := a.withValueSemantics(true)
+	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
 	}
-	transformation = a.replaceElementRefsInSQL(transformation)
 
 	alias := a.elemAlias()
 	return a.renderMapSQL(alias, transformation, array), nil
@@ -671,11 +524,11 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
+	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
+		predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
 	}
-	condition = a.replaceElementRefsInSQL(condition)
 
 	alias := a.elemAlias()
 	return a.renderFilterSQL(alias, array, condition), nil
@@ -761,18 +614,15 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 			initial, pattern.function, elemRef, array, alias), nil
 	}
 
-	// General case: rewrite element vars in the AST (item/current → elem),
-	// then generate SQL, apply safety net for custom ops, and finally
+	// General case: parse the reducer in official reduce scope, then
 	// substitute accumulator with the initial value. The order matters:
-	// accumulator substitution must happen LAST so that the safety net
-	// doesn't corrupt initial values containing "current"/"item" field names.
-	rewritten := a.rewriteElementVars(reducerExpr)
-	valueScoped := a.withValueSemantics(true).withAccumulatorType(initialValue.typ)
-	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(rewritten, true, a.argPath(arrayExpressionArgIndex))
+	// accumulator substitution must happen LAST so initial values containing
+	// the word "accumulator" are treated as SQL literals.
+	valueScoped := a.withLambdaScope(arrayLambdaScopeReduce).withValueSemantics(true).withAccumulatorType(initialValue.typ)
+	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(reducerExpr, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
-	reducerWithElem = a.replaceElementRefsInSQL(reducerWithElem)
 	reducerWithElem = replaceWithLiteral(accumulatorPattern, reducerWithElem, initial)
 
 	// Generate SQL based on dialect
@@ -906,11 +756,11 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
+	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
+		predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
-	condition = a.replaceElementRefsInSQL(condition)
 
 	// JSONLogic spec: {"all": [[], condition]} returns false (empty array = false).
 	// Without a guard, SQL NOT EXISTS on an empty UNNEST returns true (no rows to violate).
@@ -950,11 +800,11 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
+	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
+		predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
-	condition = a.replaceElementRefsInSQL(condition)
 
 	alias := a.elemAlias()
 	return a.renderSomeSQL(alias, array, condition), nil
@@ -991,11 +841,11 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	}
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
-	condition, err := a.predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
+	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
+		predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
-	condition = a.replaceElementRefsInSQL(condition)
 
 	alias := a.elemAlias()
 	return a.renderNoneSQL(alias, array, condition), nil
@@ -1278,7 +1128,6 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 					target := a
 					nestedArgs := arr
 					if a.shouldUseChildScope(operator, arr) {
-						nestedArgs = a.rewriteOuterDottedForNested(operator, arr, a.elemAlias())
 						target = a.withChildScope()
 					}
 					target = target.withValueScope(true)
@@ -1307,63 +1156,6 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 	return "", fmt.Errorf("invalid expression type: %T", expr)
 }
 
-// replaceElementRefsInSQL applies word-boundary replacement of "item" and "current"
-// with "elem" in a final SQL string. This is a safety net for SQL produced by custom
-// operators or nested operator chains that may emit literal "item"/"current" tokens
-// not reachable by the AST-level rewrite.
-func (a *ArrayOperator) replaceElementRefsInSQL(sql string) string {
-	return replaceOutsideSingleQuotedStrings(sql, func(segment string) string {
-		return a.replaceElementRefsInSQLSegment(segment)
-	})
-}
-
-func (a *ArrayOperator) replaceElementRefsInSQLSegment(sql string) string {
-	return elementRefPathPattern.ReplaceAllStringFunc(sql, func(match string) string {
-		loc := elementRefPathPattern.FindStringSubmatchIndex(match)
-		if loc == nil {
-			return match
-		}
-		prefix := match[loc[2]:loc[3]]
-		ref := match[loc[4]:loc[5]]
-		mapped := a.mapElementVarName(ref)
-		quoted, err := a.quoteArrayScopeIdentifier(mapped)
-		if err != nil {
-			return prefix + mapped
-		}
-		return prefix + quoted
-	})
-}
-
-func replaceOutsideSingleQuotedStrings(sql string, replace func(string) string) string {
-	var b strings.Builder
-	segmentStart := 0
-	for i := 0; i < len(sql); {
-		if sql[i] != '\'' {
-			i++
-			continue
-		}
-
-		b.WriteString(replace(sql[segmentStart:i]))
-		quoteStart := i
-		i++
-		for i < len(sql) {
-			if sql[i] == '\'' {
-				if i+1 < len(sql) && sql[i+1] == '\'' {
-					i += 2
-					continue
-				}
-				i++
-				break
-			}
-			i++
-		}
-		b.WriteString(sql[quoteStart:i])
-		segmentStart = i
-	}
-	b.WriteString(replace(sql[segmentStart:]))
-	return b.String()
-}
-
 // replaceWithLiteral replaces regex matches while preserving the captured prefix
 // and treating the replacement as a literal string (no $-expansion).
 func replaceWithLiteral(re *regexp.Regexp, s, replacement string) string {
@@ -1377,28 +1169,6 @@ func replaceWithLiteral(re *regexp.Regexp, s, replacement string) string {
 		prefix := match[loc[2]:loc[3]]
 		return prefix + replacement
 	})
-}
-
-// mapElementVarName maps JSONLogic element variable names to the SQL UNNEST alias.
-// Returns the mapped name, or the original if no mapping applies.
-// Only exact matches ("item", "current", "") and dot-prefix matches ("item.", "current.")
-// are mapped - this prevents corrupting field names like "current_balance" or "item_count".
-func (a *ArrayOperator) mapElementVarName(varStr string) string {
-	// Exact matches for element references
-	// Note: empty string ("") is NOT rewritten here - it's handled by expressionToSQL's
-	// special case which returns ElemVar directly without schema validation.
-	alias := a.elemAlias()
-	if varStr == ItemVar || varStr == CurrentVar {
-		return alias
-	}
-	// Dot-notation: "item.field" → "elem.field", "current.field" → "elem.field"
-	if strings.HasPrefix(varStr, ItemVar+".") {
-		return alias + varStr[len(ItemVar):]
-	}
-	if strings.HasPrefix(varStr, CurrentVar+".") {
-		return alias + varStr[len(CurrentVar):]
-	}
-	return varStr
 }
 
 func (a *ArrayOperator) quoteArrayScopePath(alias, suffix string) (string, error) {
@@ -1425,32 +1195,94 @@ func (a *ArrayOperator) quoteArrayScopeIdentifier(name string) (string, error) {
 	return strings.Join(segments, "."), nil
 }
 
-// mapArrayScopeVar maps array-scope variable names to the current element alias.
-// It handles direct elem references and JSONLogic aliases ("", "item", "current").
+// mapArrayScopeVar maps var names according to the active JSONLogic lambda
+// scope. Element lambdas resolve bare fields against the current array element;
+// reduce lambdas only expose the official current/accumulator bindings.
 func (a *ArrayOperator) mapArrayScopeVar(varName string) (string, bool, error) {
+	switch a.lambdaScope {
+	case arrayLambdaScopeElement:
+		return a.mapElementScopeVar(varName)
+	case arrayLambdaScopeReduce:
+		return a.mapReduceScopeVar(varName)
+	case arrayLambdaScopeNone:
+		if a.isVisibleElemPath(varName) {
+			quoted, err := a.quoteArrayScopeIdentifier(varName)
+			if err != nil {
+				return "", true, err
+			}
+			return quoted, true, nil
+		}
+		return "", false, nil
+	default:
+		return "", false, nil
+	}
+}
+
+func (a *ArrayOperator) mapElementScopeVar(varName string) (string, bool, error) {
+	if isUnsupportedElementScopeVar(varName) {
+		return "", true, unsupportedArrayScopeVarError(varName)
+	}
 	if varName == "" {
 		return a.elemAlias(), true, nil
 	}
-	if a.isVisibleElemPath(varName) {
-		quoted, err := a.quoteArrayScopeIdentifier(varName)
-		if err != nil {
-			return "", true, err
-		}
-		return quoted, true, nil
+	quoted, err := a.quoteArrayScopePath(a.elemAlias(), varName)
+	if err != nil {
+		return "", true, err
 	}
-	mapped := a.mapElementVarName(varName)
-	if mapped != varName {
-		quoted, err := a.quoteArrayScopeIdentifier(mapped)
-		if err != nil {
-			return "", true, err
-		}
-		return quoted, true, nil
-	}
-	return mapped, false, nil
+	return quoted, true, nil
 }
 
-// arrayScopeVarToSQL resolves array-scope var references without schema validation.
-// This keeps item/current/elem aliases working inside array lambdas when schema mode is enabled.
+func (a *ArrayOperator) mapReduceScopeVar(varName string) (string, bool, error) {
+	if isUnsupportedReduceScopeVar(varName) {
+		return "", true, unsupportedArrayScopeVarError(varName)
+	}
+	switch {
+	case varName == CurrentVar:
+		return a.elemAlias(), true, nil
+	case strings.HasPrefix(varName, CurrentVar+"."):
+		quoted, err := a.quoteArrayScopePath(a.elemAlias(), strings.TrimPrefix(varName, CurrentVar+"."))
+		if err != nil {
+			return "", true, err
+		}
+		return quoted, true, nil
+	case varName == "":
+		return "", true, fmt.Errorf("unsupported reduce-scope variable %q; use %q or %q", varName, CurrentVar, AccumulatorVar)
+	default:
+		return "", false, nil
+	}
+}
+
+func isUnsupportedElementScopeVar(varName string) bool {
+	return strings.HasPrefix(varName, ".") ||
+		strings.HasPrefix(varName, ItemVar+".") ||
+		strings.HasPrefix(varName, CurrentVar+".") ||
+		isInternalElemAliasPath(varName)
+}
+
+func isUnsupportedReduceScopeVar(varName string) bool {
+	return strings.HasPrefix(varName, ".") ||
+		strings.HasPrefix(varName, ItemVar+".") ||
+		isInternalElemAliasPath(varName)
+}
+
+func isInternalElemAliasPath(varName string) bool {
+	if !strings.HasPrefix(varName, ElemVar) {
+		return false
+	}
+	rest := varName[len(ElemVar):]
+	for len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9' {
+		rest = rest[1:]
+	}
+	return strings.HasPrefix(rest, ".")
+}
+
+func unsupportedArrayScopeVarError(varName string) error {
+	return fmt.Errorf("unsupported array-scope variable %q; use bare field names relative to the current element", varName)
+}
+
+// arrayScopeVarToSQL resolves lambda-scoped var references before schema
+// validation. Element lambdas are relative to the current element; reduce
+// lambdas expose only JSONLogic's current/accumulator bindings.
 func (a *ArrayOperator) arrayScopeVarToSQL(varExpr interface{}) (string, bool, error) {
 	if varName, ok := varExpr.(string); ok {
 		mapped, handled, err := a.mapArrayScopeVar(varName)
@@ -1494,10 +1326,13 @@ func (a *ArrayOperator) arrayScopeVarToSQL(varExpr interface{}) (string, bool, e
 	return "", false, nil
 }
 
-// arrayInternalVarToSQL resolves only internal aliases that are already in elem-scope.
-// Unlike arrayScopeVarToSQL, it does NOT map item/current; this is used in valueToSQL
-// for operands like reduce initial values where current/item should remain outer-scope.
+// arrayInternalVarToSQL resolves vars in array-produced value expressions.
+// Active lambdas delegate to arrayScopeVarToSQL; outside lambdas, only already
+// generated elem aliases are treated as array-scoped.
 func (a *ArrayOperator) arrayInternalVarToSQL(varExpr interface{}) (string, bool, error) {
+	if a.lambdaScope != arrayLambdaScopeNone {
+		return a.arrayScopeVarToSQL(varExpr)
+	}
 	if varName, ok := varExpr.(string); ok {
 		if varName == "" {
 			if !a.valueScope {
@@ -1655,91 +1490,6 @@ func (a *ArrayOperator) isBuiltInOperatorName(op string) bool {
 	return false
 }
 
-// rewriteElementVars walks the JSONLogic AST and rewrites element variable
-// references ("item", "current", "") to the UNNEST alias ("elem") before SQL
-// generation. This replaces the old post-hoc string replacement approach which
-// corrupted field names containing "item" or "current" as substrings.
-//
-// When a nested array operator is encountered, only its array source argument
-// (args[0]) is rewritten - the lambda/condition (args[1+]) is left for the
-// nested operator to handle, preserving correct variable scoping.
-func (a *ArrayOperator) rewriteElementVars(expr interface{}) interface{} {
-	switch e := expr.(type) {
-	case ProcessedValue:
-		// Pre-processed SQL from custom operators - use word-boundary regex
-		if e.IsSQL {
-			replaced := a.replaceElementRefsInSQL(e.Value)
-			if replaced != e.Value {
-				return ProcessedValue{Value: replaced, IsSQL: true}
-			}
-		}
-		return e
-	case map[string]interface{}:
-		if len(e) == 1 {
-			// Check for var expression
-			if varName, hasVar := e[OpVar]; hasVar {
-				if varStr, ok := varName.(string); ok {
-					mapped := a.mapElementVarName(varStr)
-					if mapped != varStr {
-						return map[string]interface{}{OpVar: mapped}
-					}
-				}
-				// Handle array-form var: {"var": ["current", defaultValue]}
-				if varArr, ok := varName.([]interface{}); ok && len(varArr) > 0 {
-					if varStr, ok := varArr[0].(string); ok {
-						mapped := a.mapElementVarName(varStr)
-						if mapped != varStr {
-							newArr := make([]interface{}, len(varArr))
-							copy(newArr, varArr)
-							newArr[0] = mapped
-							return map[string]interface{}{OpVar: newArr}
-						}
-					}
-				}
-				return e
-			}
-			// Check for nested array operator - don't rewrite its lambda body
-			for opName, opArgs := range e {
-				if a.isArrayOperator(opName) {
-					if arr, ok := opArgs.([]interface{}); ok {
-						newArgs := make([]interface{}, len(arr))
-						copy(newArgs, arr)
-						// Rewrite args[0] (array source - outer scope)
-						if len(newArgs) > 0 {
-							newArgs[0] = a.rewriteElementVars(arr[0])
-						}
-						// For reduce, also rewrite args[2] (initial value - outer scope)
-						if opName == OpReduce && len(newArgs) > 2 {
-							newArgs[2] = a.rewriteElementVars(arr[2])
-						}
-						return map[string]interface{}{opName: newArgs}
-					}
-				}
-			}
-			// Regular single-key operator - recursively rewrite values
-			for opName, opArgs := range e {
-				return map[string]interface{}{opName: a.rewriteElementVars(opArgs)}
-			}
-		}
-		// Multi-key map - recursively rewrite all values
-		result := make(map[string]interface{}, len(e))
-		for k, v := range e {
-			result[k] = a.rewriteElementVars(v)
-		}
-		return result
-
-	case []interface{}:
-		result := make([]interface{}, len(e))
-		for i, v := range e {
-			result[i] = a.rewriteElementVars(v)
-		}
-		return result
-
-	default:
-		return expr
-	}
-}
-
 func isEmptyArrayLiteral(value interface{}) bool {
 	arr, ok := value.([]interface{})
 	return ok && len(arr) == 0
@@ -1786,8 +1536,7 @@ func (a *ArrayOperator) ToSQLParam(operator string, args []interface{}, pc *para
 func (a *ArrayOperator) ToSQLParamAtPath(operator string, args []interface{}, pc *params.ParamCollector, path string) (string, error) {
 	scoped := a.withPath(path)
 	if scoped.shouldUseRenderedSourceChildScope(operator, args) {
-		nestedArgs := scoped.rewriteOuterDottedForNested(operator, args, scoped.elemAlias())
-		return scoped.withChildScope().ToSQLParam(operator, nestedArgs, pc)
+		return scoped.withChildScope().ToSQLParam(operator, args, pc)
 	}
 	return scoped.ToSQLParam(operator, args, pc)
 }
@@ -1812,12 +1561,11 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
-	valueScoped := a.withValueSemantics(true)
+	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
 	}
-	transformation = a.replaceElementRefsInSQL(transformation)
 	alias := a.elemAlias()
 	return a.renderMapSQL(alias, transformation, array), nil
 }
@@ -1842,11 +1590,11 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
 	}
-	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
+	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
+		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
 	}
-	condition = a.replaceElementRefsInSQL(condition)
 	alias := a.elemAlias()
 	return a.renderFilterSQL(alias, array, condition), nil
 }
@@ -1905,13 +1653,11 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 			initial, pattern.function, elemRef, array, alias), nil
 	}
 
-	rewritten := a.rewriteElementVars(reducerExpr)
-	valueScoped := a.withValueSemantics(true).withAccumulatorType(initialValue.typ)
-	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(rewritten, pc, true, a.argPath(arrayExpressionArgIndex))
+	valueScoped := a.withLambdaScope(arrayLambdaScopeReduce).withValueSemantics(true).withAccumulatorType(initialValue.typ)
+	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(reducerExpr, pc, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
-	reducerWithElem = a.replaceElementRefsInSQL(reducerWithElem)
 	reducerWithElem = replaceWithLiteral(accumulatorPattern, reducerWithElem, initial)
 
 	switch a.getDialect() {
@@ -1943,11 +1689,11 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
-	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
+	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
+		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
-	condition = a.replaceElementRefsInSQL(condition)
 
 	alias := a.elemAlias()
 	return a.renderAllSQL(alias, array, condition), nil
@@ -1973,11 +1719,11 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
-	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
+	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
+		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
-	condition = a.replaceElementRefsInSQL(condition)
 	alias := a.elemAlias()
 	return a.renderSomeSQL(alias, array, condition), nil
 }
@@ -2002,11 +1748,11 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
-	condition, err := a.predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
+	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
+		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
-	condition = a.replaceElementRefsInSQL(condition)
 	alias := a.elemAlias()
 	return a.renderNoneSQL(alias, array, condition), nil
 }
@@ -2280,7 +2026,6 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 					target := a
 					nestedArgs := arr
 					if a.shouldUseChildScope(operator, arr) {
-						nestedArgs = a.rewriteOuterDottedForNested(operator, arr, a.elemAlias())
 						target = a.withChildScope()
 					}
 					target = target.withValueScope(true)
@@ -2367,6 +2112,9 @@ func (a *ArrayOperator) rewriteArrayScopeVarParam(varExpr interface{}) (interfac
 		if len(arr) == 0 {
 			return nil, false, nil
 		}
+		if err := validateVarArrayMaxEntries(arr); err != nil {
+			return nil, true, err
+		}
 		varName, ok := arr[0].(string)
 		if !ok {
 			return nil, false, nil
@@ -2392,6 +2140,9 @@ func (a *ArrayOperator) rewriteArrayScopeVarParam(varExpr interface{}) (interfac
 
 // arrayInternalVarToSQLParam is the parameterized variant of arrayInternalVarToSQL.
 func (a *ArrayOperator) arrayInternalVarToSQLParam(varExpr interface{}, pc *params.ParamCollector) (string, bool, error) {
+	if a.lambdaScope != arrayLambdaScopeNone {
+		return a.arrayScopeVarToSQLParam(varExpr, pc)
+	}
 	if varName, ok := varExpr.(string); ok {
 		if varName == "" {
 			if !a.valueScope {

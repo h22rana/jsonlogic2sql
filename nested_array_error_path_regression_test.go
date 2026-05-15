@@ -55,12 +55,12 @@ func TestNestedArrayCustomOperatorErrorPath_Preserved_InlineAndParam(t *testing.
 		{
 			name:     "array under comparison",
 			parentOp: "==",
-			logic:    `{"==":[{"map":[{"var":"nums"},{"oops":[{"var":"item"}]}]},1]}`,
+			logic:    `{"==":[{"map":[{"var":"nums"},{"oops":[{"var":""}]}]},1]}`,
 		},
 		{
 			name:     "array under logical",
 			parentOp: "and",
-			logic:    `{"and":[true,{"map":[{"var":"nums"},{"oops":[{"var":"item"}]}]}]}`,
+			logic:    `{"and":[true,{"map":[{"var":"nums"},{"oops":[{"var":""}]}]}]}`,
 		},
 	}
 

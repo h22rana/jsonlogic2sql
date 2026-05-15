@@ -641,7 +641,7 @@ func TestTranspileCondition_RejectsValueOperandsInPredicateContexts(t *testing.T
 		},
 		{
 			name:  "array predicate cannot be value fallback",
-			logic: `{"some":[{"var":"items"},{"or":[0,{"==":[{"var":"current"},1]}]}]}`,
+			logic: `{"some":[{"var":"items"},{"or":[0,{"==":[{"var":""},1]}]}]}`,
 		},
 	}
 

@@ -48,7 +48,7 @@ func BenchmarkArithmeticExpression(b *testing.B) {
 // BenchmarkArrayAll benchmarks the all array operator.
 func BenchmarkArrayAll(b *testing.B) {
 	tr, _ := NewTranspiler(DialectBigQuery)
-	input := `{"all": [{"var": "scores"}, {">=": [{"var": "item"}, 70]}]}`
+	input := `{"all": [{"var": "scores"}, {">=": [{"var": ""}, 70]}]}`
 	b.ResetTimer()
 	for b.Loop() {
 		_, _ = tr.TranspileCondition(input)
@@ -88,7 +88,7 @@ func BenchmarkIfCondition(b *testing.B) {
 // BenchmarkDeeplyNested benchmarks a deeply nested expression combining multiple operator types.
 func BenchmarkDeeplyNested(b *testing.B) {
 	tr, _ := NewTranspiler(DialectBigQuery)
-	input := `{"and": [{"some": [{"filter": [{"var": "data"}, {">": [{"var": "value"}, 0]}]}, {">": [{"var": "elem.score"}, 50]}]}, {">": [{"reduce": [{"var": "totals"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}, 1000]}]}`
+	input := `{"and": [{"some": [{"filter": [{"var": "data"}, {">": [{"var": "value"}, 0]}]}, {">": [{"var": "score"}, 50]}]}, {">": [{"reduce": [{"var": "totals"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}, 1000]}]}`
 	b.ResetTimer()
 	for b.Loop() {
 		_, _ = tr.TranspileCondition(input)
@@ -107,7 +107,7 @@ func BenchmarkWithSchema(b *testing.B) {
 		Dialect: DialectBigQuery,
 		Schema:  schema,
 	})
-	input := `{"and": [{">=": [{"var": "age"}, 18]}, {"==": [{"var": "status"}, "active"]}, {"some": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}]}`
+	input := `{"and": [{">=": [{"var": "age"}, 18]}, {"==": [{"var": "status"}, "active"]}, {"some": [{"var": "scores"}, {">": [{"var": ""}, 70]}]}]}`
 	b.ResetTimer()
 	for b.Loop() {
 		_, _ = tr.TranspileCondition(input)
@@ -116,7 +116,7 @@ func BenchmarkWithSchema(b *testing.B) {
 
 // BenchmarkDialects benchmarks the same expression across all dialects.
 func BenchmarkDialects(b *testing.B) {
-	input := `{"and": [{">=": [{"var": "age"}, 18]}, {"in": [{"var": "status"}, ["active", "pending"]]}, {"some": [{"var": "tags"}, {"==": [{"var": "item"}, "vip"]}]}]}`
+	input := `{"and": [{">=": [{"var": "age"}, 18]}, {"in": [{"var": "status"}, ["active", "pending"]]}, {"some": [{"var": "tags"}, {"==": [{"var": ""}, "vip"]}]}]}`
 
 	dialects := []struct {
 		name    string
@@ -277,7 +277,7 @@ func BenchmarkCustomOperators(b *testing.B) {
 
 func BenchmarkArrayMapValueLambda(b *testing.B) {
 	tr := mustBenchmarkTranspiler(b, DialectBigQuery)
-	input := `{"map":[{"var":"items"},{"if":[{">":[{"var":"current.score"},0]},{"var":"current.score"},0]}]}`
+	input := `{"map":[{"var":"items"},{"if":[{">":[{"var":"score"},0]},{"var":"score"},0]}]}`
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -290,7 +290,7 @@ func BenchmarkArrayMapValueLambda(b *testing.B) {
 
 func BenchmarkParameterizedArrayScopedDefaults(b *testing.B) {
 	tr := mustBenchmarkTranspiler(b, DialectBigQuery)
-	input := `{"map":[{"var":"items"},{"cat":[{"var":["current.label","unknown"]},"-",{"var":["current.code","na"]}]}]}`
+	input := `{"map":[{"var":"items"},{"cat":[{"var":["label","unknown"]},"-",{"var":["code","na"]}]}]}`
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -302,7 +302,7 @@ func BenchmarkParameterizedArrayScopedDefaults(b *testing.B) {
 }
 
 func BenchmarkParameterizedValueDialects(b *testing.B) {
-	input := `{"map":[{"filter":[{"var":"items"},{">":[{"var":"current.score"},10]}]},{"cat":[{"var":["current.label","unknown"]},":",{"var":"current.score"}]}]}`
+	input := `{"map":[{"filter":[{"var":"items"},{">":[{"var":"score"},10]}]},{"cat":[{"var":["label","unknown"]},":",{"var":"score"}]}]}`
 
 	for _, d := range benchmarkDialects() {
 		b.Run(d.name, func(b *testing.B) {

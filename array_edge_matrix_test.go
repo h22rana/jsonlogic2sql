@@ -205,7 +205,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 	cases := []matrixCase{
 		{
 			name:      "small map",
-			logic:     `{"map":[{"var":"bag.numbers"},{"*":[{"var":"item"},2]}]}`,
+			logic:     `{"map":[{"var":"bag.numbers"},{"*":[{"var":""},2]}]}`,
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
@@ -220,7 +220,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 		},
 		{
 			name:      "all length function by dialect",
-			logic:     `{"all":[{"var":"bag.numbers"},{">=":[{"var":"item"},0]}]}`,
+			logic:     `{"all":[{"var":"bag.numbers"},{">=":[{"var":""},0]}]}`,
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
@@ -263,86 +263,86 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			},
 		},
 		{
-			name:      "nested map with outer field reference",
-			logic:     `{"map":[{"var":"bag.records"},{"map":[{"var":"item.values"},{"+":[{"var":"item.base"},{"var":"current"}]}]}]}`,
+			name:      "nested map with outer scoped source",
+			logic:     `{"map":[{"var":"bag.records"},{"map":[{"var":"values"},{"var":""}]}]}`,
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayMap(elem1 -> (elem.base + elem1), elem.values)")
+					assertContains(t, inline, "arrayMap(elem1 -> elem1, elem.values)")
 				} else {
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
-					assertContains(t, inline, "(elem.base + elem1)")
-					assertNotContains(t, inline, "UNNEST(elem.values) AS elem WHERE elem.base")
+					assertContains(t, inline, "SELECT elem1")
+					assertNotContains(t, inline, "UNNEST(elem.values) AS elem)")
 				}
 			},
 		},
 		{
-			name:      "nested filter with outer field reference",
-			logic:     `{"map":[{"var":"bag.records"},{"filter":[{"var":"item.values"},{">=":[{"var":"current"},{"var":"item.base"}]}]}]}`,
-			wantParam: 0,
+			name:      "nested filter with outer scoped source",
+			logic:     `{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{">=":[{"var":""},0]}]}]}`,
+			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayFilter(elem1 -> elem1 >= elem.base, elem.values)")
-					assertNotContains(t, inline, "arrayFilter(elem -> elem >= elem.base, elem.values)")
+					assertContains(t, inline, "arrayFilter(elem1 -> elem1 >= 0, elem.values)")
+					assertNotContains(t, inline, "arrayFilter(elem -> elem >= 0, elem.values)")
 				} else {
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
-					assertContains(t, inline, "elem1 >= elem.base")
-					assertNotContains(t, inline, "UNNEST(elem.values) AS elem WHERE elem >= elem.base")
+					assertContains(t, inline, "elem1 >= 0")
+					assertNotContains(t, inline, "UNNEST(elem.values) AS elem WHERE elem >= 0")
 				}
 			},
 		},
 		{
-			name:      "nested all with outer field reference",
-			logic:     `{"map":[{"var":"bag.records"},{"all":[{"var":"item.values"},{">=":[{"var":"current"},{"var":"item.base"}]}]}]}`,
-			wantParam: 0,
+			name:      "nested all with outer scoped source",
+			logic:     `{"map":[{"var":"bag.records"},{"all":[{"var":"values"},{">=":[{"var":""},0]}]}]}`,
+			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayAll(elem1 -> elem1 >= elem.base, elem.values)")
+					assertContains(t, inline, "arrayAll(elem1 -> elem1 >= 0, elem.values)")
 				} else {
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
-					assertContains(t, inline, "elem1 >= elem.base")
+					assertContains(t, inline, "elem1 >= 0")
 				}
 			},
 		},
 		{
-			name:      "nested some with outer field reference",
-			logic:     `{"map":[{"var":"bag.records"},{"some":[{"var":"item.values"},{">=":[{"var":"current"},{"var":"item.base"}]}]}]}`,
-			wantParam: 0,
+			name:      "nested some with outer scoped source",
+			logic:     `{"map":[{"var":"bag.records"},{"some":[{"var":"values"},{">=":[{"var":""},0]}]}]}`,
+			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayExists(elem1 -> elem1 >= elem.base, elem.values)")
+					assertContains(t, inline, "arrayExists(elem1 -> elem1 >= 0, elem.values)")
 				} else {
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
-					assertContains(t, inline, "elem1 >= elem.base")
+					assertContains(t, inline, "elem1 >= 0")
 				}
 			},
 		},
 		{
-			name:      "nested none with outer field reference",
-			logic:     `{"map":[{"var":"bag.records"},{"none":[{"var":"item.values"},{"<":[{"var":"current"},{"var":"item.base"}]}]}]}`,
-			wantParam: 0,
+			name:      "nested none with outer scoped source",
+			logic:     `{"map":[{"var":"bag.records"},{"none":[{"var":"values"},{"<":[{"var":""},0]}]}]}`,
+			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := strings.TrimPrefix(out.inlineSQL, "")
 				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayExists(elem1 -> elem1 < elem.base, elem.values)")
+					assertContains(t, inline, "arrayExists(elem1 -> elem1 < 0, elem.values)")
 				} else {
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
-					assertContains(t, inline, "elem1 < elem.base")
+					assertContains(t, inline, "elem1 < 0")
 				}
 			},
 		},
 		{
-			name:      "nested reduce with outer field reference",
-			logic:     `{"map":[{"var":"bag.records"},{"reduce":[{"var":"item.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"item.base"}]}]}`,
+			name:      "nested reduce with outer scoped source and initial",
+			logic:     `{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`,
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
@@ -358,17 +358,17 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 		},
 		{
 			name:      "very deep mixed nesting",
-			logic:     `{"and":[{"some":[{"map":[{"var":"bag.records"},{"filter":[{"var":"item.values"},{">=":[{"var":"current"},{"var":"item.base"}]}]}]},{"all":[{"var":"item"},{">=":[{"var":"current"},0]}]}]},{">=":[{"var":"metrics.amount"},100]}]}`,
-			wantParam: 2,
+			logic:     `{"and":[{"some":[{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{">=":[{"var":""},0]}]}]},{"all":[{"var":""},{">=":[{"var":""},0]}]}]},{">=":[{"var":"metrics.amount"},100]}]}`,
+			wantParam: 3,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := strings.TrimPrefix(out.inlineSQL, "")
 				assertContains(t, inline, "metrics.amount >= 100")
 				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayFilter(elem1 -> elem1 >= elem.base, elem.values)")
+					assertContains(t, inline, "arrayFilter(elem1 -> elem1 >= 0, elem.values)")
 				} else {
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
-					assertContains(t, inline, "elem1 >= elem.base")
+					assertContains(t, inline, "elem1 >= 0")
 				}
 			},
 		},
@@ -461,12 +461,12 @@ func TestArrayEdgeMatrix_SchemaVsNoSchemaValidation(t *testing.T) {
 	}{
 		{
 			name:          "unknown field rejected with schema",
-			logic:         `{"map":[{"var":"unknown.arr"},{"+":[{"var":"item"},1]}]}`,
+			logic:         `{"map":[{"var":"unknown.arr"},{"+":[{"var":""},1]}]}`,
 			wantSchemaErr: "is not defined in schema",
 		},
 		{
 			name:          "non-array field rejected with schema",
-			logic:         `{"map":[{"var":"metrics.amount"},{"+":[{"var":"item"},1]}]}`,
+			logic:         `{"map":[{"var":"metrics.amount"},{"+":[{"var":""},1]}]}`,
 			wantSchemaErr: "array operation on non-array field",
 		},
 	}
@@ -502,7 +502,7 @@ func TestArrayEdgeMatrix_PackageFunctionsSmoke(t *testing.T) {
 		DialectDuckDB,
 		DialectClickHouse,
 	}
-	logic := `{"map":[{"var":"bag.numbers"},{"*":[{"var":"item"},2]}]}`
+	logic := `{"map":[{"var":"bag.numbers"},{"*":[{"var":""},2]}]}`
 	logicMap := decodeLogicMap(t, logic)
 	logicAny := decodeLogicAny(t, logic)
 
@@ -554,7 +554,7 @@ func TestArrayEdgeMatrix_PackageFunctionsSmoke(t *testing.T) {
 }
 
 func BenchmarkArrayEdgeMatrix_DeepNesting(b *testing.B) {
-	logic := `{"and":[{"some":[{"map":[{"var":"bag.records"},{"filter":[{"var":"item.values"},{">=":[{"var":"current"},{"var":"item.base"}]}]}]},{"all":[{"var":"item"},{">=":[{"var":"current"},0]}]}]},{">=":[{"var":"metrics.amount"},100]}]}`
+	logic := `{"and":[{"some":[{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{">=":[{"var":""},0]}]}]},{"all":[{"var":""},{">=":[{"var":""},0]}]}]},{">=":[{"var":"metrics.amount"},100]}]}`
 	tr, err := NewTranspilerWithConfig(&TranspilerConfig{
 		Dialect: DialectBigQuery,
 		Schema:  matrixSchema(),
@@ -596,9 +596,9 @@ func TestArrayEdgeMatrix_NoPanicOnComplexInputs(t *testing.T) {
 	}
 
 	inputs := []string{
-		`{"map":[{"var":"bag.records"},{"map":[{"var":"item.values"},{"if":[{">":[{"var":"current"},10]},{"var":"item.base"},{"var":"current"}]}]}]}`,
-		`{"filter":[{"map":[{"var":"bag.records"},{"reduce":[{"var":"item.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"item.base"}]}]},{">":[{"var":"item"},0]}]}`,
-		`{"all":[{"filter":[{"var":"bag.numbers"},{">":[{"var":"item"},0]}]},{">":[{"var":"item"},0]}]}`,
+		`{"map":[{"var":"bag.records"},{"map":[{"var":"values"},{"if":[{">":[{"var":""},10]},{"var":""},0]}]}]}`,
+		`{"filter":[{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]},{">":[{"var":""},0]}]}`,
+		`{"all":[{"filter":[{"var":"bag.numbers"},{">":[{"var":""},0]}]},{">":[{"var":""},0]}]}`,
 	}
 
 	for i, logic := range inputs {

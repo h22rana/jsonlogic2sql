@@ -8,9 +8,7 @@ import (
 )
 
 // TestArrayOperator_ElementRefNoCorruption verifies that field names containing
-// "item" or "current" as substrings are NOT corrupted by the element variable rewrite.
-// This is a regression test for the replaceElementReference bug where
-// strings.ReplaceAll corrupted "current_balance" → "elem_balance".
+// "item" or "current" as substrings are NOT corrupted by array-scope mapping.
 func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
 	op := NewArrayOperator(config)
@@ -73,34 +71,31 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 			absent:   "current.amount",
 		},
 		{
-			name:     "item.score correctly mapped in all",
+			name:     "bare score correctly mapped in all",
 			operator: "all",
 			args: []any{
 				map[string]any{"var": "results"},
-				map[string]any{">=": []any{map[string]any{"var": "item.score"}, 50}},
+				map[string]any{">=": []any{map[string]any{"var": "score"}, 50}},
 			},
 			contains: "elem.score",
-			absent:   "item.score",
 		},
 		{
-			name:     "item exact match is replaced in none",
+			name:     "empty var maps to element in none",
 			operator: "none",
 			args: []any{
 				map[string]any{"var": "values"},
-				map[string]any{"==": []any{map[string]any{"var": "item"}, 0}},
+				map[string]any{"==": []any{map[string]any{"var": ""}, 0}},
 			},
 			contains: "elem = 0",
-			absent:   "item = 0",
 		},
 		{
-			name:     "current exact match is replaced in map",
+			name:     "empty var maps to element in map",
 			operator: "map",
 			args: []any{
 				map[string]any{"var": "values"},
-				map[string]any{"*": []any{map[string]any{"var": "current"}, 2}},
+				map[string]any{"*": []any{map[string]any{"var": ""}, 2}},
 			},
 			contains: "(elem * 2)",
-			absent:   "(current * 2)",
 		},
 	}
 
@@ -184,7 +179,7 @@ func TestArrayOperator_DottedIdentifierPreservation(t *testing.T) {
 }
 
 // TestArrayOperator_CustomOpLiteralSQL verifies that custom operators emitting
-// literal "item"/"current" SQL are correctly handled by the post-SQL safety net.
+// literal legacy alias SQL are no longer rewritten after SQL generation.
 func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
 	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
@@ -214,32 +209,28 @@ func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
 		absent   string
 	}{
 		{
-			name:     "literal item replaced in map",
+			name:     "literal item preserved in map",
 			operator: "map",
 			args:     []any{map[string]any{"var": "nums"}, map[string]any{"emit_item": []any{}}},
-			contains: "SELECT elem FROM",
-			absent:   "SELECT item FROM",
+			contains: "SELECT item FROM",
 		},
 		{
-			name:     "literal current in expression replaced in filter",
+			name:     "literal current in expression preserved in filter",
 			operator: "filter",
 			args:     []any{map[string]any{"var": "vals"}, map[string]any{">": []any{map[string]any{"emit_current_expr": []any{}}, 0}}},
-			contains: "(elem + 1)",
-			absent:   "(current + 1)",
+			contains: "(current + 1)",
 		},
 		{
-			name:     "literal current.price replaced in some",
+			name:     "literal current.price preserved in some",
 			operator: "some",
 			args:     []any{map[string]any{"var": "items"}, map[string]any{">": []any{map[string]any{"emit_current_dot": []any{}}, 0}}},
-			contains: "elem.price",
-			absent:   "current.price",
+			contains: "current.price",
 		},
 		{
-			name:     "literal current numeric-leading path replaced and quoted in some",
+			name:     "literal current numeric-leading path preserved in some",
 			operator: "some",
 			args:     []any{map[string]any{"var": "items"}, map[string]any{">": []any{map[string]any{"emit_current_numeric_dot": []any{}}, 0}}},
-			contains: "elem.`24h`",
-			absent:   "current.24h",
+			contains: "current.24h",
 		},
 	}
 
@@ -290,14 +281,13 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 				map[string]any{"var": "groups"},
 				map[string]any{
 					"reduce": []any{
-						map[string]any{"var": "item.values"},
+						map[string]any{"var": "values"},
 						map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
-						map[string]any{"var": "item.base"},
+						map[string]any{"var": "base"},
 					},
 				},
 			},
 			contains: "elem.base",
-			absent:   "item.base",
 		},
 		{
 			name:     "reduce initial with dollar sign preserved",
@@ -343,7 +333,7 @@ func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
 		{
 			name:     "item replaced in ClickHouse arrayMap",
 			operator: "map",
-			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": "item"}, 2}}},
+			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": ""}, 2}}},
 			contains: "arrayMap(elem -> (elem * 2)",
 			absent:   "item",
 		},
@@ -358,14 +348,13 @@ func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
 			absent:   "elem_balance",
 		},
 		{
-			name:     "item.score replaced in ClickHouse arrayAll",
+			name:     "bare score mapped in ClickHouse arrayAll",
 			operator: "all",
 			args: []any{
 				map[string]any{"var": "results"},
-				map[string]any{">=": []any{map[string]any{"var": "item.score"}, 50}},
+				map[string]any{">=": []any{map[string]any{"var": "score"}, 50}},
 			},
 			contains: "elem.score",
-			absent:   "item.score",
 		},
 	}
 
@@ -385,8 +374,7 @@ func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
 	}
 }
 
-// TestArrayOperator_ArrayFormVarRewrite verifies that array-form var expressions
-// like {"var": ["current", 0]} are correctly rewritten to {"var": ["elem", 0]}.
+// TestArrayOperator_ArrayFormVarRewrite verifies scoped defaulted var expressions.
 func TestArrayOperator_ArrayFormVarRewrite(t *testing.T) {
 	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
 	op := NewArrayOperator(config)
@@ -410,14 +398,13 @@ func TestArrayOperator_ArrayFormVarRewrite(t *testing.T) {
 			absent:   "COALESCE(current, 0)",
 		},
 		{
-			name:     "array-form item with default in all",
+			name:     "array-form empty var with default in all",
 			operator: "all",
 			args: []any{
 				map[string]any{"var": "scores"},
-				map[string]any{">": []any{map[string]any{"var": []any{"item", 0}}, 50}},
+				map[string]any{">": []any{map[string]any{"var": []any{"", 0}}, 50}},
 			},
 			contains: "COALESCE(elem, 0)",
-			absent:   "COALESCE(item, 0)",
 		},
 	}
 

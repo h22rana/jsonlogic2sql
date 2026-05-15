@@ -10,6 +10,7 @@ func testArrayScopeSchema() *Schema {
 		{Name: "numbers", Type: FieldTypeArray},
 		{Name: "scores", Type: FieldTypeArray},
 		{Name: "groups", Type: FieldTypeArray},
+		{Name: "type", Type: FieldTypeString},
 	})
 }
 
@@ -31,16 +32,16 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 		mustContain []string
 	}{
 		{
-			name:      "map supports item alias",
-			jsonLogic: `{"map":[{"var":"numbers"},{"*":[{"var":"item"},2]}]}`,
+			name:      "map uses empty var",
+			jsonLogic: `{"map":[{"var":"numbers"},{"*":[{"var":""},2]}]}`,
 			valueRoot: true,
 			mustContain: []string{
 				"elem",
 			},
 		},
 		{
-			name:      "filter supports current alias",
-			jsonLogic: `{"filter":[{"var":"numbers"},{">":[{"var":"current"},1]}]}`,
+			name:      "filter uses empty var",
+			jsonLogic: `{"filter":[{"var":"numbers"},{">":[{"var":""},1]}]}`,
 			valueRoot: true,
 			mustContain: []string{
 				"elem",
@@ -48,7 +49,7 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 		},
 		{
 			name:      "all supports array-form var default",
-			jsonLogic: `{"all":[{"var":"scores"},{">":[{"var":["item",0]},50]}]}`,
+			jsonLogic: `{"all":[{"var":"scores"},{">":[{"var":["",0]},50]}]}`,
 			mustContain: []string{
 				"COALESCE(elem, 0)",
 			},
@@ -62,8 +63,8 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 			},
 		},
 		{
-			name:      "nested reduce initial uses outer item alias",
-			jsonLogic: `{"map":[{"var":"groups"},{"reduce":[{"var":"item.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"item.base"}]}]}`,
+			name:      "nested reduce initial uses outer scoped field",
+			jsonLogic: `{"map":[{"var":"groups"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`,
 			valueRoot: true,
 			mustContain: []string{
 				"elem.base",
@@ -113,15 +114,15 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 		wantParamCount int
 	}{
 		{
-			name:           "map supports item alias",
-			jsonLogic:      `{"map":[{"var":"numbers"},{"*":[{"var":"item"},2]}]}`,
+			name:           "map uses empty var",
+			jsonLogic:      `{"map":[{"var":"numbers"},{"*":[{"var":""},2]}]}`,
 			valueRoot:      true,
 			mustContainSQL: "elem",
 			wantParamCount: 1,
 		},
 		{
 			name:           "all supports array-form var default",
-			jsonLogic:      `{"all":[{"var":"scores"},{">":[{"var":["item",0]},50]}]}`,
+			jsonLogic:      `{"all":[{"var":"scores"},{">":[{"var":["",0]},50]}]}`,
 			mustContainSQL: "COALESCE(elem",
 			wantParamCount: 2,
 		},
@@ -133,8 +134,8 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 			wantParamCount: 2,
 		},
 		{
-			name:           "nested reduce initial uses outer item alias",
-			jsonLogic:      `{"map":[{"var":"groups"},{"reduce":[{"var":"item.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"item.base"}]}]}`,
+			name:           "nested reduce initial uses outer scoped field",
+			jsonLogic:      `{"map":[{"var":"groups"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`,
 			valueRoot:      true,
 			mustContainSQL: "elem.base",
 			wantParamCount: 0,
@@ -184,7 +185,7 @@ func TestTranspile_ArrayNestedScopeUsesDistinctAliases(t *testing.T) {
 	}{
 		{
 			name:        "nested reduce in map",
-			jsonLogic:   `{"map":[{"var":"groups"},{"reduce":[{"var":"item.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"item.base"}]}]}`,
+			jsonLogic:   `{"map":[{"var":"groups"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`,
 			expectElem1: true,
 		},
 	}
@@ -233,7 +234,7 @@ func TestTranspileParameterized_ArrayNestedScopeUsesDistinctAliases(t *testing.T
 	}{
 		{
 			name:        "nested reduce in map",
-			jsonLogic:   `{"map":[{"var":"groups"},{"reduce":[{"var":"item.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"item.base"}]}]}`,
+			jsonLogic:   `{"map":[{"var":"groups"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`,
 			expectElem1: true,
 		},
 	}
@@ -271,5 +272,161 @@ func TestTranspileParameterized_ArrayNestedScopeUsesDistinctAliases(t *testing.T
 				})
 			}
 		})
+	}
+}
+
+func TestTranspile_ArrayLambdaVarSemantics_AllDialectsSchemaModes(t *testing.T) {
+	modes := []struct {
+		name   string
+		schema *Schema
+	}{
+		{name: "schema-aware", schema: testArrayScopeSchema()},
+		{name: "schema-less", schema: nil},
+	}
+
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			for _, d := range allDialects() {
+				t.Run(d.String(), func(t *testing.T) {
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+					}
+
+					bareFieldSQL, err := tr.TranspileValue(`{"map":[{"var":"numbers"},{"var":["type","unknown"]}]}`)
+					if err != nil {
+						t.Fatalf("bare field transpilation error: %v", err)
+					}
+					if !strings.Contains(bareFieldSQL, "COALESCE(elem.type") {
+						t.Fatalf("expected bare field to resolve against element, got: %s", bareFieldSQL)
+					}
+
+					exactNamesSQL, err := tr.TranspileValue(`{"map":[{"var":"numbers"},{"cat":[{"var":"item"},{"var":"current"},{"var":"elem"}]}]}`)
+					if err != nil {
+						t.Fatalf("exact name transpilation error: %v", err)
+					}
+					for _, want := range []string{"elem.item", "elem.current", "elem.elem"} {
+						if !strings.Contains(exactNamesSQL, want) {
+							t.Fatalf("expected exact name to resolve as element field %q, got: %s", want, exactNamesSQL)
+						}
+					}
+
+					allowedReduceSQL, err := tr.TranspileValue(`{"reduce":[{"var":"numbers"},{"cat":[{"var":"accumulator"},{"var":"current.type"}]},""]}`)
+					if err != nil {
+						t.Fatalf("reduce current.type transpilation error: %v", err)
+					}
+					if !strings.Contains(allowedReduceSQL, "elem.type") {
+						t.Fatalf("expected reduce current.type to resolve against element, got: %s", allowedReduceSQL)
+					}
+
+					bareReduceSQL, err := tr.TranspileValue(`{"reduce":[{"var":"numbers"},{"var":"type"},""]}`)
+					if err != nil {
+						t.Fatalf("reduce bare field transpilation error: %v", err)
+					}
+					if strings.Contains(bareReduceSQL, "elem.type") {
+						t.Fatalf("expected reduce bare field to remain non-element scoped, got: %s", bareReduceSQL)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspile_ArrayLambdaRejectsLegacyElementAliases_AllDialectsSchemaModes(t *testing.T) {
+	aliases := []string{".type", "item.type", "current.type", "elem.type"}
+	elementOperators := []struct {
+		name      string
+		logicFor  func(alias string) string
+		valueRoot bool
+	}{
+		{name: "map", valueRoot: true, logicFor: func(alias string) string {
+			return `{"map":[{"var":"numbers"},{"var":"` + alias + `"}]}`
+		}},
+		{name: "filter", valueRoot: true, logicFor: func(alias string) string {
+			return `{"filter":[{"var":"numbers"},{"==":[{"var":"` + alias + `"},1]}]}`
+		}},
+		{name: "all", logicFor: func(alias string) string {
+			return `{"all":[{"var":"numbers"},{"==":[{"var":"` + alias + `"},1]}]}`
+		}},
+		{name: "some", logicFor: func(alias string) string {
+			return `{"some":[{"var":"numbers"},{"==":[{"var":"` + alias + `"},1]}]}`
+		}},
+		{name: "none", logicFor: func(alias string) string {
+			return `{"none":[{"var":"numbers"},{"==":[{"var":"` + alias + `"},1]}]}`
+		}},
+	}
+	reduceRejected := []string{".type", "item.type", "elem.type", ""}
+
+	modes := []struct {
+		name   string
+		schema *Schema
+	}{
+		{name: "schema-aware", schema: testArrayScopeSchema()},
+		{name: "schema-less", schema: nil},
+	}
+
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			for _, d := range allDialects() {
+				t.Run(d.String(), func(t *testing.T) {
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+					}
+
+					for _, op := range elementOperators {
+						for _, alias := range aliases {
+							t.Run(op.name+"/"+alias, func(t *testing.T) {
+								logic := op.logicFor(alias)
+								assertArrayScopeAliasRejected(t, tr, logic, op.valueRoot)
+							})
+						}
+					}
+
+					for _, alias := range reduceRejected {
+						t.Run("reduce/"+alias, func(t *testing.T) {
+							logic := `{"reduce":[{"var":"numbers"},{"var":"` + alias + `"},""]}`
+							assertArrayScopeAliasRejected(t, tr, logic, true)
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func assertArrayScopeAliasRejected(t *testing.T, tr *Transpiler, logic string, valueRoot bool) {
+	t.Helper()
+
+	var err error
+	if valueRoot {
+		_, err = tr.TranspileValue(logic)
+	} else {
+		_, err = tr.TranspileCondition(logic)
+	}
+	assertUnsupportedArrayScopeVar(t, err)
+
+	if valueRoot {
+		_, _, err = tr.TranspileParameterizedValue(logic)
+	} else {
+		_, _, err = tr.TranspileParameterizedCondition(logic)
+	}
+	assertUnsupportedArrayScopeVar(t, err)
+}
+
+func assertUnsupportedArrayScopeVar(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected unsupported array-scope variable error, got nil")
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "unsupported array-scope") && !strings.Contains(msg, "unsupported reduce-scope") {
+		t.Fatalf("expected unsupported array/reduce scope error, got: %v", err)
 	}
 }

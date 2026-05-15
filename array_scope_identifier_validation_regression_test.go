@@ -30,10 +30,12 @@ func assertUnsafeVarRejected(t *testing.T, err error) {
 		t.Fatal("expected rejection error, got nil")
 	}
 	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "invalid identifier") || strings.Contains(msg, "not defined in schema") {
+	if strings.Contains(msg, "invalid identifier") ||
+		strings.Contains(msg, "not defined in schema") ||
+		strings.Contains(msg, "unsupported array-scope variable") {
 		return
 	}
-	t.Fatalf("expected invalid identifier or schema validation error, got: %v", err)
+	t.Fatalf("expected invalid identifier, schema validation, or unsupported array-scope variable error, got: %v", err)
 }
 
 func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *testing.T) {
@@ -65,7 +67,7 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 		},
 		{
 			name:  "map source internal elem dotted payload",
-			logic: `{"map":[{"var":"elem.x) OR 1=1 --"},{"var":"item"}]}`,
+			logic: `{"map":[{"var":"elem.x) OR 1=1 --"},{"var":""}]}`,
 		},
 		{
 			name:  "reduce initial internal elem dotted payload",
@@ -73,7 +75,7 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 		},
 		{
 			name:  "map source internal elem dotted payload with default array-form var",
-			logic: `{"map":[{"var":["elem.x) OR 1=1 --",[]]},{"var":"item"}]}`,
+			logic: `{"map":[{"var":["elem.x) OR 1=1 --",[]]},{"var":""}]}`,
 		},
 	}
 
@@ -139,7 +141,7 @@ func TestArrayScopeIdentifierValidationAllowsSafeDottedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
-	logic := `{"map":[{"var":"bag.numbers"},{"var":"item.safe_field"}]}`
+	logic := `{"map":[{"var":"bag.numbers"},{"var":"safe_field"}]}`
 
 	sql, err := tr.TranspileValue(logic)
 	if err != nil {
@@ -167,7 +169,7 @@ func TestRootArrayOperandDoesNotTreatElemAsInScopeAlias_WithSchema(t *testing.T)
 		t.Fatalf("NewTranspilerWithConfig() error: %v", err)
 	}
 
-	logic := `{"map":[{"var":"elem.values"},{"var":"item"}]}`
+	logic := `{"map":[{"var":"elem.values"},{"var":""}]}`
 	logicMap := decodeLogicMapForArrayScopeIDTest(t, logic)
 	logicAny := decodeLogicAnyForArrayScopeIDTest(t, logic)
 
@@ -208,7 +210,7 @@ func TestRootArrayOperandDoesNotTreatElemAsInScopeAlias_WithSchema(t *testing.T)
 	}
 }
 
-func TestNestedArrayOperandAllowsOuterElemAliasInChildScope(t *testing.T) {
+func TestNestedArrayOperandUsesBareOuterFieldsInChildScope(t *testing.T) {
 	t.Parallel()
 
 	tr, err := NewTranspiler(DialectBigQuery)
@@ -216,7 +218,7 @@ func TestNestedArrayOperandAllowsOuterElemAliasInChildScope(t *testing.T) {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
 
-	logic := `{"map":[{"var":"groups"},{"reduce":[{"var":"elem.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"elem.base"}]}]}`
+	logic := `{"map":[{"var":"groups"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`
 
 	sql, err := tr.TranspileValue(logic)
 	if err != nil {

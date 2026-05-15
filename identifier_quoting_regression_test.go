@@ -140,8 +140,8 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			expectedParam: nil,
 		},
 		{
-			name:  "array filter quotes numeric-leading current segment",
-			logic: `{"filter":[{"var":"events"},{">=":[{"var":"current.24h"},1]}]}`,
+			name:  "array filter quotes numeric-leading element segment",
+			logic: `{"filter":[{"var":"events"},{">=":[{"var":"24h"},1]}]}`,
 			inlineSQL: map[Dialect]string{
 				DialectBigQuery:   "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= 1)",
 				DialectSpanner:    "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= 1)",
@@ -159,8 +159,8 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			expectedParam: []QueryParam{{Name: "p1", Value: float64(1)}},
 		},
 		{
-			name:  "array map quotes numeric-leading item segment",
-			logic: `{"map":[{"var":"events"},{"var":"item.24h.total"}]}`,
+			name:  "array map quotes numeric-leading element segment",
+			logic: `{"map":[{"var":"events"},{"var":"24h.total"}]}`,
 			inlineSQL: map[Dialect]string{
 				DialectBigQuery:   "ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
 				DialectSpanner:    "ARRAY(SELECT elem.`24h`.total FROM UNNEST(events) AS elem)",
@@ -197,8 +197,8 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 			expectedParam: []QueryParam{{Name: "p1", Value: float64(0)}},
 		},
 		{
-			name:  "array filter custom operator quotes numeric-leading current segment",
-			logic: `{"filter":[{"var":"events"},{"isNonZero":[{"var":"current.24h"}]}]}`,
+			name:  "array filter custom operator quotes numeric-leading element segment",
+			logic: `{"filter":[{"var":"events"},{"isNonZero":[{"var":"24h"}]}]}`,
 			inlineSQL: map[Dialect]string{
 				DialectBigQuery:   "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",
 				DialectSpanner:    "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE (elem.`24h` != 0))",

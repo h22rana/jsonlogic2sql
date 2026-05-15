@@ -914,7 +914,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside all array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := transpileOperatorExpression(tr, `{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -927,7 +927,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside some array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := transpileOperatorExpression(tr, `{"some": [{"var": "emails"}, {"endsWith": [{"var": "item"}, "@company.com"]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"some": [{"var": "emails"}, {"endsWith": [{"var": ""}, "@company.com"]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -940,7 +940,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside none array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := transpileOperatorExpression(tr, `{"none": [{"var": "names"}, {"startsWith": [{"var": "item"}, "Bot"]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"none": [{"var": "names"}, {"startsWith": [{"var": ""}, "Bot"]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -953,7 +953,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside filter array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.TranspileValue(`{"filter": [{"var": "users"}, {"and": [{"!startsWith": [{"var": "item.name"}, "Test"]}, {"!endsWith": [{"var": "item.email"}, "@temp.com"]}]}]}`)
+		sql, err := tr.TranspileValue(`{"filter": [{"var": "users"}, {"and": [{"!startsWith": [{"var": "name"}, "Test"]}, {"!endsWith": [{"var": "email"}, "@temp.com"]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -966,7 +966,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside map array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.TranspileValue(`{"map": [{"var": "names"}, {"toLower": [{"var": "item"}]}]}`)
+		sql, err := tr.TranspileValue(`{"map": [{"var": "names"}, {"toLower": [{"var": ""}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -990,7 +990,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("deeply nested: and with all containing custom operators", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := transpileOperatorExpression(tr, `{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": "item"}, "@valid.com"]}]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": ""}, "@valid.com"]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1003,7 +1003,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("deeply nested: or with none containing custom operators", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := transpileOperatorExpression(tr, `{"or": [{"none": [{"var": "names"}, {"startsWith": [{"var": "item"}, "Bot"]}]}, {"all": [{"var": "scores"}, {">": [{"var": "item"}, 50]}]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"or": [{"none": [{"var": "names"}, {"startsWith": [{"var": ""}, "Bot"]}]}, {"all": [{"var": "scores"}, {">": [{"var": ""}, 50]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1016,7 +1016,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("triple nested: and with or containing all/some/none", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := transpileOperatorExpression(tr, `{"and": [{"or": [{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}, {"none": [{"var": "emails"}, {"startsWith": [{"var": "item"}, "blocked_"]}]}]}, {"some": [{"var": "scores"}, {">": [{"var": "item"}, 100]}]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"and": [{"or": [{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}, {"none": [{"var": "emails"}, {"startsWith": [{"var": ""}, "blocked_"]}]}]}, {"some": [{"var": "scores"}, {">": [{"var": ""}, 100]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1029,7 +1029,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("filter with nested and/or and multiple custom operators", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.TranspileValue(`{"filter": [{"var": "transactions"}, {"and": [{"!startsWith": [{"var": "item.name"}, "VOID"]}, {"!endsWith": [{"var": "item.category"}, "_canceled"]}, {"!contains": [{"var": "item.email"}, "spam"]}]}]}`)
+		sql, err := tr.TranspileValue(`{"filter": [{"var": "transactions"}, {"and": [{"!startsWith": [{"var": "name"}, "VOID"]}, {"!endsWith": [{"var": "category"}, "_canceled"]}, {"!contains": [{"var": "email"}, "spam"]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1042,7 +1042,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("if with all condition in then branch", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.TranspileValue(`{"if": [{"all": [{"var": "scores"}, {">": [{"var": "item"}, 50]}]}, {"var": "status"}, "FAILED"]}`)
+		sql, err := tr.TranspileValue(`{"if": [{"all": [{"var": "scores"}, {">": [{"var": ""}, 50]}]}, {"var": "status"}, "FAILED"]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1122,7 +1122,7 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			}
 
 			// Test: custom operator inside map
-			sql, err = tr.TranspileValue(`{"map": [{"var": "tags"}, {"toLower": [{"var": "item"}]}]}`)
+			sql, err = tr.TranspileValue(`{"map": [{"var": "tags"}, {"toLower": [{"var": ""}]}]}`)
 			if err != nil {
 				t.Errorf("[%s] map with custom operator: unexpected error: %v", d.name, err)
 			}
@@ -1138,7 +1138,7 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			}
 
 			// Test: custom operator inside all
-			sql, err = transpileOperatorExpression(tr, `{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}`)
+			sql, err = transpileOperatorExpression(tr, `{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}`)
 			if err != nil {
 				t.Errorf("[%s] all with custom operator: unexpected error: %v", d.name, err)
 			}
@@ -1160,7 +1160,7 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			}
 
 			// Test: and with all and some containing custom operators
-			sql, err = transpileOperatorExpression(tr, `{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": "item"}, "@valid.com"]}]}]}`)
+			sql, err = transpileOperatorExpression(tr, `{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": ""}, "@valid.com"]}]}]}`)
 			if err != nil {
 				t.Errorf("[%s] and with all/some: unexpected error: %v", d.name, err)
 			}

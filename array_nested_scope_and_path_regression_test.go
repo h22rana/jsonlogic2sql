@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestNestedCurrentDottedUsesInnerAlias_AllDialects(t *testing.T) {
+func TestNestedBareFieldUsesInnerAlias_AllDialects(t *testing.T) {
 	t.Parallel()
 
 	dialects := []Dialect{
@@ -17,7 +17,7 @@ func TestNestedCurrentDottedUsesInnerAlias_AllDialects(t *testing.T) {
 		DialectClickHouse,
 	}
 
-	logic := `{"map":[{"var":"groups"},{"filter":[{"var":"item.values"},{"and":[{"==":[{"var":"current"},1]},{">=":[{"var":"current.base"},0]}]}]}]}`
+	logic := `{"map":[{"var":"groups"},{"filter":[{"var":"values"},{"and":[{"==":[{"var":""},1]},{">=":[{"var":"base"},0]}]}]}]}`
 
 	for _, d := range dialects {
 		t.Run(d.String(), func(t *testing.T) {
@@ -33,10 +33,10 @@ func TestNestedCurrentDottedUsesInnerAlias_AllDialects(t *testing.T) {
 				t.Fatalf("TranspileValue() error: %v", err)
 			}
 			if strings.Contains(sql, "AND elem.base") {
-				t.Fatalf("unexpected outer alias in inner current.* predicate: %s", sql)
+				t.Fatalf("unexpected outer alias in inner bare-field predicate: %s", sql)
 			}
 			if !strings.Contains(sql, "AND elem1.base") {
-				t.Fatalf("expected inner alias for current.* in predicate, got: %s", sql)
+				t.Fatalf("expected inner alias for bare field in predicate, got: %s", sql)
 			}
 
 			psql, _, err := tr.TranspileParameterizedValue(logic)
@@ -44,10 +44,10 @@ func TestNestedCurrentDottedUsesInnerAlias_AllDialects(t *testing.T) {
 				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}
 			if strings.Contains(psql, "AND elem.base") {
-				t.Fatalf("unexpected outer alias in parameterized inner current.* predicate: %s", psql)
+				t.Fatalf("unexpected outer alias in parameterized inner bare-field predicate: %s", psql)
 			}
 			if !strings.Contains(psql, "AND elem1.base") {
-				t.Fatalf("expected inner alias for current.* in parameterized predicate, got: %s", psql)
+				t.Fatalf("expected inner alias for bare field in parameterized predicate, got: %s", psql)
 			}
 		})
 	}
@@ -75,28 +75,28 @@ func TestNestedArrayPredicatePreservesOuterScope_AllDialects(t *testing.T) {
 	}{
 		{
 			name:       "all predicate",
-			logic:      `{"all":[{"var":"bag.records"},{"some":[{"var":"item.values"},{">=":[{"var":"current"},{"var":"item.base"}]}]}]}`,
+			logic:      `{"all":[{"var":"bag.records"},{"some":[{"var":"values"},{">=":[{"var":""},0]}]}]}`,
 			want:       "UNNEST(elem.values) AS elem1",
-			notWant:    "UNNEST(elem.values) AS elem WHERE elem >= elem.base",
-			clickWant:  "arrayExists(elem1 -> elem1 >= elem.base, elem.values)",
-			clickAvoid: "arrayExists(elem -> elem >= elem.base, elem.values)",
+			notWant:    "UNNEST(elem.values) AS elem WHERE elem >= 0",
+			clickWant:  "arrayExists(elem1 -> elem1 >=",
+			clickAvoid: "arrayExists(elem -> elem >=",
 		},
 		{
 			name:       "all logical predicate",
-			logic:      `{"all":[{"var":"bag.records"},{"and":[{"some":[{"var":"item.values"},{">=":[{"var":"current"},{"var":"item.base"}]}]},true]}]}`,
+			logic:      `{"all":[{"var":"bag.records"},{"and":[{"some":[{"var":"values"},{">=":[{"var":""},0]}]},true]}]}`,
 			want:       "UNNEST(elem.values) AS elem1",
-			notWant:    "UNNEST(elem.values) AS elem WHERE elem >= elem.base",
-			clickWant:  "arrayExists(elem1 -> elem1 >= elem.base, elem.values)",
-			clickAvoid: "arrayExists(elem -> elem >= elem.base, elem.values)",
+			notWant:    "UNNEST(elem.values) AS elem WHERE elem >= 0",
+			clickWant:  "arrayExists(elem1 -> elem1 >=",
+			clickAvoid: "arrayExists(elem -> elem >=",
 		},
 		{
 			name:       "filter predicate",
-			logic:      `{"filter":[{"var":"bag.records"},{"some":[{"var":"item.values"},{">=":[{"var":"current"},{"var":"item.base"}]}]}]}`,
+			logic:      `{"filter":[{"var":"bag.records"},{"some":[{"var":"values"},{">=":[{"var":""},0]}]}]}`,
 			valueMode:  true,
 			want:       "UNNEST(elem.values) AS elem1",
-			notWant:    "UNNEST(elem.values) AS elem WHERE elem >= elem.base",
-			clickWant:  "arrayExists(elem1 -> elem1 >= elem.base, elem.values)",
-			clickAvoid: "arrayExists(elem -> elem >= elem.base, elem.values)",
+			notWant:    "UNNEST(elem.values) AS elem WHERE elem >= 0",
+			clickWant:  "arrayExists(elem1 -> elem1 >=",
+			clickAvoid: "arrayExists(elem -> elem >=",
 		},
 	}
 
@@ -158,8 +158,8 @@ func assertNestedArrayPredicateScope(
 	if !strings.Contains(sql, want) {
 		t.Fatalf("expected SQL to contain %q, got: %s", want, sql)
 	}
-	if !strings.Contains(sql, "elem1 >= elem.base") {
-		t.Fatalf("expected inner current with outer item reference, got: %s", sql)
+	if !strings.Contains(sql, "elem1 >=") {
+		t.Fatalf("expected inner element predicate, got: %s", sql)
 	}
 	if strings.Contains(sql, notWant) {
 		t.Fatalf("unexpected nested scope collapse %q in SQL: %s", notWant, sql)
@@ -184,12 +184,12 @@ func TestCustomOperatorPathInsideArrayContexts_InlineAndParam(t *testing.T) {
 	}{
 		{
 			name:     "direct custom operator in map transform",
-			logic:    `{"map":[{"var":"bag.records"},{"oops":[{"var":"item"}]}]}`,
+			logic:    `{"map":[{"var":"bag.records"},{"oops":[{"var":""}]}]}`,
 			wantPath: "$.map[1].oops",
 		},
 		{
 			name:     "nested custom operator under logical in map transform",
-			logic:    `{"map":[{"var":"bag.records"},{"and":[{"oops":[{"var":"item"}]},{">":[{"var":"current"},0]}]}]}`,
+			logic:    `{"map":[{"var":"bag.records"},{"and":[{"oops":[{"var":""}]},{">":[{"var":""},0]}]}]}`,
 			wantPath: "$.map[1].and[0].oops",
 		},
 	}

@@ -252,7 +252,7 @@ func TestParser_Parse(t *testing.T) {
 		{
 			name: "map operation",
 			input: map[string]interface{}{
-				"map": []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": "item"}, 1}}},
+				"map": []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"+": []interface{}{map[string]interface{}{"var": ""}, 1}}},
 			},
 			expected: "ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)",
 			hasError: false,

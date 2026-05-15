@@ -400,7 +400,7 @@ POSITION('hello' IN 'hello world') > 0
 ### Map Array
 
 ```json
-{"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
+{"map": [{"var": "numbers"}, {"+": [{"var": ""}, 1]}]}
 ```
 ```sql
 ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
@@ -409,7 +409,7 @@ ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
 ### Filter Array
 
 ```json
-{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+{"filter": [{"var": "scores"}, {">": [{"var": ""}, 70]}]}
 ```
 ```sql
 ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
