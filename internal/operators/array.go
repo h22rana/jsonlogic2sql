@@ -300,10 +300,30 @@ func (a *ArrayOperator) shouldUseChildScope(op string, args []interface{}) bool 
 	if !a.isArrayOperator(op) || len(args) == 0 {
 		return false
 	}
-	if isRenderedArrayScopeSource(args[0]) || a.referencesVisibleElemAlias(args[0]) {
+	if isRenderedArrayScopeSource(args[0]) ||
+		a.referencesVisibleElemAlias(args[0]) ||
+		a.referencesCurrentScopeAlias(args[0]) {
 		return true
 	}
-	return op == OpReduce && len(args) > 2 && a.referencesVisibleElemAlias(args[2])
+	return op == OpReduce && len(args) > 2 &&
+		(a.referencesVisibleElemAlias(args[2]) || a.referencesCurrentScopeAlias(args[2]))
+}
+
+func (a *ArrayOperator) shouldParseScopedArrayExpressionLocally(expr interface{}) bool {
+	operator, args, ok := arrayOperatorArgs(expr)
+	return ok && a.shouldUseChildScope(operator, args)
+}
+
+func arrayOperatorArgs(expr interface{}) (string, []interface{}, bool) {
+	exprMap, ok := expr.(map[string]interface{})
+	if !ok || len(exprMap) != 1 {
+		return "", nil, false
+	}
+	for operator, rawArgs := range exprMap {
+		args, ok := rawArgs.([]interface{})
+		return operator, args, ok
+	}
+	return "", nil, false
 }
 
 func (a *ArrayOperator) referencesVisibleElemAlias(expr interface{}) bool {
@@ -353,6 +373,81 @@ func (a *ArrayOperator) referencesVisibleElemAlias(expr interface{}) bool {
 			}
 		}
 		return false
+	default:
+		return false
+	}
+}
+
+func (a *ArrayOperator) referencesCurrentScopeAlias(expr interface{}) bool {
+	switch e := expr.(type) {
+	case map[string]interface{}:
+		if len(e) == 1 {
+			if varName, hasVar := e[OpVar]; hasVar {
+				return a.varExprReferencesCurrentScopeAlias(varName)
+			}
+		}
+		for _, v := range e {
+			if a.referencesCurrentScopeAlias(v) {
+				return true
+			}
+		}
+		return false
+	case []interface{}:
+		for _, v := range e {
+			if a.referencesCurrentScopeAlias(v) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func (a *ArrayOperator) varExprReferencesCurrentScopeAlias(varExpr interface{}) bool {
+	switch v := varExpr.(type) {
+	case string:
+		return a.varNameReferencesCurrentScopeAlias(v)
+	case []interface{}:
+		if len(v) == 0 {
+			return false
+		}
+		if s, ok := v[0].(string); ok {
+			return a.varNameReferencesCurrentScopeAlias(s)
+		}
+		if pv, ok := v[0].(ProcessedValue); ok && pv.IsSQL {
+			for _, alias := range a.visibleElems {
+				if pv.Value == alias || strings.Contains(pv.Value, alias+".") {
+					return true
+				}
+			}
+		}
+	case ProcessedValue:
+		if v.IsSQL {
+			for _, alias := range a.visibleElems {
+				if v.Value == alias || strings.Contains(v.Value, alias+".") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (a *ArrayOperator) varNameReferencesCurrentScopeAlias(varName string) bool {
+	switch a.lambdaScope {
+	case arrayLambdaScopeElement:
+		return !isUnsupportedElementScopeVar(varName)
+	case arrayLambdaScopeReduce:
+		if varName == CurrentVar {
+			return true
+		}
+		if strings.HasPrefix(varName, CurrentVar+".") {
+			return strings.TrimPrefix(varName, CurrentVar+".") != ""
+		}
+		return false
+	case arrayLambdaScopeNone:
+		return a.isVisibleElemPath(varName)
 	default:
 		return false
 	}
@@ -480,6 +575,76 @@ func (a *ArrayOperator) ToSQLAtPath(operator string, args []interface{}, path st
 
 func (a *ArrayOperator) shouldUseRenderedSourceChildScope(op string, args []interface{}) bool {
 	return a.shouldUseChildScope(op, args)
+}
+
+func (a *ArrayOperator) rewriteNestedArrayOuterScopeArgs(
+	operator string,
+	args []interface{},
+	allowAccumulator bool,
+	path string,
+) ([]interface{}, error) {
+	rewrittenArgs := make([]interface{}, len(args))
+	copy(rewrittenArgs, args)
+
+	opPath := tperrors.BuildPath(path, operator, -1)
+	if len(rewrittenArgs) > 0 {
+		rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(
+			args[0],
+			allowAccumulator,
+			tperrors.BuildArrayPath(opPath, 0),
+		)
+		if err != nil {
+			return nil, err
+		}
+		rewrittenArgs[0] = rewritten
+	}
+	if operator == OpReduce && len(rewrittenArgs) > arrayReduceInitialArgIndex {
+		rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(
+			args[arrayReduceInitialArgIndex],
+			allowAccumulator,
+			tperrors.BuildArrayPath(opPath, arrayReduceInitialArgIndex),
+		)
+		if err != nil {
+			return nil, err
+		}
+		rewrittenArgs[arrayReduceInitialArgIndex] = rewritten
+	}
+	return rewrittenArgs, nil
+}
+
+func (a *ArrayOperator) rewriteNestedArrayOuterScopeArgsParam(
+	operator string,
+	args []interface{},
+	allowAccumulator bool,
+	path string,
+) ([]interface{}, error) {
+	rewrittenArgs := make([]interface{}, len(args))
+	copy(rewrittenArgs, args)
+
+	opPath := tperrors.BuildPath(path, operator, -1)
+	if len(rewrittenArgs) > 0 {
+		rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(
+			args[0],
+			allowAccumulator,
+			tperrors.BuildArrayPath(opPath, 0),
+		)
+		if err != nil {
+			return nil, err
+		}
+		rewrittenArgs[0] = rewritten
+	}
+	if operator == OpReduce && len(rewrittenArgs) > arrayReduceInitialArgIndex {
+		rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(
+			args[arrayReduceInitialArgIndex],
+			allowAccumulator,
+			tperrors.BuildArrayPath(opPath, arrayReduceInitialArgIndex),
+		)
+		if err != nil {
+			return nil, err
+		}
+		rewrittenArgs[arrayReduceInitialArgIndex] = rewritten
+	}
+	return rewrittenArgs, nil
 }
 
 func isRenderedArrayScopeSource(value interface{}) bool {
@@ -964,6 +1129,13 @@ func (a *ArrayOperator) valueExpressionResultWithContextAndPath(expr interface{}
 		}
 		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
 	}
+	if a.shouldParseScopedArrayExpressionLocally(expr) {
+		sql, err := a.expressionToSQLWithContextAndPath(expr, allowAccumulator, path)
+		if err != nil {
+			return OperatorResult{}, err
+		}
+		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
+	}
 	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, allowAccumulator, path)
 	if err != nil {
 		return OperatorResult{}, err
@@ -977,6 +1149,9 @@ func (a *ArrayOperator) valueExpressionResultWithContextAndPath(expr interface{}
 
 func (a *ArrayOperator) predicateExpressionToSQLWithContextAndPath(expr interface{}, path string) (string, error) {
 	if a.config == nil || !a.config.HasPredicateExpressionParser() {
+		return a.expressionToSQLWithContextAndPath(expr, false, path)
+	}
+	if a.shouldParseScopedArrayExpressionLocally(expr) {
 		return a.expressionToSQLWithContextAndPath(expr, false, path)
 	}
 	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, false, path)
@@ -1186,12 +1361,17 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 					target := a
 					nestedArgs := arr
 					if a.shouldUseChildScope(operator, arr) {
+						var rewriteErr error
+						nestedArgs, rewriteErr = a.rewriteNestedArrayOuterScopeArgs(operator, arr, allowAccumulator, path)
+						if rewriteErr != nil {
+							return "", rewriteErr
+						}
 						target = a.withChildScope()
 					}
 					target = target.withValueScope(true)
 					target = target.withValueSemantics(false)
 					nestedPath := tperrors.BuildPath(path, operator, -1)
-					return target.ToSQLAtPath(operator, nestedArgs, nestedPath)
+					return target.withPath(nestedPath).ToSQL(operator, nestedArgs)
 				}
 			default:
 				// Try to use the expression parser callback for unknown operators
@@ -2085,6 +2265,13 @@ func (a *ArrayOperator) valueExpressionResultParamWithContextAndPath(
 		}
 		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
 	}
+	if a.shouldParseScopedArrayExpressionLocally(expr) {
+		sql, err := a.expressionToSQLParamWithContextAndPath(expr, pc, allowAccumulator, path)
+		if err != nil {
+			return OperatorResult{}, err
+		}
+		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
+	}
 	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, allowAccumulator, path)
 	if err != nil {
 		return OperatorResult{}, err
@@ -2102,6 +2289,9 @@ func (a *ArrayOperator) predicateExpressionToSQLParamWithContextAndPath(
 	path string,
 ) (string, error) {
 	if a.config == nil || !a.config.HasParamPredicateExpressionParser() {
+		return a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
+	}
+	if a.shouldParseScopedArrayExpressionLocally(expr) {
 		return a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
 	}
 	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, false, path)
@@ -2307,12 +2497,17 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 					target := a
 					nestedArgs := arr
 					if a.shouldUseChildScope(operator, arr) {
+						var rewriteErr error
+						nestedArgs, rewriteErr = a.rewriteNestedArrayOuterScopeArgsParam(operator, arr, allowAccumulator, path)
+						if rewriteErr != nil {
+							return "", rewriteErr
+						}
 						target = a.withChildScope()
 					}
 					target = target.withValueScope(true)
 					target = target.withValueSemantics(false)
 					nestedPath := tperrors.BuildPath(path, operator, -1)
-					return target.ToSQLParamAtPath(operator, nestedArgs, pc, nestedPath)
+					return target.withPath(nestedPath).ToSQLParam(operator, nestedArgs, pc)
 				}
 			default:
 				if a.config != nil && a.config.HasParamExpressionParser() {

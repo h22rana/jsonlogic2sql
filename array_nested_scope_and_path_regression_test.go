@@ -136,6 +136,229 @@ func TestNestedArrayPredicatePreservesOuterScope_AllDialects(t *testing.T) {
 	}
 }
 
+func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "groups", Type: FieldTypeArray},
+		{Name: "values", Type: FieldTypeArray},
+		{Name: "tags", Type: FieldTypeArray},
+		{Name: "score", Type: FieldTypeNumber},
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+
+	modes := []struct {
+		name   string
+		schema *Schema
+	}{
+		{name: "schema-less", schema: nil},
+		{name: "schema-aware", schema: schema},
+	}
+
+	cases := []struct {
+		name      string
+		logic     string
+		want      []string
+		notWant   []string
+		clickWant []string
+		clickDeny []string
+	}{
+		{
+			name:  "map source current field and transform bare field",
+			logic: `{"reduce":[{"var":"groups"},{"map":[{"var":"current.values"},{"merge":[{"var":"tags"},{"var":"tags"}]}]},[]]}`,
+			want: []string{
+				"UNNEST(elem.values) AS elem1",
+				"elem1.tags",
+			},
+			notWant: []string{
+				"UNNEST(elem.values) AS elem)",
+				"ARRAY_CONCAT(elem.tags, elem.tags)",
+				"elem.tags || elem.tags",
+			},
+			clickWant: []string{
+				"arrayMap(elem1 -> arrayConcat(elem1.tags, elem1.tags), elem.values)",
+			},
+			clickDeny: []string{
+				"arrayMap(elem -> arrayConcat(elem.tags, elem.tags), elem.values)",
+			},
+		},
+		{
+			name:  "filter source current field and predicate bare field",
+			logic: `{"reduce":[{"var":"groups"},{"filter":[{"var":"current.values"},{">":[{"var":"score"},0]}]},[]]}`,
+			want: []string{
+				"UNNEST(elem.values) AS elem1",
+				"elem1.score >",
+			},
+			notWant: []string{
+				"UNNEST(elem.values) AS elem WHERE elem.score >",
+			},
+			clickWant: []string{
+				"arrayFilter(elem1 -> elem1.score >",
+				", elem.values)",
+			},
+			clickDeny: []string{
+				"arrayFilter(elem -> elem.score >",
+			},
+		},
+		{
+			name:  "some source current field and predicate bare field",
+			logic: `{"reduce":[{"var":"groups"},{"some":[{"var":"current.values"},{">":[{"var":"score"},0]}]},false]}`,
+			want: []string{
+				"UNNEST(elem.values) AS elem1",
+				"elem1.score >",
+			},
+			notWant: []string{
+				"UNNEST(elem.values) AS elem WHERE elem.score >",
+			},
+			clickWant: []string{
+				"arrayExists(elem1 -> elem1.score >",
+				", elem.values)",
+			},
+			clickDeny: []string{
+				"arrayExists(elem -> elem.score >",
+			},
+		},
+		{
+			name:  "all source current field and predicate bare field",
+			logic: `{"reduce":[{"var":"groups"},{"all":[{"var":"current.values"},{">":[{"var":"score"},0]}]},false]}`,
+			want: []string{
+				"UNNEST(elem.values) AS elem1",
+				"elem1.score >",
+			},
+			notWant: []string{
+				"UNNEST(elem.values) AS elem WHERE NOT (elem.score >",
+			},
+			clickWant: []string{
+				"arrayAll(elem1 -> elem1.score >",
+				", elem.values)",
+			},
+			clickDeny: []string{
+				"arrayAll(elem -> elem.score >",
+			},
+		},
+		{
+			name:  "none source current field and predicate bare field",
+			logic: `{"reduce":[{"var":"groups"},{"none":[{"var":"current.values"},{">":[{"var":"score"},0]}]},false]}`,
+			want: []string{
+				"UNNEST(elem.values) AS elem1",
+				"elem1.score >",
+			},
+			notWant: []string{
+				"UNNEST(elem.values) AS elem WHERE elem.score >",
+			},
+			clickWant: []string{
+				"arrayExists(elem1 -> elem1.score >",
+				", elem.values)",
+			},
+			clickDeny: []string{
+				"arrayExists(elem -> elem.score >",
+			},
+		},
+		{
+			name:  "nested reduce source current field and reducer current field",
+			logic: `{"reduce":[{"var":"groups"},{"+":[{"var":"accumulator"},{"reduce":[{"var":"current.values"},{"+":[{"var":"accumulator"},{"var":"current.amount"}]},0]}]},0]}`,
+			want: []string{
+				"UNNEST(elem.values) AS elem1",
+				"SUM(elem1.amount)",
+			},
+			notWant: []string{
+				"SUM(elem.amount)",
+				"UNNEST(elem.values) AS elem)",
+			},
+			clickWant: []string{
+				"arrayMap(x -> x.amount, elem.values)",
+			},
+			clickDeny: []string{
+				"arrayMap(x -> elem.amount, elem.values)",
+			},
+		},
+		{
+			name:  "three-level map filter keeps elem elem1 elem2 distinct",
+			logic: `{"reduce":[{"var":"groups"},{"map":[{"var":"current.values"},{"filter":[{"var":"tags"},{">":[{"var":"score"},0]}]}]},[]]}`,
+			want: []string{
+				"UNNEST(elem.values) AS elem1",
+				"UNNEST(elem1.tags) AS elem2",
+				"elem2.score >",
+			},
+			notWant: []string{
+				"UNNEST(elem.values) AS elem)",
+				"UNNEST(elem1.tags) AS elem1",
+				"elem1.score >",
+			},
+			clickWant: []string{
+				"arrayMap(elem1 -> arrayFilter(elem2 -> elem2.score >",
+				", elem1.tags), elem.values)",
+			},
+			clickDeny: []string{
+				"arrayMap(elem -> arrayFilter(elem -> elem.score >",
+			},
+		},
+	}
+
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+			for _, d := range allDialects() {
+				t.Run(d.String(), func(t *testing.T) {
+					t.Parallel()
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+					}
+
+					for _, tc := range cases {
+						t.Run(tc.name, func(t *testing.T) {
+							t.Parallel()
+							sql, err := tr.TranspileValue(tc.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error: %v", err)
+							}
+							assertReduceNestedArrayAliases(t, d, sql, tc)
+
+							paramSQL, _, err := tr.TranspileParameterizedValue(tc.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error: %v", err)
+							}
+							assertReduceNestedArrayAliases(t, d, paramSQL, tc)
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func assertReduceNestedArrayAliases(t *testing.T, d Dialect, sql string, tc struct {
+	name      string
+	logic     string
+	want      []string
+	notWant   []string
+	clickWant []string
+	clickDeny []string
+},
+) {
+	t.Helper()
+	wants := tc.want
+	denies := tc.notWant
+	if d == DialectClickHouse {
+		wants = tc.clickWant
+		denies = tc.clickDeny
+	}
+	for _, want := range wants {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("%s: expected SQL to contain %q, got: %s", tc.name, want, sql)
+		}
+	}
+	for _, deny := range denies {
+		if strings.Contains(sql, deny) {
+			t.Fatalf("%s: unexpected alias-shadow fragment %q in SQL: %s", tc.name, deny, sql)
+		}
+	}
+}
+
 func assertNestedArrayPredicateScope(
 	t *testing.T,
 	d Dialect,

@@ -314,6 +314,7 @@ type expressionResult struct {
 	rawLiteralKnown         bool
 	rawLiteral              interface{}
 	requiresKnownTruthiness bool
+	preserveParamRefs       bool
 }
 
 func resultFromOperator(res operators.OperatorResult) expressionResult {
@@ -321,6 +322,16 @@ func resultFromOperator(res operators.OperatorResult) expressionResult {
 		return predicateResult(res.SQL)
 	}
 	return expressionResult{OperatorResult: res}
+}
+
+func customOperatorResult(res operators.OperatorResult, preserveParamRefs bool) expressionResult {
+	result := resultFromOperator(res)
+	result.preserveParamRefs = preserveParamRefs
+	return result
+}
+
+func canRollbackParamRefs(res expressionResult) bool {
+	return !res.preserveParamRefs
 }
 
 func predicateResult(sql string) expressionResult {
@@ -929,7 +940,8 @@ func (p *Parser) parseTruthinessResultParam(expr interface{}, path string, pc *p
 	if err != nil {
 		return expressionResult{}, "", err
 	}
-	if res.truthKnown || (res.Kind != operators.ExpressionKindPredicate && res.Type == operators.ExpressionTypeNull) {
+	if (res.truthKnown || (res.Kind != operators.ExpressionKindPredicate && res.Type == operators.ExpressionTypeNull)) &&
+		canRollbackParamRefs(res) {
 		pc.Restore(checkpoint)
 	}
 	return res, condition, nil
@@ -994,7 +1006,7 @@ func (p *Parser) parseTruthinessLogicalParam(
 		if err != nil {
 			return expressionResult{}, "", err
 		}
-		if res.truthKnown {
+		if res.truthKnown && canRollbackParamRefs(res) {
 			if operator == "and" && res.truthy {
 				pc.Restore(operandCheckpoint)
 				continue
@@ -2397,6 +2409,7 @@ func (p *Parser) parseExpressionAnyParam(expr interface{}, path string, pc *para
 func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
 	if p.customOpLookup != nil {
 		if handler, ok := p.customOpLookup(operator); ok {
+			paramCount := len(pc.Params())
 			processedArgs, err := p.processCustomOperatorArgsParam(args, path, pc)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
@@ -2414,7 +2427,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 			if res.Kind != operators.ExpressionKindPredicate {
 				return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, "predicate", kindName(res.Kind))
 			}
-			return resultFromOperator(res), nil
+			return customOperatorResult(res, len(pc.Params()) > paramCount), nil
 		}
 	}
 
@@ -2481,6 +2494,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
 	if p.customOpLookup != nil {
 		if handler, ok := p.customOpLookup(operator); ok {
+			paramCount := len(pc.Params())
 			processedArgs, err := p.processCustomOperatorArgsParam(args, path, pc)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
@@ -2495,7 +2509,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 				return expressionResult{}, tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
 					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted string literal", ph))
 			}
-			return resultFromOperator(res), nil
+			return customOperatorResult(res, len(pc.Params()) > paramCount), nil
 		}
 	}
 
@@ -2612,7 +2626,7 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 		if err != nil {
 			return expressionResult{}, err
 		}
-		if res.truthKnown {
+		if res.truthKnown && canRollbackParamRefs(res) {
 			if operator == "and" && res.truthy {
 				pc.Restore(operandCheckpoint)
 				continue
@@ -2709,10 +2723,13 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 			return expressionResult{}, err
 		}
 		if cond.truthKnown && !cond.truthy {
+			if !canRollbackParamRefs(cond) {
+				continue
+			}
 			pc.Restore(conditionCheckpoint)
 			continue
 		}
-		if cond.truthKnown && cond.truthy {
+		if cond.truthKnown && cond.truthy && canRollbackParamRefs(cond) {
 			pc.Restore(conditionCheckpoint)
 		}
 		thenRes, err := p.parsePredicateIfOperandParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
@@ -2860,7 +2877,9 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 		if operator == "and" && !current.truthy {
 			return current, nil
 		}
-		pc.Restore(checkpoint)
+		if canRollbackParamRefs(current) {
+			pc.Restore(checkpoint)
+		}
 		return p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
 	}
 	condition, err := p.truthinessSQL(current, argPath)
@@ -3016,19 +3035,30 @@ func (p *Parser) parseStringifiedLogicalFromParam(
 		return expressionResult{}, err
 	}
 	if index == len(args)-1 {
+		if !canRollbackParamRefs(current) {
+			return valueResult(catStringSQL(current), operators.ExpressionTypeString), nil
+		}
 		pc.Restore(truthCheckpoint)
 		return p.parseCatStringExpressionParam(args[index], argPath, pc)
 	}
 	if current.truthKnown {
 		if operator == operators.OpOr && current.truthy {
+			if !canRollbackParamRefs(current) {
+				return valueResult(catStringSQL(current), operators.ExpressionTypeString), nil
+			}
 			pc.Restore(truthCheckpoint)
 			return p.parseCatStringExpressionParam(args[index], argPath, pc)
 		}
 		if operator == operators.OpAnd && !current.truthy {
+			if !canRollbackParamRefs(current) {
+				return valueResult(catStringSQL(current), operators.ExpressionTypeString), nil
+			}
 			pc.Restore(truthCheckpoint)
 			return p.parseCatStringExpressionParam(args[index], argPath, pc)
 		}
-		pc.Restore(truthCheckpoint)
+		if canRollbackParamRefs(current) {
+			pc.Restore(truthCheckpoint)
+		}
 		return p.parseStringifiedLogicalFromParam(operator, args, index+1, path, pc)
 	}
 	currentString, err := p.parseCatStringExpressionParam(args[index], argPath, pc)
