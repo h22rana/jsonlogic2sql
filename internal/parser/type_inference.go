@@ -81,9 +81,6 @@ func (p *Parser) inferVarExpressionType(args interface{}, accumulatorType operat
 	if typ := p.fieldExpressionType(fieldName); typ != operators.ExpressionTypeUnknown {
 		return typ
 	}
-	if arr, ok := args.([]interface{}); ok && len(arr) > 1 {
-		return p.inferValueExpressionType(arr[1], accumulatorType)
-	}
 	return operators.ExpressionTypeUnknown
 }
 

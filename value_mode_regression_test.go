@@ -770,7 +770,19 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 func TestTranspileValue_ReduceAccumulatorTruthinessRejectsUnknownInitialTypeAllDialects(t *testing.T) {
 	t.Parallel()
 
-	logic := `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},{"var":"current"}]},{"var":"seed"}]}`
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "field initial without schema",
+			logic: `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},{"var":"current"}]},{"var":"seed"}]}`,
+		},
+		{
+			name:  "defaulted field initial without schema",
+			logic: `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},"x"]},{"var":["seed",""]}]}`,
+		},
+	}
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
@@ -781,15 +793,19 @@ func TestTranspileValue_ReduceAccumulatorTruthinessRejectsUnknownInitialTypeAllD
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
 
-			got, valueErr := tr.TranspileValue(logic)
-			if !IsErrorCode(valueErr, ErrInvalidExpressionContext) {
-				t.Fatalf("TranspileValue() = %q, error = %v, want %s", got, valueErr, ErrInvalidExpressionContext)
-			}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, valueErr := tr.TranspileValue(tt.logic)
+					if !IsErrorCode(valueErr, ErrInvalidExpressionContext) {
+						t.Fatalf("TranspileValue() = %q, error = %v, want %s", got, valueErr, ErrInvalidExpressionContext)
+					}
 
-			gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
-			if !IsErrorCode(err, ErrInvalidExpressionContext) {
-				t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want %s",
-					gotParam, gotParams, err, ErrInvalidExpressionContext)
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if !IsErrorCode(err, ErrInvalidExpressionContext) {
+						t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want %s",
+							gotParam, gotParams, err, ErrInvalidExpressionContext)
+					}
+				})
 			}
 		})
 	}
