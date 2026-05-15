@@ -1422,8 +1422,8 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		},
 		{
 			name:     "deeply nested reduce filter",
-			input:    `{"reduce": [{"filter": [{"var": "data"}, {"and": [{"some": [{"var": "tags"}, {"==": [{"var": ""}, "important"]}]}, {">": [{"var": "value"}, 0]}]}]}, {"+": [{"var": "accumulator"}, {"reduce": [{"var": "current.subitems"}, {"+": [{"var": "acc"}, {"var": "current"}]}, 0]}]}, 0]}`,
-			expected: "(SELECT (0 + (SELECT (acc + elem1) FROM UNNEST(elem.subitems) AS elem1)) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE (EXISTS (SELECT 1 FROM UNNEST(elem.tags) AS elem1 WHERE elem1 = 'important') AND elem.value > 0))) AS elem)",
+			input:    `{"reduce": [{"filter": [{"var": "data"}, {"and": [{"some": [{"var": "tags"}, {"==": [{"var": ""}, "important"]}]}, {">": [{"var": "value"}, 0]}]}]}, {"+": [{"var": "accumulator"}, {"reduce": [{"var": "current.subitems"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}]}, 0]}`,
+			expected: "(SELECT (0 + 0 + COALESCE((SELECT SUM(elem1) FROM UNNEST(elem.subitems) AS elem1), 0)) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE (EXISTS (SELECT 1 FROM UNNEST(elem.tags) AS elem1 WHERE elem1 = 'important') AND elem.value > 0))) AS elem)",
 			hasError: false,
 		},
 		{

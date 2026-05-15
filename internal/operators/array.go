@@ -1259,7 +1259,8 @@ func (a *ArrayOperator) mapReduceScopeVar(varName string) (string, bool, error) 
 	case varName == "":
 		return "", true, fmt.Errorf("unsupported reduce-scope variable %q; use %q or %q", varName, CurrentVar, AccumulatorVar)
 	default:
-		return "", false, nil
+		return "", true, fmt.Errorf("unsupported reduce-scope variable %q; use %q, %q.<field>, or %q",
+			varName, CurrentVar, CurrentVar, AccumulatorVar)
 	}
 }
 

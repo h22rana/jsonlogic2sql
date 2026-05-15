@@ -21,15 +21,15 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 		absent   string
 	}{
 		{
-			name:     "current_balance not corrupted in reduce",
+			name:     "current.current_balance correctly mapped in reduce",
 			operator: "reduce",
 			args: []any{
 				map[string]any{"var": "orders"},
-				map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current_balance"}}},
+				map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.current_balance"}}},
 				0,
 			},
-			contains: "current_balance",
-			absent:   "elem_balance",
+			contains: "elem.current_balance",
+			absent:   "current.current_balance",
 		},
 		{
 			name:     "item_count not corrupted in all",

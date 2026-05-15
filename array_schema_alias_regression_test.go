@@ -322,13 +322,7 @@ func TestTranspile_ArrayLambdaVarSemantics_AllDialectsSchemaModes(t *testing.T) 
 						t.Fatalf("expected reduce current.type to resolve against element, got: %s", allowedReduceSQL)
 					}
 
-					bareReduceSQL, err := tr.TranspileValue(`{"reduce":[{"var":"numbers"},{"var":"type"},""]}`)
-					if err != nil {
-						t.Fatalf("reduce bare field transpilation error: %v", err)
-					}
-					if strings.Contains(bareReduceSQL, "elem.type") {
-						t.Fatalf("expected reduce bare field to remain non-element scoped, got: %s", bareReduceSQL)
-					}
+					assertArrayScopeAliasRejected(t, tr, `{"reduce":[{"var":"numbers"},{"var":"type"},""]}`, true)
 				})
 			}
 		})
@@ -358,7 +352,7 @@ func TestTranspile_ArrayLambdaRejectsLegacyElementAliases_AllDialectsSchemaModes
 			return `{"none":[{"var":"numbers"},{"==":[{"var":"` + alias + `"},1]}]}`
 		}},
 	}
-	reduceRejected := []string{".type", "item.type", "elem.type", ""}
+	reduceRejected := []string{".type", "item.type", "elem.type", "", "acc", "type"}
 
 	modes := []struct {
 		name   string
