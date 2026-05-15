@@ -46,6 +46,11 @@ type ArrayOperator struct {
 	hasAccumulatorType bool
 }
 
+type typedValueSQL struct {
+	sql string
+	typ ExpressionType
+}
+
 // NewArrayOperator creates a new ArrayOperator instance with optional config.
 func NewArrayOperator(config *OperatorConfig) *ArrayOperator {
 	return &ArrayOperator{
@@ -175,9 +180,9 @@ func (a *ArrayOperator) argPath(index int) string {
 	return tperrors.BuildArrayPath(a.currentPath(), index)
 }
 
-func (a *ArrayOperator) inferValueExpressionType(expr interface{}, accumulatorType ExpressionType) ExpressionType {
+func (a *ArrayOperator) inferValueExpressionType(expr interface{}) ExpressionType {
 	if a != nil && a.config != nil && a.config.HasValueTypeInferer() {
-		return a.config.InferValueExpressionType(expr, accumulatorType)
+		return a.config.InferValueExpressionType(expr, ExpressionTypeUnknown)
 	}
 	return inferLiteralValueExpressionType(expr)
 }
@@ -702,10 +707,11 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	}
 
 	// Third argument: initial value
-	initial, err := a.valueToSQLAtPath(args[arrayReduceInitialArgIndex], a.argPath(arrayReduceInitialArgIndex))
+	initialValue, err := a.valueToTypedSQLAtPath(args[arrayReduceInitialArgIndex], a.argPath(arrayReduceInitialArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
 	}
+	initial := initialValue.sql
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return initial, nil
 	}
@@ -761,8 +767,7 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	// accumulator substitution must happen LAST so that the safety net
 	// doesn't corrupt initial values containing "current"/"item" field names.
 	rewritten := a.rewriteElementVars(reducerExpr)
-	accumulatorType := a.inferValueExpressionType(args[arrayReduceInitialArgIndex], ExpressionTypeUnknown)
-	valueScoped := a.withValueSemantics(true).withAccumulatorType(accumulatorType)
+	valueScoped := a.withValueSemantics(true).withAccumulatorType(initialValue.typ)
 	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(rewritten, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
@@ -1041,18 +1046,30 @@ func (a *ArrayOperator) valueToSQL(value interface{}) (string, error) {
 }
 
 func (a *ArrayOperator) valueExpressionToSQLWithContextAndPath(expr interface{}, allowAccumulator bool, path string) (string, error) {
-	if a.config == nil || !a.config.HasValueExpressionParser() {
-		return a.expressionToSQLWithContextAndPath(expr, allowAccumulator, path)
-	}
-	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, allowAccumulator, path)
-	if err != nil {
-		return "", err
-	}
-	res, err := a.config.ParseValueExpression(rewritten, path)
+	res, err := a.valueExpressionResultWithContextAndPath(expr, allowAccumulator, path)
 	if err != nil {
 		return "", err
 	}
 	return res.SQL, nil
+}
+
+func (a *ArrayOperator) valueExpressionResultWithContextAndPath(expr interface{}, allowAccumulator bool, path string) (OperatorResult, error) {
+	if a.config == nil || !a.config.HasValueExpressionParser() {
+		sql, err := a.expressionToSQLWithContextAndPath(expr, allowAccumulator, path)
+		if err != nil {
+			return OperatorResult{}, err
+		}
+		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
+	}
+	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, allowAccumulator, path)
+	if err != nil {
+		return OperatorResult{}, err
+	}
+	res, err := a.config.ParseValueExpression(rewritten, path)
+	if err != nil {
+		return OperatorResult{}, err
+	}
+	return res, nil
 }
 
 func (a *ArrayOperator) predicateExpressionToSQLWithContextAndPath(expr interface{}, path string) (string, error) {
@@ -1071,13 +1088,28 @@ func (a *ArrayOperator) predicateExpressionToSQLWithContextAndPath(expr interfac
 }
 
 func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string, error) {
+	result, err := a.valueToTypedSQLAtPath(value, path)
+	if err != nil {
+		return "", err
+	}
+	return result.sql, nil
+}
+
+func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (typedValueSQL, error) {
 	// Handle ProcessedValue (pre-processed SQL from parser)
 	if pv, ok := value.(ProcessedValue); ok {
 		if pv.IsSQL {
-			return pv.Value, nil
+			if pv.HasExpressionInfo {
+				return typedValueSQL{sql: pv.Value, typ: expressionTypeFromResultKind(pv.Kind, pv.Type)}, nil
+			}
+			return typedValueSQL{sql: pv.Value, typ: ExpressionTypeUnknown}, nil
 		}
 		// It's a literal, convert it
-		return a.dataOp.valueToSQL(pv.Value)
+		sql, err := a.dataOp.valueToSQL(pv.Value)
+		if err != nil {
+			return typedValueSQL{}, err
+		}
+		return typedValueSQL{sql: sql, typ: inferLiteralValueExpressionType(pv.Value)}, nil
 	}
 
 	// Handle complex expressions (operators)
@@ -1085,12 +1117,23 @@ func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string
 		// Check if it's a var expression
 		if varExpr, hasVar := expr[OpVar]; hasVar {
 			if sql, handled, err := a.arrayInternalVarToSQL(varExpr); handled || err != nil {
-				return sql, err
+				if err != nil {
+					return typedValueSQL{}, err
+				}
+				return typedValueSQL{sql: sql, typ: a.inferValueExpressionType(value)}, nil
 			}
-			return a.dataOp.ToSQL(OpVar, []interface{}{varExpr})
+			sql, err := a.dataOp.ToSQL(OpVar, []interface{}{varExpr})
+			if err != nil {
+				return typedValueSQL{}, err
+			}
+			return typedValueSQL{sql: sql, typ: a.inferValueExpressionType(value)}, nil
 		}
 		// Otherwise, it's a complex value expression.
-		return a.valueExpressionToSQLWithContextAndPath(value, false, path)
+		res, err := a.valueExpressionResultWithContextAndPath(value, false, path)
+		if err != nil {
+			return typedValueSQL{}, err
+		}
+		return typedValueSQL{sql: res.SQL, typ: expressionTypeFromResultKind(res.Kind, res.Type)}, nil
 	}
 
 	// Handle arrays
@@ -1099,15 +1142,23 @@ func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string
 		for i, elem := range arr {
 			elementSQL, err := a.valueExpressionToSQLWithContextAndPath(elem, false, tperrors.BuildArrayPath(path, i))
 			if err != nil {
-				return "", fmt.Errorf("invalid array element %d: %w", i, err)
+				return typedValueSQL{}, fmt.Errorf("invalid array element %d: %w", i, err)
 			}
 			elements[i] = elementSQL
 		}
-		return a.arrayLiteral(elements)
+		sql, err := a.arrayLiteral(elements)
+		if err != nil {
+			return typedValueSQL{}, err
+		}
+		return typedValueSQL{sql: sql, typ: ExpressionTypeArray}, nil
 	}
 
 	// Handle primitive values
-	return a.dataOp.valueToSQL(value)
+	sql, err := a.dataOp.valueToSQL(value)
+	if err != nil {
+		return typedValueSQL{}, err
+	}
+	return typedValueSQL{sql: sql, typ: inferLiteralValueExpressionType(value)}, nil
 }
 
 func (a *ArrayOperator) arrayLiteral(elements []string) (string, error) {
@@ -1813,10 +1864,11 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return "", err
 	}
-	initial, err := a.valueToSQLParamAtPath(args[arrayReduceInitialArgIndex], pc, a.argPath(arrayReduceInitialArgIndex))
+	initialValue, err := a.valueToTypedSQLParamAtPath(args[arrayReduceInitialArgIndex], pc, a.argPath(arrayReduceInitialArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
 	}
+	initial := initialValue.sql
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return initial, nil
 	}
@@ -1854,8 +1906,7 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	}
 
 	rewritten := a.rewriteElementVars(reducerExpr)
-	accumulatorType := a.inferValueExpressionType(args[arrayReduceInitialArgIndex], ExpressionTypeUnknown)
-	valueScoped := a.withValueSemantics(true).withAccumulatorType(accumulatorType)
+	valueScoped := a.withValueSemantics(true).withAccumulatorType(initialValue.typ)
 	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(rewritten, pc, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
@@ -2000,18 +2051,35 @@ func (a *ArrayOperator) valueExpressionToSQLParamWithContextAndPath(
 	allowAccumulator bool,
 	path string,
 ) (string, error) {
-	if a.config == nil || !a.config.HasParamValueExpressionParser() {
-		return a.expressionToSQLParamWithContextAndPath(expr, pc, allowAccumulator, path)
-	}
-	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, allowAccumulator, path)
-	if err != nil {
-		return "", err
-	}
-	res, err := a.config.ParseValueExpressionParam(rewritten, path, pc)
+	res, err := a.valueExpressionResultParamWithContextAndPath(expr, pc, allowAccumulator, path)
 	if err != nil {
 		return "", err
 	}
 	return res.SQL, nil
+}
+
+func (a *ArrayOperator) valueExpressionResultParamWithContextAndPath(
+	expr interface{},
+	pc *params.ParamCollector,
+	allowAccumulator bool,
+	path string,
+) (OperatorResult, error) {
+	if a.config == nil || !a.config.HasParamValueExpressionParser() {
+		sql, err := a.expressionToSQLParamWithContextAndPath(expr, pc, allowAccumulator, path)
+		if err != nil {
+			return OperatorResult{}, err
+		}
+		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
+	}
+	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, allowAccumulator, path)
+	if err != nil {
+		return OperatorResult{}, err
+	}
+	res, err := a.config.ParseValueExpressionParam(rewritten, path, pc)
+	if err != nil {
+		return OperatorResult{}, err
+	}
+	return res, nil
 }
 
 func (a *ArrayOperator) predicateExpressionToSQLParamWithContextAndPath(
@@ -2034,21 +2102,47 @@ func (a *ArrayOperator) predicateExpressionToSQLParamWithContextAndPath(
 }
 
 func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.ParamCollector, path string) (string, error) {
+	result, err := a.valueToTypedSQLParamAtPath(value, pc, path)
+	if err != nil {
+		return "", err
+	}
+	return result.sql, nil
+}
+
+func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params.ParamCollector, path string) (typedValueSQL, error) {
 	if pv, ok := value.(ProcessedValue); ok {
 		if pv.IsSQL {
-			return pv.Value, nil
+			if pv.HasExpressionInfo {
+				return typedValueSQL{sql: pv.Value, typ: expressionTypeFromResultKind(pv.Kind, pv.Type)}, nil
+			}
+			return typedValueSQL{sql: pv.Value, typ: ExpressionTypeUnknown}, nil
 		}
-		return a.dataOp.valueToSQLParam(pv.Value, pc)
+		sql, err := a.dataOp.valueToSQLParam(pv.Value, pc)
+		if err != nil {
+			return typedValueSQL{}, err
+		}
+		return typedValueSQL{sql: sql, typ: inferLiteralValueExpressionType(pv.Value)}, nil
 	}
 
 	if expr, ok := value.(map[string]interface{}); ok {
 		if varExpr, hasVar := expr[OpVar]; hasVar {
 			if sql, handled, err := a.arrayInternalVarToSQLParam(varExpr, pc); handled || err != nil {
-				return sql, err
+				if err != nil {
+					return typedValueSQL{}, err
+				}
+				return typedValueSQL{sql: sql, typ: a.inferValueExpressionType(value)}, nil
 			}
-			return a.dataOp.ToSQLParam(OpVar, []interface{}{varExpr}, pc)
+			sql, err := a.dataOp.ToSQLParam(OpVar, []interface{}{varExpr}, pc)
+			if err != nil {
+				return typedValueSQL{}, err
+			}
+			return typedValueSQL{sql: sql, typ: a.inferValueExpressionType(value)}, nil
 		}
-		return a.valueExpressionToSQLParamWithContextAndPath(value, pc, false, path)
+		res, err := a.valueExpressionResultParamWithContextAndPath(value, pc, false, path)
+		if err != nil {
+			return typedValueSQL{}, err
+		}
+		return typedValueSQL{sql: res.SQL, typ: expressionTypeFromResultKind(res.Kind, res.Type)}, nil
 	}
 
 	if arr, ok := value.([]interface{}); ok {
@@ -2056,14 +2150,29 @@ func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.Para
 		for i, elem := range arr {
 			elementSQL, err := a.valueExpressionToSQLParamWithContextAndPath(elem, pc, false, tperrors.BuildArrayPath(path, i))
 			if err != nil {
-				return "", fmt.Errorf("invalid array element %d: %w", i, err)
+				return typedValueSQL{}, fmt.Errorf("invalid array element %d: %w", i, err)
 			}
 			elements[i] = elementSQL
 		}
-		return a.arrayLiteral(elements)
+		sql, err := a.arrayLiteral(elements)
+		if err != nil {
+			return typedValueSQL{}, err
+		}
+		return typedValueSQL{sql: sql, typ: ExpressionTypeArray}, nil
 	}
 
-	return a.dataOp.valueToSQLParam(value, pc)
+	sql, err := a.dataOp.valueToSQLParam(value, pc)
+	if err != nil {
+		return typedValueSQL{}, err
+	}
+	return typedValueSQL{sql: sql, typ: inferLiteralValueExpressionType(value)}, nil
+}
+
+func expressionTypeFromResultKind(kind ExpressionKind, typ ExpressionType) ExpressionType {
+	if kind == ExpressionKindPredicate {
+		return ExpressionTypeBoolean
+	}
+	return typ
 }
 
 func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(

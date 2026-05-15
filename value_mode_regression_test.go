@@ -811,6 +811,62 @@ func TestTranspileValue_ReduceAccumulatorTruthinessRejectsUnknownInitialTypeAllD
 	}
 }
 
+func TestTranspileValue_ReduceAccumulatorTruthinessUsesTypedCustomInitialAllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},1]},{"zero":[]}]}`
+
+	renderReduce := func(d Dialect, reducer string) string {
+		if d == DialectClickHouse {
+			return fmt.Sprintf("arrayFold((acc, elem) -> %s, arr, 0)", reducer)
+		}
+		return fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer)
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			err = tr.RegisterOperatorFunc("zero", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				if len(args) != 0 {
+					return OperatorResult{}, fmt.Errorf("zero requires no arguments")
+				}
+				return ValueSQL("0", ExpressionTypeNumber), nil
+			})
+			if err != nil {
+				t.Fatalf("RegisterOperatorFunc() error = %v", err)
+			}
+
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			wantReducer := "CASE WHEN (0 IS NOT NULL AND 0 != 0) THEN 0 ELSE 1 END"
+			if want := renderReduce(d, wantReducer); got != want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, want)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			placeholder := testPlaceholder(d, 1)
+			wantParamReducer := fmt.Sprintf("CASE WHEN (0 IS NOT NULL AND 0 != 0) THEN 0 ELSE %s END", placeholder)
+			if want := renderReduce(d, wantParamReducer); gotParam != want {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: float64(1)}}
+			if !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_ReduceAccumulatorTruthinessUsesSchemaInitialTypeAllDialects(t *testing.T) {
 	t.Parallel()
 
