@@ -72,10 +72,16 @@ func (n *NumericOperator) extractFieldNameFromValue(value interface{}) string {
 
 // extractFieldName extracts the field name from a var argument.
 func (n *NumericOperator) extractFieldName(varName interface{}) string {
+	if pv, ok := varName.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+		return pv.FieldName
+	}
 	if nameStr, ok := varName.(string); ok {
 		return nameStr
 	}
 	if nameArr, ok := varName.([]interface{}); ok && len(nameArr) > 0 {
+		if pv, ok := nameArr[0].(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+			return pv.FieldName
+		}
 		if nameStr, ok := nameArr[0].(string); ok {
 			return nameStr
 		}

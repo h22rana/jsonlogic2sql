@@ -275,6 +275,62 @@ func TestTranspileParameterized_ArrayNestedScopeUsesDistinctAliases(t *testing.T
 	}
 }
 
+func TestTranspile_ArrayScopedVarsPreserveSchemaValidation(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "groups", Type: FieldTypeArray},
+		{Name: "values", Type: FieldTypeString},
+		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "tags", Type: FieldTypeArray},
+	})
+
+	tests := []struct {
+		name      string
+		logic     string
+		wantError string
+	}{
+		{
+			name:      "nested map rejects scoped string source",
+			logic:     `{"map":[{"var":"groups"},{"map":[{"var":"values"},{"var":""}]}]}`,
+			wantError: "array operation on non-array field 'values'",
+		},
+		{
+			name:      "filter rejects scoped boolean ordering",
+			logic:     `{"filter":[{"var":"groups"},{">":[{"var":"flag"},0]}]}`,
+			wantError: "ordering comparison '>' on incompatible field 'flag'",
+		},
+		{
+			name:      "reduce rejects current boolean ordering",
+			logic:     `{"reduce":[{"var":"groups"},{"if":[{">":[{"var":"current.flag"},0]},{"var":"accumulator"},{"var":"accumulator"}]},0]}`,
+			wantError: "ordering comparison '>' on incompatible field 'flag'",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					if _, err := tr.TranspileValue(tt.logic); err == nil || !strings.Contains(err.Error(), tt.wantError) {
+						t.Fatalf("TranspileValue() error = %v, want containing %q", err, tt.wantError)
+					}
+					sql, params, err := tr.TranspileParameterizedValue(tt.logic)
+					if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+						t.Fatalf("TranspileParameterizedValue() error = %v, want containing %q (SQL %q params %#v)",
+							err, tt.wantError, sql, params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspile_ArrayLambdaVarSemantics_AllDialectsSchemaModes(t *testing.T) {
 	modes := []struct {
 		name   string
@@ -352,7 +408,7 @@ func TestTranspile_ArrayLambdaRejectsLegacyElementAliases_AllDialectsSchemaModes
 			return `{"none":[{"var":"numbers"},{"==":[{"var":"` + alias + `"},1]}]}`
 		}},
 	}
-	reduceRejected := []string{".type", "item.type", "elem.type", "", "acc", "type"}
+	reduceRejected := []string{".type", "item.type", "elem.type", "", "acc", "type", "current."}
 
 	modes := []struct {
 		name   string
@@ -389,6 +445,37 @@ func TestTranspile_ArrayLambdaRejectsLegacyElementAliases_AllDialectsSchemaModes
 							assertArrayScopeAliasRejected(t, tr, logic, true)
 						})
 					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspile_ArrayLambdaRejectsTrailingDotReduceCurrent_AllDialects(t *testing.T) {
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "general reduce",
+			logic: `{"reduce":[{"var":"numbers"},{"cat":[{"var":"accumulator"},{"var":"current."}]},""]}`,
+		},
+		{
+			name:  "aggregate reduce",
+			logic: `{"reduce":[{"var":"numbers"},{"+":[{"var":"accumulator"},{"var":"current."}]},0]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					assertArrayScopeAliasRejected(t, tr, tt.logic, true)
 				})
 			}
 		})

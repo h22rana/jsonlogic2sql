@@ -483,9 +483,16 @@ func varFieldName(args interface{}) string {
 	switch v := args.(type) {
 	case string:
 		return v
+	case operators.ProcessedValue:
+		if v.IsSQL && v.IsField {
+			return v.FieldName
+		}
 	case []interface{}:
 		if len(v) == 0 {
 			return ""
+		}
+		if pv, ok := v[0].(operators.ProcessedValue); ok && pv.IsSQL && pv.IsField {
+			return pv.FieldName
 		}
 		if field, ok := v[0].(string); ok {
 			return field
@@ -1326,6 +1333,7 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 				Kind: pv.Kind,
 				Type: pv.Type,
 			})
+			copyProcessedFieldMetadata(&res, pv)
 			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 			return withVarDefaultMetadata(res, args), nil
 		}
@@ -2503,6 +2511,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 				Kind: pv.Kind,
 				Type: pv.Type,
 			})
+			copyProcessedFieldMetadata(&res, pv)
 			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 			return withVarDefaultMetadata(res, args), nil
 		}
