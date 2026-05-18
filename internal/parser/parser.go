@@ -3060,7 +3060,7 @@ func (p *Parser) parseStringifiedLogicalFromParam(
 	}
 	if index == len(args)-1 {
 		if !canRollbackParamRefs(current) {
-			return valueResult(catStringSQL(current), operators.ExpressionTypeString), nil
+			return p.stringifiedCatResult(current, argPath)
 		}
 		pc.Restore(truthCheckpoint)
 		return p.parseCatStringExpressionParam(args[index], argPath, pc)
@@ -3068,14 +3068,14 @@ func (p *Parser) parseStringifiedLogicalFromParam(
 	if current.truthKnown {
 		if operator == operators.OpOr && current.truthy {
 			if !canRollbackParamRefs(current) {
-				return valueResult(catStringSQL(current), operators.ExpressionTypeString), nil
+				return p.stringifiedCatResult(current, argPath)
 			}
 			pc.Restore(truthCheckpoint)
 			return p.parseCatStringExpressionParam(args[index], argPath, pc)
 		}
 		if operator == operators.OpAnd && !current.truthy {
 			if !canRollbackParamRefs(current) {
-				return valueResult(catStringSQL(current), operators.ExpressionTypeString), nil
+				return p.stringifiedCatResult(current, argPath)
 			}
 			pc.Restore(truthCheckpoint)
 			return p.parseCatStringExpressionParam(args[index], argPath, pc)

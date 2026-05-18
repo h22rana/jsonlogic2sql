@@ -3104,6 +3104,7 @@ func TestTranspileValue_CatRejectsStaticArrayValuesAllDialectsSchemaModes(t *tes
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
 		{Name: "items", Type: FieldTypeArray},
 	})
 
@@ -3127,6 +3128,11 @@ func TestTranspileValue_CatRejectsStaticArrayValuesAllDialectsSchemaModes(t *tes
 		{
 			name:  "custom array value",
 			logic: `{"cat":[{"arrayValue":[]}]}`,
+		},
+		{
+			name:       "custom array value behind parameterized stringified or",
+			logic:      `{"cat":[{"or":[{"var":"flag"},{"arrayParam":["x"]}]}]}`,
+			schemaOnly: true,
 		},
 		{
 			name:       "schema array field",
@@ -3155,6 +3161,15 @@ func TestTranspileValue_CatRejectsStaticArrayValuesAllDialectsSchemaModes(t *tes
 							return OperatorResult{}, fmt.Errorf("arrayValue requires no arguments")
 						}
 						return ValueSQL("array_expr", ExpressionTypeArray), nil
+					})
+					if err != nil {
+						t.Fatalf("RegisterOperatorFunc() error = %v", err)
+					}
+					err = tr.RegisterOperatorFunc("arrayParam", func(_ string, args []OperatorArg) (OperatorResult, error) {
+						if len(args) != 1 {
+							return OperatorResult{}, fmt.Errorf("arrayParam requires one argument")
+						}
+						return ValueSQL(fmt.Sprintf("[%s]", args[0].SQL), ExpressionTypeArray), nil
 					})
 					if err != nil {
 						t.Fatalf("RegisterOperatorFunc() error = %v", err)
