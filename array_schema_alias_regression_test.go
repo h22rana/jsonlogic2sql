@@ -177,6 +177,82 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 	}
 }
 
+func TestArrayScopedDefaultedVarsPreserveSchemaEqualityMetadata(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "items", Type: FieldTypeArray},
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+
+	cases := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "loose equality",
+			logic: `{"some":[{"var":"items"},{"==":[{"var":["amount","abc"]},"abc"]}]}`,
+		},
+		{
+			name:  "strict equality",
+			logic: `{"some":[{"var":"items"},{"===":[{"var":["amount","abc"]},"abc"]}]}`,
+		},
+		{
+			name:  "loose inequality",
+			logic: `{"some":[{"var":"items"},{"!=":[{"var":["amount","abc"]},"abc"]}]}`,
+		},
+		{
+			name:  "strict inequality",
+			logic: `{"some":[{"var":"items"},{"!==":[{"var":["amount","abc"]},"abc"]}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error: %v", err)
+					}
+					if strings.Contains(sql, "WHERE FALSE") || strings.Contains(sql, "WHERE TRUE") {
+						t.Fatalf("inline scoped default comparison folded away: %s", sql)
+					}
+					if !strings.Contains(sql, "COALESCE(elem.amount, 'abc')") {
+						t.Fatalf("inline SQL did not preserve scoped default comparison, got: %s", sql)
+					}
+
+					paramSQL, params, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error: %v", err)
+					}
+					if strings.Contains(paramSQL, "WHERE FALSE") || strings.Contains(paramSQL, "WHERE TRUE") {
+						t.Fatalf("parameterized scoped default comparison folded away: %s params=%#v", paramSQL, params)
+					}
+					if !strings.Contains(paramSQL, "COALESCE(elem.amount, ") {
+						t.Fatalf("parameterized SQL did not preserve scoped default comparison, got: %s params=%#v", paramSQL, params)
+					}
+					if len(params) != 2 {
+						t.Fatalf("params = %#v, want default and comparison literal", params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspile_ArrayNestedScopeUsesDistinctAliases(t *testing.T) {
 	tests := []struct {
 		name        string

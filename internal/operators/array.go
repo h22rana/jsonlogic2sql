@@ -241,6 +241,40 @@ func (a *ArrayOperator) scopedSQLFieldResult(sql, fieldName string) ProcessedVal
 	return result
 }
 
+func (a *ArrayOperator) scopedSQLFieldResultFromVarExpr(sql string, varExpr interface{}) ProcessedValue {
+	result := a.scopedSQLFieldResult(sql, a.scopedFieldNameFromVarExpr(varExpr))
+	defaultValue, hasDefault, defaultKnown := scopedVarDefaultLiteral(varExpr)
+	if !hasDefault {
+		return result
+	}
+	result.FieldHasDefault = true
+	if defaultKnown {
+		result.FieldDefaultLiteral = defaultValue
+		result.FieldDefaultLiteralKnown = true
+	}
+	return result
+}
+
+func scopedVarDefaultLiteral(varExpr interface{}) (interface{}, bool, bool) {
+	arr, ok := varExpr.([]interface{})
+	if !ok || len(arr) < 2 {
+		return nil, false, false
+	}
+	defaultValue := arr[1]
+	if pv, ok := defaultValue.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return nil, true, false
+		}
+		return pv.Value, true, true
+	}
+	switch defaultValue.(type) {
+	case map[string]interface{}, []interface{}:
+		return nil, true, false
+	default:
+		return defaultValue, true, true
+	}
+}
+
 func inferLiteralValueExpressionType(expr interface{}) ExpressionType {
 	if pv, ok := expr.(ProcessedValue); ok {
 		if pv.HasExpressionInfo {
@@ -1844,7 +1878,7 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorWithContextAndPath(expr inte
 					if err != nil {
 						return nil, err
 					}
-					return a.scopedSQLFieldResult(sql, a.scopedFieldNameFromVarExpr(varName)), nil
+					return a.scopedSQLFieldResultFromVarExpr(sql, varName), nil
 				}
 				return e, nil
 			}
