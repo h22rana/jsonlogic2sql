@@ -79,6 +79,60 @@ if err != nil {
 }
 ```
 
+## Nested Object and Array Element Fields
+
+Schemas can describe object fields with `fields` and array element fields with
+`elementFields`. The transpiler flattens those definitions internally for type
+validation, while array lambdas still emit SQL relative to the element alias.
+
+```json
+[
+  {
+    "name": "profile",
+    "type": "object",
+    "fields": [
+      { "name": "country", "type": "string" },
+      {
+        "name": "status",
+        "type": "enum",
+        "allowedValues": ["active", "blocked"]
+      }
+    ]
+  },
+  {
+    "name": "payment_methods",
+    "type": "array",
+    "elementFields": [
+      {
+        "name": "type",
+        "type": "enum",
+        "allowedValues": ["BALANCE", "CARD"]
+      },
+      { "name": "amount", "type": "number" },
+      {
+        "name": "details",
+        "type": "object",
+        "fields": [
+          { "name": "issuer", "type": "string" }
+        ]
+      }
+    ]
+  }
+]
+```
+
+Those entries define these schema paths: `profile.country`,
+`profile.status`, `payment_methods.type`, `payment_methods.amount`, and
+`payment_methods.details.issuer`.
+
+```json
+{"some":[{"var":"payment_methods"},{"==":[{"var":"type"},"BALANCE"]}]}
+```
+
+In a lambda, `{"var":"type"}` resolves against the current array element and
+is validated as `payment_methods.type`, then emitted as `elem.type`.
+Unknown scoped fields are rejected in schema-aware mode.
+
 ## Supported Field Types
 
 | Type | Constant | Description |

@@ -8,7 +8,7 @@ A Go library that converts JSON Logic expressions into SQL predicate and value e
 - **SQL Dialect Support**: Target BigQuery, Spanner, PostgreSQL, DuckDB, or ClickHouse
 - **Parameterized Queries**: Generate SQL with bind placeholders (`@p1`, `$1`) and separate parameter values for safe execution
 - **Custom Operators**: Extensible registry pattern for custom SQL functions
-- **Schema Validation**: Optional field schema for strict column validation
+- **Schema Validation**: Optional field schema for strict column validation, including nested object fields and array element fields
 - **Identifier Quoting**: Path segments such as `24h` and `7d` are quoted per dialect
 - **Structured Errors**: Error codes and JSONPath locations for debugging
 - **Regression Matrices**: Cross-dialect schema-aware/schema-less matrix tests for nested built-in and custom operator flows

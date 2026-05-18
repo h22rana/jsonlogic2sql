@@ -175,6 +175,9 @@
             const statusEl = document.getElementById('schema-status');
             const badgeEl = document.getElementById('schema-badge');
             const countEl = document.getElementById('schema-field-count');
+            const countFields = (fields) => fields.reduce((total, field) => {
+                return total + 1 + countFields(field.fields || []) + countFields(field.elementFields || []);
+            }, 0);
             if (result.error) {
                 statusEl.textContent = 'Error: ' + result.error;
                 statusEl.style.color = '#f85149';
@@ -194,7 +197,7 @@
                 try {
                     const fields = JSON.parse(json);
                     if (Array.isArray(fields)) {
-                        const n = fields.length;
+                        const n = countFields(fields);
                         statusEl.textContent = n + ' field' + (n !== 1 ? 's' : '') + ' loaded';
                         statusEl.style.color = '#7ee787';
                         badgeEl.textContent = n + ' fields'; badgeEl.className = 'badge on';
@@ -407,8 +410,21 @@
         document.getElementById('schema-sample-btn').addEventListener('click', () => {
             const sample = JSON.stringify([
                 { name: "amount", type: "integer" }, { name: "status", type: "string" },
-                { name: "country", type: "string" }, { name: "user.verified", type: "boolean" },
-                { name: "user.roles", type: "array" }, { name: "user.age", type: "integer" },
+                {
+                    name: "user", type: "object", fields: [
+                        { name: "verified", type: "boolean" },
+                        { name: "roles", type: "array" },
+                        { name: "age", type: "integer" }
+                    ]
+                },
+                {
+                    name: "payment_methods", type: "array", elementFields: [
+                        { name: "type", type: "enum", allowedValues: ["BALANCE", "CARD"] },
+                        { name: "amount", type: "number" },
+                        { name: "details", type: "object", fields: [{ name: "issuer", type: "string" }] }
+                    ]
+                },
+                { name: "country", type: "string" },
                 { name: "merchant_code", type: "string" }, { name: "price", type: "number" },
                 { name: "tags", type: "array" }, { name: "description", type: "string" }
             ], null, 2);

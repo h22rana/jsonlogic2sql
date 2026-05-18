@@ -303,6 +303,7 @@ func getSamples(_ js.Value, _ []js.Value) interface{} {
 		{"name": "NOT IN", "mode": "condition", "jsonLogic": `{"!": {"in": [{"var": "status"}, ["blocked", "suspended"]]}}`},
 		{"name": "NULL check", "mode": "condition", "jsonLogic": `{"==": [{"var": "deleted_at"}, null]}`},
 		{"name": "Null-safe fields", "mode": "condition", "jsonLogic": `{"==": [{"var": "primary_email"}, {"var": "backup_email"}]}`},
+		{"name": "Array element enum", "mode": "condition", "jsonLogic": `{"some": [{"var": "payment_methods"}, {"==": [{"var": "type"}, "BALANCE"]}]}`},
 		{"name": "Chained comparison", "mode": "condition", "jsonLogic": `{"<": [18, {"var": "age"}, 65]}`},
 		{"name": "Nested arithmetic", "mode": "condition", "jsonLogic": `{">": [{"+": [{"var": "base"}, {"*": [{"var": "bonus"}, 0.1]}]}, 1000]}`},
 		{"name": "Value fallback", "mode": "value", "jsonLogic": `{"or": [false, "", "unknown"]}`},

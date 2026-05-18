@@ -329,10 +329,41 @@ Field definition for schema.
 
 ```go
 type FieldSchema struct {
-    Name          string    // Field name (e.g., "order.amount")
-    Type          FieldType // Field type
-    AllowedValues []string  // For enum types: list of valid values
+    Name          string        // Field name (e.g., "order.amount")
+    Type          FieldType     // Field type
+    AllowedValues []string      // For enum types: list of valid values
+    Fields        []FieldSchema // Nested object fields
+    ElementFields []FieldSchema // Nested fields on array elements
 }
+```
+
+Object schemas use `Fields`; array schemas use `ElementFields`. For example:
+
+```json
+[
+  {
+    "name": "profile",
+    "type": "object",
+    "fields": [
+      { "name": "country", "type": "string" },
+      { "name": "status", "type": "enum", "allowedValues": ["active", "blocked"] }
+    ]
+  },
+  {
+    "name": "payments",
+    "type": "array",
+    "elementFields": [
+      { "name": "type", "type": "enum", "allowedValues": ["BALANCE", "CARD"] },
+      {
+        "name": "details",
+        "type": "object",
+        "fields": [
+          { "name": "issuer", "type": "string" }
+        ]
+      }
+    ]
+  }
+]
 ```
 
 ### FieldType
