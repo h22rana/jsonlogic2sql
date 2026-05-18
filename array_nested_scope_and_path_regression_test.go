@@ -110,25 +110,31 @@ func TestNestedArrayPredicatePreservesOuterScope_AllDialects(t *testing.T) {
 					t.Fatalf("NewTranspiler() error: %v", err)
 				}
 
-				var sql string
+				var (
+					sql       string
+					inlineErr error
+				)
 				if tc.valueMode {
-					sql, err = tr.TranspileValue(tc.logic)
+					sql, inlineErr = tr.TranspileValue(tc.logic)
 				} else {
-					sql, err = tr.TranspileCondition(tc.logic)
+					sql, inlineErr = tr.TranspileCondition(tc.logic)
 				}
-				if err != nil {
-					t.Fatalf("inline transpilation error: %v", err)
+				if inlineErr != nil {
+					t.Fatalf("inline transpilation error: %v", inlineErr)
 				}
 				assertNestedArrayPredicateScope(t, d, sql, tc.want, tc.notWant, tc.clickWant, tc.clickAvoid)
 
-				var paramSQL string
+				var (
+					paramSQL string
+					paramErr error
+				)
 				if tc.valueMode {
-					paramSQL, _, err = tr.TranspileParameterizedValue(tc.logic)
+					paramSQL, _, paramErr = tr.TranspileParameterizedValue(tc.logic)
 				} else {
-					paramSQL, _, err = tr.TranspileParameterizedCondition(tc.logic)
+					paramSQL, _, paramErr = tr.TranspileParameterizedCondition(tc.logic)
 				}
-				if err != nil {
-					t.Fatalf("parameterized transpilation error: %v", err)
+				if paramErr != nil {
+					t.Fatalf("parameterized transpilation error: %v", paramErr)
 				}
 				assertNestedArrayPredicateScope(t, d, paramSQL, tc.want, tc.notWant, tc.clickWant, tc.clickAvoid)
 			})
@@ -278,26 +284,32 @@ func TestScopedNestedArrayValuesUseTruthinessInArrayLambdaPredicates_AllDialects
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
 
-							var sql string
+							var (
+								sql       string
+								inlineErr error
+							)
 							if tc.condition {
-								sql, err = tr.TranspileCondition(tc.logic)
+								sql, inlineErr = tr.TranspileCondition(tc.logic)
 							} else {
-								sql, err = tr.TranspileValue(tc.logic)
+								sql, inlineErr = tr.TranspileValue(tc.logic)
 							}
-							if err != nil {
-								t.Fatalf("inline transpilation error: %v", err)
+							if inlineErr != nil {
+								t.Fatalf("inline transpilation error: %v", inlineErr)
 							}
 							assertScopedArrayValueTruthiness(t, d, sql, tc.kind)
 
-							var paramSQL string
-							var params []QueryParam
+							var (
+								paramSQL string
+								params   []QueryParam
+								paramErr error
+							)
 							if tc.condition {
-								paramSQL, params, err = tr.TranspileParameterizedCondition(tc.logic)
+								paramSQL, params, paramErr = tr.TranspileParameterizedCondition(tc.logic)
 							} else {
-								paramSQL, params, err = tr.TranspileParameterizedValue(tc.logic)
+								paramSQL, params, paramErr = tr.TranspileParameterizedValue(tc.logic)
 							}
-							if err != nil {
-								t.Fatalf("parameterized transpilation error: %v", err)
+							if paramErr != nil {
+								t.Fatalf("parameterized transpilation error: %v", paramErr)
 							}
 							assertScopedArrayValueTruthiness(t, d, paramSQL, tc.kind)
 							if len(params) != tc.paramLen {
@@ -546,15 +558,15 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaModes(t *tes
 					for _, tc := range cases {
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
-							sql, err := tr.TranspileValue(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileValue() error: %v", err)
+							sql, inlineErr := tr.TranspileValue(tc.logic)
+							if inlineErr != nil {
+								t.Fatalf("TranspileValue() error: %v", inlineErr)
 							}
 							assertReduceNestedArrayAliases(t, d, sql, tc)
 
-							paramSQL, _, err := tr.TranspileParameterizedValue(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileParameterizedValue() error: %v", err)
+							paramSQL, _, paramErr := tr.TranspileParameterizedValue(tc.logic)
+							if paramErr != nil {
+								t.Fatalf("TranspileParameterizedValue() error: %v", paramErr)
 							}
 							assertReduceNestedArrayAliases(t, d, paramSQL, tc)
 						})
@@ -655,20 +667,20 @@ func TestCustomOperatorPathInsideArrayContexts_InlineAndParam(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := tr.TranspileValue(tc.logic)
-			if err == nil {
+			_, inlineErr := tr.TranspileValue(tc.logic)
+			if inlineErr == nil {
 				t.Fatalf("expected inline error for %s, got nil", tc.name)
 			}
-			if !strings.Contains(err.Error(), tc.wantPath) {
-				t.Fatalf("inline error missing expected path %q: %v", tc.wantPath, err)
+			if !strings.Contains(inlineErr.Error(), tc.wantPath) {
+				t.Fatalf("inline error missing expected path %q: %v", tc.wantPath, inlineErr)
 			}
 
-			_, _, err = tr.TranspileParameterizedValue(tc.logic)
-			if err == nil {
+			_, _, paramErr := tr.TranspileParameterizedValue(tc.logic)
+			if paramErr == nil {
 				t.Fatalf("expected parameterized error for %s, got nil", tc.name)
 			}
-			if !strings.Contains(err.Error(), tc.wantPath) {
-				t.Fatalf("parameterized error missing expected path %q: %v", tc.wantPath, err)
+			if !strings.Contains(paramErr.Error(), tc.wantPath) {
+				t.Fatalf("parameterized error missing expected path %q: %v", tc.wantPath, paramErr)
 			}
 		})
 	}

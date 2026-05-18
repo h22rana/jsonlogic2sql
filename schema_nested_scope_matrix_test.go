@@ -147,18 +147,18 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
 
-							sql, params, err := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, false)
-							if err != nil {
-								t.Fatalf("inline transpilation error = %v", err)
+							sql, params, inlineErr := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, false)
+							if inlineErr != nil {
+								t.Fatalf("inline transpilation error = %v", inlineErr)
 							}
 							assertSQLContainsAll(t, sql, tc.want)
 							if len(params) != 0 {
 								t.Fatalf("inline params = %#v, want none", params)
 							}
 
-							paramSQL, params, err := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, true)
-							if err != nil {
-								t.Fatalf("parameterized transpilation error = %v", err)
+							paramSQL, params, paramErr := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, true)
+							if paramErr != nil {
+								t.Fatalf("parameterized transpilation error = %v", paramErr)
 							}
 							assertSQLContainsAll(t, paramSQL, tc.want)
 							if len(params) != tc.paramLen {

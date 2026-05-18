@@ -103,29 +103,29 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 							m := decodeLogicMapForArrayScopeIDTest(t, tc.logic)
 							logicAny := decodeLogicAnyForArrayScopeIDTest(t, tc.logic)
 
-							sql, err := tr.TranspileValue(tc.logic)
-							assertUnsafeVarRejected(t, err)
+							sql, inlineErr := tr.TranspileValue(tc.logic)
+							assertUnsafeVarRejected(t, inlineErr)
 							if strings.Contains(sql, "OR 1=1") {
 								t.Fatalf("unexpected injectable SQL emitted: %s", sql)
 							}
 
-							psql, _, err := tr.TranspileParameterizedValue(tc.logic)
-							assertUnsafeVarRejected(t, err)
+							psql, _, paramErr := tr.TranspileParameterizedValue(tc.logic)
+							assertUnsafeVarRejected(t, paramErr)
 							if strings.Contains(psql, "OR 1=1") {
 								t.Fatalf("unexpected injectable SQL emitted in parameterized mode: %s", psql)
 							}
 
-							_, err = tr.TranspileValueFromMap(m)
-							assertUnsafeVarRejected(t, err)
+							_, mapErr := tr.TranspileValueFromMap(m)
+							assertUnsafeVarRejected(t, mapErr)
 
-							_, err = tr.TranspileValueFromInterface(logicAny)
-							assertUnsafeVarRejected(t, err)
+							_, anyErr := tr.TranspileValueFromInterface(logicAny)
+							assertUnsafeVarRejected(t, anyErr)
 
-							_, _, err = tr.TranspileParameterizedValueFromMap(m)
-							assertUnsafeVarRejected(t, err)
+							_, _, paramMapErr := tr.TranspileParameterizedValueFromMap(m)
+							assertUnsafeVarRejected(t, paramMapErr)
 
-							_, _, err = tr.TranspileParameterizedValueFromInterface(logicAny)
-							assertUnsafeVarRejected(t, err)
+							_, _, paramAnyErr := tr.TranspileParameterizedValueFromInterface(logicAny)
+							assertUnsafeVarRejected(t, paramAnyErr)
 						})
 					}
 				})
