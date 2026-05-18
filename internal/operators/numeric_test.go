@@ -101,6 +101,13 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 			hasError: false,
 		},
 		{
+			name:     "unary minus with negative literal",
+			operator: "-",
+			args:     []interface{}{-5},
+			expected: "(-(-5))",
+			hasError: false,
+		},
+		{
 			name:     "unary minus with var",
 			operator: "-",
 			args:     []interface{}{map[string]interface{}{"var": "value"}},

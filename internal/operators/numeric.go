@@ -26,6 +26,13 @@ func NewNumericOperator(config *OperatorConfig) *NumericOperator {
 	}
 }
 
+func unaryMinusSQL(operand string) string {
+	if strings.HasPrefix(strings.TrimSpace(operand), "-") {
+		operand = fmt.Sprintf("(%s)", operand)
+	}
+	return fmt.Sprintf("(-%s)", operand)
+}
+
 // schema returns the schema from config, or nil if not configured.
 func (n *NumericOperator) schema() SchemaProvider {
 	if n.config == nil {
@@ -168,7 +175,7 @@ func (n *NumericOperator) handleSubtraction(args []interface{}) (string, error) 
 		if err != nil {
 			return "", fmt.Errorf("invalid unary minus argument: %w", err)
 		}
-		return fmt.Sprintf("(-%s)", operand), nil
+		return unaryMinusSQL(operand), nil
 	}
 
 	operands := make([]string, len(args))
@@ -488,7 +495,7 @@ func (n *NumericOperator) generateComplexSQL(operator string, args []string) (st
 	case "-":
 		if len(args) == 1 {
 			// Unary minus (negation) - wrap in parentheses for safety in nested expressions
-			return fmt.Sprintf("(-%s)", args[0]), nil
+			return unaryMinusSQL(args[0]), nil
 		}
 		if len(args) < 2 {
 			return "", fmt.Errorf("subtraction requires at least 1 argument")
@@ -595,7 +602,7 @@ func (n *NumericOperator) handleSubtractionParam(args []interface{}, pc *params.
 		if err != nil {
 			return "", fmt.Errorf("invalid unary minus argument: %w", err)
 		}
-		return fmt.Sprintf("(-%s)", operand), nil
+		return unaryMinusSQL(operand), nil
 	}
 	operands := make([]string, len(args))
 	for i, arg := range args {

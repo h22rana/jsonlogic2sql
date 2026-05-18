@@ -617,7 +617,7 @@ func TestEdgeCasesNumericBoundaries(t *testing.T) {
 		{"scientific notation", `{"==": [{"var": "x"}, 1e10]}`, "x = 1e10"},
 		{"negative decimal", `{"==": [{"var": "x"}, -0.001]}`, "x = -0.001"},
 		{"negative in subtraction", `{"-": [5, -3]}`, "(5 - -3)"},
-		{"unary minus on negative", `{"-": [-5]}`, "(--5)"},
+		{"unary minus on negative", `{"-": [-5]}`, "(-(-5))"},
 	}
 
 	for _, tt := range tests {
