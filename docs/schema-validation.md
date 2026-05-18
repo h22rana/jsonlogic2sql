@@ -85,7 +85,9 @@ Schemas can describe object fields with `fields` and array element fields with
 `elementFields`. The transpiler flattens those definitions internally for type
 validation, while array lambdas still emit SQL relative to the element alias.
 `fields` is valid only on `object` fields, and `elementFields` is valid only on
-`array` fields.
+`array` fields. Every field entry, including nested object children and array
+element children, must include a non-empty `name` and one of the supported
+`type` values.
 
 ```json
 [

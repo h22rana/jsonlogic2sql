@@ -87,6 +87,19 @@ func ValidateSchemaFields(fields []FieldSchema) error {
 }
 
 func validateSchemaField(prefix string, field FieldSchema) error {
+	if strings.TrimSpace(field.Name) == "" {
+		if prefix == "" {
+			return fmt.Errorf("schema field requires non-empty name")
+		}
+		return fmt.Errorf("schema field under %q requires non-empty name", prefix)
+	}
+	if field.Type == "" {
+		return fmt.Errorf("schema field %q requires non-empty type", joinSchemaPath(prefix, field.Name))
+	}
+	if !isSupportedFieldType(field.Type) {
+		return fmt.Errorf("schema field %q has unsupported type %q", joinSchemaPath(prefix, field.Name), field.Type)
+	}
+
 	fieldName := joinSchemaPath(prefix, field.Name)
 	for _, seg := range strings.Split(fieldName, ".") {
 		if dialect.ContainsQuoteCharacters(seg) {
@@ -112,6 +125,21 @@ func validateSchemaField(prefix string, field FieldSchema) error {
 		}
 	}
 	return nil
+}
+
+func isSupportedFieldType(fieldType FieldType) bool {
+	switch fieldType {
+	case FieldTypeString,
+		FieldTypeInteger,
+		FieldTypeNumber,
+		FieldTypeBoolean,
+		FieldTypeArray,
+		FieldTypeObject,
+		FieldTypeEnum:
+		return true
+	default:
+		return false
+	}
 }
 
 func joinSchemaPath(prefix, name string) string {

@@ -337,9 +337,10 @@ type FieldSchema struct {
 }
 ```
 
-Object schemas use `Fields`; array schemas use `ElementFields`. `Fields`
-requires `Type: FieldTypeObject`; `ElementFields` requires
-`Type: FieldTypeArray`. For example:
+`Name` and `Type` are required for every entry, including nested object fields
+and array element fields. Object schemas use `Fields`; array schemas use
+`ElementFields`. `Fields` requires `Type: FieldTypeObject`; `ElementFields`
+requires `Type: FieldTypeArray`. For example:
 
 ```json
 [

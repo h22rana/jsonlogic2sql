@@ -243,6 +243,66 @@ func TestNestedSchemaShapeValidation(t *testing.T) {
 		wantError string
 	}{
 		{
+			name: "root name is required",
+			fields: []FieldSchema{
+				{Type: FieldTypeString},
+			},
+			wantError: "schema field requires non-empty name",
+		},
+		{
+			name: "nested object child name is required",
+			fields: []FieldSchema{
+				{
+					Name: "profile",
+					Type: FieldTypeObject,
+					Fields: []FieldSchema{
+						{Type: FieldTypeString},
+					},
+				},
+			},
+			wantError: `schema field under "profile" requires non-empty name`,
+		},
+		{
+			name: "array element child name is required",
+			fields: []FieldSchema{
+				{
+					Name: "payments",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Type: FieldTypeString},
+					},
+				},
+			},
+			wantError: `schema field under "payments" requires non-empty name`,
+		},
+		{
+			name: "type is required",
+			fields: []FieldSchema{
+				{Name: "profile.status"},
+			},
+			wantError: `schema field "profile.status" requires non-empty type`,
+		},
+		{
+			name: "nested type is required",
+			fields: []FieldSchema{
+				{
+					Name: "profile",
+					Type: FieldTypeObject,
+					Fields: []FieldSchema{
+						{Name: "status"},
+					},
+				},
+			},
+			wantError: `schema field "profile.status" requires non-empty type`,
+		},
+		{
+			name: "unsupported type is rejected",
+			fields: []FieldSchema{
+				{Name: "profile.status", Type: FieldType("varchar")},
+			},
+			wantError: `schema field "profile.status" has unsupported type "varchar"`,
+		},
+		{
 			name: "fields require object type",
 			fields: []FieldSchema{
 				{
