@@ -793,7 +793,7 @@ func TestDialectAwareOperators(t *testing.T) {
 			t.Fatalf("BigQuery: unexpected error: %v", err)
 		}
 		if bqSQL != "STRPOS(name, 'test') > 0" {
-			t.Errorf("BigQuery: expected 'WHERE STRPOS(name, 'test') > 0', got %s", bqSQL)
+			t.Errorf("BigQuery: expected STRPOS(name, 'test') > 0, got %s", bqSQL)
 		}
 
 		// Test with Spanner
@@ -804,7 +804,7 @@ func TestDialectAwareOperators(t *testing.T) {
 			t.Fatalf("Spanner: unexpected error: %v", err)
 		}
 		if spannerSQL != "STRPOS(name, 'test') > 0" {
-			t.Errorf("Spanner: expected 'WHERE STRPOS(name, 'test') > 0', got %s", spannerSQL)
+			t.Errorf("Spanner: expected STRPOS(name, 'test') > 0, got %s", spannerSQL)
 		}
 	})
 
@@ -840,37 +840,37 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 			if len(args) != 2 {
 				return OperatorResult{}, fmt.Errorf("startsWith requires 2 arguments")
 			}
-			return PredicateSQL(fmt.Sprintf("%s LIKE '%s%%'", args[0].SQL, args[1].SQL)), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE CONCAT(%s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
 		tr.RegisterOperatorFunc("!startsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
 				return OperatorResult{}, fmt.Errorf("!startsWith requires 2 arguments")
 			}
-			return PredicateSQL(fmt.Sprintf("%s NOT LIKE '%s%%'", args[0].SQL, args[1].SQL)), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE CONCAT(%s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
 		tr.RegisterOperatorFunc("endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
 				return OperatorResult{}, fmt.Errorf("endsWith requires 2 arguments")
 			}
-			return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s'", args[0].SQL, args[1].SQL)), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE CONCAT('%%', %s)", args[0].SQL, args[1].SQL)), nil
 		})
 		tr.RegisterOperatorFunc("!endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
 				return OperatorResult{}, fmt.Errorf("!endsWith requires 2 arguments")
 			}
-			return PredicateSQL(fmt.Sprintf("%s NOT LIKE '%%%s'", args[0].SQL, args[1].SQL)), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE CONCAT('%%', %s)", args[0].SQL, args[1].SQL)), nil
 		})
 		tr.RegisterOperatorFunc("contains", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
 				return OperatorResult{}, fmt.Errorf("contains requires 2 arguments")
 			}
-			return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s%%'", args[0].SQL, args[1].SQL)), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE CONCAT('%%', %s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
 		tr.RegisterOperatorFunc("!contains", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
 				return OperatorResult{}, fmt.Errorf("!contains requires 2 arguments")
 			}
-			return PredicateSQL(fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0].SQL, args[1].SQL)), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE CONCAT('%%', %s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
 		return tr
 	}
@@ -905,8 +905,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "(name LIKE ''A'%' AND (email LIKE '%'@company.com'' OR desc NOT LIKE '%'spam'%'))"
+		expected := "(name LIKE CONCAT('A', '%') AND (email LIKE CONCAT('%', '@company.com') OR desc NOT LIKE CONCAT('%', 'spam', '%')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -918,8 +917,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "(ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')))"
+		expected := "(ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -931,8 +929,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE '%'@company.com'')"
+		expected := "EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@company.com'))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -944,8 +941,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE ''Bot'%')"
+		expected := "NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE CONCAT('Bot', '%'))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -957,8 +953,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "ARRAY(SELECT elem FROM UNNEST(users) AS elem WHERE (elem.name NOT LIKE ''Test'%' AND elem.email NOT LIKE '%'@temp.com''))"
+		expected := "ARRAY(SELECT elem FROM UNNEST(users) AS elem WHERE (elem.name NOT LIKE CONCAT('Test', '%') AND elem.email NOT LIKE CONCAT('%', '@temp.com')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -994,8 +989,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%'))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE '%'@valid.com''))"
+		expected := "((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -1007,8 +1001,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "(NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE ''Bot'%') OR (ARRAY_LENGTH(scores) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem > 50))))"
+		expected := "(NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE CONCAT('Bot', '%')) OR (ARRAY_LENGTH(scores) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem > 50))))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -1020,8 +1013,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "(((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%'))) OR NOT EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE ''blocked_'%')) AND EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE elem > 100))"
+		expected := "(((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) OR NOT EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('blocked_', '%'))) AND EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE elem > 100))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -1033,8 +1025,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "ARRAY(SELECT elem FROM UNNEST(transactions) AS elem WHERE (elem.name NOT LIKE ''VOID'%' AND elem.category NOT LIKE '%'_canceled'' AND elem.email NOT LIKE '%'spam'%'))"
+		expected := "ARRAY(SELECT elem FROM UNNEST(transactions) AS elem WHERE (elem.name NOT LIKE CONCAT('VOID', '%') AND elem.category NOT LIKE CONCAT('%', '_canceled') AND elem.email NOT LIKE CONCAT('%', 'spam', '%')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -1100,10 +1091,10 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			return ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
 		tr.RegisterOperatorFunc("!contains", func(op string, args []OperatorArg) (OperatorResult, error) {
-			return PredicateSQL(fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0].SQL, args[1].SQL)), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE CONCAT('%%', %s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
 		tr.RegisterOperatorFunc("endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
-			return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s'", args[0].SQL, args[1].SQL)), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE CONCAT('%%', %s)", args[0].SQL, args[1].SQL)), nil
 		})
 		return tr
 	}
@@ -1142,18 +1133,17 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			if err != nil {
 				t.Errorf("[%s] all with custom operator: unexpected error: %v", d.name, err)
 			}
-			// ClickHouse uses arrayAll, others use NOT EXISTS with dialect-specific array length
-			// Note: string literals come pre-quoted from the parser
+			// ClickHouse uses arrayAll, others use NOT EXISTS with dialect-specific array length.
 			var expectedAll string
 			switch d.dialect {
 			case DialectClickHouse:
-				expectedAll = "(length(tags) > 0 AND arrayAll(elem -> elem NOT LIKE '%'spam'%', tags))"
+				expectedAll = "(length(tags) > 0 AND arrayAll(elem -> elem NOT LIKE CONCAT('%', 'spam', '%'), tags))"
 			case DialectPostgreSQL:
-				expectedAll = "(CARDINALITY(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')))"
+				expectedAll = "(CARDINALITY(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
 			case DialectDuckDB:
-				expectedAll = "(length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')))"
+				expectedAll = "(length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
 			default: // BigQuery, Spanner
-				expectedAll = "(ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')))"
+				expectedAll = "(ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
 			}
 			if sql != expectedAll {
 				t.Errorf("[%s] all with custom operator: got %s", d.name, sql)
@@ -1164,9 +1154,19 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			if err != nil {
 				t.Errorf("[%s] and with all/some: unexpected error: %v", d.name, err)
 			}
-			// Just verify no error - detailed output differs by dialect
-			if sql == "" {
-				t.Errorf("[%s] and with all/some: got empty result", d.name)
+			var expectedAnd string
+			switch d.dialect {
+			case DialectClickHouse:
+				expectedAnd = "((length(tags) > 0 AND arrayAll(elem -> elem NOT LIKE CONCAT('%', 'spam', '%'), tags)) AND arrayExists(elem -> elem LIKE CONCAT('%', '@valid.com'), emails))"
+			case DialectPostgreSQL:
+				expectedAnd = "((CARDINALITY(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
+			case DialectDuckDB:
+				expectedAnd = "((length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
+			default:
+				expectedAnd = "((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
+			}
+			if sql != expectedAnd {
+				t.Errorf("[%s] and with all/some: got %s, want %s", d.name, sql, expectedAnd)
 			}
 		})
 	}

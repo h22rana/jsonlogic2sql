@@ -146,10 +146,10 @@ func runAllAPIVariants(t *testing.T, tr *Transpiler, logic string) apiOutput {
 	if len(mapCondParams) != len(condParams) || len(anyCondParams) != len(condParams) {
 		t.Fatalf("parameterized condition API param count mismatch: direct=%d fromMap=%d fromAny=%d", len(condParams), len(mapCondParams), len(anyCondParams))
 	}
-	if condSQL != strings.TrimPrefix(inlineSQL, "") {
+	if condSQL != inlineSQL {
 		t.Fatalf("condition mismatch: inline=%q cond=%q", inlineSQL, condSQL)
 	}
-	if paramCond != strings.TrimPrefix(paramSQL, "") {
+	if paramCond != paramSQL {
 		t.Fatalf("parameterized condition mismatch: inline=%q cond=%q", paramSQL, paramCond)
 	}
 
@@ -209,7 +209,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem -> (elem * 2), bag.numbers)")
 				} else {
@@ -224,7 +224,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				switch d {
 				case DialectBigQuery, DialectSpanner:
 					assertContains(t, inline, "ARRAY_LENGTH(bag.numbers)")
@@ -241,7 +241,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				switch d {
 				case DialectPostgreSQL:
 					assertContains(t, inline, "bag.numbers || bag.words")
@@ -258,7 +258,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 2,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "COALESCE(elem, 0)")
 			},
 		},
@@ -268,7 +268,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem1 -> elem1, elem.values)")
 				} else {
@@ -284,7 +284,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayFilter(elem1 -> elem1 >= 0, elem.values)")
 					assertNotContains(t, inline, "arrayFilter(elem -> elem >= 0, elem.values)")
@@ -301,7 +301,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayAll(elem1 -> elem1 >= 0, elem.values)")
 				} else {
@@ -316,7 +316,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayExists(elem1 -> elem1 >= 0, elem.values)")
 				} else {
@@ -331,7 +331,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayExists(elem1 -> elem1 < 0, elem.values)")
 				} else {
@@ -346,7 +346,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem -> elem.base + coalesce(arrayReduce('sum', elem.values), 0), bag.records)")
 				} else {
@@ -362,7 +362,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 			wantParam: 3,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "metrics.amount >= 100")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayFilter(elem1 -> elem1 >= 0, elem.values)")
@@ -458,16 +458,31 @@ func TestArrayEdgeMatrix_SchemaVsNoSchemaValidation(t *testing.T) {
 		name          string
 		logic         string
 		wantSchemaErr string
+		wantNoSchema  map[Dialect]string
 	}{
 		{
 			name:          "unknown field rejected with schema",
 			logic:         `{"map":[{"var":"unknown.arr"},{"+":[{"var":""},1]}]}`,
 			wantSchemaErr: "is not defined in schema",
+			wantNoSchema: map[Dialect]string{
+				DialectBigQuery:   "ARRAY(SELECT (elem + 1) FROM UNNEST(unknown.arr) AS elem)",
+				DialectSpanner:    "ARRAY(SELECT (elem + 1) FROM UNNEST(unknown.arr) AS elem)",
+				DialectPostgreSQL: "ARRAY(SELECT (elem + 1) FROM UNNEST(unknown.arr) AS elem)",
+				DialectDuckDB:     "ARRAY(SELECT (elem + 1) FROM UNNEST(unknown.arr) AS elem)",
+				DialectClickHouse: "arrayMap(elem -> (elem + 1), unknown.arr)",
+			},
 		},
 		{
 			name:          "non-array field rejected with schema",
 			logic:         `{"map":[{"var":"metrics.amount"},{"+":[{"var":""},1]}]}`,
 			wantSchemaErr: "array operation on non-array field",
+			wantNoSchema: map[Dialect]string{
+				DialectBigQuery:   "ARRAY(SELECT (elem + 1) FROM UNNEST(metrics.amount) AS elem)",
+				DialectSpanner:    "ARRAY(SELECT (elem + 1) FROM UNNEST(metrics.amount) AS elem)",
+				DialectPostgreSQL: "ARRAY(SELECT (elem + 1) FROM UNNEST(metrics.amount) AS elem)",
+				DialectDuckDB:     "ARRAY(SELECT (elem + 1) FROM UNNEST(metrics.amount) AS elem)",
+				DialectClickHouse: "arrayMap(elem -> (elem + 1), metrics.amount)",
+			},
 		},
 	}
 
@@ -485,8 +500,8 @@ func TestArrayEdgeMatrix_SchemaVsNoSchemaValidation(t *testing.T) {
 					if err != nil {
 						t.Fatalf("no-schema mode should pass, got error: %v", err)
 					}
-					if !strings.HasPrefix(sql, "") {
-						t.Fatalf("expected WHERE SQL in no-schema mode, got: %s", sql)
+					if sql != tc.wantNoSchema[d] {
+						t.Fatalf("no-schema SQL = %q, want %q", sql, tc.wantNoSchema[d])
 					}
 				})
 			}
@@ -527,7 +542,7 @@ func TestArrayEdgeMatrix_PackageFunctionsSmoke(t *testing.T) {
 			if sql1 != sql2 || sql1 != sql3 {
 				t.Fatalf("package transpile mismatch: direct=%q map=%q any=%q", sql1, sql2, sql3)
 			}
-			if strings.TrimPrefix(sql1, "") != cond {
+			if sql1 != cond {
 				t.Fatalf("package condition mismatch: sql=%q cond=%q", sql1, cond)
 			}
 
@@ -542,7 +557,7 @@ func TestArrayEdgeMatrix_PackageFunctionsSmoke(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}
-			if strings.TrimPrefix(psql, "") != pcond {
+			if psql != pcond {
 				t.Fatalf("package parameterized condition mismatch: sql=%q cond=%q", psql, pcond)
 			}
 			if len(cparams) != len(params) {

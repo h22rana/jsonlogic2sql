@@ -95,30 +95,18 @@ func TestRegressionMatrix_DataAccess_AllDialects(t *testing.T) {
 							if err != nil {
 								t.Fatalf("TranspileCondition() error: %v", err)
 							}
-							cond, err := tr.TranspileCondition(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileCondition() error: %v", err)
-							}
-							if strings.TrimPrefix(sql, "") != cond {
-								t.Fatalf("WHERE/condition mismatch: sql=%q cond=%q", sql, cond)
+							cond := sql
+							if strings.TrimSpace(cond) == "" || strings.HasPrefix(cond, "WHERE ") {
+								t.Fatalf("TranspileCondition() returned invalid condition SQL: %q", cond)
 							}
 
 							psql, params, err := tr.TranspileParameterizedCondition(tc.logic)
 							if err != nil {
 								t.Fatalf("TranspileParameterizedCondition() error: %v", err)
 							}
-							if !strings.HasPrefix(psql, "") {
-								t.Fatalf("TranspileParameterizedCondition() SQL missing WHERE: %q", psql)
-							}
-							pcond, cparams, err := tr.TranspileParameterizedCondition(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileParameterizedCondition() error: %v", err)
-							}
-							if strings.TrimPrefix(psql, "") != pcond {
-								t.Fatalf("param WHERE/condition mismatch: psql=%q pcond=%q", psql, pcond)
-							}
-							if !reflect.DeepEqual(params, cparams) {
-								t.Fatalf("param mismatch between parameterized APIs:\nparams=%#v\ncparams=%#v", params, cparams)
+							pcond := psql
+							if strings.TrimSpace(pcond) == "" || strings.HasPrefix(pcond, "WHERE ") {
+								t.Fatalf("TranspileParameterizedCondition() returned invalid condition SQL: %q", pcond)
 							}
 
 							logicMap := parseDataAccessLogicMap(t, tc.logic)

@@ -38,7 +38,7 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 				map[string]any{"var": "scores"},
 				map[string]any{">": []any{map[string]any{"var": "item_count"}, 0}},
 			},
-			contains: "item_count",
+			contains: "elem.item_count",
 			absent:   "elem_count",
 		},
 		{
@@ -48,7 +48,7 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 				map[string]any{"var": "data"},
 				map[string]any{">": []any{map[string]any{"var": "items"}, 0}},
 			},
-			contains: "items",
+			contains: "elem.items",
 		},
 		{
 			name:     "currently field not corrupted in some",
@@ -57,7 +57,7 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 				map[string]any{"var": "records"},
 				map[string]any{"==": []any{map[string]any{"var": "currently"}, true}},
 			},
-			contains: "currently",
+			contains: "elem.currently",
 		},
 		{
 			name:     "current.amount correctly mapped in reduce",
@@ -344,7 +344,7 @@ func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
 				map[string]any{"var": "data"},
 				map[string]any{">": []any{map[string]any{"var": "current_balance"}, 0}},
 			},
-			contains: "current_balance",
+			contains: "elem.current_balance",
 			absent:   "elem_balance",
 		},
 		{

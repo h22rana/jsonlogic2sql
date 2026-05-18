@@ -360,9 +360,8 @@ func TestComplexNestedExpressions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Test '%s' (%s) failed with error: %v", tt.name, tt.description, err)
 			}
-			// At minimum, should produce valid SQL
-			if !strings.HasPrefix(result, "") {
-				t.Errorf("Expected result to start with 'WHERE ', got: %s", result)
+			if strings.TrimSpace(result) == "" {
+				t.Errorf("expected non-empty SQL, got %q", result)
 			}
 			t.Logf("Test '%s': %s", tt.name, result)
 		})

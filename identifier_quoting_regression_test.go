@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -411,8 +410,8 @@ func assertIdentifierQuotingSQL(
 	if err != nil {
 		t.Fatalf("transpile repeat error: %v", err)
 	}
-	if cond != strings.TrimPrefix(expectedInline, "") {
-		t.Fatalf("TranspileCondition() for %s = %q, want %q", d, cond, strings.TrimPrefix(expectedInline, ""))
+	if cond != expectedInline {
+		t.Fatalf("TranspileCondition() for %s = %q, want %q", d, cond, expectedInline)
 	}
 
 	var paramSQL string
@@ -442,8 +441,8 @@ func assertIdentifierQuotingSQL(
 	if err != nil {
 		t.Fatalf("parameterized transpile repeat error: %v", err)
 	}
-	if paramCond != strings.TrimPrefix(expectedParamSQL, "") {
-		t.Fatalf("TranspileParameterizedCondition() for %s = %q, want %q", d, paramCond, strings.TrimPrefix(expectedParamSQL, ""))
+	if paramCond != expectedParamSQL {
+		t.Fatalf("TranspileParameterizedCondition() for %s = %q, want %q", d, paramCond, expectedParamSQL)
 	}
 	if !reflect.DeepEqual(condParams, expectedParams) {
 		t.Fatalf("TranspileParameterizedCondition() params for %s = %#v, want %#v", d, condParams, expectedParams)

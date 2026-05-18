@@ -112,7 +112,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem -> (elem * 2), bag.numbers)")
 				} else {
@@ -127,7 +127,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem -> (item * 2), bag.numbers)")
 				} else {
@@ -142,7 +142,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem -> item, bag.numbers)")
 				} else {
@@ -156,7 +156,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "(elem > 0)")
 				switch d {
 				case DialectBigQuery, DialectSpanner:
@@ -174,7 +174,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "(item > 0)")
 				switch d {
 				case DialectBigQuery, DialectSpanner:
@@ -192,7 +192,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayFilter(elem1 -> (elem1 >= 0), elem.values)")
 				} else {
@@ -208,7 +208,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayFilter(elem1 -> (elem1 >= 0), elem.values)")
 				} else {
@@ -224,7 +224,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "elem.base")
 				if d == DialectClickHouse {
 					assertContains(t, inline, "arrayMap(elem -> arrayFold((acc, elem1) -> (elem.base + elem1), elem.values, elem.base), bag.records)")
@@ -242,7 +242,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "elem.base")
 				if d != DialectClickHouse {
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
@@ -257,7 +257,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 1,
 			validate: func(t *testing.T, _ Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "elem")
 				assertNoWholeWordToken(t, inline, "current")
 				assertNoWholeWordToken(t, inline, "accumulator")
@@ -269,7 +269,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 1,
 			validate: func(t *testing.T, _ Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "current")
 				assertNoWholeWordToken(t, inline, "accumulator")
 			},
@@ -280,7 +280,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 0,
 			validate: func(t *testing.T, _ Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "current_balance")
 				assertNotContains(t, inline, "elem_balance")
 			},
@@ -291,7 +291,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 1,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "(elem >= 10)")
 				assertPlaceholderStyle(t, d, out.paramSQL, 1)
 			},
@@ -302,7 +302,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 			wantParam: 2,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
-				inline := strings.TrimPrefix(out.inlineSQL, "")
+				inline := out.inlineSQL
 				assertContains(t, inline, "metrics.amount >= 100")
 				assertNoWholeWordToken(t, inline, "current")
 				assertNoWholeWordToken(t, inline, "accumulator")
@@ -404,8 +404,12 @@ func TestCustomOperatorArrayEdgeMatrix_SchemaValidationParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("no-schema transpile should pass, got: %v", err)
 			}
-			if !strings.HasPrefix(sql, "") {
-				t.Fatalf("expected WHERE SQL in no-schema mode, got: %s", sql)
+			want := "ARRAY(SELECT (elem * 2) FROM UNNEST(unknown.values) AS elem)"
+			if d == DialectClickHouse {
+				want = "arrayMap(elem -> (elem * 2), unknown.values)"
+			}
+			if sql != want {
+				t.Fatalf("no-schema SQL = %q, want %q", sql, want)
 			}
 		})
 	}

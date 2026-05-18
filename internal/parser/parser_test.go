@@ -525,7 +525,7 @@ func TestParser_ParseCondition(t *testing.T) {
 				if result != tt.expected {
 					t.Errorf("ParseCondition() = %q, expected %q", result, tt.expected)
 				}
-				// Verify it does NOT have "" prefix
+				// Verify it does not include a WHERE prefix.
 				if strings.HasPrefix(result, "WHERE ") {
 					t.Errorf("ParseCondition() should not have WHERE prefix, got %q", result)
 				}

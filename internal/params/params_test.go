@@ -261,8 +261,8 @@ func TestValidatePlaceholderRefsPositional(t *testing.T) {
 	}
 }
 
-// KNOWN_LIMITATION: ValidatePlaceholderRefs may produce false positives for
-// placeholder-like text inside SQL string literals or comments.
+// KNOWN_LIMITATION: ValidatePlaceholderRefs can treat placeholder-like text
+// inside SQL string literals as a real reference.
 // TODO: Future tokenizer upgrade to skip quoted strings and SQL comments.
 func TestValidatePlaceholderRefsFalsePositives(t *testing.T) {
 	// A custom operator could emit SQL with @p1 inside a string literal.
@@ -281,7 +281,8 @@ func TestValidatePlaceholderRefsFalsePositives(t *testing.T) {
 	}
 }
 
-// KNOWN_LIMITATION: Placeholder-like text in SQL comments.
+// KNOWN_LIMITATION: ValidatePlaceholderRefs can treat placeholder-like text in
+// SQL comments as a real reference.
 // TODO: Future tokenizer upgrade to skip SQL comments.
 func TestValidatePlaceholderRefsCommentFalsePositive(t *testing.T) {
 	sql := "WHERE /* $1 */ x = $2"
