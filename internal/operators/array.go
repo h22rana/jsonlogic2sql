@@ -781,9 +781,9 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	}
 	array := arrayValue.sql
 
-	// Second argument: condition expression - rewrite element vars before SQL generation
+	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
+		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
 	}
@@ -1051,9 +1051,9 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	}
 	array := arrayValue.sql
 
-	// Second argument: condition expression - rewrite element vars before SQL generation
+	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
+		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
@@ -1099,9 +1099,9 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	}
 	array := arrayValue.sql
 
-	// Second argument: condition expression - rewrite element vars before SQL generation
+	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
+		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
@@ -1144,9 +1144,9 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	}
 	array := arrayValue.sql
 
-	// Second argument: condition expression - rewrite element vars before SQL generation
+	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		predicateExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
+		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
@@ -1252,6 +1252,20 @@ func (a *ArrayOperator) predicateExpressionToSQLWithContextAndPath(expr interfac
 		return "", err
 	}
 	return res.SQL, nil
+}
+
+func (a *ArrayOperator) truthinessExpressionToSQLWithContextAndPath(expr interface{}, path string) (string, error) {
+	if a.config == nil || !a.config.HasTruthinessExpressionParser() {
+		return a.predicateExpressionToSQLWithContextAndPath(expr, path)
+	}
+	if a.shouldParseScopedArrayExpressionLocally(expr) {
+		return a.expressionToSQLWithContextAndPath(expr, false, path)
+	}
+	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, false, path)
+	if err != nil {
+		return "", err
+	}
+	return a.config.ParseTruthinessExpression(rewritten, path)
 }
 
 func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string, error) {
@@ -2144,7 +2158,7 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 	}
 	array := arrayValue.sql
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
+		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
 	}
@@ -2251,7 +2265,7 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	}
 	array := arrayValue.sql
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
+		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
 	}
@@ -2285,7 +2299,7 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	}
 	array := arrayValue.sql
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
+		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
 	}
@@ -2318,7 +2332,7 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	}
 	array := arrayValue.sql
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
+		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
 	}
@@ -2427,6 +2441,24 @@ func (a *ArrayOperator) predicateExpressionToSQLParamWithContextAndPath(
 		return "", err
 	}
 	return res.SQL, nil
+}
+
+func (a *ArrayOperator) truthinessExpressionToSQLParamWithContextAndPath(
+	expr interface{},
+	pc *params.ParamCollector,
+	path string,
+) (string, error) {
+	if a.config == nil || !a.config.HasParamTruthinessExpressionParser() {
+		return a.predicateExpressionToSQLParamWithContextAndPath(expr, pc, path)
+	}
+	if a.shouldParseScopedArrayExpressionLocally(expr) {
+		return a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
+	}
+	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, false, path)
+	if err != nil {
+		return "", err
+	}
+	return a.config.ParseTruthinessExpressionParam(rewritten, path, pc)
 }
 
 func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.ParamCollector, path string) (string, error) {

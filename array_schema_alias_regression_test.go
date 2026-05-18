@@ -177,6 +177,145 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 	}
 }
 
+func TestArrayPredicateLambdasUseTruthinessAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "items", Type: FieldTypeArray},
+		{Name: "active", Type: FieldTypeBoolean},
+		{Name: "name", Type: FieldTypeString},
+		{Name: "score", Type: FieldTypeNumber},
+		{Name: "tags", Type: FieldTypeArray},
+	})
+
+	arrayLength := func(d Dialect, expr string) string {
+		switch d {
+		case DialectPostgreSQL:
+			return "CARDINALITY(" + expr + ")"
+		case DialectDuckDB, DialectClickHouse:
+			return "length(" + expr + ")"
+		default:
+			return "ARRAY_LENGTH(" + expr + ")"
+		}
+	}
+
+	tests := []struct {
+		name      string
+		valueRoot bool
+		logic     string
+		want      func(Dialect) string
+	}{
+		{
+			name:      "filter boolean field",
+			valueRoot: true,
+			logic:     `{"filter":[{"var":"items"},{"var":"active"}]}`,
+			want: func(Dialect) string {
+				return "elem.active IS TRUE"
+			},
+		},
+		{
+			name:  "some string field",
+			logic: `{"some":[{"var":"items"},{"var":"name"}]}`,
+			want: func(Dialect) string {
+				return "(elem.name IS NOT NULL AND elem.name != '')"
+			},
+		},
+		{
+			name:  "all number field",
+			logic: `{"all":[{"var":"items"},{"var":"score"}]}`,
+			want: func(Dialect) string {
+				return "(elem.score IS NOT NULL AND elem.score != 0)"
+			},
+		},
+		{
+			name:  "none array field",
+			logic: `{"none":[{"var":"items"},{"var":"tags"}]}`,
+			want: func(d Dialect) string {
+				return "(elem.tags IS NOT NULL AND " + arrayLength(d, "elem.tags") + " > 0)"
+			},
+		},
+		{
+			name:      "filter truthiness-only logical",
+			valueRoot: true,
+			logic:     `{"filter":[{"var":"items"},{"and":[{"var":"active"},"kept"]}]}`,
+			want: func(Dialect) string {
+				return "elem.active IS TRUE"
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+
+					schemaAware, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					var got string
+					var gotParams []QueryParam
+					if tt.valueRoot {
+						got, err = schemaAware.TranspileValue(tt.logic)
+					} else {
+						got, err = schemaAware.TranspileCondition(tt.logic)
+					}
+					if err != nil {
+						t.Fatalf("schema-aware inline error = %v", err)
+					}
+					if want := tt.want(d); !strings.Contains(got, want) {
+						t.Fatalf("schema-aware inline SQL = %q, want to contain %q", got, want)
+					}
+
+					if tt.valueRoot {
+						got, gotParams, err = schemaAware.TranspileParameterizedValue(tt.logic)
+					} else {
+						got, gotParams, err = schemaAware.TranspileParameterizedCondition(tt.logic)
+					}
+					if err != nil {
+						t.Fatalf("schema-aware parameterized error = %v", err)
+					}
+					if want := tt.want(d); !strings.Contains(got, want) {
+						t.Fatalf("schema-aware parameterized SQL = %q, want to contain %q", got, want)
+					}
+					if len(gotParams) != 0 {
+						t.Fatalf("schema-aware params = %#v, want none", gotParams)
+					}
+
+					schemaLess, err := NewTranspiler(d)
+					if err != nil {
+						t.Fatalf("NewTranspiler() error = %v", err)
+					}
+					if tt.valueRoot {
+						_, err = schemaLess.TranspileValue(tt.logic)
+					} else {
+						_, err = schemaLess.TranspileCondition(tt.logic)
+					}
+					if !IsErrorCode(err, ErrInvalidExpressionContext) {
+						t.Fatalf("schema-less inline error = %v, want %s", err, ErrInvalidExpressionContext)
+					}
+					if tt.valueRoot {
+						got, gotParams, err = schemaLess.TranspileParameterizedValue(tt.logic)
+					} else {
+						got, gotParams, err = schemaLess.TranspileParameterizedCondition(tt.logic)
+					}
+					if !IsErrorCode(err, ErrInvalidExpressionContext) {
+						t.Fatalf("schema-less parameterized error = %v, want %s (SQL %q params %#v)",
+							err, ErrInvalidExpressionContext, got, gotParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestArrayScopedDefaultedVarsPreserveSchemaEqualityMetadata(t *testing.T) {
 	t.Parallel()
 

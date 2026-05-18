@@ -4079,27 +4079,45 @@ func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *te
 	}
 }
 
-func TestTranspileValue_ArrayPredicateContextsRejectValueLogicals(t *testing.T) {
+func TestTranspileValue_ArrayPredicateContextsUseTruthinessLogicals(t *testing.T) {
+	t.Parallel()
+
 	logic := `{"filter":[{"var":"items"},{"or":[0,{"==":[{"var":""},1]}]}]}`
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
 			tr, err := NewTranspiler(d)
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
 
-			_, err = tr.TranspileValue(logic)
-			if !IsErrorCode(err, ErrInvalidExpressionContext) {
-				t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidExpressionContext)
+			want := "ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE elem = 1)"
+			wantParam := "ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE elem = " + testPlaceholder(d, 1) + ")"
+			if d == DialectClickHouse {
+				want = "arrayFilter(elem -> elem = 1, items)"
+				wantParam = "arrayFilter(elem -> elem = " + testPlaceholder(d, 1) + ", items)"
 			}
 
-			_, params, err := tr.TranspileParameterizedValue(logic)
-			if !IsErrorCode(err, ErrInvalidExpressionContext) {
-				t.Fatalf("TranspileParameterizedValue() error = %v, want %s", err, ErrInvalidExpressionContext)
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
 			}
-			if len(params) != 0 {
-				t.Fatalf("params = %#v, want none", params)
+			if got != want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, want)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if gotParam != wantParam {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: float64(1)}}
+			if !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
 			}
 		})
 	}

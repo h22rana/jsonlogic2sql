@@ -84,6 +84,10 @@ func NewParser(config *operators.OperatorConfig) *Parser {
 		res, err := p.parseExpressionPredicate(expr, path)
 		return res.OperatorResult, err
 	})
+	config.SetTruthinessExpressionParser(func(expr any, path string) (string, error) {
+		_, condition, err := p.parseTruthinessResult(expr, path)
+		return condition, err
+	})
 	config.SetParamValueExpressionParser(func(expr any, path string, pc *params.ParamCollector) (operators.OperatorResult, error) {
 		res, err := p.parseExpressionValueParam(expr, path, pc)
 		if err != nil {
@@ -94,6 +98,10 @@ func NewParser(config *operators.OperatorConfig) *Parser {
 	config.SetParamPredicateExpressionParser(func(expr any, path string, pc *params.ParamCollector) (operators.OperatorResult, error) {
 		res, err := p.parseExpressionPredicateParam(expr, path, pc)
 		return res.OperatorResult, err
+	})
+	config.SetParamTruthinessExpressionParser(func(expr any, path string, pc *params.ParamCollector) (string, error) {
+		_, condition, err := p.parseTruthinessResultParam(expr, path, pc)
+		return condition, err
 	})
 	config.SetValueTypeInferer(p.inferValueExpressionType)
 

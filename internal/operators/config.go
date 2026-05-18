@@ -25,6 +25,14 @@ type TypedExpressionParser func(expr any, path string) (OperatorResult, error)
 // ParamTypedExpressionParser is the parameterized variant of TypedExpressionParser.
 type ParamTypedExpressionParser func(expr any, path string, pc *params.ParamCollector) (OperatorResult, error)
 
+// TruthinessExpressionParser parses an expression in JSONLogic truthiness
+// context and returns a SQL predicate.
+type TruthinessExpressionParser func(expr any, path string) (string, error)
+
+// ParamTruthinessExpressionParser is the parameterized variant of
+// TruthinessExpressionParser.
+type ParamTruthinessExpressionParser func(expr any, path string, pc *params.ParamCollector) (string, error)
+
 // ValueTypeInferer returns the static value type for an expression when it can
 // be inferred without generating SQL.
 type ValueTypeInferer func(expr any, accumulatorType ExpressionType) ExpressionType
@@ -40,8 +48,10 @@ type OperatorConfig struct {
 	ParamExpressionParser      ParamExpressionParser
 	ValueExpressionParser      TypedExpressionParser
 	PredicateExpressionParser  TypedExpressionParser
+	TruthinessParser           TruthinessExpressionParser
 	ParamValueExpressionParser ParamTypedExpressionParser
 	ParamPredicateParser       ParamTypedExpressionParser
+	ParamTruthinessParser      ParamTruthinessExpressionParser
 	ValueTypeInferer           ValueTypeInferer
 }
 
@@ -229,6 +239,26 @@ func (c *OperatorConfig) ParsePredicateExpression(expr any, path string) (Operat
 	return c.PredicateExpressionParser(expr, path)
 }
 
+// SetTruthinessExpressionParser sets the callback for JSONLogic truthiness parsing.
+func (c *OperatorConfig) SetTruthinessExpressionParser(parser TruthinessExpressionParser) {
+	if c != nil {
+		c.TruthinessParser = parser
+	}
+}
+
+// HasTruthinessExpressionParser returns true if a truthiness parser is configured.
+func (c *OperatorConfig) HasTruthinessExpressionParser() bool {
+	return c != nil && c.TruthinessParser != nil
+}
+
+// ParseTruthinessExpression parses a nested expression in JSONLogic truthiness context.
+func (c *OperatorConfig) ParseTruthinessExpression(expr any, path string) (string, error) {
+	if !c.HasTruthinessExpressionParser() {
+		return "", fmt.Errorf("truthiness expression parser not configured")
+	}
+	return c.TruthinessParser(expr, path)
+}
+
 // SetParamValueExpressionParser sets the parameterized value parser callback.
 func (c *OperatorConfig) SetParamValueExpressionParser(parser ParamTypedExpressionParser) {
 	if c != nil {
@@ -267,6 +297,26 @@ func (c *OperatorConfig) ParsePredicateExpressionParam(expr any, path string, pc
 		return OperatorResult{}, fmt.Errorf("parameterized predicate expression parser not configured")
 	}
 	return c.ParamPredicateParser(expr, path, pc)
+}
+
+// SetParamTruthinessExpressionParser sets the parameterized truthiness parser callback.
+func (c *OperatorConfig) SetParamTruthinessExpressionParser(parser ParamTruthinessExpressionParser) {
+	if c != nil {
+		c.ParamTruthinessParser = parser
+	}
+}
+
+// HasParamTruthinessExpressionParser returns true if a parameterized truthiness parser is configured.
+func (c *OperatorConfig) HasParamTruthinessExpressionParser() bool {
+	return c != nil && c.ParamTruthinessParser != nil
+}
+
+// ParseTruthinessExpressionParam parses a nested expression in parameterized truthiness context.
+func (c *OperatorConfig) ParseTruthinessExpressionParam(expr any, path string, pc *params.ParamCollector) (string, error) {
+	if !c.HasParamTruthinessExpressionParser() {
+		return "", fmt.Errorf("parameterized truthiness expression parser not configured")
+	}
+	return c.ParamTruthinessParser(expr, path, pc)
 }
 
 // SetValueTypeInferer sets the callback used by operators that need parser

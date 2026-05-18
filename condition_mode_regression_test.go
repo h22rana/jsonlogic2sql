@@ -639,10 +639,6 @@ func TestTranspileCondition_RejectsValueOperandsInPredicateContexts(t *testing.T
 			name:  "logical operand cannot be value fallback",
 			logic: `{"and":[{"or":[0,5]},{">":[{"var":"amount"},1]}]}`,
 		},
-		{
-			name:  "array predicate cannot be value fallback",
-			logic: `{"some":[{"var":"items"},{"or":[0,{"==":[{"var":""},1]}]}]}`,
-		},
 	}
 
 	for _, d := range allDialects() {
@@ -666,6 +662,50 @@ func TestTranspileCondition_RejectsValueOperandsInPredicateContexts(t *testing.T
 						t.Fatalf("params = %#v, want none", params)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_ArrayPredicateLambdasAcceptTruthinessFallbacks(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"some":[{"var":"items"},{"or":[0,{"==":[{"var":""},1]}]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			want := "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 1)"
+			wantParam := "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = " + testPlaceholder(d, 1) + ")"
+			if d == DialectClickHouse {
+				want = "arrayExists(elem -> elem = 1, items)"
+				wantParam = "arrayExists(elem -> elem = " + testPlaceholder(d, 1) + ", items)"
+			}
+
+			got, err := tr.TranspileCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
+			}
+			if got != want {
+				t.Fatalf("TranspileCondition() = %q, want %q", got, want)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			if gotParam != wantParam {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, wantParam)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: float64(1)}}
+			if !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
 			}
 		})
 	}
