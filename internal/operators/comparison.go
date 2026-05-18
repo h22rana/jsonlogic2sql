@@ -142,6 +142,15 @@ func (c *ComparisonOperator) extractFieldNameFromValue(value interface{}) string
 	return ""
 }
 
+func (c *ComparisonOperator) isKnownArrayOperand(value interface{}) bool {
+	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.HasExpressionInfo &&
+		pv.Kind == ExpressionKindValue && pv.Type == ExpressionTypeArray {
+		return true
+	}
+	fieldName := c.extractFieldNameFromValue(value)
+	return fieldName != "" && c.schema() != nil && c.schema().IsArrayType(fieldName)
+}
+
 // extractFieldName extracts the field name from a var argument.
 func (c *ComparisonOperator) extractFieldName(varName interface{}) string {
 	if pv, ok := varName.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
@@ -438,7 +447,30 @@ func foldLiteralInComparison(leftArg, rightArg interface{}) (bool, bool, error) 
 		}
 		return false, true, nil
 	default:
+		nonContainer, err := nonContainerInHaystackLiteral(rightArg)
+		if err != nil {
+			return false, false, err
+		}
+		if nonContainer {
+			return false, true, nil
+		}
 		return false, false, nil
+	}
+}
+
+func nonContainerInHaystackLiteral(value interface{}) (bool, error) {
+	switch v := value.(type) {
+	case nil, bool:
+		return true, nil
+	case json.Number:
+		_, err := normalizeJSONNumberLiteral(v)
+		return true, err
+	case float32, float64:
+		return true, ValidateFiniteNativeFloat(v)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return true, nil
+	default:
+		return false, nil
 	}
 }
 
@@ -1912,7 +1944,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 				if c.schema().IsArrayType(fieldName) {
 					// Array type: use dialect-specific array membership syntax
 					return c.arrayMembershipSQL(leftSQL, rightSQL), nil
-				} else if c.schema().IsStringType(fieldName) {
+				} else if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 					// Coerce left side literal to string if needed (e.g., 123 → '123')
 					coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
 					coercedLeftSQL, err := c.valueToSQL(coercedLeft)
@@ -1921,6 +1953,8 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 					}
 					// String type: use string containment syntax
 					return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+				} else if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
+					return boolSQL(false), nil
 				}
 			}
 
@@ -1947,7 +1981,10 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 	// Check if right side is an array
 	if arr, ok := rightValue.([]interface{}); ok {
 		if len(arr) == 0 {
-			return "", fmt.Errorf("in operator array cannot be empty")
+			return boolSQL(false), nil
+		}
+		if c.isKnownArrayOperand(leftOriginal) {
+			return boolSQL(false), nil
 		}
 
 		// Validate enum values if left side is an enum field
@@ -1990,22 +2027,13 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
 	}
 
-	if num, ok := rightValue.(float64); ok {
-		rightSQL, err := c.dataOp.valueToSQL(num)
-		if err != nil {
-			return "", fmt.Errorf("invalid number in IN operator: %w", err)
-		}
-		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
-	}
-	if num, ok := rightValue.(json.Number); ok {
-		rightSQL, err := c.dataOp.valueToSQL(num)
-		if err != nil {
-			return "", fmt.Errorf("invalid number in IN operator: %w", err)
-		}
-		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+	if nonContainer, err := nonContainerInHaystackLiteral(rightValue); err != nil {
+		return "", fmt.Errorf("invalid non-container in IN operator: %w", err)
+	} else if nonContainer {
+		return boolSQL(false), nil
 	}
 
-	return "", fmt.Errorf("in operator requires array, variable, string, or number as second argument")
+	return "", fmt.Errorf("in operator requires array, variable, or string as second argument")
 }
 
 func (c *ComparisonOperator) handleInSQLRight(
@@ -2020,13 +2048,16 @@ func (c *ComparisonOperator) handleInSQLRight(
 		if c.schema().IsArrayType(fieldName) {
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 		}
-		if c.schema().IsStringType(fieldName) {
+		if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 			coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
 			coercedLeftSQL, err := c.valueToSQL(coercedLeft)
 			if err != nil {
 				return "", fmt.Errorf("invalid left operand after coercion: %w", err)
 			}
 			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+		}
+		if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
+			return boolSQL(false), nil
 		}
 	}
 
@@ -2036,7 +2067,9 @@ func (c *ComparisonOperator) handleInSQLRight(
 			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
 		case ExpressionTypeArray:
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
-		case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+			return boolSQL(false), nil
+		case ExpressionTypeUnknown:
 		}
 	}
 
@@ -2450,13 +2483,15 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 						return "", fmt.Errorf("invalid left operand: %w", lErr)
 					}
 					return c.arrayMembershipSQL(leftSQL, rightSQL), nil
-				} else if c.schema().IsStringType(fieldName) {
+				} else if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 					coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
 					coercedLeftSQL, lErr := c.valueToSQLParam(coercedLeft, pc)
 					if lErr != nil {
 						return "", fmt.Errorf("invalid left operand after coercion: %w", lErr)
 					}
 					return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+				} else if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
+					return boolSQL(false), nil
 				}
 			}
 
@@ -2480,7 +2515,21 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 		return c.handleInSQLRightParam(leftOriginal, rightField.Value, rightField.FieldName, rightField.Type, rightField.HasExpressionInfo, pc)
 	}
 
-	// Generate leftSQL for all remaining paths (array, string, number on right side).
+	if arr, ok := rightValue.([]interface{}); ok {
+		if len(arr) == 0 {
+			return boolSQL(false), nil
+		}
+		if c.isKnownArrayOperand(leftOriginal) {
+			return boolSQL(false), nil
+		}
+	}
+	if nonContainer, err := nonContainerInHaystackLiteral(rightValue); err != nil {
+		return "", fmt.Errorf("invalid non-container in IN operator: %w", err)
+	} else if nonContainer {
+		return boolSQL(false), nil
+	}
+
+	// Generate leftSQL for the remaining array and string haystack paths.
 	leftSQL, err := c.valueToSQLParam(leftOriginal, pc)
 	if err != nil {
 		return "", fmt.Errorf("invalid left operand: %w", err)
@@ -2491,10 +2540,6 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 	}
 
 	if arr, ok := rightValue.([]interface{}); ok {
-		if len(arr) == 0 {
-			return "", fmt.Errorf("in operator array cannot be empty")
-		}
-
 		if leftFieldName != "" && c.schema() != nil && c.schema().IsEnumType(leftFieldName) {
 			for _, item := range arr {
 				if err := c.validateEnumValue(item, leftFieldName); err != nil {
@@ -2532,22 +2577,7 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
 	}
 
-	if num, ok := rightValue.(float64); ok {
-		rightSQL, err := c.dataOp.valueToSQLParam(num, pc)
-		if err != nil {
-			return "", fmt.Errorf("invalid number in IN operator: %w", err)
-		}
-		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
-	}
-	if num, ok := rightValue.(json.Number); ok {
-		rightSQL, err := c.dataOp.valueToSQLParam(num, pc)
-		if err != nil {
-			return "", fmt.Errorf("invalid number in IN operator: %w", err)
-		}
-		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
-	}
-
-	return "", fmt.Errorf("in operator requires array, variable, string, or number as second argument")
+	return "", fmt.Errorf("in operator requires array, variable, or string as second argument")
 }
 
 func (c *ComparisonOperator) handleInSQLRightParam(
@@ -2558,13 +2588,18 @@ func (c *ComparisonOperator) handleInSQLRightParam(
 	hasRightType bool,
 	pc *params.ParamCollector,
 ) (string, error) {
-	if c.schema() != nil && fieldName != "" && c.schema().IsStringType(fieldName) {
-		coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
-		coercedLeftSQL, err := c.valueToSQLParam(coercedLeft, pc)
-		if err != nil {
-			return "", fmt.Errorf("invalid left operand after coercion: %w", err)
+	if c.schema() != nil && fieldName != "" {
+		if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
+			coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
+			coercedLeftSQL, err := c.valueToSQLParam(coercedLeft, pc)
+			if err != nil {
+				return "", fmt.Errorf("invalid left operand after coercion: %w", err)
+			}
+			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
 		}
-		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+		if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
+			return boolSQL(false), nil
+		}
 	}
 
 	leftSQL, err := c.valueToSQLParam(leftOriginal, pc)
@@ -2593,7 +2628,9 @@ func (c *ComparisonOperator) handleInSQLRightParamWithLeftSQL(
 			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
 		case ExpressionTypeArray:
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
-		case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+			return boolSQL(false), nil
+		case ExpressionTypeUnknown:
 		}
 	}
 

@@ -3350,6 +3350,21 @@ func TestTranspileValue_LiteralComparisonsEmitFoldedBooleanValuesAllDialects(t *
 			want:  "FALSE",
 		},
 		{
+			name:  "literal in empty array folds false",
+			logic: `{"in":["x",[]]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "literal in numeric haystack folds false",
+			logic: `{"in":["3",12345]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "literal in boolean haystack folds false",
+			logic: `{"in":["true",true]}`,
+			want:  "FALSE",
+		},
+		{
 			name:  "literal in array uses strict equality for string number",
 			logic: `{"in":["1",[1]]}`,
 			want:  "FALSE",

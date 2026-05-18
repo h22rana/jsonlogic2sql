@@ -210,8 +210,8 @@ func TestComparisonOperator_ToSQL(t *testing.T) {
 			name:     "in with empty array",
 			operator: "in",
 			args:     []interface{}{map[string]interface{}{"var": "field"}, []interface{}{}},
-			expected: "",
-			hasError: true,
+			expected: "FALSE",
+			hasError: false,
 		},
 		{
 			name:     "in with string containment",
@@ -1039,6 +1039,22 @@ func TestFoldLiteralComparison_ArrayMembershipUsesStrictEquality(t *testing.T) {
 			name: "null matches null",
 			args: []interface{}{nil, []interface{}{nil}},
 			want: true,
+		},
+		{
+			name: "empty array haystack is false",
+			args: []interface{}{"x", []interface{}{}},
+		},
+		{
+			name: "numeric haystack is false",
+			args: []interface{}{"3", float64(12345)},
+		},
+		{
+			name: "boolean haystack is false",
+			args: []interface{}{"true", true},
+		},
+		{
+			name: "null haystack is false",
+			args: []interface{}{"x", nil},
 		},
 	}
 
@@ -2338,13 +2354,13 @@ func TestComparisonOperator_handleIn_WithVarRightSide(t *testing.T) {
 			expected: "position(description, 'test') > 0",
 			hasError: false,
 		},
-		// Number containment (right side is a number literal)
+		// Non-container right-hand literals are known false in JSONLogic.
 		{
-			name:     "in with number on right side",
+			name:     "in with number on right side folds false",
 			dialect:  dialect.DialectBigQuery,
 			leftArg:  "3",
 			rightArg: float64(12345),
-			expected: "STRPOS(12345, '3') > 0",
+			expected: "FALSE",
 			hasError: false,
 		},
 	}
@@ -2396,11 +2412,11 @@ func TestComparisonOperator_handleIn_NoSchema_VarRightSide(t *testing.T) {
 			hasError: false,
 		},
 		{
-			name:     "in with unsupported right side type",
+			name:     "boolean right side folds false",
 			leftArg:  "test",
 			rightArg: true,
-			expected: "",
-			hasError: true,
+			expected: "FALSE",
+			hasError: false,
 		},
 	}
 
@@ -2623,6 +2639,17 @@ func TestComparisonOperator_handleIn_WithSchemaArrayVar(t *testing.T) {
 	if result != expected {
 		t.Errorf("ToSQL() = %v, want %v", result, expected)
 	}
+
+	result, err = op.ToSQL("in", []interface{}{
+		map[string]interface{}{"var": "tags"},
+		[]interface{}{"test", "other"},
+	})
+	if err != nil {
+		t.Errorf("ToSQL() unexpected error for array-valued left operand = %v", err)
+	}
+	if expected := "FALSE"; result != expected {
+		t.Errorf("ToSQL() = %v, want %v", result, expected)
+	}
 }
 
 func TestComparisonOperator_valueToSQL_ExpressionParserCallback(t *testing.T) {
@@ -2781,7 +2808,7 @@ func TestComparisonOperator_ToSQLParam(t *testing.T) {
 			name:     "in with empty array",
 			operator: "in",
 			args:     []interface{}{map[string]interface{}{"var": "field"}, []interface{}{}},
-			wantErr:  true,
+			wantSQL:  "FALSE",
 		},
 	}
 
@@ -3013,6 +3040,18 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		assertQueryParams(t, pc.Params(), []params.QueryParam{{Name: "p1", Value: "needle"}})
 	})
 
+	t.Run("array type var on left with literal list folds false", func(t *testing.T) {
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		got, err := op.handleInParam(map[string]interface{}{"var": "tags"}, []interface{}{"needle", "other"}, pc)
+		if err != nil {
+			t.Fatalf("handleInParam() error = %v", err)
+		}
+		if want := "FALSE"; got != want {
+			t.Errorf("handleInParam() = %q, want %q", got, want)
+		}
+		assertQueryParams(t, pc.Params(), nil)
+	})
+
 	t.Run("string type var on right uses strposFunc with parameterized left", func(t *testing.T) {
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		got, err := op.handleInParam("probe", map[string]interface{}{"var": "description"}, pc)
@@ -3042,6 +3081,30 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 			{Name: "p2", Value: "APAC"},
 			{Name: "p3", Value: "US"},
 		})
+	})
+
+	t.Run("numeric right-hand literal folds false without params", func(t *testing.T) {
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		got, err := op.handleInParam(map[string]interface{}{"var": "region"}, float64(12345), pc)
+		if err != nil {
+			t.Fatalf("handleInParam() error = %v", err)
+		}
+		if want := "FALSE"; got != want {
+			t.Errorf("handleInParam() = %q, want %q", got, want)
+		}
+		assertQueryParams(t, pc.Params(), nil)
+	})
+
+	t.Run("empty right-hand array folds false without params", func(t *testing.T) {
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		got, err := op.handleInParam(map[string]interface{}{"var": "region"}, []interface{}{}, pc)
+		if err != nil {
+			t.Fatalf("handleInParam() error = %v", err)
+		}
+		if want := "FALSE"; got != want {
+			t.Errorf("handleInParam() = %q, want %q", got, want)
+		}
+		assertQueryParams(t, pc.Params(), nil)
 	})
 
 	t.Run("string containment without schema", func(t *testing.T) {

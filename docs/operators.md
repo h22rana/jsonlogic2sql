@@ -353,6 +353,10 @@ When the right-hand side is an array-typed field (with schema), `in` uses
 dialect-specific array membership syntax (e.g., BigQuery/Spanner use
 `value IN UNNEST(array)`; PostgreSQL uses `value = ANY(array)`).
 
+When the right-hand side is a known non-container value such as a number,
+boolean, null, or an empty array literal, `in` folds to `FALSE` because
+JSONLogic membership only applies to strings and arrays.
+
 When a schema is provided, array elements are automatically coerced to match the field type. For example, numeric values in the array are quoted as strings when the field is a string type:
 
 ```json

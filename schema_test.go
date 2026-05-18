@@ -146,10 +146,53 @@ func TestSchemaInOperator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Transpile with array field (left var) failed: %v", err)
 	}
-	// Should use array membership syntax: tags IN ('tag1', 'tag2')
-	expected = "tags IN ('tag1', 'tag2')"
+	// JSONLogic array membership uses strict element equality. An array-valued
+	// left operand cannot strictly equal scalar elements in a literal RHS array.
+	expected = "FALSE"
 	if result != expected {
 		t.Errorf("TranspileCondition() = %q, want %q", result, expected)
+	}
+}
+
+func TestSchemaInOperator_ArrayValuedLeftOperandFoldsFalseAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "tags", Type: FieldTypeArray},
+	})
+	logic := `{"in": [{"var": "tags"}, ["tag1", "tag2"]]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			got, err := tr.TranspileCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
+			}
+			if got != "FALSE" {
+				t.Fatalf("TranspileCondition() = %q, want FALSE", got)
+			}
+
+			gotParam, params, err := tr.TranspileParameterizedCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			if gotParam != "FALSE" {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want FALSE", gotParam)
+			}
+			if len(params) != 0 {
+				t.Fatalf("params = %#v, want none", params)
+			}
+		})
 	}
 }
 

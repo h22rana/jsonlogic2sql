@@ -546,7 +546,7 @@ func TestEdgeCasesEmptyInputs(t *testing.T) {
 		{"and with empty array", `{"and": []}`, true},
 		{"or with empty array", `{"or": []}`, true},
 		{"cat with empty array", `{"cat": []}`, true},
-		{"in with empty array", `{"in": [{"var": "x"}, []]}`, true},
+		{"in with empty array", `{"in": [{"var": "x"}, []]}`, false},
 		{"missing with empty array", `{"missing": []}`, true},
 	}
 
