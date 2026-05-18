@@ -854,26 +854,25 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 		switch a.getDialect() {
 		case dialect.DialectClickHouse:
 			// ClickHouse: For field access, we need arrayMap first to extract the field
+			aggregateInput := array
 			if pattern.fieldSuffix != "" {
 				mappedRef, quoteErr := a.quoteArrayScopePath("x", pattern.fieldSuffix)
 				if quoteErr != nil {
 					return "", quoteErr
 				}
-				// initial + coalesce(arrayReduce('sum', arrayMap(x -> x.field, array)), 0)
-				return fmt.Sprintf("%s + coalesce(arrayReduce('%s', arrayMap(x -> %s, %s)), 0)",
-					initial, strings.ToLower(pattern.function), mappedRef, array), nil
+				aggregateInput = fmt.Sprintf("arrayMap(x -> %s, %s)", mappedRef, array)
 			}
-			// initial + coalesce(arrayReduce('sum', array), 0)
-			return fmt.Sprintf("%s + coalesce(arrayReduce('%s', %s), 0)",
-				initial, strings.ToLower(pattern.function), array), nil
+			aggregateSQL := fmt.Sprintf("arrayReduce('%s', %s)", strings.ToLower(pattern.function), aggregateInput)
+			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, true, array), nil
 		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-			// Standard SQL: initial + COALESCE((SELECT AGG(elem.field) FROM UNNEST(array) AS elem), 0)
-			return fmt.Sprintf("%s + COALESCE((SELECT %s(%s) FROM UNNEST(%s) AS %s), 0)",
-				initial, pattern.function, elemRef, array, alias), nil
+			// Standard SQL: aggregate the array once and combine it with the
+			// initial accumulator according to the reducer operator.
+			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM UNNEST(%s) AS %s)", pattern.function, elemRef, array, alias)
+			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 		}
 		// Fallback for any future dialects
-		return fmt.Sprintf("%s + COALESCE((SELECT %s(%s) FROM UNNEST(%s) AS %s), 0)",
-			initial, pattern.function, elemRef, array, alias), nil
+		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM UNNEST(%s) AS %s)", pattern.function, elemRef, array, alias)
+		return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 	}
 
 	// General case: parse the reducer in official reduce scope, then
@@ -903,6 +902,34 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 type aggregatePattern struct {
 	function    string // SQL aggregate function name (SUM, MIN, MAX)
 	fieldSuffix string // Optional field suffix (e.g., "price" for "current.price")
+}
+
+func renderReduceAggregateResult(function, initial, aggregateSQL string, clickhouse bool, sourceArray string) string {
+	coalesce := "COALESCE"
+	least := "LEAST"
+	greatest := "GREATEST"
+	if clickhouse {
+		coalesce = "coalesce"
+		least = "least"
+		greatest = "greatest"
+	}
+
+	switch function {
+	case AggregateMIN:
+		if clickhouse {
+			return fmt.Sprintf("CASE WHEN length(%s) > 0 THEN %s(%s, %s(%s, %s)) ELSE %s END",
+				sourceArray, least, initial, coalesce, aggregateSQL, initial, initial)
+		}
+		return fmt.Sprintf("%s(%s, %s(%s, %s))", least, initial, coalesce, aggregateSQL, initial)
+	case AggregateMAX:
+		if clickhouse {
+			return fmt.Sprintf("CASE WHEN length(%s) > 0 THEN %s(%s, %s(%s, %s)) ELSE %s END",
+				sourceArray, greatest, initial, coalesce, aggregateSQL, initial, initial)
+		}
+		return fmt.Sprintf("%s(%s, %s(%s, %s))", greatest, initial, coalesce, aggregateSQL, initial)
+	default:
+		return fmt.Sprintf("%s + %s(%s, 0)", initial, coalesce, aggregateSQL)
+	}
 }
 
 // detectAggregatePattern checks if the reducer expression matches a common aggregate pattern.
@@ -2165,22 +2192,22 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 
 		switch a.getDialect() {
 		case dialect.DialectClickHouse:
+			aggregateInput := array
 			if pattern.fieldSuffix != "" {
 				mappedRef, quoteErr := a.quoteArrayScopePath("x", pattern.fieldSuffix)
 				if quoteErr != nil {
 					return "", quoteErr
 				}
-				return fmt.Sprintf("%s + coalesce(arrayReduce('%s', arrayMap(x -> %s, %s)), 0)",
-					initial, strings.ToLower(pattern.function), mappedRef, array), nil
+				aggregateInput = fmt.Sprintf("arrayMap(x -> %s, %s)", mappedRef, array)
 			}
-			return fmt.Sprintf("%s + coalesce(arrayReduce('%s', %s), 0)",
-				initial, strings.ToLower(pattern.function), array), nil
+			aggregateSQL := fmt.Sprintf("arrayReduce('%s', %s)", strings.ToLower(pattern.function), aggregateInput)
+			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, true, array), nil
 		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-			return fmt.Sprintf("%s + COALESCE((SELECT %s(%s) FROM UNNEST(%s) AS %s), 0)",
-				initial, pattern.function, elemRef, array, alias), nil
+			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM UNNEST(%s) AS %s)", pattern.function, elemRef, array, alias)
+			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 		}
-		return fmt.Sprintf("%s + COALESCE((SELECT %s(%s) FROM UNNEST(%s) AS %s), 0)",
-			initial, pattern.function, elemRef, array, alias), nil
+		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM UNNEST(%s) AS %s)", pattern.function, elemRef, array, alias)
+		return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 	}
 
 	valueScoped := a.withLambdaScope(arrayLambdaScopeReduce).withValueSemantics(true).withAccumulatorType(initialValue.typ)

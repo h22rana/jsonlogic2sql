@@ -1960,14 +1960,14 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				{
 					name:     "reduce with MIN pattern",
 					input:    `{"reduce": [{"var": "values"}, {"min": [{"var": "accumulator"}, {"var": "current"}]}, 999999]}`,
-					expected: "999999 + COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 0)",
+					expected: "LEAST(999999, COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 999999))",
 				},
 
 				// Reduce operator tests - MAX pattern
 				{
 					name:     "reduce with MAX pattern",
 					input:    `{"reduce": [{"var": "values"}, {"max": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`,
-					expected: "0 + COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0)",
+					expected: "GREATEST(0, COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0))",
 				},
 
 				// Reduce operator tests - general pattern
@@ -2202,8 +2202,8 @@ func TestTranspileConditionConvenienceFunction(t *testing.T) {
 	}
 }
 
-// TestTranspileVsTranspileCondition verifies the difference between Transpile and TranspileCondition.
-func TestTranspileVsTranspileCondition(t *testing.T) {
+// TestTranspileConditionDoesNotAddWherePrefix verifies condition APIs return a bare predicate.
+func TestTranspileConditionDoesNotAddWherePrefix(t *testing.T) {
 	tr, err := NewTranspiler(DialectBigQuery)
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
@@ -2211,22 +2211,20 @@ func TestTranspileVsTranspileCondition(t *testing.T) {
 
 	input := `{">": [{"var": "amount"}, 1000]}`
 
-	// Transpile should include WHERE
-	withWhere, err := tr.TranspileCondition(input)
+	conditionSQL, err := tr.TranspileCondition(input)
 	if err != nil {
 		t.Fatalf("TranspileCondition() error: %v", err)
 	}
-	if withWhere != "amount > 1000" {
-		t.Errorf("TranspileCondition() = %q, expected %q", withWhere, "amount > 1000")
+	if conditionSQL != "amount > 1000" {
+		t.Errorf("TranspileCondition() = %q, expected %q", conditionSQL, "amount > 1000")
 	}
 
-	// TranspileCondition should NOT include WHERE
-	withoutWhere, err := tr.TranspileCondition(input)
+	repeatedConditionSQL, err := tr.TranspileCondition(input)
 	if err != nil {
 		t.Fatalf("TranspileCondition() error: %v", err)
 	}
-	if withoutWhere != "amount > 1000" {
-		t.Errorf("TranspileCondition() = %q, expected %q", withoutWhere, "amount > 1000")
+	if repeatedConditionSQL != conditionSQL {
+		t.Errorf("repeated TranspileCondition() = %q, expected %q", repeatedConditionSQL, conditionSQL)
 	}
 }
 

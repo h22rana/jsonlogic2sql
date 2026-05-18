@@ -742,6 +742,77 @@ func TestTranspileValue_ReduceTruthinessUsesInferredTypeAllDialectsSchemaModes(t
 	}
 }
 
+func TestTranspileValue_ReduceMinMaxAggregateIncludesInitialAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		logic      string
+		initial    float64
+		wantSQL    func(Dialect, string) string
+		wantParams []QueryParam
+	}{
+		{
+			name:    "min includes non-winning initial",
+			logic:   `{"reduce":[{"var":"values"},{"min":[{"var":"accumulator"},{"var":"current"}]},999999]}`,
+			initial: 999999,
+			wantSQL: func(d Dialect, initial string) string {
+				if d == DialectClickHouse {
+					return fmt.Sprintf("CASE WHEN length(values) > 0 THEN least(%s, coalesce(arrayReduce('min', values), %s)) ELSE %s END", initial, initial, initial)
+				}
+				return fmt.Sprintf("LEAST(%s, COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), %s))", initial, initial)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(999999)}},
+		},
+		{
+			name:    "max includes winning initial",
+			logic:   `{"reduce":[{"var":"values"},{"max":[{"var":"accumulator"},{"var":"current"}]},100]}`,
+			initial: 100,
+			wantSQL: func(d Dialect, initial string) string {
+				if d == DialectClickHouse {
+					return fmt.Sprintf("CASE WHEN length(values) > 0 THEN greatest(%s, coalesce(arrayReduce('max', values), %s)) ELSE %s END", initial, initial, initial)
+				}
+				return fmt.Sprintf("GREATEST(%s, COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), %s))", initial, initial)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(100)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if want := tt.wantSQL(d, fmt.Sprintf("%.0f", tt.initial)); got != want {
+						t.Fatalf("TranspileValue() = %q, want %q", got, want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tt.wantSQL(d, testPlaceholder(d, 1)); gotParam != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_ReduceStringTruthinessUsesInferredTypeAllDialectsSchemaModes(t *testing.T) {
 	t.Parallel()
 

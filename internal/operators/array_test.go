@@ -324,14 +324,14 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					name:     "reduce with MIN pattern",
 					operator: "reduce",
 					args:     []any{map[string]any{"var": "values"}, map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 999999},
-					expected: "999999 + COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 0)",
+					expected: "LEAST(999999, COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 999999))",
 					hasError: false,
 				},
 				{
 					name:     "reduce with MAX pattern",
 					operator: "reduce",
 					args:     []any{map[string]any{"var": "values"}, map[string]any{"max": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 0},
-					expected: "0 + COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0)",
+					expected: "GREATEST(0, COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0))",
 					hasError: false,
 				},
 				{
@@ -360,14 +360,14 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					name:     "reduce with MAX pattern on current.value",
 					operator: "reduce",
 					args:     []any{map[string]any{"var": "readings"}, map[string]any{"max": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.value"}}}, 0},
-					expected: "0 + COALESCE((SELECT MAX(elem.value) FROM UNNEST(readings) AS elem), 0)",
+					expected: "GREATEST(0, COALESCE((SELECT MAX(elem.value) FROM UNNEST(readings) AS elem), 0))",
 					hasError: false,
 				},
 				{
 					name:     "reduce with MIN pattern on current.amount",
 					operator: "reduce",
 					args:     []any{map[string]any{"var": "transactions"}, map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.amount"}}}, 9999999},
-					expected: "9999999 + COALESCE((SELECT MIN(elem.amount) FROM UNNEST(transactions) AS elem), 0)",
+					expected: "LEAST(9999999, COALESCE((SELECT MIN(elem.amount) FROM UNNEST(transactions) AS elem), 9999999))",
 					hasError: false,
 				},
 				{
@@ -801,7 +801,7 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"max": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
 				0,
 			},
-			expected: "0 + COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0)",
+			expected: "GREATEST(0, COALESCE((SELECT MAX(elem) FROM UNNEST(values) AS elem), 0))",
 			hasError: false,
 		},
 		{
@@ -812,7 +812,7 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 				map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
 				999999,
 			},
-			expected: "999999 + COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 0)",
+			expected: "LEAST(999999, COALESCE((SELECT MIN(elem) FROM UNNEST(values) AS elem), 999999))",
 			hasError: false,
 		},
 		{
@@ -994,14 +994,14 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 			name:     "reduce with MAX pattern on current.value (ClickHouse)",
 			operator: "reduce",
 			args:     []any{map[string]any{"var": "readings"}, map[string]any{"max": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.value"}}}, 0},
-			expected: "0 + coalesce(arrayReduce('max', arrayMap(x -> x.value, readings)), 0)",
+			expected: "CASE WHEN length(readings) > 0 THEN greatest(0, coalesce(arrayReduce('max', arrayMap(x -> x.value, readings)), 0)) ELSE 0 END",
 			hasError: false,
 		},
 		{
 			name:     "reduce with MIN pattern on current.amount (ClickHouse)",
 			operator: "reduce",
 			args:     []any{map[string]any{"var": "transactions"}, map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.amount"}}}, 9999999},
-			expected: "9999999 + coalesce(arrayReduce('min', arrayMap(x -> x.amount, transactions)), 0)",
+			expected: "CASE WHEN length(transactions) > 0 THEN least(9999999, coalesce(arrayReduce('min', arrayMap(x -> x.amount, transactions)), 9999999)) ELSE 9999999 END",
 			hasError: false,
 		},
 		// All - uses arrayAll
