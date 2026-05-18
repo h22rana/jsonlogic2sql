@@ -370,19 +370,20 @@ outer:
 	for i, arg := range args {
 		// If it's a complex expression, convert it to SQL
 		if exprMap, ok := arg.(map[string]interface{}); ok {
+			if len(exprMap) != 1 {
+				return nil, fmt.Errorf("operator object must have exactly one key")
+			}
 			// Check if it's a complex expression (not just a var)
-			if len(exprMap) == 1 {
-				for operator := range exprMap {
-					if operator != "var" {
-						// It's a complex expression, convert it to SQL
-						sql, err := l.expressionToSQL(arg)
-						if err != nil {
-							return nil, fmt.Errorf("invalid argument %d: %w", i, err)
-						}
-						// Store as SQL fragment so comparison does not quote it as a literal.
-						processed[i] = ProcessedValue{Value: sql, IsSQL: true}
-						continue outer
+			for operator := range exprMap {
+				if operator != "var" {
+					// It's a complex expression, convert it to SQL
+					sql, err := l.expressionToSQL(arg)
+					if err != nil {
+						return nil, fmt.Errorf("invalid argument %d: %w", i, err)
 					}
+					// Store as SQL fragment so comparison does not quote it as a literal.
+					processed[i] = ProcessedValue{Value: sql, IsSQL: true}
+					continue outer
 				}
 			}
 			// For var expressions, keep as is
@@ -644,16 +645,17 @@ func (l *LogicalOperator) processArgsParam(args []interface{}, pc *params.ParamC
 outer:
 	for i, arg := range args {
 		if exprMap, ok := arg.(map[string]interface{}); ok {
-			if len(exprMap) == 1 {
-				for operator := range exprMap {
-					if operator != "var" {
-						sql, err := l.expressionToSQLParam(arg, pc)
-						if err != nil {
-							return nil, fmt.Errorf("invalid argument %d: %w", i, err)
-						}
-						processed[i] = ProcessedValue{Value: sql, IsSQL: true}
-						continue outer
+			if len(exprMap) != 1 {
+				return nil, fmt.Errorf("operator object must have exactly one key")
+			}
+			for operator := range exprMap {
+				if operator != "var" {
+					sql, err := l.expressionToSQLParam(arg, pc)
+					if err != nil {
+						return nil, fmt.Errorf("invalid argument %d: %w", i, err)
 					}
+					processed[i] = ProcessedValue{Value: sql, IsSQL: true}
+					continue outer
 				}
 			}
 			processed[i] = arg

@@ -1422,19 +1422,11 @@ func TestParser_primitiveToSQL(t *testing.T) {
 // --- Tests for processArg additional branches (66.7% -> higher) ---
 
 func TestParser_processArg_AdditionalBranches(t *testing.T) {
-	t.Run("multi-key map is returned as-is", func(t *testing.T) {
+	t.Run("multi-key map is rejected", func(t *testing.T) {
 		p := NewParser(nil)
 		multiKeyMap := map[string]interface{}{"a": 1, "b": 2}
-		result, err := p.processArg(multiKeyMap, "$", 0)
-		if err != nil {
-			t.Fatalf("processArg() unexpected error: %v", err)
-		}
-		if resultMap, ok := result.(map[string]interface{}); !ok {
-			t.Errorf("processArg() returned %T, expected map[string]interface{}", result)
-		} else {
-			if len(resultMap) != 2 {
-				t.Errorf("processArg() returned map with %d keys, expected 2", len(resultMap))
-			}
+		if _, err := p.processArg(multiKeyMap, "$", 0); !isTranspileErrorCode(err, tperrors.ErrMultipleKeys) {
+			t.Fatalf("processArg() error = %v, want %s", err, tperrors.ErrMultipleKeys)
 		}
 	})
 

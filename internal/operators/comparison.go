@@ -1673,15 +1673,16 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 
 	// Check if it's a var expression
 	if varExpr, ok := value.(map[string]interface{}); ok {
-		if len(varExpr) == 1 {
-			for operator, args := range varExpr {
-				if operator == "var" {
-					// Special case: empty var name represents the current element in array operations
-					if varName, ok := args.(string); ok && varName == "" {
-						return "elem", nil
-					}
-					return c.dataOp.ToSQL(OpVar, []interface{}{args})
+		if len(varExpr) != 1 {
+			return "", fmt.Errorf("operator object must have exactly one key")
+		}
+		for operator, args := range varExpr {
+			if operator == "var" {
+				// Special case: empty var name represents the current element in array operations
+				if varName, ok := args.(string); ok && varName == "" {
+					return "elem", nil
 				}
+				return c.dataOp.ToSQL(OpVar, []interface{}{args})
 			}
 		}
 	}
@@ -2359,14 +2360,15 @@ func (c *ComparisonOperator) valueToSQLParam(value interface{}, pc *params.Param
 	}
 
 	if varExpr, ok := value.(map[string]interface{}); ok {
-		if len(varExpr) == 1 {
-			for operator, args := range varExpr {
-				if operator == "var" {
-					if varName, ok := args.(string); ok && varName == "" {
-						return "elem", nil
-					}
-					return c.dataOp.ToSQLParam(OpVar, []interface{}{args}, pc)
+		if len(varExpr) != 1 {
+			return "", fmt.Errorf("operator object must have exactly one key")
+		}
+		for operator, args := range varExpr {
+			if operator == "var" {
+				if varName, ok := args.(string); ok && varName == "" {
+					return "elem", nil
 				}
+				return c.dataOp.ToSQLParam(OpVar, []interface{}{args}, pc)
 			}
 		}
 	}

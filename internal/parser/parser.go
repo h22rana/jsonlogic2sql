@@ -2099,10 +2099,14 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 	if p.isPrimitive(arg) {
 		return arg, nil
 	}
-	if exprMap, ok := arg.(map[string]interface{}); ok && len(exprMap) == 1 {
+	if exprMap, ok := arg.(map[string]interface{}); ok {
+		argPath := tperrors.BuildArrayPath(path, index)
+		if len(exprMap) != 1 {
+			return nil, tperrors.NewMultipleKeys(argPath)
+		}
 		for operator := range exprMap {
 			if operator != "var" {
-				res, err := p.parseExpressionValue(arg, tperrors.BuildArrayPath(path, index))
+				res, err := p.parseExpressionValue(arg, argPath)
 				if err != nil {
 					return nil, err
 				}
@@ -2128,45 +2132,44 @@ func (p *Parser) processArg(arg interface{}, path string, index int) (interface{
 
 	// If it's a complex expression (map with single key)
 	if exprMap, ok := arg.(map[string]interface{}); ok {
-		if len(exprMap) == 1 {
-			for operator, opArgs := range exprMap {
-				operatorPath := tperrors.BuildPath(path, operator, index)
+		if len(exprMap) != 1 {
+			return nil, tperrors.NewMultipleKeys(argPath)
+		}
+		for operator, opArgs := range exprMap {
+			operatorPath := tperrors.BuildPath(path, operator, index)
 
-				// Check if it's a custom operator (not built-in)
-				if !p.isBuiltInOperator(operator) {
-					// It's a custom operator, parse it to SQL
-					sql, err := p.parseOperator(operator, opArgs, operatorPath)
-					if err != nil {
-						return nil, err
-					}
-					// Wrap in ProcessedValue to mark as SQL
-					return operators.SQLResult(sql), nil
-				}
-
-				// It's a built-in operator - recursively process its arguments
-				// to handle any nested custom operators.
-				// Array operators are handled specially: parse them immediately with
-				// their full operatorPath so nested custom-operator failures preserve
-				// complete JSONPath context under non-array parents (e.g. == / and).
-				// ArrayOperator still performs scope-aware rewrites before nested
-				// custom operators are parsed.
-				if p.isArrayOperator(operator) {
-					sql, err := p.parseOperator(operator, opArgs, operatorPath)
-					if err != nil {
-						return nil, err
-					}
-					return operators.SQLResult(sql), nil
-				}
-				processedOpArgs, err := p.processOpArgs(opArgs, operatorPath)
+			// Check if it's a custom operator (not built-in)
+			if !p.isBuiltInOperator(operator) {
+				// It's a custom operator, parse it to SQL
+				sql, err := p.parseOperator(operator, opArgs, operatorPath)
 				if err != nil {
 					return nil, err
 				}
-				// Return the expression with processed arguments
-				return map[string]interface{}{operator: processedOpArgs}, nil
+				// Wrap in ProcessedValue to mark as SQL
+				return operators.SQLResult(sql), nil
 			}
+
+			// It's a built-in operator - recursively process its arguments
+			// to handle any nested custom operators.
+			// Array operators are handled specially: parse them immediately with
+			// their full operatorPath so nested custom-operator failures preserve
+			// complete JSONPath context under non-array parents (e.g. == / and).
+			// ArrayOperator still performs scope-aware rewrites before nested
+			// custom operators are parsed.
+			if p.isArrayOperator(operator) {
+				sql, err := p.parseOperator(operator, opArgs, operatorPath)
+				if err != nil {
+					return nil, err
+				}
+				return operators.SQLResult(sql), nil
+			}
+			processedOpArgs, err := p.processOpArgs(opArgs, operatorPath)
+			if err != nil {
+				return nil, err
+			}
+			// Return the expression with processed arguments
+			return map[string]interface{}{operator: processedOpArgs}, nil
 		}
-		// Multi-key maps - keep as is
-		return arg, nil
 	}
 
 	// Arrays need recursive processing too
@@ -3230,11 +3233,15 @@ func (p *Parser) processValueArgParam(arg interface{}, path string, index int, p
 	if p.isPrimitive(arg) {
 		return arg, nil
 	}
-	if exprMap, ok := arg.(map[string]interface{}); ok && len(exprMap) == 1 {
+	if exprMap, ok := arg.(map[string]interface{}); ok {
+		argPath := tperrors.BuildArrayPath(path, index)
+		if len(exprMap) != 1 {
+			return nil, tperrors.NewMultipleKeys(argPath)
+		}
 		for operator := range exprMap {
 			if operator != "var" {
 				checkpoint := pc.Checkpoint()
-				res, err := p.parseExpressionValueParam(arg, tperrors.BuildArrayPath(path, index), pc)
+				res, err := p.parseExpressionValueParam(arg, argPath, pc)
 				if err != nil {
 					return nil, err
 				}
@@ -3256,38 +3263,38 @@ func (p *Parser) processValueArgParam(arg interface{}, path string, index int, p
 
 // processArgParam is the parameterized variant of processArg. Keep in sync.
 func (p *Parser) processArgParam(arg interface{}, path string, index int, pc *params.ParamCollector) (interface{}, error) {
+	argPath := tperrors.BuildArrayPath(path, index)
 	if exprMap, ok := arg.(map[string]interface{}); ok {
-		if len(exprMap) == 1 {
-			for operator, opArgs := range exprMap {
-				operatorPath := tperrors.BuildPath(path, operator, index)
+		if len(exprMap) != 1 {
+			return nil, tperrors.NewMultipleKeys(argPath)
+		}
+		for operator, opArgs := range exprMap {
+			operatorPath := tperrors.BuildPath(path, operator, index)
 
-				if !p.isBuiltInOperator(operator) {
-					sql, err := p.parseOperatorParam(operator, opArgs, operatorPath, pc)
-					if err != nil {
-						return nil, err
-					}
-					return operators.SQLResult(sql), nil
-				}
-
-				if p.isArrayOperator(operator) {
-					sql, err := p.parseOperatorParam(operator, opArgs, operatorPath, pc)
-					if err != nil {
-						return nil, err
-					}
-					return operators.SQLResult(sql), nil
-				}
-				processedOpArgs, err := p.processOpArgsParam(opArgs, operatorPath, pc)
+			if !p.isBuiltInOperator(operator) {
+				sql, err := p.parseOperatorParam(operator, opArgs, operatorPath, pc)
 				if err != nil {
 					return nil, err
 				}
-				return map[string]interface{}{operator: processedOpArgs}, nil
+				return operators.SQLResult(sql), nil
 			}
+
+			if p.isArrayOperator(operator) {
+				sql, err := p.parseOperatorParam(operator, opArgs, operatorPath, pc)
+				if err != nil {
+					return nil, err
+				}
+				return operators.SQLResult(sql), nil
+			}
+			processedOpArgs, err := p.processOpArgsParam(opArgs, operatorPath, pc)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]interface{}{operator: processedOpArgs}, nil
 		}
-		return arg, nil
 	}
 
 	if arr, ok := arg.([]interface{}); ok {
-		argPath := tperrors.BuildArrayPath(path, index)
 		return p.processArgsParam(arr, argPath, pc)
 	}
 

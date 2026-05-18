@@ -1333,6 +1333,9 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 
 	// Handle var expressions
 	if varExpr, ok := expr.(map[string]interface{}); ok {
+		if len(varExpr) != 1 {
+			return "", tperrors.NewMultipleKeys(path)
+		}
 		if varName, hasVar := varExpr[OpVar]; hasVar {
 			if allowAccumulator {
 				if rewritten, handled, err := a.rewriteAccumulatorVar(varName); handled || err != nil {
@@ -1896,63 +1899,64 @@ func (a *ArrayOperator) arrayInternalVarToSQL(varExpr interface{}) (string, bool
 func (a *ArrayOperator) rewriteScopedVarsForOperatorWithContextAndPath(expr interface{}, allowAccumulator bool, path string) (interface{}, error) {
 	switch e := expr.(type) {
 	case map[string]interface{}:
-		if len(e) == 1 {
-			if varName, hasVar := e[OpVar]; hasVar {
-				if allowAccumulator {
-					if rewritten, handled, err := a.rewriteAccumulatorVar(varName); handled || err != nil {
-						if err != nil {
-							return nil, err
-						}
-						return rewritten, nil
-					}
-				}
-				if sql, handled, err := a.arrayScopeVarToSQL(varName); handled || err != nil {
+		if len(e) != 1 {
+			return nil, tperrors.NewMultipleKeys(path)
+		}
+		if varName, hasVar := e[OpVar]; hasVar {
+			if allowAccumulator {
+				if rewritten, handled, err := a.rewriteAccumulatorVar(varName); handled || err != nil {
 					if err != nil {
 						return nil, err
 					}
-					return a.scopedSQLFieldResultFromVarExpr(sql, varName), nil
+					return rewritten, nil
 				}
-				return e, nil
 			}
-			for opName, opArgs := range e {
-				if rewrittenArgs, handled, err := a.rewriteScopedMissingFields(opName, opArgs, allowAccumulator); handled || err != nil {
+			if sql, handled, err := a.arrayScopeVarToSQL(varName); handled || err != nil {
+				if err != nil {
+					return nil, err
+				}
+				return a.scopedSQLFieldResultFromVarExpr(sql, varName), nil
+			}
+			return e, nil
+		}
+		for opName, opArgs := range e {
+			if rewrittenArgs, handled, err := a.rewriteScopedMissingFields(opName, opArgs, allowAccumulator); handled || err != nil {
+				if err != nil {
+					return nil, err
+				}
+				return map[string]interface{}{opName: rewrittenArgs}, nil
+			}
+			if a.isArrayOperator(opName) {
+				arr, ok := opArgs.([]interface{})
+				if !ok {
+					return e, nil
+				}
+				newArgs := make([]interface{}, len(arr))
+				copy(newArgs, arr)
+				opPath := tperrors.BuildPath(path, opName, -1)
+				if len(newArgs) > 0 {
+					rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(arr[0], allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
 					if err != nil {
 						return nil, err
 					}
-					return map[string]interface{}{opName: rewrittenArgs}, nil
+					newArgs[0] = rewritten
 				}
-				if a.isArrayOperator(opName) {
-					arr, ok := opArgs.([]interface{})
-					if !ok {
-						return e, nil
-					}
-					newArgs := make([]interface{}, len(arr))
-					copy(newArgs, arr)
-					opPath := tperrors.BuildPath(path, opName, -1)
-					if len(newArgs) > 0 {
-						rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(arr[0], allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
-						if err != nil {
-							return nil, err
-						}
-						newArgs[0] = rewritten
-					}
-					if opName == OpReduce && len(newArgs) > 2 {
-						rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(arr[2], allowAccumulator, tperrors.BuildArrayPath(opPath, 2))
-						if err != nil {
-							return nil, err
-						}
-						newArgs[2] = rewritten
-					}
-					return map[string]interface{}{opName: newArgs}, nil
-				}
-				if !a.isBuiltInOperatorName(opName) {
-					opPath := tperrors.BuildPath(path, opName, -1)
-					rewrittenArgs, err := a.rewriteScopedVarsForOperatorWithContextAndPath(opArgs, allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
+				if opName == OpReduce && len(newArgs) > 2 {
+					rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(arr[2], allowAccumulator, tperrors.BuildArrayPath(opPath, 2))
 					if err != nil {
 						return nil, err
 					}
-					return map[string]interface{}{opName: rewrittenArgs}, nil
+					newArgs[2] = rewritten
 				}
+				return map[string]interface{}{opName: newArgs}, nil
+			}
+			if !a.isBuiltInOperatorName(opName) {
+				opPath := tperrors.BuildPath(path, opName, -1)
+				rewrittenArgs, err := a.rewriteScopedVarsForOperatorWithContextAndPath(opArgs, allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
+				if err != nil {
+					return nil, err
+				}
+				return map[string]interface{}{opName: rewrittenArgs}, nil
 			}
 		}
 		result := make(map[string]interface{}, len(e))
@@ -2494,6 +2498,9 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 	}
 
 	if varExpr, ok := expr.(map[string]interface{}); ok {
+		if len(varExpr) != 1 {
+			return "", tperrors.NewMultipleKeys(path)
+		}
 		if varName, hasVar := varExpr[OpVar]; hasVar {
 			if allowAccumulator {
 				if rewritten, handled, err := a.rewriteAccumulatorVarParam(varName); handled || err != nil {
@@ -2780,63 +2787,64 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorParamWithContextAndPath(
 ) (interface{}, error) {
 	switch e := expr.(type) {
 	case map[string]interface{}:
-		if len(e) == 1 {
-			if varName, hasVar := e[OpVar]; hasVar {
-				if allowAccumulator {
-					if rewritten, handled, err := a.rewriteAccumulatorVarParam(varName); handled || err != nil {
-						if err != nil {
-							return nil, err
-						}
-						return rewritten, nil
-					}
-				}
-				if rewritten, handled, err := a.rewriteArrayScopeVarParam(varName); handled || err != nil {
+		if len(e) != 1 {
+			return nil, tperrors.NewMultipleKeys(path)
+		}
+		if varName, hasVar := e[OpVar]; hasVar {
+			if allowAccumulator {
+				if rewritten, handled, err := a.rewriteAccumulatorVarParam(varName); handled || err != nil {
 					if err != nil {
 						return nil, err
 					}
 					return rewritten, nil
 				}
-				return e, nil
 			}
-			for opName, opArgs := range e {
-				if rewrittenArgs, handled, err := a.rewriteScopedMissingFields(opName, opArgs, allowAccumulator); handled || err != nil {
+			if rewritten, handled, err := a.rewriteArrayScopeVarParam(varName); handled || err != nil {
+				if err != nil {
+					return nil, err
+				}
+				return rewritten, nil
+			}
+			return e, nil
+		}
+		for opName, opArgs := range e {
+			if rewrittenArgs, handled, err := a.rewriteScopedMissingFields(opName, opArgs, allowAccumulator); handled || err != nil {
+				if err != nil {
+					return nil, err
+				}
+				return map[string]interface{}{opName: rewrittenArgs}, nil
+			}
+			if a.isArrayOperator(opName) {
+				arr, ok := opArgs.([]interface{})
+				if !ok {
+					return e, nil
+				}
+				newArgs := make([]interface{}, len(arr))
+				copy(newArgs, arr)
+				opPath := tperrors.BuildPath(path, opName, -1)
+				if len(newArgs) > 0 {
+					rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr[0], allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
 					if err != nil {
 						return nil, err
 					}
-					return map[string]interface{}{opName: rewrittenArgs}, nil
+					newArgs[0] = rewritten
 				}
-				if a.isArrayOperator(opName) {
-					arr, ok := opArgs.([]interface{})
-					if !ok {
-						return e, nil
-					}
-					newArgs := make([]interface{}, len(arr))
-					copy(newArgs, arr)
-					opPath := tperrors.BuildPath(path, opName, -1)
-					if len(newArgs) > 0 {
-						rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr[0], allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
-						if err != nil {
-							return nil, err
-						}
-						newArgs[0] = rewritten
-					}
-					if opName == OpReduce && len(newArgs) > 2 {
-						rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr[2], allowAccumulator, tperrors.BuildArrayPath(opPath, 2))
-						if err != nil {
-							return nil, err
-						}
-						newArgs[2] = rewritten
-					}
-					return map[string]interface{}{opName: newArgs}, nil
-				}
-				if !a.isBuiltInOperatorName(opName) {
-					opPath := tperrors.BuildPath(path, opName, -1)
-					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(opArgs, allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
+				if opName == OpReduce && len(newArgs) > 2 {
+					rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr[2], allowAccumulator, tperrors.BuildArrayPath(opPath, 2))
 					if err != nil {
 						return nil, err
 					}
-					return map[string]interface{}{opName: rewrittenArgs}, nil
+					newArgs[2] = rewritten
 				}
+				return map[string]interface{}{opName: newArgs}, nil
+			}
+			if !a.isBuiltInOperatorName(opName) {
+				opPath := tperrors.BuildPath(path, opName, -1)
+				rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(opArgs, allowAccumulator, tperrors.BuildArrayPath(opPath, 0))
+				if err != nil {
+					return nil, err
+				}
+				return map[string]interface{}{opName: rewrittenArgs}, nil
 			}
 		}
 		result := make(map[string]interface{}, len(e))

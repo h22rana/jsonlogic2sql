@@ -370,6 +370,9 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 
 	// Handle var expressions and complex expressions
 	if expr, ok := value.(map[string]interface{}); ok {
+		if len(expr) != 1 {
+			return "", fmt.Errorf("operator object must have exactly one key")
+		}
 		if varExpr, hasVar := expr[OpVar]; hasVar {
 			return n.dataOp.ToSQL(OpVar, []interface{}{varExpr})
 		}
@@ -749,6 +752,9 @@ func (n *NumericOperator) valueToSQLParam(value interface{}, pc *params.ParamCol
 	}
 
 	if expr, ok := value.(map[string]interface{}); ok {
+		if len(expr) != 1 {
+			return "", fmt.Errorf("operator object must have exactly one key")
+		}
 		if varExpr, hasVar := expr[OpVar]; hasVar {
 			return n.dataOp.ToSQLParam(OpVar, []interface{}{varExpr}, pc)
 		}

@@ -1944,3 +1944,83 @@ func TestTranspileCondition_UnaryEmptyArrayTruthinessAllDialectsSchemaModes(t *t
 		})
 	}
 }
+
+func TestTranspile_RejectsMalformedNestedValueOperandsAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "x", Type: FieldTypeNumber},
+		{Name: "items", Type: FieldTypeArray},
+	})
+
+	tests := []struct {
+		name  string
+		logic string
+		value bool
+	}{
+		{
+			name:  "comparison operand arithmetic contains multi-key var",
+			logic: `{">":[{"+":[{"var":"x","extra":true},1]},2]}`,
+		},
+		{
+			name:  "value arithmetic contains multi-key var",
+			logic: `{"+":[{"var":"x","extra":true},1]}`,
+			value: true,
+		},
+		{
+			name:  "array lambda comparison operand contains multi-key var",
+			logic: `{"some":[{"var":"items"},{">":[{"+":[{"var":"value","extra":true},1]},2]}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							if tt.value {
+								if _, err := tr.TranspileValue(tt.logic); !IsErrorCode(err, ErrMultipleKeys) {
+									t.Fatalf("TranspileValue() error = %v, want %s", err, ErrMultipleKeys)
+								}
+								sql, params, err := tr.TranspileParameterizedValue(tt.logic)
+								if !IsErrorCode(err, ErrMultipleKeys) {
+									t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+										err, ErrMultipleKeys, sql, params)
+								}
+								if len(params) != 0 {
+									t.Fatalf("params = %#v, want none", params)
+								}
+								return
+							}
+
+							if _, err := tr.TranspileCondition(tt.logic); !IsErrorCode(err, ErrMultipleKeys) {
+								t.Fatalf("TranspileCondition() error = %v, want %s", err, ErrMultipleKeys)
+							}
+							sql, params, err := tr.TranspileParameterizedCondition(tt.logic)
+							if !IsErrorCode(err, ErrMultipleKeys) {
+								t.Fatalf("TranspileParameterizedCondition() error = %v, want %s (SQL %q params %#v)",
+									err, ErrMultipleKeys, sql, params)
+							}
+							if len(params) != 0 {
+								t.Fatalf("params = %#v, want none", params)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
