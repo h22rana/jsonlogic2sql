@@ -205,6 +205,150 @@ func assertNestedPredicateValueMaterialized(t *testing.T, sql string) {
 	}
 }
 
+func TestScopedNestedArrayValuesUseTruthinessInArrayLambdaPredicates_AllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "records", Type: FieldTypeArray},
+		{Name: "values", Type: FieldTypeArray},
+	})
+
+	modes := []struct {
+		name   string
+		schema *Schema
+	}{
+		{name: "schema-less"},
+		{name: "schema-aware", schema: schema},
+	}
+
+	cases := []struct {
+		name      string
+		logic     string
+		condition bool
+		kind      string
+		paramLen  int
+	}{
+		{
+			name:  "filter map predicate",
+			logic: `{"filter":[{"var":"records"},{"map":[{"var":"values"},{"var":""}]}]}`,
+			kind:  "array",
+		},
+		{
+			name:      "some map predicate",
+			logic:     `{"some":[{"var":"records"},{"map":[{"var":"values"},{"var":""}]}]}`,
+			condition: true,
+			kind:      "array",
+		},
+		{
+			name:     "filter reduce predicate",
+			logic:    `{"filter":[{"var":"records"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},0]}]}`,
+			kind:     "number",
+			paramLen: 1,
+		},
+		{
+			name:      "all reduce predicate",
+			logic:     `{"all":[{"var":"records"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},0]}]}`,
+			condition: true,
+			kind:      "number",
+			paramLen:  1,
+		},
+	}
+
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+			for _, d := range allDialects() {
+				t.Run(d.String(), func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+					}
+
+					for _, tc := range cases {
+						t.Run(tc.name, func(t *testing.T) {
+							t.Parallel()
+
+							var sql string
+							if tc.condition {
+								sql, err = tr.TranspileCondition(tc.logic)
+							} else {
+								sql, err = tr.TranspileValue(tc.logic)
+							}
+							if err != nil {
+								t.Fatalf("inline transpilation error: %v", err)
+							}
+							assertScopedArrayValueTruthiness(t, d, sql, tc.kind)
+
+							var paramSQL string
+							var params []QueryParam
+							if tc.condition {
+								paramSQL, params, err = tr.TranspileParameterizedCondition(tc.logic)
+							} else {
+								paramSQL, params, err = tr.TranspileParameterizedValue(tc.logic)
+							}
+							if err != nil {
+								t.Fatalf("parameterized transpilation error: %v", err)
+							}
+							assertScopedArrayValueTruthiness(t, d, paramSQL, tc.kind)
+							if len(params) != tc.paramLen {
+								t.Fatalf("params = %#v, want len %d", params, tc.paramLen)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func assertScopedArrayValueTruthiness(t *testing.T, d Dialect, sql, kind string) {
+	t.Helper()
+	if !strings.Contains(sql, "elem.values") {
+		t.Fatalf("SQL = %q, want scoped nested source elem.values", sql)
+	}
+	if !strings.Contains(sql, "IS NOT NULL") {
+		t.Fatalf("SQL = %q, want local value expression guarded by IS NOT NULL", sql)
+	}
+
+	switch kind {
+	case "array":
+		wantLength := "ARRAY_LENGTH("
+		switch d {
+		case DialectPostgreSQL:
+			wantLength = "CARDINALITY("
+		case DialectDuckDB, DialectClickHouse:
+			wantLength = "length("
+		}
+		if !strings.Contains(sql, wantLength) || !strings.Contains(sql, "> 0") {
+			t.Fatalf("SQL = %q, want array truthiness via %s... > 0", sql, wantLength)
+		}
+		for _, raw := range []string{"WHERE ARRAY(SELECT", "-> arrayMap("} {
+			if strings.Contains(sql, raw) {
+				t.Fatalf("SQL = %q, contains raw array value predicate %q", sql, raw)
+			}
+		}
+	case "number":
+		if !strings.Contains(sql, "!= 0") {
+			t.Fatalf("SQL = %q, want numeric truthiness via != 0", sql)
+		}
+		for _, raw := range []string{
+			"WHERE 0 +", "WHERE @p1 +", "WHERE $1 +",
+			"-> 0 +", "-> @p1 +", "-> $1 +",
+		} {
+			if strings.Contains(sql, raw) {
+				t.Fatalf("SQL = %q, contains raw numeric value predicate %q", sql, raw)
+			}
+		}
+	default:
+		t.Fatalf("unsupported truthiness kind %q", kind)
+	}
+}
+
 func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaModes(t *testing.T) {
 	t.Parallel()
 

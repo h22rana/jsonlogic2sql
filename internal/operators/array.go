@@ -1279,13 +1279,54 @@ func (a *ArrayOperator) truthinessExpressionToSQLWithContextAndPath(expr interfa
 		return a.predicateExpressionToSQLWithContextAndPath(expr, path)
 	}
 	if a.shouldParseScopedArrayExpressionLocally(expr) {
-		return a.expressionToSQLWithContextAndPath(expr, false, path)
+		sql, err := a.expressionToSQLWithContextAndPath(expr, false, path)
+		if err != nil {
+			return "", err
+		}
+		return a.localTruthinessExpressionSQL(expr, sql, path)
 	}
 	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, false, path)
 	if err != nil {
 		return "", err
 	}
 	return a.config.ParseTruthinessExpression(rewritten, path)
+}
+
+func (a *ArrayOperator) localTruthinessExpressionSQL(expr interface{}, sql, path string) (string, error) {
+	if isPredicateArrayExpression(expr) {
+		return sql, nil
+	}
+	result := a.localValueExpressionResult(expr, sql)
+	if result.Kind == ExpressionKindPredicate {
+		return result.SQL, nil
+	}
+	switch result.Type {
+	case ExpressionTypeNull:
+		return "FALSE", nil
+	case ExpressionTypeBoolean:
+		return fmt.Sprintf("%s IS TRUE", result.SQL), nil
+	case ExpressionTypeString:
+		return fmt.Sprintf("(%s IS NOT NULL AND %s != '')", result.SQL, result.SQL), nil
+	case ExpressionTypeNumber:
+		return fmt.Sprintf("(%s IS NOT NULL AND %s != 0)", result.SQL, result.SQL), nil
+	case ExpressionTypeArray:
+		lengthCheck := a.arrayLengthSQL(result.SQL)
+		return fmt.Sprintf("(%s IS NOT NULL AND %s > 0)", result.SQL, lengthCheck), nil
+	case ExpressionTypeUnknown:
+		return "", tperrors.New(
+			tperrors.ErrInvalidExpressionContext,
+			"",
+			path,
+			"truthiness requires a statically known value type for locally scoped array expression",
+		)
+	default:
+		return "", tperrors.New(
+			tperrors.ErrInvalidExpressionContext,
+			"",
+			path,
+			"unsupported locally scoped array expression type",
+		)
+	}
 }
 
 func (a *ArrayOperator) valueToSQLAtPath(value interface{}, path string) (string, error) {
@@ -2472,7 +2513,11 @@ func (a *ArrayOperator) truthinessExpressionToSQLParamWithContextAndPath(
 		return a.predicateExpressionToSQLParamWithContextAndPath(expr, pc, path)
 	}
 	if a.shouldParseScopedArrayExpressionLocally(expr) {
-		return a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
+		sql, err := a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
+		if err != nil {
+			return "", err
+		}
+		return a.localTruthinessExpressionSQL(expr, sql, path)
 	}
 	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, false, path)
 	if err != nil {
