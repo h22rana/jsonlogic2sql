@@ -41,8 +41,9 @@ type ArrayOperator struct {
 }
 
 type typedValueSQL struct {
-	sql string
-	typ ExpressionType
+	sql               string
+	typ               ExpressionType
+	emptyArrayLiteral bool
 }
 
 // NewArrayOperator creates a new ArrayOperator instance with optional config.
@@ -728,10 +729,14 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return a.emptyArrayLiteralSQL()
+	}
+	array := arrayValue.sql
 
 	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], false, a.argPath(arrayExpressionArgIndex))
@@ -767,10 +772,14 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return a.emptyArrayLiteralSQL()
+	}
+	array := arrayValue.sql
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
@@ -819,10 +828,14 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return initial, nil
+	}
+	array := arrayValue.sql
 
 	// Second argument: reducer expression
 	reducerExpr := args[arrayExpressionArgIndex]
@@ -1002,10 +1015,14 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return "FALSE", nil
+	}
+	array := arrayValue.sql
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
@@ -1046,10 +1063,14 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return "FALSE", nil
+	}
+	array := arrayValue.sql
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
@@ -1087,10 +1108,14 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	}
 
 	// First argument: array
-	array, err := a.valueToSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return "TRUE", nil
+	}
+	array := arrayValue.sql
 
 	// Second argument: condition expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
@@ -1133,11 +1158,14 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 		if isEmptyArrayLiteral(arg) {
 			continue
 		}
-		array, err := a.valueToSQLAtPath(arg, a.argPath(i))
+		arrayValue, err := a.valueToTypedSQLAtPath(arg, a.argPath(i))
 		if err != nil {
 			return "", fmt.Errorf("invalid merge array argument %d: %w", i, err)
 		}
-		arrays = append(arrays, array)
+		if arrayValue.emptyArrayLiteral {
+			continue
+		}
+		arrays = append(arrays, arrayValue.sql)
 	}
 	return a.renderMergeSQL(arrays)
 }
@@ -1245,7 +1273,11 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		if err != nil {
 			return typedValueSQL{}, err
 		}
-		return typedValueSQL{sql: res.SQL, typ: expressionTypeFromResultKind(res.Kind, res.Type)}, nil
+		return typedValueSQL{
+			sql:               res.SQL,
+			typ:               expressionTypeFromResultKind(res.Kind, res.Type),
+			emptyArrayLiteral: res.EmptyArrayLiteral,
+		}, nil
 	}
 
 	// Handle arrays
@@ -1262,7 +1294,7 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		if err != nil {
 			return typedValueSQL{}, err
 		}
-		return typedValueSQL{sql: sql, typ: ExpressionTypeArray}, nil
+		return typedValueSQL{sql: sql, typ: ExpressionTypeArray, emptyArrayLiteral: len(arr) == 0}, nil
 	}
 
 	// Handle primitive values
@@ -2039,10 +2071,14 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return a.emptyArrayLiteralSQL()
 	}
-	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return a.emptyArrayLiteralSQL()
+	}
+	array := arrayValue.sql
 	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
@@ -2068,10 +2104,14 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return a.emptyArrayLiteralSQL()
 	}
-	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return a.emptyArrayLiteralSQL()
+	}
+	array := arrayValue.sql
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
@@ -2102,10 +2142,14 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return initial, nil
 	}
-	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return initial, nil
+	}
+	array := arrayValue.sql
 	reducerExpr := args[arrayExpressionArgIndex]
 	alias := a.elemAlias()
 
@@ -2167,10 +2211,14 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return "FALSE", nil
 	}
-	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return "FALSE", nil
+	}
+	array := arrayValue.sql
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
@@ -2197,10 +2245,14 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return "FALSE", nil
 	}
-	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return "FALSE", nil
+	}
+	array := arrayValue.sql
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
@@ -2226,10 +2278,14 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return "TRUE", nil
 	}
-	array, err := a.valueToSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
+	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
+	if arrayValue.emptyArrayLiteral {
+		return "TRUE", nil
+	}
+	array := arrayValue.sql
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		predicateExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
@@ -2259,11 +2315,14 @@ func (a *ArrayOperator) handleMergeParam(args []interface{}, pc *params.ParamCol
 		if isEmptyArrayLiteral(arg) {
 			continue
 		}
-		array, err := a.valueToSQLParamAtPath(arg, pc, a.argPath(i))
+		arrayValue, err := a.valueToTypedSQLParamAtPath(arg, pc, a.argPath(i))
 		if err != nil {
 			return "", fmt.Errorf("invalid merge array argument %d: %w", i, err)
 		}
-		arrays = append(arrays, array)
+		if arrayValue.emptyArrayLiteral {
+			continue
+		}
+		arrays = append(arrays, arrayValue.sql)
 	}
 	return a.renderMergeSQL(arrays)
 }
@@ -2380,7 +2439,11 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		if err != nil {
 			return typedValueSQL{}, err
 		}
-		return typedValueSQL{sql: res.SQL, typ: expressionTypeFromResultKind(res.Kind, res.Type)}, nil
+		return typedValueSQL{
+			sql:               res.SQL,
+			typ:               expressionTypeFromResultKind(res.Kind, res.Type),
+			emptyArrayLiteral: res.EmptyArrayLiteral,
+		}, nil
 	}
 
 	if arr, ok := value.([]interface{}); ok {
@@ -2396,7 +2459,7 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		if err != nil {
 			return typedValueSQL{}, err
 		}
-		return typedValueSQL{sql: sql, typ: ExpressionTypeArray}, nil
+		return typedValueSQL{sql: sql, typ: ExpressionTypeArray, emptyArrayLiteral: len(arr) == 0}, nil
 	}
 
 	sql, err := a.dataOp.valueToSQLParam(value, pc)

@@ -151,6 +151,8 @@ func TestTranspileValue_EmptyArrayFoldableContextsAllDialects(t *testing.T) {
 		`{"or":[{"map":[[],{"var":"missing"}]},"fallback"]}`,
 		`{"or":[{"filter":[[],true]},"fallback"]}`,
 		`{"or":[{"merge":[[]]},"fallback"]}`,
+		`{"or":[{"map":[{"or":[false,[]]},{"var":"missing"}]},"fallback"]}`,
+		`{"or":[{"filter":[{"if":[false,[1],[]]},{"var":"missing"}]},"fallback"]}`,
 	}
 
 	for _, d := range allDialects() {
@@ -231,6 +233,159 @@ func TestTranspileValue_EmptyArrayFoldableContextsAllDialects(t *testing.T) {
 			}
 			if len(gotParams) != 0 {
 				t.Fatalf("params = %#v, want none", gotParams)
+			}
+		})
+	}
+}
+
+func TestArrayOperators_FoldedEmptyArraySourcesAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "items", Type: FieldTypeArray},
+	})
+
+	predicateTests := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "all folded empty or source",
+			logic: `{"all":[{"or":[false,[]]},true]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "some folded empty if source",
+			logic: `{"some":[{"if":[false,[1],[]]},true]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "none folded empty or source",
+			logic: `{"none":[{"or":[false,[]]},true]}`,
+			want:  "TRUE",
+		},
+	}
+
+	valueTests := []struct {
+		name       string
+		logic      string
+		wantSQL    func(Dialect) string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "reduce folded empty source returns numeric initial",
+			logic: `{"reduce":[{"or":[false,[]]},{"+":[{"var":"accumulator"},{"var":"current"}]},5]}`,
+			wantSQL: func(Dialect) string {
+				return "5"
+			},
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(5)}},
+		},
+		{
+			name:  "reduce folded if empty source returns string initial",
+			logic: `{"reduce":[{"if":[false,[1],[]]},{"cat":[{"var":"accumulator"},{"var":"current"}]},"seed"]}`,
+			wantSQL: func(Dialect) string {
+				return "'seed'"
+			},
+			wantParam: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "seed"}},
+		},
+		{
+			name:  "merge skips folded empty identity",
+			logic: `{"merge":[{"or":[false,[]]},[1]]}`,
+			wantSQL: func(d Dialect) string {
+				switch d {
+				case DialectPostgreSQL:
+					return "ARRAY[1]"
+				case DialectClickHouse:
+					return "arrayConcat([1])"
+				default:
+					return "ARRAY_CONCAT([1])"
+				}
+			},
+			wantParam: func(d Dialect) string {
+				ph := testPlaceholder(d, 1)
+				switch d {
+				case DialectPostgreSQL:
+					return fmt.Sprintf("ARRAY[%s]", ph)
+				case DialectClickHouse:
+					return fmt.Sprintf("arrayConcat([%s])", ph)
+				default:
+					return fmt.Sprintf("ARRAY_CONCAT([%s])", ph)
+				}
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range predicateTests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileCondition() error = %v", err)
+							}
+							if got != tt.want {
+								t.Fatalf("TranspileCondition() = %q, want %q", got, tt.want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+							}
+							if gotParam != tt.want {
+								t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, tt.want)
+							}
+							if len(gotParams) != 0 {
+								t.Fatalf("params = %#v, want none", gotParams)
+							}
+						})
+					}
+
+					for _, tt := range valueTests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if want := tt.wantSQL(d); got != want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
 			}
 		})
 	}

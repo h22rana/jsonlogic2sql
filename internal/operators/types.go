@@ -43,9 +43,10 @@ func (a OperatorArg) String() string {
 // OperatorResult is the typed SQL representation returned by custom operators
 // and parser expression callbacks.
 type OperatorResult struct {
-	SQL  string
-	Kind ExpressionKind
-	Type ExpressionType
+	SQL               string
+	Kind              ExpressionKind
+	Type              ExpressionType
+	EmptyArrayLiteral bool
 }
 
 // PredicateSQL creates a custom-operator result that can be used in predicate

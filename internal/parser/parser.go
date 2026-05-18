@@ -565,6 +565,14 @@ func arrayValueOperatorReturnsEmptyLiteral(operator string, args []interface{}) 
 	}
 }
 
+func (p *Parser) sqlIsEmptyArrayLiteral(sql string) bool {
+	if p.config == nil {
+		return sql == "[]"
+	}
+	emptySQL, err := p.config.ArrayLiteral(nil)
+	return err == nil && sql == emptySQL
+}
+
 func (p *Parser) literalToSQL(value interface{}) (string, error) {
 	return p.dataOp.ValueToSQL(value)
 }
@@ -749,10 +757,23 @@ func valueSQL(res expressionResult) string {
 }
 
 func valueOperatorResult(res expressionResult) operators.OperatorResult {
+	var opResult operators.OperatorResult
 	if res.Kind == operators.ExpressionKindPredicate {
-		return operators.ValueSQL(operators.PredicateValueSQL(res.SQL), operators.ExpressionTypeBoolean)
+		opResult = operators.ValueSQL(operators.PredicateValueSQL(res.SQL), operators.ExpressionTypeBoolean)
+	} else {
+		opResult = res.OperatorResult
 	}
-	return res.OperatorResult
+	if expressionResultIsEmptyArrayLiteral(res) {
+		opResult.EmptyArrayLiteral = true
+	}
+	return opResult
+}
+
+func expressionResultIsEmptyArrayLiteral(res expressionResult) bool {
+	return res.Kind == operators.ExpressionKindValue &&
+		valueTypeOf(res) == operators.ExpressionTypeArray &&
+		res.rawLiteralKnown &&
+		isEmptyArrayLiteralValue(res.rawLiteral)
 }
 
 func catStringSQL(res expressionResult) string {
@@ -1412,7 +1433,7 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		if arrayValueOperatorReturnsEmptyLiteral(operator, arr) {
+		if arrayValueOperatorReturnsEmptyLiteral(operator, arr) || p.sqlIsEmptyArrayLiteral(sql) {
 			return literalValueResultWithRaw(sql, operators.ExpressionTypeArray, false, []interface{}{}), nil
 		}
 		return valueResult(sql, operators.ExpressionTypeArray), nil
@@ -2592,7 +2613,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		if arrayValueOperatorReturnsEmptyLiteral(operator, arr) {
+		if arrayValueOperatorReturnsEmptyLiteral(operator, arr) || p.sqlIsEmptyArrayLiteral(sql) {
 			return literalValueResultWithRaw(sql, operators.ExpressionTypeArray, false, []interface{}{}), nil
 		}
 		return valueResult(sql, operators.ExpressionTypeArray), nil
