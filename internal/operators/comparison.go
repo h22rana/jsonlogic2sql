@@ -2659,7 +2659,15 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 			return sql, nil
 		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
 			return boolSQL(false), nil
-		case ExpressionTypeArray, ExpressionTypeUnknown:
+		case ExpressionTypeUnknown:
+			if c.isStringLikeInOperandNoSchema(leftOriginal, pc, 0) {
+				sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
+				if err != nil {
+					return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+				}
+				return sql, nil
+			}
+		case ExpressionTypeArray:
 		}
 	}
 
@@ -2738,6 +2746,28 @@ func (c *ComparisonOperator) handleInSQLRightParam(
 		}
 		if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
 			return boolSQL(false), nil
+		}
+	}
+
+	if hasRightType {
+		switch rightType {
+		case ExpressionTypeString:
+			sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
+			if err != nil {
+				return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+			}
+			return sql, nil
+		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+			return boolSQL(false), nil
+		case ExpressionTypeUnknown:
+			if c.isStringLikeInOperandNoSchema(leftOriginal, pc, 0) {
+				sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
+				if err != nil {
+					return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+				}
+				return sql, nil
+			}
+		case ExpressionTypeArray:
 		}
 	}
 

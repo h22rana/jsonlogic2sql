@@ -1571,6 +1571,117 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 	}
 }
 
+func TestTranspileParameterizedCondition_InUnknownRHSStringContainmentDoesNotLeakParamsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	stringContainmentSQL := func(d Dialect, haystack, needle string) string {
+		switch d {
+		case DialectPostgreSQL:
+			return fmt.Sprintf("POSITION(%s IN %s) > 0", needle, haystack)
+		case DialectClickHouse:
+			return fmt.Sprintf("position(%s, %s) > 0", haystack, needle)
+		default:
+			return fmt.Sprintf("STRPOS(%s, %s) > 0", haystack, needle)
+		}
+	}
+	nonEmptyStringSQL := func(sql string) string {
+		return fmt.Sprintf("(%s IS NOT NULL AND %s != '')", sql, sql)
+	}
+
+	tests := []struct {
+		name       string
+		logic      string
+		register   func(*Transpiler) error
+		wantSQL    func(Dialect) string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "literal needle with unknown typed if rhs",
+			logic: `{"in":["x",{"if":[{">":[{"var":"a"},0]},{"var":"s"},{"var":"t"}]}]}`,
+			wantSQL: func(d Dialect) string {
+				rhs := "CASE WHEN a > 0 THEN s ELSE t END"
+				return stringContainmentSQL(d, rhs, "'x'")
+			},
+			wantParam: func(d Dialect) string {
+				rhs := fmt.Sprintf("CASE WHEN a > %s THEN s ELSE t END", testPlaceholder(d, 1))
+				return stringContainmentSQL(d, rhs, testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(0)},
+				{Name: "p2", Value: "x"},
+			},
+		},
+		{
+			name:  "empty literal needle with unknown typed if rhs",
+			logic: `{"in":["",{"if":[{">":[{"var":"a"},0]},{"var":"s"},{"var":"t"}]}]}`,
+			wantSQL: func(Dialect) string {
+				return nonEmptyStringSQL("CASE WHEN a > 0 THEN s ELSE t END")
+			},
+			wantParam: func(d Dialect) string {
+				rhs := fmt.Sprintf("CASE WHEN a > %s THEN s ELSE t END", testPlaceholder(d, 1))
+				return nonEmptyStringSQL(rhs)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(0)}},
+		},
+		{
+			name:  "literal needle with custom unknown typed rhs",
+			logic: `{"in":["x",{"unknownHaystack":[]}]}`,
+			register: func(tr *Transpiler) error {
+				return tr.RegisterOperatorFunc("unknownHaystack", func(string, []OperatorArg) (OperatorResult, error) {
+					return ValueSQL("custom_haystack", ExpressionTypeUnknown), nil
+				})
+			},
+			wantSQL: func(d Dialect) string {
+				return stringContainmentSQL(d, "custom_haystack", "'x'")
+			},
+			wantParam: func(d Dialect) string {
+				return stringContainmentSQL(d, "custom_haystack", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					tr, err := NewTranspiler(d)
+					if err != nil {
+						t.Fatalf("NewTranspiler() error = %v", err)
+					}
+					if tt.register != nil {
+						if registerErr := tt.register(tr); registerErr != nil {
+							t.Fatalf("RegisterOperatorFunc() error = %v", registerErr)
+						}
+					}
+
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if want := tt.wantSQL(d); got != want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileCondition_LiteralComparisonsEmitFoldedBooleansAllDialects(t *testing.T) {
 	t.Parallel()
 
