@@ -341,8 +341,9 @@ type FieldSchema struct {
 and array element fields. Object schemas use `Fields`; array schemas use
 `ElementFields`. `Fields` requires `Type: FieldTypeObject`; `ElementFields`
 requires `Type: FieldTypeArray`. Enum schemas require at least one
-`AllowedValues` entry, and non-enum schemas cannot set `AllowedValues`. For
-example:
+unique `AllowedValues` entry, and non-enum schemas cannot set `AllowedValues`.
+Flattened field paths must be unique and cannot contain empty path segments.
+For example:
 
 ```json
 [
@@ -464,7 +465,11 @@ Check if error has specific code.
 func NewSchema(fields []FieldSchema) (*Schema, error)
 ```
 
-Create a new schema from field definitions. Returns an error if any field name contains quote characters (backtick, double quote, or single quote). Field names must be raw, unquoted identifiers; the transpiler handles quoting automatically.
+Create a new schema from field definitions. `NewSchema` validates the schema by
+default and returns an error for invalid field names, unsupported or missing
+types, invalid nested `fields` / `elementFields` usage, invalid enum metadata,
+duplicate flattened field paths, or empty path segments. Field names must be
+raw, unquoted identifiers; the transpiler handles quoting automatically.
 
 ### ValidateSchemaFields
 
@@ -472,7 +477,8 @@ Create a new schema from field definitions. Returns an error if any field name c
 func ValidateSchemaFields(fields []FieldSchema) error
 ```
 
-Validate schema field definitions. Returns an error if any field name contains quote characters (backtick, double quote, or single quote). Field names must be raw, unquoted identifiers.
+Validate schema field definitions without constructing a `Schema`. It applies
+the same validation rules as `NewSchema`.
 
 ### NewSchemaFromJSON
 

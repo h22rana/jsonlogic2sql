@@ -39,10 +39,9 @@ type Schema struct {
 	validationErr error
 }
 
-// NewSchema creates a new schema from a slice of field schemas.
-// Returns an error if any field name contains quote characters (backtick,
-// double quote, or single quote). Schema field names must be raw, unquoted
-// identifiers; the transpiler handles quoting automatically.
+// NewSchema validates field definitions and creates a new schema.
+// Schema field names must be raw, unquoted identifiers; the transpiler handles
+// quoting automatically.
 func NewSchema(fields []FieldSchema) (*Schema, error) {
 	if err := ValidateSchemaFields(fields); err != nil {
 		return nil, err
@@ -74,19 +73,20 @@ func (s *Schema) addField(prefix string, field FieldSchema) {
 	}
 }
 
-// ValidateSchemaFields validates schema field definitions.
-// Field names must be raw, unquoted identifiers; the transpiler applies SQL
-// identifier quoting automatically based on the target dialect.
+// ValidateSchemaFields validates schema field definitions without constructing
+// a Schema. Field names must be raw, unquoted identifiers; the transpiler
+// applies SQL identifier quoting automatically based on the target dialect.
 func ValidateSchemaFields(fields []FieldSchema) error {
+	seen := make(map[string]struct{})
 	for _, field := range fields {
-		if err := validateSchemaField("", field); err != nil {
+		if err := validateSchemaField("", field, seen); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateSchemaField(prefix string, field FieldSchema) error {
+func validateSchemaField(prefix string, field FieldSchema, seen map[string]struct{}) error {
 	if strings.TrimSpace(field.Name) == "" {
 		if prefix == "" {
 			return fmt.Errorf("schema field requires non-empty name")
@@ -102,12 +102,20 @@ func validateSchemaField(prefix string, field FieldSchema) error {
 
 	fieldName := joinSchemaPath(prefix, field.Name)
 	for _, seg := range strings.Split(fieldName, ".") {
+		if seg == "" {
+			return fmt.Errorf("schema field %q contains an empty path segment", fieldName)
+		}
 		if dialect.ContainsQuoteCharacters(seg) {
 			return fmt.Errorf(
 				"schema field %q contains quote characters; "+
 					"use raw identifiers; the transpiler handles quoting automatically", fieldName)
 		}
 	}
+	if _, exists := seen[fieldName]; exists {
+		return fmt.Errorf("schema field %q is defined more than once", fieldName)
+	}
+	seen[fieldName] = struct{}{}
+
 	if len(field.Fields) > 0 && field.Type != FieldTypeObject {
 		return fmt.Errorf("schema field %q uses fields but has type %q; fields require object type", fieldName, field.Type)
 	}
@@ -118,18 +126,32 @@ func validateSchemaField(prefix string, field FieldSchema) error {
 		if len(field.AllowedValues) == 0 {
 			return fmt.Errorf("schema enum field %q requires at least one allowedValues entry", fieldName)
 		}
+		if err := validateEnumAllowedValues(fieldName, field.AllowedValues); err != nil {
+			return err
+		}
 	} else if len(field.AllowedValues) > 0 {
 		return fmt.Errorf("schema field %q uses allowedValues but has type %q; allowedValues require enum type", fieldName, field.Type)
 	}
 	for _, child := range field.Fields {
-		if err := validateSchemaField(fieldName, child); err != nil {
+		if err := validateSchemaField(fieldName, child, seen); err != nil {
 			return err
 		}
 	}
 	for _, child := range field.ElementFields {
-		if err := validateSchemaField(fieldName, child); err != nil {
+		if err := validateSchemaField(fieldName, child, seen); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateEnumAllowedValues(fieldName string, allowedValues []string) error {
+	seen := make(map[string]struct{}, len(allowedValues))
+	for _, value := range allowedValues {
+		if _, exists := seen[value]; exists {
+			return fmt.Errorf("schema enum field %q has duplicate allowed value %q", fieldName, value)
+		}
+		seen[value] = struct{}{}
 	}
 	return nil
 }

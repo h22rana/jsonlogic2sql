@@ -88,9 +88,11 @@ validation, while array lambdas still emit SQL relative to the element alias.
 `array` fields. Every field entry, including nested object children and array
 element children, must include a non-empty `name` and one of the supported
 `type` values. Enum fields must include at least one `allowedValues` entry;
-non-enum fields cannot use `allowedValues`. Object `fields` and array
-`elementFields` are optional so schemas can represent object fields and
-primitive-array fields without exposing named children.
+enum values must be unique, and non-enum fields cannot use `allowedValues`.
+Object `fields` and array `elementFields` are optional so schemas can represent
+object fields and primitive-array fields without exposing named children.
+Flattened field paths must be unique and cannot contain empty path segments
+such as `profile..status`.
 
 ```json
 [
@@ -422,7 +424,8 @@ SQL expression.
 ## Schema API Reference
 
 ```go
-// Schema creation
+// Schema creation. NewSchema validates by default; ValidateSchemaFields is the
+// standalone helper for checking definitions without constructing a Schema.
 schema, err := jsonlogic2sql.NewSchema(fields)
 err = jsonlogic2sql.ValidateSchemaFields(fields)
 schema, err = jsonlogic2sql.NewSchemaFromJSON(data)

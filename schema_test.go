@@ -303,6 +303,48 @@ func TestNestedSchemaShapeValidation(t *testing.T) {
 			wantError: `schema field "profile.status" has unsupported type "varchar"`,
 		},
 		{
+			name: "root path segment cannot be empty",
+			fields: []FieldSchema{
+				{Name: "profile..status", Type: FieldTypeString},
+			},
+			wantError: `schema field "profile..status" contains an empty path segment`,
+		},
+		{
+			name: "nested path segment cannot be empty",
+			fields: []FieldSchema{
+				{
+					Name: "profile",
+					Type: FieldTypeObject,
+					Fields: []FieldSchema{
+						{Name: ".status", Type: FieldTypeString},
+					},
+				},
+			},
+			wantError: `schema field "profile..status" contains an empty path segment`,
+		},
+		{
+			name: "duplicate root field is rejected",
+			fields: []FieldSchema{
+				{Name: "profile.status", Type: FieldTypeString},
+				{Name: "profile.status", Type: FieldTypeString},
+			},
+			wantError: `schema field "profile.status" is defined more than once`,
+		},
+		{
+			name: "duplicate flattened nested field is rejected",
+			fields: []FieldSchema{
+				{Name: "profile.status", Type: FieldTypeString},
+				{
+					Name: "profile",
+					Type: FieldTypeObject,
+					Fields: []FieldSchema{
+						{Name: "status", Type: FieldTypeString},
+					},
+				},
+			},
+			wantError: `schema field "profile.status" is defined more than once`,
+		},
+		{
 			name: "enum allowedValues are required",
 			fields: []FieldSchema{
 				{Name: "profile.status", Type: FieldTypeEnum},
@@ -334,6 +376,26 @@ func TestNestedSchemaShapeValidation(t *testing.T) {
 				},
 			},
 			wantError: `schema enum field "payments.type" requires at least one allowedValues entry`,
+		},
+		{
+			name: "duplicate enum allowedValues are rejected",
+			fields: []FieldSchema{
+				{Name: "profile.status", Type: FieldTypeEnum, AllowedValues: []string{"active", "active"}},
+			},
+			wantError: `schema enum field "profile.status" has duplicate allowed value "active"`,
+		},
+		{
+			name: "nested duplicate enum allowedValues are rejected",
+			fields: []FieldSchema{
+				{
+					Name: "payments",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Name: "type", Type: FieldTypeEnum, AllowedValues: []string{"CARD", "CARD"}},
+					},
+				},
+			},
+			wantError: `schema enum field "payments.type" has duplicate allowed value "CARD"`,
 		},
 		{
 			name: "primitive allowedValues are rejected",
