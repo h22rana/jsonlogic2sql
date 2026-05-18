@@ -107,7 +107,13 @@ func TestAccumulatorOutsideReduceResolvesAsElementField_AllDialects(t *testing.T
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "bag.numbers", Type: FieldTypeArray},
+		{
+			Name: "bag.numbers",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "accumulator", Type: FieldTypeNumber},
+			},
+		},
 	})
 
 	dialects := []Dialect{

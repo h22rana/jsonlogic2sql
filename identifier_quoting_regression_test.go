@@ -13,7 +13,14 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "profile.status", Type: FieldTypeString},
 		{Name: "metrics.24h.count", Type: FieldTypeInteger},
-		{Name: "events", Type: FieldTypeArray},
+		{
+			Name: "events",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "24h", Type: FieldTypeInteger},
+				{Name: "24h.total", Type: FieldTypeInteger},
+			},
+		},
 		{Name: "fixture.windowed_metrics.24h.events.total", Type: FieldTypeInteger},
 		{Name: "fixture.windowed_metrics.7d.events.count", Type: FieldTypeInteger},
 	})

@@ -23,3 +23,10 @@ type SchemaProvider interface {
 	// ValidateEnumValue checks if a value is valid for an enum field
 	ValidateEnumValue(fieldName, value string) error
 }
+
+// ScopedSchemaProvider is implemented by schemas that can resolve fields
+// relative to a nested object or array-element schema scope.
+type ScopedSchemaProvider interface {
+	SchemaProvider
+	ResolveScopedField(scopePath, fieldName string) (string, error)
+}

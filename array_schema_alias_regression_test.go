@@ -7,10 +7,30 @@ import (
 
 func testArrayScopeSchema() *Schema {
 	return mustNewSchema([]FieldSchema{
-		{Name: "numbers", Type: FieldTypeArray},
+		{
+			Name: "numbers",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "type", Type: FieldTypeString},
+				{Name: "item", Type: FieldTypeString},
+				{Name: "current", Type: FieldTypeString},
+				{Name: "elem", Type: FieldTypeString},
+				{Name: "name", Type: FieldTypeArray},
+				{Name: "email", Type: FieldTypeString},
+				{Name: "phone", Type: FieldTypeString},
+			},
+		},
 		{Name: "scores", Type: FieldTypeArray},
-		{Name: "groups", Type: FieldTypeArray},
-		{Name: "type", Type: FieldTypeString},
+		{
+			Name: "groups",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "base", Type: FieldTypeNumber},
+				{Name: "flag", Type: FieldTypeBoolean},
+				{Name: "tags", Type: FieldTypeArray},
+				{Name: "values", Type: FieldTypeArray},
+			},
+		},
 	})
 }
 
@@ -181,11 +201,16 @@ func TestArrayPredicateLambdasUseTruthinessAllDialectsSchemaModes(t *testing.T) 
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "items", Type: FieldTypeArray},
-		{Name: "active", Type: FieldTypeBoolean},
-		{Name: "name", Type: FieldTypeString},
-		{Name: "score", Type: FieldTypeNumber},
-		{Name: "tags", Type: FieldTypeArray},
+		{
+			Name: "items",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "active", Type: FieldTypeBoolean},
+				{Name: "name", Type: FieldTypeString},
+				{Name: "score", Type: FieldTypeNumber},
+				{Name: "tags", Type: FieldTypeArray},
+			},
+		},
 	})
 
 	arrayLength := func(d Dialect, expr string) string {
@@ -320,8 +345,13 @@ func TestArrayScopedDefaultedVarsPreserveSchemaEqualityMetadata(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "items", Type: FieldTypeArray},
-		{Name: "amount", Type: FieldTypeNumber},
+		{
+			Name: "items",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "amount", Type: FieldTypeNumber},
+			},
+		},
 	})
 
 	cases := []struct {
@@ -492,10 +522,15 @@ func TestTranspileParameterized_ArrayNestedScopeUsesDistinctAliases(t *testing.T
 
 func TestTranspile_ArrayScopedVarsPreserveSchemaValidation(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "groups", Type: FieldTypeArray},
-		{Name: "values", Type: FieldTypeString},
-		{Name: "flag", Type: FieldTypeBoolean},
-		{Name: "tags", Type: FieldTypeArray},
+		{
+			Name: "groups",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "values", Type: FieldTypeString},
+				{Name: "flag", Type: FieldTypeBoolean},
+				{Name: "tags", Type: FieldTypeArray},
+			},
+		},
 	})
 
 	tests := []struct {
@@ -506,17 +541,17 @@ func TestTranspile_ArrayScopedVarsPreserveSchemaValidation(t *testing.T) {
 		{
 			name:      "nested map rejects scoped string source",
 			logic:     `{"map":[{"var":"groups"},{"map":[{"var":"values"},{"var":""}]}]}`,
-			wantError: "array operation on non-array field 'values'",
+			wantError: "array operation on non-array field 'groups.values'",
 		},
 		{
 			name:      "filter rejects scoped boolean ordering",
 			logic:     `{"filter":[{"var":"groups"},{">":[{"var":"flag"},0]}]}`,
-			wantError: "ordering comparison '>' on incompatible field 'flag'",
+			wantError: "ordering comparison '>' on incompatible field 'groups.flag'",
 		},
 		{
 			name:      "reduce rejects current boolean ordering",
 			logic:     `{"reduce":[{"var":"groups"},{"if":[{">":[{"var":"current.flag"},0]},{"var":"accumulator"},{"var":"accumulator"}]},0]}`,
-			wantError: "ordering comparison '>' on incompatible field 'flag'",
+			wantError: "ordering comparison '>' on incompatible field 'groups.flag'",
 		},
 	}
 
@@ -543,6 +578,124 @@ func TestTranspile_ArrayScopedVarsPreserveSchemaValidation(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestTranspile_ArrayScopeUnknownFieldsRejectedWithSchema_AllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{
+			Name: "numbers",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "type", Type: FieldTypeString},
+			},
+		},
+	})
+
+	cases := []struct {
+		name      string
+		logic     string
+		valueRoot bool
+	}{
+		{
+			name:      "map bare field",
+			logic:     `{"map":[{"var":"numbers"},{"var":"unknown"}]}`,
+			valueRoot: true,
+		},
+		{
+			name:      "map defaulted field",
+			logic:     `{"map":[{"var":"numbers"},{"var":["unknown","x"]}]}`,
+			valueRoot: true,
+		},
+		{
+			name:      "filter missing field",
+			logic:     `{"filter":[{"var":"numbers"},{"missing":"unknown"}]}`,
+			valueRoot: true,
+		},
+		{
+			name:      "reduce current field",
+			logic:     `{"reduce":[{"var":"numbers"},{"cat":[{"var":"accumulator"},{"var":"current.unknown"}]},""]}`,
+			valueRoot: true,
+		},
+		{
+			name:  "some predicate field",
+			logic: `{"some":[{"var":"numbers"},{"==":[{"var":"unknown"},"x"]}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			schemaAware, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+			schemaLess, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error: %v", err)
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					assertUnknownScopedFieldRejected(t, schemaAware, tc.logic, tc.valueRoot)
+					assertUnknownScopedFieldAllowedWithoutSchema(t, schemaLess, tc.logic, tc.valueRoot)
+				})
+			}
+		})
+	}
+}
+
+func assertUnknownScopedFieldRejected(t *testing.T, tr *Transpiler, logic string, valueRoot bool) {
+	t.Helper()
+
+	var err error
+	if valueRoot {
+		_, err = tr.TranspileValue(logic)
+	} else {
+		_, err = tr.TranspileCondition(logic)
+	}
+	if err == nil || !strings.Contains(err.Error(), "field 'unknown' is not defined in schema") {
+		t.Fatalf("inline error = %v, want unknown field schema error", err)
+	}
+
+	if valueRoot {
+		_, _, err = tr.TranspileParameterizedValue(logic)
+	} else {
+		_, _, err = tr.TranspileParameterizedCondition(logic)
+	}
+	if err == nil || !strings.Contains(err.Error(), "field 'unknown' is not defined in schema") {
+		t.Fatalf("parameterized error = %v, want unknown field schema error", err)
+	}
+}
+
+func assertUnknownScopedFieldAllowedWithoutSchema(t *testing.T, tr *Transpiler, logic string, valueRoot bool) {
+	t.Helper()
+
+	var err error
+	if valueRoot {
+		_, err = tr.TranspileValue(logic)
+	} else {
+		_, err = tr.TranspileCondition(logic)
+	}
+	if err != nil {
+		t.Fatalf("schema-less inline error = %v, want nil", err)
+	}
+
+	if valueRoot {
+		_, _, err = tr.TranspileParameterizedValue(logic)
+	} else {
+		_, _, err = tr.TranspileParameterizedCondition(logic)
+	}
+	if err != nil {
+		t.Fatalf("schema-less parameterized error = %v, want nil", err)
 	}
 }
 

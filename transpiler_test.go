@@ -217,8 +217,14 @@ func TestTranspiler_NullSafeFieldEquality_ReviewRegressions(t *testing.T) {
 	}
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "items", Type: FieldTypeArray},
-		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
+		{
+			Name: "items",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
+				{Name: "expected_status", Type: FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
+			},
+		},
 	})
 	enumTr, err := NewTranspilerWithConfig(&TranspilerConfig{
 		Dialect:               DialectBigQuery,
@@ -278,8 +284,16 @@ func TestTranspiler_NullSafeFieldEquality_AllDialectsSchemaModesNestedConditions
 		{Name: "d", Type: FieldTypeString},
 		{Name: "e", Type: FieldTypeString},
 		{Name: "f", Type: FieldTypeString},
-		{Name: "items", Type: FieldTypeArray},
-		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
+		{
+			Name: "items",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "left", Type: FieldTypeString},
+				{Name: "right", Type: FieldTypeString},
+				{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
+				{Name: "expected_status", Type: FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
+			},
+		},
 	})
 	modes := []struct {
 		name   string
@@ -335,7 +349,14 @@ func TestTranspiler_NullSafeFieldEquality_CustomOperatorInteraction(t *testing.T
 		{Name: "right", Type: FieldTypeString},
 		{Name: "name", Type: FieldTypeString},
 		{Name: "normalized_name", Type: FieldTypeString},
-		{Name: "items", Type: FieldTypeArray},
+		{
+			Name: "items",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "code", Type: FieldTypeString},
+				{Name: "normalized", Type: FieldTypeString},
+			},
+		},
 	})
 	modes := []struct {
 		name   string

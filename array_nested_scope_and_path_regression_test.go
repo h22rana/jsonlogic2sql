@@ -209,8 +209,13 @@ func TestScopedNestedArrayValuesUseTruthinessInArrayLambdaPredicates_AllDialects
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "records", Type: FieldTypeArray},
-		{Name: "values", Type: FieldTypeArray},
+		{
+			Name: "records",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "values", Type: FieldTypeArray},
+			},
+		},
 	})
 
 	modes := []struct {
@@ -353,11 +358,27 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaModes(t *tes
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "groups", Type: FieldTypeArray},
-		{Name: "values", Type: FieldTypeArray},
-		{Name: "tags", Type: FieldTypeArray},
-		{Name: "score", Type: FieldTypeNumber},
-		{Name: "amount", Type: FieldTypeNumber},
+		{
+			Name: "groups",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{
+					Name: "values",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Name: "amount", Type: FieldTypeNumber},
+						{Name: "score", Type: FieldTypeNumber},
+						{
+							Name: "tags",
+							Type: FieldTypeArray,
+							ElementFields: []FieldSchema{
+								{Name: "score", Type: FieldTypeNumber},
+							},
+						},
+					},
+				},
+			},
+		},
 	})
 
 	modes := []struct {

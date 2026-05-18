@@ -3,6 +3,7 @@ package jsonlogic2sql
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -72,6 +73,166 @@ func TestSchemaFromJSON(t *testing.T) {
 	}
 	if schema.IsNumericType("field2") != true {
 		t.Error("field2 should be numeric type")
+	}
+}
+
+func TestNestedSchemaObjectAndArrayEnumValidation(t *testing.T) {
+	schemaJSON := `[
+		{
+			"name": "profile",
+			"type": "object",
+			"fields": [
+				{"name": "country", "type": "string"},
+				{"name": "status", "type": "enum", "allowedValues": ["active", "blocked"]}
+			]
+		},
+		{
+			"name": "payments",
+			"type": "array",
+			"elementFields": [
+				{"name": "type", "type": "enum", "allowedValues": ["BALANCE", "CARD"]},
+				{"name": "amount", "type": "number"},
+				{
+					"name": "details",
+					"type": "object",
+					"fields": [
+						{"name": "issuer", "type": "string"}
+					]
+				}
+			]
+		}
+	]`
+
+	schema, err := NewSchemaFromJSON([]byte(schemaJSON))
+	if err != nil {
+		t.Fatalf("NewSchemaFromJSON() error = %v", err)
+	}
+
+	for _, fieldName := range []string{
+		"profile",
+		"profile.country",
+		"profile.status",
+		"payments",
+		"payments.type",
+		"payments.amount",
+		"payments.details",
+		"payments.details.issuer",
+	} {
+		if !schema.HasField(fieldName) {
+			t.Fatalf("schema should expose flattened field %q", fieldName)
+		}
+	}
+	if !schema.IsEnumType("profile.status") || !schema.IsEnumType("payments.type") {
+		t.Fatal("nested enum fields should keep enum metadata")
+	}
+	if err := schema.ValidateEnumValue("profile.status", "archived"); err == nil {
+		t.Fatal("profile.status should reject an enum value outside allowedValues")
+	}
+	if got, err := schema.ResolveScopedField("payments", "details.issuer"); err != nil || got != "payments.details.issuer" {
+		t.Fatalf("ResolveScopedField(payments, details.issuer) = %q, %v; want payments.details.issuer, nil", got, err)
+	}
+	if _, err := schema.ResolveScopedField("payments", "unknown"); err == nil {
+		t.Fatal("ResolveScopedField() should reject unknown array element fields")
+	}
+
+	validCases := []struct {
+		name             string
+		logic            string
+		wantInlineSQL    string
+		wantParamSQL     string
+		wantParamLiteral string
+	}{
+		{
+			name:             "object enum field",
+			logic:            `{"==":[{"var":"profile.status"},"active"]}`,
+			wantInlineSQL:    "profile.status = 'active'",
+			wantParamSQL:     "profile.status = ",
+			wantParamLiteral: "active",
+		},
+		{
+			name:             "array element enum field",
+			logic:            `{"some":[{"var":"payments"},{"==":[{"var":"type"},"BALANCE"]}]}`,
+			wantInlineSQL:    "elem.type = 'BALANCE'",
+			wantParamSQL:     "elem.type = ",
+			wantParamLiteral: "BALANCE",
+		},
+		{
+			name:             "object field inside array element",
+			logic:            `{"some":[{"var":"payments"},{"==":[{"var":"details.issuer"},"visa"]}]}`,
+			wantInlineSQL:    "elem.details.issuer = 'visa'",
+			wantParamSQL:     "elem.details.issuer = ",
+			wantParamLiteral: "visa",
+		},
+	}
+
+	invalidCases := []struct {
+		name      string
+		logic     string
+		wantError string
+	}{
+		{
+			name:      "object enum rejects invalid value",
+			logic:     `{"==":[{"var":"profile.status"},"archived"]}`,
+			wantError: "invalid enum value 'archived' for field 'profile.status'",
+		},
+		{
+			name:      "array element enum rejects invalid value",
+			logic:     `{"some":[{"var":"payments"},{"==":[{"var":"type"},"CASH"]}]}`,
+			wantError: "invalid enum value 'CASH' for field 'payments.type'",
+		},
+		{
+			name:      "array element object rejects unknown field",
+			logic:     `{"some":[{"var":"payments"},{"==":[{"var":"details.unknown"},"visa"]}]}`,
+			wantError: "field 'details.unknown' is not defined in schema scope 'payments'",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tc := range validCases {
+				t.Run(tc.name, func(t *testing.T) {
+					sql, err := tr.TranspileCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if !strings.Contains(sql, tc.wantInlineSQL) {
+						t.Fatalf("TranspileCondition() = %q, want to contain %q", sql, tc.wantInlineSQL)
+					}
+
+					paramSQL, params, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if !strings.Contains(paramSQL, tc.wantParamSQL) {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want to contain %q", paramSQL, tc.wantParamSQL)
+					}
+					if len(params) != 1 || params[0].Value != tc.wantParamLiteral {
+						t.Fatalf("params = %#v, want one string param %q", params, tc.wantParamLiteral)
+					}
+				})
+			}
+
+			for _, tc := range invalidCases {
+				t.Run(tc.name, func(t *testing.T) {
+					if _, err := tr.TranspileCondition(tc.logic); err == nil || !strings.Contains(err.Error(), tc.wantError) {
+						t.Fatalf("TranspileCondition() error = %v, want containing %q", err, tc.wantError)
+					}
+					paramSQL, params, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+						t.Fatalf("TranspileParameterizedCondition() error = %v, want containing %q (SQL %q params %#v)",
+							err, tc.wantError, paramSQL, params)
+					}
+				})
+			}
+		})
 	}
 }
 

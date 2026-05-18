@@ -26,9 +26,11 @@ const (
 
 // FieldSchema represents the schema/metadata for a single field.
 type FieldSchema struct {
-	Name          string    `json:"name"`
-	Type          FieldType `json:"type"`
-	AllowedValues []string  `json:"allowedValues,omitempty"` // For enum types: list of valid values
+	Name          string        `json:"name"`
+	Type          FieldType     `json:"type"`
+	AllowedValues []string      `json:"allowedValues,omitempty"` // For enum types: list of valid values
+	Fields        []FieldSchema `json:"fields,omitempty"`        // Nested object fields
+	ElementFields []FieldSchema `json:"elementFields,omitempty"` // Nested fields on array elements
 }
 
 // Schema represents the collection of field schemas.
@@ -53,9 +55,23 @@ func newSchemaUnchecked(fields []FieldSchema) *Schema {
 		fields: make(map[string]FieldSchema),
 	}
 	for _, field := range fields {
-		s.fields[field.Name] = field
+		s.addField("", field)
 	}
 	return s
+}
+
+func (s *Schema) addField(prefix string, field FieldSchema) {
+	fieldName := joinSchemaPath(prefix, field.Name)
+	stored := field
+	stored.Name = fieldName
+	s.fields[fieldName] = stored
+
+	for _, child := range field.Fields {
+		s.addField(fieldName, child)
+	}
+	for _, child := range field.ElementFields {
+		s.addField(fieldName, child)
+	}
 }
 
 // ValidateSchemaFields validates schema field definitions.
@@ -63,15 +79,43 @@ func newSchemaUnchecked(fields []FieldSchema) *Schema {
 // identifier quoting automatically based on the target dialect.
 func ValidateSchemaFields(fields []FieldSchema) error {
 	for _, field := range fields {
-		for _, seg := range strings.Split(field.Name, ".") {
-			if dialect.ContainsQuoteCharacters(seg) {
-				return fmt.Errorf(
-					"schema field %q contains quote characters; "+
-						"use raw identifiers; the transpiler handles quoting automatically", field.Name)
-			}
+		if err := validateSchemaField("", field); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func validateSchemaField(prefix string, field FieldSchema) error {
+	fieldName := joinSchemaPath(prefix, field.Name)
+	for _, seg := range strings.Split(fieldName, ".") {
+		if dialect.ContainsQuoteCharacters(seg) {
+			return fmt.Errorf(
+				"schema field %q contains quote characters; "+
+					"use raw identifiers; the transpiler handles quoting automatically", fieldName)
+		}
+	}
+	for _, child := range field.Fields {
+		if err := validateSchemaField(fieldName, child); err != nil {
+			return err
+		}
+	}
+	for _, child := range field.ElementFields {
+		if err := validateSchemaField(fieldName, child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func joinSchemaPath(prefix, name string) string {
+	if prefix == "" {
+		return name
+	}
+	if name == "" {
+		return prefix
+	}
+	return prefix + "." + name
 }
 
 // NewSchemaFromJSON creates a new schema from a JSON byte slice.
@@ -113,6 +157,32 @@ func (s *Schema) ValidateField(fieldName string) error {
 		return fmt.Errorf("field '%s' is not defined in schema", fieldName)
 	}
 	return nil
+}
+
+// ResolveScopedField resolves a field name relative to an array element or
+// object schema scope. For example, field "type" in scope "payments" resolves
+// to "payments.type" and validates against that nested schema entry.
+func (s *Schema) ResolveScopedField(scopePath, fieldName string) (string, error) {
+	if s == nil {
+		return fieldName, nil
+	}
+	if s.validationErr != nil {
+		return "", s.validationErr
+	}
+	if fieldName == "" {
+		return scopePath, nil
+	}
+	if scopePath == "" {
+		if err := s.ValidateField(fieldName); err != nil {
+			return "", err
+		}
+		return fieldName, nil
+	}
+	scopedName := joinSchemaPath(scopePath, fieldName)
+	if s.HasField(scopedName) {
+		return scopedName, nil
+	}
+	return "", fmt.Errorf("field '%s' is not defined in schema scope '%s'", fieldName, scopePath)
 }
 
 // GetFields returns all field names in the schema.
