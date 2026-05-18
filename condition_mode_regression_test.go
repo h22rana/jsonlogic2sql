@@ -1416,6 +1416,152 @@ func TestTranspileCondition_InRightHandValueExpressionsAllDialects(t *testing.T)
 					if want := tt.wantParam(d); gotParam != want {
 						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
 					}
+					if len(tt.wantParams) == 0 && len(gotParams) == 0 {
+						return
+					}
+					if !reflect.DeepEqual(gotParams, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeNumber},
+		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "name", Type: FieldTypeString},
+	})
+
+	stringContainmentSQL := func(d Dialect, haystack, needle string) string {
+		switch d {
+		case DialectPostgreSQL:
+			return fmt.Sprintf("POSITION(%s IN %s) > 0", needle, haystack)
+		case DialectClickHouse:
+			return fmt.Sprintf("position(%s, %s) > 0", haystack, needle)
+		default:
+			return fmt.Sprintf("STRPOS(%s, %s) > 0", haystack, needle)
+		}
+	}
+	stringCastSQL := func(d Dialect, expr string) string {
+		switch d {
+		case DialectPostgreSQL:
+			return fmt.Sprintf("CAST(%s AS TEXT)", expr)
+		case DialectDuckDB:
+			return fmt.Sprintf("CAST(%s AS VARCHAR)", expr)
+		case DialectClickHouse:
+			return fmt.Sprintf("toString(%s)", expr)
+		default:
+			return fmt.Sprintf("CAST(%s AS STRING)", expr)
+		}
+	}
+	boolStringSQL := func(expr string) string {
+		return fmt.Sprintf("CASE WHEN %s IS TRUE THEN 'true' ELSE 'false' END", expr)
+	}
+
+	tests := []struct {
+		name       string
+		logic      string
+		wantSQL    func(Dialect) string
+		wantParam  func(Dialect) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "schema numeric field needle casts for string containment",
+			logic: `{"in":[{"var":"amount"},"12345"]}`,
+			wantSQL: func(d Dialect) string {
+				return stringContainmentSQL(d, "'12345'", stringCastSQL(d, "amount"))
+			},
+			wantParam: func(d Dialect) string {
+				return stringContainmentSQL(d, testPlaceholder(d, 1), stringCastSQL(d, "amount"))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "12345"}},
+		},
+		{
+			name:  "schema boolean field needle uses jsonlogic string form",
+			logic: `{"in":[{"var":"flag"},"true"]}`,
+			wantSQL: func(d Dialect) string {
+				return stringContainmentSQL(d, "'true'", boolStringSQL("flag"))
+			},
+			wantParam: func(d Dialect) string {
+				return stringContainmentSQL(d, testPlaceholder(d, 1), boolStringSQL("flag"))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "true"}},
+		},
+		{
+			name:  "literal number needle stringifies for typed string expression",
+			logic: `{"in":[3,{"cat":["12345"]}]}`,
+			wantSQL: func(d Dialect) string {
+				return stringContainmentSQL(d, "CONCAT('12345')", "'3'")
+			},
+			wantParam: func(d Dialect) string {
+				return stringContainmentSQL(d, fmt.Sprintf("CONCAT(%s)", testPlaceholder(d, 1)), testPlaceholder(d, 2))
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: "12345"},
+				{Name: "p2", Value: "3"},
+			},
+		},
+		{
+			name:  "empty string needle requires non-empty string field",
+			logic: `{"in":["",{"var":"name"}]}`,
+			wantSQL: func(Dialect) string {
+				return "(name IS NOT NULL AND name != '')"
+			},
+			wantParam: func(Dialect) string {
+				return "(name IS NOT NULL AND name != '')"
+			},
+			wantParams: []QueryParam{},
+		},
+		{
+			name:  "empty array needle stringifies to empty string",
+			logic: `{"in":[[],{"var":"name"}]}`,
+			wantSQL: func(Dialect) string {
+				return "(name IS NOT NULL AND name != '')"
+			},
+			wantParam: func(Dialect) string {
+				return "(name IS NOT NULL AND name != '')"
+			},
+			wantParams: []QueryParam{},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if want := tt.wantSQL(d); got != want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if len(tt.wantParams) == 0 && len(gotParams) == 0 {
+						return
+					}
 					if !reflect.DeepEqual(gotParams, tt.wantParams) {
 						t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
 					}
@@ -1466,6 +1612,51 @@ func TestTranspileCondition_LiteralComparisonsEmitFoldedBooleansAllDialects(t *t
 		{
 			name:  "literal in boolean haystack folds false",
 			logic: `{"in":["true",true]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "literal in string haystack stringifies number",
+			logic: `{"in":[3,"12345"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "literal in string haystack stringifies boolean",
+			logic: `{"in":[true,"true"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "literal in string haystack stringifies null",
+			logic: `{"in":[null,"null"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "literal in empty string haystack is false",
+			logic: `{"in":["",""]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "empty string needle matches non-empty string haystack",
+			logic: `{"in":["","x"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "array literal needle uses javascript string form",
+			logic: `{"in":[[1,2],"x1,2y"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "empty array needle is false against empty string haystack",
+			logic: `{"in":[[],""]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "empty array needle matches non-empty string haystack",
+			logic: `{"in":[[],"abc"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "literal in string haystack keeps mismatched text false",
+			logic: `{"in":[0,"false"]}`,
 			want:  "FALSE",
 		},
 		{

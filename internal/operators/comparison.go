@@ -420,6 +420,17 @@ func hasOverflowedJSONNumberLiteral(values ...interface{}) bool {
 }
 
 func foldLiteralInComparison(leftArg, rightArg interface{}) (bool, bool, error) {
+	if right, ok := rightArg.(string); ok {
+		if right == "" {
+			return false, true, nil
+		}
+		leftString, ok, err := jsonLogicInStringNeedleLiteral(leftArg)
+		if !ok || err != nil {
+			return false, ok, err
+		}
+		return strings.Contains(right, leftString), true, nil
+	}
+
 	left, leftOK := equalityLiteralValue(leftArg)
 	if !leftOK {
 		return false, false, nil
@@ -429,12 +440,6 @@ func foldLiteralInComparison(leftArg, rightArg interface{}) (bool, bool, error) 
 	}
 
 	switch right := rightArg.(type) {
-	case string:
-		leftString, ok := left.(string)
-		if !ok {
-			return false, false, nil
-		}
-		return strings.Contains(right, leftString), true, nil
 	case []interface{}:
 		for _, item := range right {
 			itemLiteral, ok := equalityLiteralValue(item)
@@ -1560,6 +1565,25 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 	// Special handling for 'in' operator - right side should be an array
 	if operator == "in" {
 		leftArg := materializePredicateValueOperand(args[0])
+		if sql, handled, err := c.handleInStringifiableLiteralNeedle(leftArg, args[1]); handled || err != nil {
+			return sql, err
+		}
+		if str, ok := args[1].(string); ok {
+			rightSQL, err := c.dataOp.valueToSQL(str)
+			if err != nil {
+				return "", fmt.Errorf("invalid string in IN operator: %w", err)
+			}
+			if literal, ok, err := jsonLogicInStringNeedleLiteral(leftArg); ok || err != nil {
+				if err != nil {
+					return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+				}
+				needleSQL, err := c.dataOp.valueToSQL(literal)
+				if err != nil {
+					return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+				}
+				return c.stringContainmentSQL(rightSQL, leftArg, needleSQL)
+			}
+		}
 		leftSQL, err := c.valueToSQL(leftArg)
 		if err != nil {
 			return "", fmt.Errorf("invalid left operand: %w", err)
@@ -1946,13 +1970,12 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 					return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 				} else if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 					// Coerce left side literal to string if needed (e.g., 123 → '123')
-					coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
-					coercedLeftSQL, err := c.valueToSQL(coercedLeft)
+					coercedLeftSQL, err := c.stringContainmentNeedleSQL(leftOriginal, leftSQL)
 					if err != nil {
 						return "", fmt.Errorf("invalid left operand after coercion: %w", err)
 					}
 					// String type: use string containment syntax
-					return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+					return c.stringContainmentSQL(rightSQL, leftOriginal, coercedLeftSQL)
 				} else if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
 					return boolSQL(false), nil
 				}
@@ -1963,7 +1986,11 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 			// use containment; otherwise fall back to array membership.
 			if c.isStringLikeInOperandNoSchema(leftOriginal, nil, 0) || isSQLStringLiteral(leftSQL) {
 				// Use STRPOS/position for string containment
-				return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+				needleSQL, err := c.stringContainmentNeedleSQL(leftOriginal, leftSQL)
+				if err != nil {
+					return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+				}
+				return c.stringContainmentSQL(rightSQL, leftOriginal, needleSQL)
 			}
 			// Otherwise, assume array membership
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
@@ -2024,7 +2051,11 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 		if err != nil {
 			return "", fmt.Errorf("invalid string in IN operator: %w", err)
 		}
-		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+		needleSQL, err := c.stringContainmentNeedleSQL(leftOriginal, leftSQL)
+		if err != nil {
+			return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+		}
+		return c.stringContainmentSQL(rightSQL, leftOriginal, needleSQL)
 	}
 
 	if nonContainer, err := nonContainerInHaystackLiteral(rightValue); err != nil {
@@ -2034,6 +2065,87 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 	}
 
 	return "", fmt.Errorf("in operator requires array, variable, or string as second argument")
+}
+
+func (c *ComparisonOperator) handleInStringifiableLiteralNeedle(
+	leftArg interface{},
+	rightValue interface{},
+) (string, bool, error) {
+	literal, ok, err := jsonLogicInStringNeedleLiteral(leftArg)
+	if !ok || err != nil {
+		return "", ok, err
+	}
+
+	needleSQL, err := c.dataOp.valueToSQL(literal)
+	if err != nil {
+		return "", true, fmt.Errorf("invalid left operand for string containment: %w", err)
+	}
+
+	if varExpr, ok := rightValue.(map[string]interface{}); ok {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
+			rightSQL, err := c.dataOp.ToSQL(OpVar, []interface{}{varName})
+			if err != nil {
+				return "", true, fmt.Errorf("invalid variable in IN operator: %w", err)
+			}
+			fieldName := c.extractFieldName(varName)
+			if c.schema() != nil && fieldName != "" {
+				if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
+					sql, err := c.stringContainmentSQL(rightSQL, leftArg, needleSQL)
+					return sql, true, err
+				}
+				if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
+					return boolSQL(false), true, nil
+				}
+			}
+		}
+	}
+
+	if rightField, ok := fieldExpressionOperandSQL(rightValue); ok {
+		return c.handleInStringifiableLiteralNeedleSQLRight(
+			leftArg,
+			needleSQL,
+			rightField.Value,
+			rightField.FieldName,
+			rightField.Type,
+			rightField.HasExpressionInfo,
+		)
+	}
+
+	if rightSQL, rightType, ok := valueExpressionOperandSQL(rightValue); ok {
+		return c.handleInStringifiableLiteralNeedleSQLRight(leftArg, needleSQL, rightSQL, "", rightType, true)
+	}
+
+	return "", false, nil
+}
+
+func (c *ComparisonOperator) handleInStringifiableLiteralNeedleSQLRight(
+	leftArg interface{},
+	needleSQL string,
+	rightSQL string,
+	fieldName string,
+	rightType ExpressionType,
+	hasRightType bool,
+) (string, bool, error) {
+	if c.schema() != nil && fieldName != "" {
+		if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
+			sql, err := c.stringContainmentSQL(rightSQL, leftArg, needleSQL)
+			return sql, true, err
+		}
+		if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
+			return boolSQL(false), true, nil
+		}
+	}
+	if hasRightType {
+		switch rightType {
+		case ExpressionTypeString:
+			sql, err := c.stringContainmentSQL(rightSQL, leftArg, needleSQL)
+			return sql, true, err
+		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+			return boolSQL(false), true, nil
+		case ExpressionTypeArray, ExpressionTypeUnknown:
+		}
+	}
+	return "", false, nil
 }
 
 func (c *ComparisonOperator) handleInSQLRight(
@@ -2049,12 +2161,11 @@ func (c *ComparisonOperator) handleInSQLRight(
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 		}
 		if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
-			coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
-			coercedLeftSQL, err := c.valueToSQL(coercedLeft)
+			coercedLeftSQL, err := c.stringContainmentNeedleSQL(leftOriginal, leftSQL)
 			if err != nil {
 				return "", fmt.Errorf("invalid left operand after coercion: %w", err)
 			}
-			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+			return c.stringContainmentSQL(rightSQL, leftOriginal, coercedLeftSQL)
 		}
 		if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
 			return boolSQL(false), nil
@@ -2064,7 +2175,11 @@ func (c *ComparisonOperator) handleInSQLRight(
 	if hasRightType {
 		switch rightType {
 		case ExpressionTypeString:
-			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+			needleSQL, err := c.stringContainmentNeedleSQL(leftOriginal, leftSQL)
+			if err != nil {
+				return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+			}
+			return c.stringContainmentSQL(rightSQL, leftOriginal, needleSQL)
 		case ExpressionTypeArray:
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
@@ -2074,7 +2189,11 @@ func (c *ComparisonOperator) handleInSQLRight(
 	}
 
 	if c.isStringLikeInOperandNoSchema(leftOriginal, nil, 0) || isSQLStringLiteral(leftSQL) {
-		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+		needleSQL, err := c.stringContainmentNeedleSQL(leftOriginal, leftSQL)
+		if err != nil {
+			return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+		}
+		return c.stringContainmentSQL(rightSQL, leftOriginal, needleSQL)
 	}
 	return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 }
@@ -2484,12 +2603,11 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 					}
 					return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 				} else if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
-					coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
-					coercedLeftSQL, lErr := c.valueToSQLParam(coercedLeft, pc)
+					sql, lErr := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
 					if lErr != nil {
 						return "", fmt.Errorf("invalid left operand after coercion: %w", lErr)
 					}
-					return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+					return sql, nil
 				} else if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
 					return boolSQL(false), nil
 				}
@@ -2500,12 +2618,16 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 			// expressions (cat/substr) while still falling back safely.
 			isLeftString := c.isStringLikeInOperandNoSchema(leftOriginal, pc, 0)
 
+			if isLeftString {
+				sql, lErr := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
+				if lErr != nil {
+					return "", fmt.Errorf("invalid left operand for string containment: %w", lErr)
+				}
+				return sql, nil
+			}
 			leftSQL, err := c.valueToSQLParam(leftOriginal, pc)
 			if err != nil {
 				return "", fmt.Errorf("invalid left operand: %w", err)
-			}
-			if isLeftString {
-				return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
 			}
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 		}
@@ -2513,6 +2635,32 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 
 	if rightField, ok := fieldExpressionOperandSQL(rightValue); ok {
 		return c.handleInSQLRightParam(leftOriginal, rightField.Value, rightField.FieldName, rightField.Type, rightField.HasExpressionInfo, pc)
+	}
+
+	if str, ok := rightValue.(string); ok {
+		rightSQL, err := c.dataOp.valueToSQLParam(str, pc)
+		if err != nil {
+			return "", fmt.Errorf("invalid string in IN operator: %w", err)
+		}
+		sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
+		if err != nil {
+			return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+		}
+		return sql, nil
+	}
+
+	if rightSQL, rightType, ok := valueExpressionOperandSQL(rightValue); ok {
+		switch rightType {
+		case ExpressionTypeString:
+			sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
+			if err != nil {
+				return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+			}
+			return sql, nil
+		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+			return boolSQL(false), nil
+		case ExpressionTypeArray, ExpressionTypeUnknown:
+		}
 	}
 
 	if arr, ok := rightValue.([]interface{}); ok {
@@ -2569,14 +2717,6 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 		return fmt.Sprintf("%s IN (%s)", leftSQL, strings.Join(values, ", ")), nil
 	}
 
-	if str, ok := rightValue.(string); ok {
-		rightSQL, err := c.dataOp.valueToSQLParam(str, pc)
-		if err != nil {
-			return "", fmt.Errorf("invalid string in IN operator: %w", err)
-		}
-		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
-	}
-
 	return "", fmt.Errorf("in operator requires array, variable, or string as second argument")
 }
 
@@ -2590,12 +2730,11 @@ func (c *ComparisonOperator) handleInSQLRightParam(
 ) (string, error) {
 	if c.schema() != nil && fieldName != "" {
 		if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
-			coercedLeft := c.coerceValueForComparison(leftOriginal, fieldName)
-			coercedLeftSQL, err := c.valueToSQLParam(coercedLeft, pc)
+			sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
 			if err != nil {
 				return "", fmt.Errorf("invalid left operand after coercion: %w", err)
 			}
-			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, coercedLeftSQL)), nil
+			return sql, nil
 		}
 		if c.schema().IsNumericType(fieldName) || c.schema().IsBooleanType(fieldName) {
 			return boolSQL(false), nil
@@ -2625,7 +2764,11 @@ func (c *ComparisonOperator) handleInSQLRightParamWithLeftSQL(
 	if hasRightType {
 		switch rightType {
 		case ExpressionTypeString:
-			return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+			needleSQL, err := c.stringContainmentNeedleSQLParam(leftOriginal, leftSQL, pc)
+			if err != nil {
+				return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+			}
+			return c.stringContainmentSQL(rightSQL, leftOriginal, needleSQL)
 		case ExpressionTypeArray:
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
@@ -2635,7 +2778,11 @@ func (c *ComparisonOperator) handleInSQLRightParamWithLeftSQL(
 	}
 
 	if c.isStringLikeInOperandNoSchema(leftOriginal, pc, 0) {
-		return fmt.Sprintf("%s > 0", c.strposFunc(rightSQL, leftSQL)), nil
+		needleSQL, err := c.stringContainmentNeedleSQLParam(leftOriginal, leftSQL, pc)
+		if err != nil {
+			return "", fmt.Errorf("invalid left operand for string containment: %w", err)
+		}
+		return c.stringContainmentSQL(rightSQL, leftOriginal, needleSQL)
 	}
 	return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 }

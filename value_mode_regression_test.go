@@ -3365,6 +3365,51 @@ func TestTranspileValue_LiteralComparisonsEmitFoldedBooleanValuesAllDialects(t *
 			want:  "FALSE",
 		},
 		{
+			name:  "literal in string haystack stringifies number",
+			logic: `{"in":[3,"12345"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "literal in string haystack stringifies boolean",
+			logic: `{"in":[true,"true"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "literal in string haystack stringifies null",
+			logic: `{"in":[null,"null"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "literal in empty string haystack is false",
+			logic: `{"in":["",""]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "empty string needle matches non-empty string haystack",
+			logic: `{"in":["","x"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "array literal needle uses javascript string form",
+			logic: `{"in":[[1,2],"x1,2y"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "empty array needle is false against empty string haystack",
+			logic: `{"in":[[],""]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "empty array needle matches non-empty string haystack",
+			logic: `{"in":[[],"abc"]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "literal in string haystack keeps mismatched text false",
+			logic: `{"in":[0,"false"]}`,
+			want:  "FALSE",
+		},
+		{
 			name:  "literal in array uses strict equality for string number",
 			logic: `{"in":["1",[1]]}`,
 			want:  "FALSE",

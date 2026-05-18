@@ -1053,6 +1053,48 @@ func TestFoldLiteralComparison_ArrayMembershipUsesStrictEquality(t *testing.T) {
 			args: []interface{}{"true", true},
 		},
 		{
+			name: "string haystack stringifies number needle",
+			args: []interface{}{float64(3), "12345"},
+			want: true,
+		},
+		{
+			name: "string haystack stringifies boolean needle",
+			args: []interface{}{true, "true"},
+			want: true,
+		},
+		{
+			name: "string haystack stringifies null needle",
+			args: []interface{}{nil, "null"},
+			want: true,
+		},
+		{
+			name: "empty string haystack is false",
+			args: []interface{}{"", ""},
+		},
+		{
+			name: "empty string needle matches non-empty haystack",
+			args: []interface{}{"", "x"},
+			want: true,
+		},
+		{
+			name: "array needle uses javascript string form",
+			args: []interface{}{[]interface{}{float64(1), float64(2)}, "x1,2y"},
+			want: true,
+		},
+		{
+			name: "empty array needle is false with empty string haystack",
+			args: []interface{}{[]interface{}{}, ""},
+		},
+		{
+			name: "empty array needle matches non-empty string haystack",
+			args: []interface{}{[]interface{}{}, "abc"},
+			want: true,
+		},
+		{
+			name: "string haystack keeps mismatched stringified number false",
+			args: []interface{}{float64(0), "false"},
+		},
+		{
 			name: "null haystack is false",
 			args: []interface{}{"x", nil},
 		},
@@ -3023,6 +3065,8 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		"tags":        "array",
 		"description": "string",
 		"region":      "string",
+		"amount":      "number",
+		"flag":        "boolean",
 	})
 	config := NewOperatorConfig(dialect.DialectBigQuery, schema)
 	op := NewComparisonOperator(config)
@@ -3138,6 +3182,77 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		if pc.Params()[0].Value != "123" {
 			t.Errorf("param value = %v (%T), want string \"123\"", pc.Params()[0].Value, pc.Params()[0].Value)
 		}
+	})
+
+	t.Run("schema numeric field needle casts without unused left param", func(t *testing.T) {
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		got, err := op.handleInParam(map[string]interface{}{"var": "amount"}, "12345", pc)
+		if err != nil {
+			t.Fatalf("handleInParam() error = %v", err)
+		}
+		want := "STRPOS(@p1, CAST(amount AS STRING)) > 0"
+		if got != want {
+			t.Errorf("handleInParam() = %q, want %q", got, want)
+		}
+		assertQueryParams(t, pc.Params(), []params.QueryParam{{Name: "p1", Value: "12345"}})
+	})
+
+	t.Run("schema boolean field needle stringifies without unused left param", func(t *testing.T) {
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		got, err := op.handleInParam(map[string]interface{}{"var": "flag"}, "true", pc)
+		if err != nil {
+			t.Fatalf("handleInParam() error = %v", err)
+		}
+		want := "STRPOS(@p1, CASE WHEN flag IS TRUE THEN 'true' ELSE 'false' END) > 0"
+		if got != want {
+			t.Errorf("handleInParam() = %q, want %q", got, want)
+		}
+		assertQueryParams(t, pc.Params(), []params.QueryParam{{Name: "p1", Value: "true"}})
+	})
+
+	t.Run("literal number needle stringifies for string haystack", func(t *testing.T) {
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		got, err := op.handleInParam(float64(3), "12345", pc)
+		if err != nil {
+			t.Fatalf("handleInParam() error = %v", err)
+		}
+		want := "STRPOS(@p1, @p2) > 0"
+		if got != want {
+			t.Errorf("handleInParam() = %q, want %q", got, want)
+		}
+		assertQueryParams(t, pc.Params(), []params.QueryParam{
+			{Name: "p1", Value: "12345"},
+			{Name: "p2", Value: "3"},
+		})
+	})
+
+	t.Run("empty string needle checks haystack is non-empty without params", func(t *testing.T) {
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		got, err := op.handleInParam("", map[string]interface{}{"var": "description"}, pc)
+		if err != nil {
+			t.Fatalf("handleInParam() error = %v", err)
+		}
+		want := "(description IS NOT NULL AND description != '')"
+		if got != want {
+			t.Errorf("handleInParam() = %q, want %q", got, want)
+		}
+		assertQueryParams(t, pc.Params(), nil)
+	})
+
+	t.Run("array literal needle stringifies for string haystack", func(t *testing.T) {
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		got, err := op.handleInParam([]interface{}{float64(1), float64(2)}, "x1,2y", pc)
+		if err != nil {
+			t.Fatalf("handleInParam() error = %v", err)
+		}
+		want := "STRPOS(@p1, @p2) > 0"
+		if got != want {
+			t.Errorf("handleInParam() = %q, want %q", got, want)
+		}
+		assertQueryParams(t, pc.Params(), []params.QueryParam{
+			{Name: "p1", Value: "x1,2y"},
+			{Name: "p2", Value: "1,2"},
+		})
 	})
 
 	t.Run("ProcessedValue SQL literal treated as string containment", func(t *testing.T) {

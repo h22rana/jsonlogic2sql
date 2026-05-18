@@ -131,6 +131,21 @@ func (c *OperatorConfig) ArrayLiteral(elements []string) (string, error) {
 	return fmt.Sprintf("[%s]", body), nil
 }
 
+// StringCast renders a dialect-specific cast to a SQL string type.
+func (c *OperatorConfig) StringCast(expr string) string {
+	switch c.GetDialect() {
+	case dialect.DialectPostgreSQL:
+		return fmt.Sprintf("CAST(%s AS TEXT)", expr)
+	case dialect.DialectDuckDB:
+		return fmt.Sprintf("CAST(%s AS VARCHAR)", expr)
+	case dialect.DialectClickHouse:
+		return fmt.Sprintf("toString(%s)", expr)
+	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner:
+		return fmt.Sprintf("CAST(%s AS STRING)", expr)
+	}
+	return fmt.Sprintf("CAST(%s AS STRING)", expr)
+}
+
 // SetExpressionParser sets the callback for parsing nested expressions.
 // This should be called by the parser after all operators are created.
 func (c *OperatorConfig) SetExpressionParser(parser ExpressionParser) {

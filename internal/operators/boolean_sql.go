@@ -61,3 +61,19 @@ func BooleanValueNumberSQL(sql string) string {
 	}
 	return fmt.Sprintf("(CASE WHEN %s IS TRUE THEN %s ELSE %s END)", expr, predicateNumberTrue, predicateNumberFalse)
 }
+
+// BooleanValueStringSQL converts a boolean SQL value into a JSONLogic-style
+// string value. IS TRUE keeps NULL aligned with JavaScript's falsy coercion.
+func BooleanValueStringSQL(sql string) string {
+	if value, ok := sqlBooleanConstant(sql); ok {
+		if value {
+			return "'true'"
+		}
+		return "'false'"
+	}
+	expr := StripRedundantOuterParens(sql)
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(expr)), "CASE ") {
+		expr = fmt.Sprintf("(%s)", expr)
+	}
+	return fmt.Sprintf("CASE WHEN %s IS TRUE THEN 'true' ELSE 'false' END", expr)
+}
