@@ -1216,14 +1216,14 @@ func (a *ArrayOperator) valueExpressionResultWithContextAndPath(expr interface{}
 		if err != nil {
 			return OperatorResult{}, err
 		}
-		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
+		return a.localValueExpressionResult(expr, sql), nil
 	}
 	if a.shouldParseScopedArrayExpressionLocally(expr) {
 		sql, err := a.expressionToSQLWithContextAndPath(expr, allowAccumulator, path)
 		if err != nil {
 			return OperatorResult{}, err
 		}
-		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
+		return a.localValueExpressionResult(expr, sql), nil
 	}
 	rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, allowAccumulator, path)
 	if err != nil {
@@ -1234,6 +1234,26 @@ func (a *ArrayOperator) valueExpressionResultWithContextAndPath(expr interface{}
 		return OperatorResult{}, err
 	}
 	return res, nil
+}
+
+func (a *ArrayOperator) localValueExpressionResult(expr interface{}, sql string) OperatorResult {
+	if isPredicateArrayExpression(expr) {
+		return ValueSQL(PredicateValueSQL(sql), ExpressionTypeBoolean)
+	}
+	return ValueSQL(sql, a.inferValueExpressionType(expr))
+}
+
+func isPredicateArrayExpression(expr interface{}) bool {
+	operator, _, ok := arrayOperatorArgs(expr)
+	if !ok {
+		return false
+	}
+	switch operator {
+	case OpAll, OpSome, OpNone:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *ArrayOperator) predicateExpressionToSQLWithContextAndPath(expr interface{}, path string) (string, error) {
@@ -2401,14 +2421,14 @@ func (a *ArrayOperator) valueExpressionResultParamWithContextAndPath(
 		if err != nil {
 			return OperatorResult{}, err
 		}
-		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
+		return a.localValueExpressionResult(expr, sql), nil
 	}
 	if a.shouldParseScopedArrayExpressionLocally(expr) {
 		sql, err := a.expressionToSQLParamWithContextAndPath(expr, pc, allowAccumulator, path)
 		if err != nil {
 			return OperatorResult{}, err
 		}
-		return ValueSQL(sql, a.inferValueExpressionType(expr)), nil
+		return a.localValueExpressionResult(expr, sql), nil
 	}
 	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, allowAccumulator, path)
 	if err != nil {

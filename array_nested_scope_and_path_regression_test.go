@@ -136,6 +136,75 @@ func TestNestedArrayPredicatePreservesOuterScope_AllDialects(t *testing.T) {
 	}
 }
 
+func TestScopedNestedArrayPredicatesAreTwoValuedInValueMode_AllDialects(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "map all",
+			logic: `{"map":[{"var":"groups"},{"all":[{"var":"items"},true]}]}`,
+		},
+		{
+			name:  "map some",
+			logic: `{"map":[{"var":"groups"},{"some":[{"var":"items"},true]}]}`,
+		},
+		{
+			name:  "map none",
+			logic: `{"map":[{"var":"groups"},{"none":[{"var":"items"},true]}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error: %v", err)
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error: %v", err)
+					}
+					assertNestedPredicateValueMaterialized(t, sql)
+
+					paramSQL, params, err := tr.TranspileParameterizedValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error: %v", err)
+					}
+					assertNestedPredicateValueMaterialized(t, paramSQL)
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func assertNestedPredicateValueMaterialized(t *testing.T, sql string) {
+	t.Helper()
+	for _, want := range []string{"CASE WHEN", "elem.items", "THEN TRUE ELSE FALSE END"} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("SQL = %q, want to contain %q", sql, want)
+		}
+	}
+	if strings.Contains(sql, "SELECT (ARRAY_LENGTH(elem.items)") ||
+		strings.Contains(sql, "SELECT (CARDINALITY(elem.items)") ||
+		strings.Contains(sql, "SELECT (length(elem.items)") ||
+		strings.Contains(sql, "elem -> (length(elem.items)") {
+		t.Fatalf("nested predicate was not materialized as a value: %s", sql)
+	}
+}
+
 func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaModes(t *testing.T) {
 	t.Parallel()
 
