@@ -84,6 +84,8 @@ if err != nil {
 Schemas can describe object fields with `fields` and array element fields with
 `elementFields`. The transpiler flattens those definitions internally for type
 validation, while array lambdas still emit SQL relative to the element alias.
+`fields` is valid only on `object` fields, and `elementFields` is valid only on
+`array` fields.
 
 ```json
 [

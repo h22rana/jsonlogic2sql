@@ -95,6 +95,12 @@ func validateSchemaField(prefix string, field FieldSchema) error {
 					"use raw identifiers; the transpiler handles quoting automatically", fieldName)
 		}
 	}
+	if len(field.Fields) > 0 && field.Type != FieldTypeObject {
+		return fmt.Errorf("schema field %q uses fields but has type %q; fields require object type", fieldName, field.Type)
+	}
+	if len(field.ElementFields) > 0 && field.Type != FieldTypeArray {
+		return fmt.Errorf("schema field %q uses elementFields but has type %q; elementFields require array type", fieldName, field.Type)
+	}
 	for _, child := range field.Fields {
 		if err := validateSchemaField(fieldName, child); err != nil {
 			return err

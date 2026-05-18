@@ -236,6 +236,71 @@ func TestNestedSchemaObjectAndArrayEnumValidation(t *testing.T) {
 	}
 }
 
+func TestNestedSchemaShapeValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		fields    []FieldSchema
+		wantError string
+	}{
+		{
+			name: "fields require object type",
+			fields: []FieldSchema{
+				{
+					Name: "payments",
+					Type: FieldTypeArray,
+					Fields: []FieldSchema{
+						{Name: "type", Type: FieldTypeString},
+					},
+				},
+			},
+			wantError: `schema field "payments" uses fields but has type "array"; fields require object type`,
+		},
+		{
+			name: "elementFields require array type",
+			fields: []FieldSchema{
+				{
+					Name: "profile",
+					Type: FieldTypeObject,
+					ElementFields: []FieldSchema{
+						{Name: "status", Type: FieldTypeString},
+					},
+				},
+			},
+			wantError: `schema field "profile" uses elementFields but has type "object"; elementFields require array type`,
+		},
+		{
+			name: "nested child shape is validated",
+			fields: []FieldSchema{
+				{
+					Name: "profile",
+					Type: FieldTypeObject,
+					Fields: []FieldSchema{
+						{
+							Name: "tags",
+							Type: FieldTypeString,
+							ElementFields: []FieldSchema{
+								{Name: "code", Type: FieldTypeString},
+							},
+						},
+					},
+				},
+			},
+			wantError: `schema field "profile.tags" uses elementFields but has type "string"; elementFields require array type`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateSchemaFields(tt.fields); err == nil || err.Error() != tt.wantError {
+				t.Fatalf("ValidateSchemaFields() error = %v, want %q", err, tt.wantError)
+			}
+			if _, err := NewSchema(tt.fields); err == nil || err.Error() != tt.wantError {
+				t.Fatalf("NewSchema() error = %v, want %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestSchemaWithTranspiler(t *testing.T) {
 	// Create schema
 	schema := mustNewSchema([]FieldSchema{
