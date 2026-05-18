@@ -87,7 +87,10 @@ validation, while array lambdas still emit SQL relative to the element alias.
 `fields` is valid only on `object` fields, and `elementFields` is valid only on
 `array` fields. Every field entry, including nested object children and array
 element children, must include a non-empty `name` and one of the supported
-`type` values.
+`type` values. Enum fields must include at least one `allowedValues` entry;
+non-enum fields cannot use `allowedValues`. Object `fields` and array
+`elementFields` are optional so schemas can represent object fields and
+primitive-array fields without exposing named children.
 
 ```json
 [

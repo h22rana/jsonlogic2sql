@@ -340,7 +340,9 @@ type FieldSchema struct {
 `Name` and `Type` are required for every entry, including nested object fields
 and array element fields. Object schemas use `Fields`; array schemas use
 `ElementFields`. `Fields` requires `Type: FieldTypeObject`; `ElementFields`
-requires `Type: FieldTypeArray`. For example:
+requires `Type: FieldTypeArray`. Enum schemas require at least one
+`AllowedValues` entry, and non-enum schemas cannot set `AllowedValues`. For
+example:
 
 ```json
 [

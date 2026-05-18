@@ -303,6 +303,53 @@ func TestNestedSchemaShapeValidation(t *testing.T) {
 			wantError: `schema field "profile.status" has unsupported type "varchar"`,
 		},
 		{
+			name: "enum allowedValues are required",
+			fields: []FieldSchema{
+				{Name: "profile.status", Type: FieldTypeEnum},
+			},
+			wantError: `schema enum field "profile.status" requires at least one allowedValues entry`,
+		},
+		{
+			name: "nested enum allowedValues are required",
+			fields: []FieldSchema{
+				{
+					Name: "profile",
+					Type: FieldTypeObject,
+					Fields: []FieldSchema{
+						{Name: "status", Type: FieldTypeEnum},
+					},
+				},
+			},
+			wantError: `schema enum field "profile.status" requires at least one allowedValues entry`,
+		},
+		{
+			name: "array element enum allowedValues are required",
+			fields: []FieldSchema{
+				{
+					Name: "payments",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Name: "type", Type: FieldTypeEnum},
+					},
+				},
+			},
+			wantError: `schema enum field "payments.type" requires at least one allowedValues entry`,
+		},
+		{
+			name: "primitive allowedValues are rejected",
+			fields: []FieldSchema{
+				{Name: "profile.status", Type: FieldTypeString, AllowedValues: []string{"active"}},
+			},
+			wantError: `schema field "profile.status" uses allowedValues but has type "string"; allowedValues require enum type`,
+		},
+		{
+			name: "array allowedValues are rejected",
+			fields: []FieldSchema{
+				{Name: "tags", Type: FieldTypeArray, AllowedValues: []string{"risk"}},
+			},
+			wantError: `schema field "tags" uses allowedValues but has type "array"; allowedValues require enum type`,
+		},
+		{
 			name: "fields require object type",
 			fields: []FieldSchema{
 				{
@@ -358,6 +405,23 @@ func TestNestedSchemaShapeValidation(t *testing.T) {
 				t.Fatalf("NewSchema() error = %v, want %q", err, tt.wantError)
 			}
 		})
+	}
+}
+
+func TestSchemaObjectAndArrayChildrenAreOptional(t *testing.T) {
+	schema, err := NewSchema([]FieldSchema{
+		{Name: "metadata", Type: FieldTypeObject},
+		{Name: "tags", Type: FieldTypeArray},
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{""}},
+	})
+	if err != nil {
+		t.Fatalf("NewSchema() error = %v", err)
+	}
+	if !schema.HasField("metadata") || !schema.HasField("tags") || !schema.HasField("status") {
+		t.Fatalf("schema fields missing after construction: %#v", schema.GetFields())
+	}
+	if err := schema.ValidateEnumValue("status", ""); err != nil {
+		t.Fatalf("empty string should be allowed when explicitly listed in enum allowedValues: %v", err)
 	}
 }
 

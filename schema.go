@@ -114,6 +114,13 @@ func validateSchemaField(prefix string, field FieldSchema) error {
 	if len(field.ElementFields) > 0 && field.Type != FieldTypeArray {
 		return fmt.Errorf("schema field %q uses elementFields but has type %q; elementFields require array type", fieldName, field.Type)
 	}
+	if field.Type == FieldTypeEnum {
+		if len(field.AllowedValues) == 0 {
+			return fmt.Errorf("schema enum field %q requires at least one allowedValues entry", fieldName)
+		}
+	} else if len(field.AllowedValues) > 0 {
+		return fmt.Errorf("schema field %q uses allowedValues but has type %q; allowedValues require enum type", fieldName, field.Type)
+	}
 	for _, child := range field.Fields {
 		if err := validateSchemaField(fieldName, child); err != nil {
 			return err
