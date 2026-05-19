@@ -155,7 +155,7 @@ type QueryParam struct {
 
 ## Schema Coercion
 
-When a schema is configured, values are coerced **before** being bound as parameters. For example, if a field is declared as `integer` and the JSONLogic contains a string `"50000"`, the bound parameter value will be `int64(50000)`, not the string `"50000"`. Equality comparisons that fold to constants, such as an integer field compared with `"abc"`, do not add placeholder values.
+When a schema is configured, values are coerced **before** being bound as parameters for comparison operators where JSONLogic coercion can be modeled statically. For example, if a field is declared as `integer` and the JSONLogic contains a string `"50000"`, the bound parameter value will be `int64(50000)`, not the string `"50000"`. Equality comparisons that fold to constants, such as an integer field compared with `"abc"`, do not add placeholder values. Literal-array `in` is an exception: it uses strict `indexOf`-style membership, so mismatched literal members are filtered or fold to `FALSE` instead of being coerced.
 
 ```go
 schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
@@ -283,6 +283,7 @@ This typically occurs when a custom operator drops an argument. See [Error Handl
 |-------|---------------------|------------------------------------------|
 | `{"==": [{"var": "email"}, "alice"]}` | `email = 'alice'` | `email = @p1` + `[{p1, "alice"}]` |
 | `{"in": [{"var": "x"}, [1, 2]]}` | `x IN (1, 2)` | `x IN (@p1, @p2)` + `[{p1, 1}, {p2, 2}]` |
+| `{"in": [{"var": "x"}, [null, 1]]}` | `(x IS NULL OR x IN (1))` | `(x IS NULL OR x IN (@p1))` + `[{p1, 1}]` |
 | `{"==": [{"var": "f"}, null]}` | `f IS NULL` | `f IS NULL` (no params) |
 | `{"==": [{"var": "f"}, true]}` | `f = TRUE` | `f = TRUE` (no params) |
 

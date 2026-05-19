@@ -372,9 +372,10 @@ Large integers are preserved without precision loss:
 country IN ('US', 'CA', 'MX')
 ```
 
-### In Array with Type Coercion (Schema)
+### In Array Strict Membership (Schema)
 
-When a schema is provided, array elements are coerced to match the field type:
+JSONLogic array membership follows JavaScript `indexOf`, so literal array
+members are matched strictly and are not coerced to match the left field type:
 
 ```json
 // Schema: sector_code is string type, amount is integer type
@@ -382,8 +383,8 @@ When a schema is provided, array elements are coerced to match the field type:
 {"in": [{"var": "amount"}, ["100", "200", "300"]]}
 ```
 ```sql
-sector_code IN ('5960', '9000')
-amount IN (100, 200, 300)
+FALSE
+FALSE
 ```
 
 ### String Containment

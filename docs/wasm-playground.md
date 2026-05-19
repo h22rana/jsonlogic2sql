@@ -79,9 +79,9 @@ const paramCond = jsonlogic2sql.transpileParameterizedCondition(t.id, '{"==": [{
 const paramValue = jsonlogic2sql.transpileParameterizedValue(t.id, '{"cat": ["Hello, ", {"var": "name"}]}');
 // paramValue = { sql: "CONCAT(@p1, COALESCE(name, ''))", params: '[{"Name":"p1","Value":"Hello, "}]' }
 
-// With schema, type coercion is applied automatically
-const coerced = jsonlogic2sql.transpileCondition(t.id, '{"in": [{"var": "status"}, [5960, 9000]]}');
-// coerced = { sql: "status IN ('5960', '9000')" }
+// With schema, equality literals are coerced automatically
+const coerced = jsonlogic2sql.transpileCondition(t.id, '{"==": [{"var": "status"}, 5960]}');
+// coerced = { sql: "status = '5960'" }
 
 // Field-to-field equality is null-safe by default.
 const nullSafe = jsonlogic2sql.transpileCondition(t.id, '{"==": [{"var": "a"}, {"var": "b"}]}');

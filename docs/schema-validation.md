@@ -207,13 +207,13 @@ _, err = transpiler.TranspileCondition(`{"some": [{"var": "amount"}, {"==": [{"v
 The `in` operator behavior depends on the field type:
 
 ```go
-// Array field: uses dialect-specific array membership syntax
+// Array field: uses null-safe JSONLogic membership
 sql, _ := transpiler.TranspileCondition(`{"in": ["admin", {"var": "tags"}]}`)
 fmt.Println(sql)
-// BigQuery/Spanner: 'admin' IN UNNEST(tags)
-// PostgreSQL:       'admin' = ANY(tags)
-// DuckDB:           list_contains(tags, 'admin')
-// ClickHouse:       has(tags, 'admin')
+// BigQuery/Spanner/PostgreSQL/DuckDB:
+// EXISTS (SELECT 1 FROM UNNEST(tags) AS __j2s_member WHERE ((__j2s_member IS NULL AND 'admin' IS NULL) OR (__j2s_member IS NOT NULL AND 'admin' IS NOT NULL AND __j2s_member = 'admin')))
+// ClickHouse:
+// arrayExists(__j2s_member -> ((__j2s_member IS NULL AND 'admin' IS NULL) OR (__j2s_member IS NOT NULL AND 'admin' IS NOT NULL AND __j2s_member = 'admin')), tags)
 
 // String field: uses STRPOS for containment
 sql, _ = transpiler.TranspileCondition(`{"in": ["hello", {"var": "name"}]}`)
@@ -227,7 +227,7 @@ known from schema metadata, the transpiler uses conservative heuristics to
 infer whether to generate:
 
 - string containment (`STRPOS` / `POSITION` / `position`)
-- array membership (`IN UNNEST` / `= ANY` / `list_contains` / `has`)
+- array membership (`EXISTS ... UNNEST(...)` / ClickHouse `arrayExists`)
 
 Current heuristics treat obvious string-producing left operands as containment, including:
 
@@ -239,21 +239,30 @@ For deterministic behavior across all expression shapes (especially custom opera
 
 ### Type Coercion
 
-When a schema is provided, the transpiler automatically coerces literal values to match the field's type. This prevents type errors in strict-typing databases like BigQuery and Spanner.
+When a schema is provided, the transpiler automatically coerces literal values
+for comparison operators where JSONLogic equality/order semantics can be
+modeled statically. This prevents type errors in strict-typing databases like
+BigQuery and Spanner.
 
 **Number to String** - When a string field is compared with numeric literals, the numbers are coerced to quoted strings:
 
 ```go
 // Schema: category_code is string type
-sql, _ := transpiler.TranspileCondition(`{"in": [{"var": "category_code"}, [5960, 9000]]}`)
+sql, _ := transpiler.TranspileCondition(`{"==": [{"var": "category_code"}, 5960]}`)
 fmt.Println(sql)
-// Output: category_code IN ('5960', '9000')
+// Output: category_code = '5960'
 // If category_code were not declared in the schema, transpilation would fail.
 ```
 
 For equality, this is a canonical string match. For example, `code == 5` emits
 `code = '5'`; it does not also match strings that JavaScript would coerce to the
 same number at runtime, such as `"05"`, `"5.0"`, or `" 5 "`.
+
+Literal array membership is different: JSONLogic uses JavaScript `indexOf`
+semantics, so members are matched strictly and are not coerced to the left field
+type. For a string field, `{"in":[{"var":"code"},[5960,9000]]}` folds to
+`FALSE`, while `{"in":[{"var":"code"},["5960","9000"]]}` emits
+`code IN ('5960', '9000')`.
 
 **String to Number** - When a numeric field is compared with string literals that are valid numbers, the strings are coerced to unquoted numbers:
 
@@ -348,7 +357,7 @@ visible default cannot match. Expression defaults are not folded because their
 runtime value is unknown. The default value itself is emitted as provided by the
 `var` operator; it is not coerced to the schema type before `COALESCE`.
 
-Basic schema coercion applies to comparison operators (`==`, `!=`, `>`, `>=`, `<`, `<=`), the `in` operator with array literals, and string containment checks. Equality and inequality add the JS-aware literal handling described above. Schema coercion also applies to comparisons nested within numeric expressions (e.g., `{"+": [{"==": [{"var": "status"}, 123]}, 0]}` correctly coerces `123` to `'123'` for a string field).
+Basic schema coercion applies to comparison operators (`==`, `!=`, `>`, `>=`, `<`, `<=`) and string containment checks. Literal-array `in` uses strict JSONLogic membership instead of field-type coercion. Equality and inequality add the JS-aware literal handling described above. Schema coercion also applies to comparisons nested within numeric expressions (e.g., `{"+": [{"==": [{"var": "status"}, 123]}, 0]}` correctly coerces `123` to `'123'` for a string field).
 
 **Numeric String Coercion** - In numeric operations (`+`, `-`, `*`, `/`, `%`), string operands are coerced per JSONLogic's JavaScript-like semantics. Valid numeric strings are converted to numbers, whitespace is trimmed, and non-numeric strings are safely quoted:
 

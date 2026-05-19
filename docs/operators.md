@@ -344,25 +344,39 @@ CAST(-5 AS NUMERIC)
 country IN ('US', 'CA', 'MX')
 ```
 
-When the right-hand side is an array-typed field (with schema), `in` uses
-dialect-specific array membership syntax (e.g., BigQuery/Spanner use
-`value IN UNNEST(array)`; PostgreSQL uses `value = ANY(array)`).
+When the right-hand side is an array-typed field (with schema), `in` emits
+null-safe element membership SQL so JSONLogic `null in [null]` stays true.
+BigQuery, Spanner, PostgreSQL, and DuckDB use an `EXISTS ... UNNEST(...)`
+predicate; ClickHouse uses `arrayExists(...)`.
 
 When the right-hand side is a known non-container value such as a number,
 boolean, null, or an empty array literal, `in` folds to `FALSE` because
 JSONLogic membership only applies to strings and arrays.
 
-When a schema is provided, array elements are automatically coerced to match the field type. For example, numeric values in the array are quoted as strings when the field is a string type:
+Literal array membership follows JavaScript `indexOf` semantics, so element
+matching is strict. Unlike equality comparisons, literal array members are not
+coerced to the left field's schema type:
 
 ```json
 // Schema: merchant_code is string type
 {"in": [{"var": "merchant_code"}, [5960, 9000]]}
 ```
 ```sql
-merchant_code IN ('5960', '9000')
+FALSE
 ```
 
-See [Type Coercion](schema-validation.md#type-coercion) for details.
+If a literal array contains both type-compatible values and mismatched values,
+the impossible members are ignored. `null` is handled explicitly:
+
+```json
+{"in": [{"var": "status"}, [null, "active"]]}
+```
+```sql
+(status IS NULL OR status IN ('active'))
+```
+
+See [Type Coercion](schema-validation.md#type-coercion) for the comparison
+operators that do apply schema-aware literal coercion.
 
 ### Map Array
 
