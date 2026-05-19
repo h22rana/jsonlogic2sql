@@ -7,7 +7,7 @@ Complete API documentation for jsonlogic2sql.
 ### TranspileCondition
 
 ```go
-func TranspileCondition(dialect Dialect, jsonLogic string) (string, error)
+func TranspileCondition(dialect Dialect, schema *Schema, jsonLogic string) (string, error)
 ```
 
 Converts a JSON Logic string to a SQL predicate expression without the `WHERE` keyword. Callers add `WHERE` themselves when building full queries.
@@ -15,7 +15,7 @@ Converts a JSON Logic string to a SQL predicate expression without the `WHERE` k
 ### TranspileConditionFromMap
 
 ```go
-func TranspileConditionFromMap(dialect Dialect, logic map[string]interface{}) (string, error)
+func TranspileConditionFromMap(dialect Dialect, schema *Schema, logic map[string]interface{}) (string, error)
 ```
 
 Converts a pre-parsed JSON Logic map to a SQL condition without WHERE.
@@ -23,7 +23,7 @@ Converts a pre-parsed JSON Logic map to a SQL condition without WHERE.
 ### TranspileConditionFromInterface
 
 ```go
-func TranspileConditionFromInterface(dialect Dialect, logic interface{}) (string, error)
+func TranspileConditionFromInterface(dialect Dialect, schema *Schema, logic interface{}) (string, error)
 ```
 
 Converts any JSON Logic interface{} to a SQL condition without WHERE.
@@ -31,7 +31,7 @@ Converts any JSON Logic interface{} to a SQL condition without WHERE.
 ### TranspileValue
 
 ```go
-func TranspileValue(dialect Dialect, jsonLogic string) (string, error)
+func TranspileValue(dialect Dialect, schema *Schema, jsonLogic string) (string, error)
 ```
 
 Converts a JSON Logic string to a SQL value expression. Use this for value-producing JSONLogic such as arithmetic, string expressions, `map`, `reduce`, or value-returning `and`/`or`.
@@ -39,7 +39,7 @@ Converts a JSON Logic string to a SQL value expression. Use this for value-produ
 ### TranspileValueFromMap
 
 ```go
-func TranspileValueFromMap(dialect Dialect, logic map[string]interface{}) (string, error)
+func TranspileValueFromMap(dialect Dialect, schema *Schema, logic map[string]interface{}) (string, error)
 ```
 
 Converts a pre-parsed JSON Logic map to a SQL value expression.
@@ -47,7 +47,7 @@ Converts a pre-parsed JSON Logic map to a SQL value expression.
 ### TranspileValueFromInterface
 
 ```go
-func TranspileValueFromInterface(dialect Dialect, logic interface{}) (string, error)
+func TranspileValueFromInterface(dialect Dialect, schema *Schema, logic interface{}) (string, error)
 ```
 
 Converts any JSON Logic interface{} to a SQL value expression.
@@ -55,7 +55,7 @@ Converts any JSON Logic interface{} to a SQL value expression.
 ### TranspileParameterizedCondition
 
 ```go
-func TranspileParameterizedCondition(dialect Dialect, jsonLogic string) (string, []QueryParam, error)
+func TranspileParameterizedCondition(dialect Dialect, schema *Schema, jsonLogic string) (string, []QueryParam, error)
 ```
 
 Converts a JSON Logic string to a SQL condition (without WHERE) with bind parameter placeholders.
@@ -63,7 +63,7 @@ Converts a JSON Logic string to a SQL condition (without WHERE) with bind parame
 ### TranspileParameterizedConditionFromMap
 
 ```go
-func TranspileParameterizedConditionFromMap(dialect Dialect, logic map[string]interface{}) (string, []QueryParam, error)
+func TranspileParameterizedConditionFromMap(dialect Dialect, schema *Schema, logic map[string]interface{}) (string, []QueryParam, error)
 ```
 
 Converts a pre-parsed JSON Logic map to a SQL condition (without WHERE) with bind parameter placeholders.
@@ -71,7 +71,7 @@ Converts a pre-parsed JSON Logic map to a SQL condition (without WHERE) with bin
 ### TranspileParameterizedConditionFromInterface
 
 ```go
-func TranspileParameterizedConditionFromInterface(dialect Dialect, logic interface{}) (string, []QueryParam, error)
+func TranspileParameterizedConditionFromInterface(dialect Dialect, schema *Schema, logic interface{}) (string, []QueryParam, error)
 ```
 
 Converts any JSON Logic interface{} to a SQL condition (without WHERE) with bind parameter placeholders.
@@ -79,7 +79,7 @@ Converts any JSON Logic interface{} to a SQL condition (without WHERE) with bind
 ### TranspileParameterizedValue
 
 ```go
-func TranspileParameterizedValue(dialect Dialect, jsonLogic string) (string, []QueryParam, error)
+func TranspileParameterizedValue(dialect Dialect, schema *Schema, jsonLogic string) (string, []QueryParam, error)
 ```
 
 Converts a JSON Logic string to a SQL value expression with bind parameter placeholders.
@@ -87,7 +87,7 @@ Converts a JSON Logic string to a SQL value expression with bind parameter place
 ### TranspileParameterizedValueFromMap
 
 ```go
-func TranspileParameterizedValueFromMap(dialect Dialect, logic map[string]interface{}) (string, []QueryParam, error)
+func TranspileParameterizedValueFromMap(dialect Dialect, schema *Schema, logic map[string]interface{}) (string, []QueryParam, error)
 ```
 
 Converts a pre-parsed JSON Logic map to a parameterized SQL value expression.
@@ -95,7 +95,7 @@ Converts a pre-parsed JSON Logic map to a parameterized SQL value expression.
 ### TranspileParameterizedValueFromInterface
 
 ```go
-func TranspileParameterizedValueFromInterface(dialect Dialect, logic interface{}) (string, []QueryParam, error)
+func TranspileParameterizedValueFromInterface(dialect Dialect, schema *Schema, logic interface{}) (string, []QueryParam, error)
 ```
 
 Converts any JSON Logic interface{} to a parameterized SQL value expression.
@@ -103,10 +103,10 @@ Converts any JSON Logic interface{} to a parameterized SQL value expression.
 ### NewTranspiler
 
 ```go
-func NewTranspiler(dialect Dialect) (*Transpiler, error)
+func NewTranspiler(dialect Dialect, schema *Schema) (*Transpiler, error)
 ```
 
-Creates a new transpiler instance with the specified dialect.
+Creates a new transpiler instance with the specified dialect and required schema. Use `NewSchema(nil)` only for literal-only expressions.
 
 ### NewTranspilerWithConfig
 
@@ -147,7 +147,7 @@ Main transpiler instance.
 | `TranspileParameterizedValueFromMap(logic map[string]interface{}) (string, []QueryParam, error)` | Convert map to parameterized SQL value expression |
 | `TranspileParameterizedValueFromInterface(logic interface{}) (string, []QueryParam, error)` | Convert interface to parameterized SQL value expression |
 | `GetDialect() Dialect` | Get the configured dialect |
-| `SetSchema(schema *Schema)` | Set schema for field validation |
+| `SetSchema(schema *Schema) error` | Replace the required schema for field validation |
 | `SetNullSafeFieldEquality(enabled bool)` | Enable or disable null-safe field-to-field equality |
 | `RegisterOperator(name string, handler OperatorHandler) error` | Register custom operator with handler |
 | `RegisterOperatorFunc(name string, fn OperatorFunc) error` | Register custom operator with function |
@@ -172,10 +172,13 @@ Configuration options for the transpiler.
 ```go
 type TranspilerConfig struct {
     Dialect               Dialect // Required: target SQL dialect
-    Schema                *Schema // Optional: schema for field validation
+    Schema                *Schema // Required: schema for field validation
     NullSafeFieldEquality bool    // Optional: null-safe field-to-field equality
 }
 ```
+
+Use an empty schema only for literal-only expressions. Any `var` field access
+must be declared in the schema.
 
 `NullSafeFieldEquality` defaults to `false`. When enabled, `==`, `===`, `!=`,
 and `!==` comparisons between two `var` operands use portable SQL that also

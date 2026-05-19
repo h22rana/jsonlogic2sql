@@ -17,9 +17,10 @@ On startup, the REPL prompts for:
 
 1. SQL dialect
 2. expression mode (`condition` by default, or `value`)
-3. optional schema path
+3. schema path, or empty schema for literal-only expressions
 
-Leave the schema path empty to skip schema validation.
+Leave the schema path empty only for literal-only expressions. Field access
+requires a schema.
 
 ## Basic Usage
 
@@ -61,14 +62,14 @@ Select dialect:
 5. ClickHouse
 Enter choice (1-5): 3
 
-[PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
+[PostgreSQL] jsonlogic> {"merge": [1, [2]]}
 Error: [E008] at $.merge (operator: merge): expected predicate expression, got value expression
 
 [PostgreSQL] jsonlogic> :value
 Expression mode: value
 
-[PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
-SQL: (a || b)
+[PostgreSQL] jsonlogic> {"merge": [1, [2]]}
+SQL: (ARRAY[1] || ARRAY[2])
 ```
 
 The prompt shows the current dialect in brackets.

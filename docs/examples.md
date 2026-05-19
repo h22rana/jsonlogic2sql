@@ -157,10 +157,8 @@ NOT (TRUE)
 {"!!": [{"var": "value"}]}
 ```
 ```sql
--- Without schema:
--- error: field truthiness requires schema/type information
-
--- With schema (type-appropriate SQL)
+-- With value typed as number:
+(value IS NOT NULL AND value != 0)
 ```
 
 ### Double Negation (Empty Array)
@@ -587,6 +585,7 @@ All predicate examples above can be generated with bind parameter placeholders i
 ```go
 sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectBigQuery,
+    schema,
     `{"==": [{"var": "status"}, "active"]}`,
 )
 // sql    = "status = @p1"
@@ -598,6 +597,7 @@ sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
 ```go
 sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectBigQuery,
+    schema,
     `{"in": [{"var": "country"}, ["US", "CA", "MX"]]}`,
 )
 // sql    = "country IN (@p1, @p2, @p3)"
@@ -609,6 +609,7 @@ sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
 ```go
 sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectPostgreSQL,
+    schema,
     `{"and": [{">": [{"var": "amount"}, 10000]}, {"==": [{"var": "status"}, "pending"]}]}`,
 )
 // sql    = "(amount > $1 AND status = $2)"
@@ -620,6 +621,7 @@ sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
 ```go
 condition, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectBigQuery,
+    schema,
     `{">": [{"var": "amount"}, 1000]}`,
 )
 // condition = "amount > @p1"

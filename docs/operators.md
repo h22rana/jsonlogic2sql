@@ -36,7 +36,7 @@ COALESCE(status, 'pending')
 ```
 
 With a schema, equality and inequality comparisons against `[field, default]`
-vars preserve the `COALESCE` expression while applying schema-aware coercion to
+vars preserve the `COALESCE` expression while applying schema-required coercion to
 the comparison literal. The default value is emitted as provided; visible enum
 defaults are validated when enum values are configured.
 
@@ -208,7 +208,7 @@ NOT (isDeleted IS TRUE)
 Without schema, field truthiness is rejected because the transpiler cannot know
 whether `value` should be treated as a string, number, boolean, or array. With
 schema, the `!!` operator generates type-appropriate SQL. See
-[Schema-Aware Truthiness](schema-validation.md#schema-aware-truthiness) for
+[Schema-Aware Truthiness](schema-validation.md#schema-required-truthiness) for
 details.
 
 ### Logical AND
@@ -338,7 +338,7 @@ CAST(-5 AS NUMERIC)
 | `in` | Check if value is in array |
 | `map`, `filter`, `reduce` | Array transformations |
 | `all`, `some`, `none` | Array condition checks |
-| `merge` | Merge arrays |
+| `merge` | Merge arrays, casting scalar arguments to single-element arrays |
 
 ### In Array
 
@@ -457,6 +457,19 @@ NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
 ```sql
 ARRAY_CONCAT(array1, array2)
 ```
+
+JSONLogic `merge` casts non-array arguments to arrays. The transpiler follows
+that behavior when the scalar element type is statically known:
+
+```json
+{"merge": [1, [2]]}
+```
+```sql
+ARRAY_CONCAT([1], [2])
+```
+
+Unknown-typed or incompatible scalar element types return an explicit error
+instead of generating dialect-specific invalid array SQL.
 
 ## String Operations
 

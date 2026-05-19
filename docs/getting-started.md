@@ -25,8 +25,14 @@ import (
 )
 
 func main() {
-    // Simple usage with dialect (required)
-    sql, err := jsonlogic2sql.TranspileCondition(jsonlogic2sql.DialectBigQuery, `{">": [{"var": "amount"}, 1000]}`)
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    })
+    if err != nil {
+        panic(err)
+    }
+
+    sql, err := jsonlogic2sql.TranspileCondition(jsonlogic2sql.DialectBigQuery, schema, `{">": [{"var": "amount"}, 1000]}`)
     if err != nil {
         panic(err)
     }
@@ -45,8 +51,18 @@ import (
 )
 
 func main() {
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+        {Name: "failedAttempts", Type: jsonlogic2sql.FieldTypeNumber},
+        {Name: "country", Type: jsonlogic2sql.FieldTypeString},
+    })
+    if err != nil {
+        panic(err)
+    }
+
     // Create a transpiler instance
-    transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
     if err != nil {
         panic(err)
     }
@@ -82,6 +98,7 @@ keyword. Use it for filters and join predicates:
 // Returns just the condition without "WHERE"
 condition, err := jsonlogic2sql.TranspileCondition(
     jsonlogic2sql.DialectBigQuery,
+    schema,
     `{">": [{"var": "amount"}, 1000]}`,
 )
 // condition = "amount > 1000"
@@ -95,6 +112,7 @@ Use `TranspileValue` when the JSONLogic root produces a scalar or array value:
 ```go
 value, err := jsonlogic2sql.TranspileValue(
     jsonlogic2sql.DialectBigQuery,
+    schema,
     `{"or": [false, "fallback"]}`,
 )
 // value = "'fallback'"
@@ -113,14 +131,16 @@ The library supports multiple SQL dialects. You must specify a dialect when crea
 | ClickHouse | `DialectClickHouse` | ClickHouse SQL |
 
 ```go
+schema, _ := jsonlogic2sql.NewSchema(nil) // literal-only expressions
+
 // BigQuery
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // PostgreSQL
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL, schema)
 
 // ClickHouse
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectClickHouse)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectClickHouse, schema)
 ```
 
 ### Parameterized Queries
@@ -136,7 +156,11 @@ import (
 )
 
 func main() {
-    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    schema, _ := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    })
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
     sql, params, err := transpiler.TranspileParameterizedCondition(
         `{"==": [{"var": "status"}, "active"]}`,
@@ -150,6 +174,7 @@ func main() {
     // Or use the convenience function
     sql, params, err = jsonlogic2sql.TranspileParameterizedCondition(
         jsonlogic2sql.DialectPostgreSQL,
+        schema,
         `{">": [{"var": "amount"}, 1000]}`,
     )
     fmt.Println(sql)    // Output: amount > $1

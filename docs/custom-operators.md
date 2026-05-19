@@ -32,6 +32,17 @@ Custom operators must use this typed contract. Legacy handlers that return only
 a SQL string are no longer accepted because the transpiler cannot infer whether
 the SQL is a predicate or a value expression safely.
 
+The examples below assume a schema variable such as:
+
+```go
+schema, _ := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "name", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+})
+```
+
 ```go
 package main
 
@@ -41,7 +52,10 @@ import (
 )
 
 func main() {
-    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    schema, _ := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+    })
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
     // Register a custom "length" operator
     err := transpiler.RegisterOperatorFunc("length", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
@@ -90,7 +104,7 @@ func (u *UpperOperator) ToSQL(operator string, args []jsonlogic2sql.OperatorArg)
 }
 
 func main() {
-    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
     // Register the handler
     err := transpiler.RegisterOperator("upper", &UpperOperator{})
@@ -108,7 +122,7 @@ func main() {
 Register and use multiple custom operators together:
 
 ```go
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 transpiler.RegisterOperatorFunc("length", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
     return jsonlogic2sql.ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), jsonlogic2sql.ExpressionTypeNumber), nil
@@ -126,7 +140,7 @@ sql, _ := transpiler.TranspileCondition(`{"and": [{">": [{"length": [{"var": "na
 ## Managing Custom Operators
 
 ```go
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Check if an operator is registered
 if transpiler.HasCustomOperator("length") {
@@ -155,7 +169,7 @@ operators receive dialect-correct SQL column references. For example,
 `fixture.history."24h".events.total` for PostgreSQL/DuckDB.
 
 ```go
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // safeDivide: Division that returns NULL on division by zero
 transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
@@ -220,7 +234,7 @@ func (s *SafeDivideOperator) ToSQLWithDialect(op string, args []jsonlogic2sql.Op
     }
 }
 
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 transpiler.RegisterDialectAwareOperator("safeDivide", &SafeDivideOperator{})
 ```
 
@@ -229,7 +243,7 @@ transpiler.RegisterDialectAwareOperator("safeDivide", &SafeDivideOperator{})
 Custom operators work seamlessly when nested inside any built-in operator:
 
 ```go
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Register custom operators
 transpiler.RegisterOperatorFunc("toLower", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {

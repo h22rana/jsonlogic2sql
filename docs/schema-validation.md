@@ -1,6 +1,6 @@
 # Schema Validation
 
-You can optionally provide a schema to enforce strict field validation. When a schema is set, the transpiler will only accept fields defined in the schema and will return errors for undefined fields.
+You must provide a schema to enforce strict field validation. The transpiler only accepts fields defined in the schema and returns errors for undefined fields. Use `NewSchema(nil)` only for literal-only JSONLogic that does not access fields.
 
 ## Defining a Schema
 
@@ -24,8 +24,7 @@ func main() {
         panic(err)
     }
 
-    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
-    transpiler.SetSchema(schema)
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
     // Valid field - works
     sql, err := transpiler.TranspileCondition(`{"==": [{"var": "order.status"}, "active"]}`)
@@ -140,7 +139,7 @@ Those entries define these schema paths: `profile.country`,
 
 In a lambda, `{"var":"type"}` resolves against the current array element and
 is validated as `payment_methods.type`, then emitted as `elem.type`.
-Unknown scoped fields are rejected in schema-aware mode.
+Unknown scoped fields are rejected in schema-required mode.
 
 ## Supported Field Types
 
@@ -179,8 +178,7 @@ if err != nil {
     panic(err)
 }
 
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
-transpiler.SetSchema(schema)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Valid: numeric operation on integer field
 sql, _ := transpiler.TranspileValue(`{"+": [{"var": "amount"}, 10]}`)
@@ -230,7 +228,7 @@ Current heuristics treat obvious string-producing left operands as containment, 
 - string SQL literals
 - string expressions rooted at `cat` or `substr`
 
-For deterministic behavior across all expression shapes (especially custom operators), use schema-aware mode.
+For deterministic behavior across all expression shapes (especially custom operators), use schema-required mode.
 
 ### Type Coercion
 
@@ -319,7 +317,7 @@ fmt.Println(sql)
 // Output: code = 'Infinity'
 ```
 
-**Defaulted Variables** - Equality and inequality apply the same schema-aware
+**Defaulted Variables** - Equality and inequality apply the same schema-required
 literal coercion to `[field, default]` vars while preserving the `COALESCE`
 expression emitted by the `var` operator:
 
@@ -385,8 +383,7 @@ if err != nil {
     panic(err)
 }
 
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
-transpiler.SetSchema(schema)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Valid enum value - works
 sql, err := transpiler.TranspileCondition(`{"==": [{"var": "status"}, "active"]}`)

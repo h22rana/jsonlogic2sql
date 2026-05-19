@@ -8,10 +8,10 @@ A Go library that converts JSON Logic expressions into SQL predicate and value e
 - **SQL Dialect Support**: Target BigQuery, Spanner, PostgreSQL, DuckDB, or ClickHouse
 - **Parameterized Queries**: Generate SQL with bind placeholders (`@p1`, `$1`) and separate parameter values for safe execution
 - **Custom Operators**: Extensible registry pattern for custom SQL functions
-- **Schema Validation**: Optional field schema for strict column validation, including nested object fields and array element fields
+- **Schema Validation**: Required field schema for strict column validation, including nested object fields and array element fields
 - **Identifier Quoting**: Path segments such as `24h` and `7d` are quoted per dialect
 - **Structured Errors**: Error codes and JSONPath locations for debugging
-- **Regression Matrices**: Cross-dialect schema-aware/schema-less matrix tests for nested built-in and custom operator flows
+- **Regression Matrices**: Cross-dialect matrix tests for nested built-in and custom operator flows
 - **Array Scope Safety**: Array lambdas use JSONLogic element-relative vars while nested operators keep aliases distinct in generated SQL
 - **Library & CLI**: Both programmatic API and interactive REPL
 
@@ -32,8 +32,16 @@ import (
 )
 
 func main() {
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    })
+    if err != nil {
+        panic(err)
+    }
+
     sql, err := jsonlogic2sql.TranspileCondition(
         jsonlogic2sql.DialectBigQuery,
+        schema,
         `{">": [{"var": "amount"}, 1000]}`,
     )
     if err != nil {
@@ -48,6 +56,7 @@ Use `TranspileValue` for value-producing expressions such as arithmetic, string 
 ```go
 sql, err := jsonlogic2sql.TranspileValue(
     jsonlogic2sql.DialectBigQuery,
+    schema,
     `{"or": [false, "fallback"]}`,
 )
 fmt.Println(sql) // Output: 'fallback'
@@ -64,8 +73,17 @@ import (
 )
 
 func main() {
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    })
+    if err != nil {
+        panic(err)
+    }
+
     sql, params, err := jsonlogic2sql.TranspileParameterizedCondition(
         jsonlogic2sql.DialectBigQuery,
+        schema,
         `{"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}`,
     )
     if err != nil {
@@ -124,9 +142,9 @@ func main() {
 
 > **Condition vs Value APIs:** `TranspileCondition` returns SQL predicates that callers can put after `WHERE`. `TranspileValue` returns SQL value expressions. Value-producing JSONLogic such as `{"or":[false,"fallback"]}` is valid in value mode, but is rejected in condition mode instead of generating non-portable SQL like `FALSE OR 'fallback'`.
 
-> **Truthiness Requires Types for Fields:** JSONLogic truthiness for fields depends on the field type. In schema-less mode, dynamic field truthiness such as `{"or":[{"var":"nickname"},"unknown"]}` or `{"!!":{"var":"nickname"}}` returns `ErrInvalidExpressionContext` instead of emitting mixed-type SQL comparisons. Provide a schema for type-aware truthiness SQL.
+> **Schema Is Required:** Field-accessing JSONLogic must be transpiled with a schema. Use `NewSchema(nil)` only for literal-only expressions; an empty schema rejects `var` field access.
 
-> **`in` Operator Inference:** Without a schema, `in` uses heuristics to infer string containment vs array membership. For deterministic behavior (especially with complex expressions), prefer schema-aware mode.
+> **`in` Operator Inference:** The schema determines whether `in` means string containment or array membership for field operands. Declare field types for deterministic behavior, especially with complex expressions.
 
 ## Interactive REPL
 
@@ -151,8 +169,8 @@ Expression mode: value
 [BigQuery] jsonlogic> :dialect
 Select dialect: PostgreSQL
 
-[PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
-SQL: (a || b)
+[PostgreSQL] jsonlogic> {"merge": [1, [2]]}
+SQL: (ARRAY[1] || ARRAY[2])
 ```
 
 ## Development

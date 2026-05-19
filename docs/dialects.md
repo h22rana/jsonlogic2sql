@@ -15,11 +15,13 @@ jsonlogic2sql supports multiple SQL dialects, generating appropriate syntax for 
 ## Usage
 
 ```go
+schema, _ := jsonlogic2sql.NewSchema(nil) // literal-only expressions
+
 // Create transpiler with specific dialect
-transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Or use convenience functions
-sql, err := jsonlogic2sql.TranspileCondition(jsonlogic2sql.DialectPostgreSQL, jsonLogic)
+sql, err := jsonlogic2sql.TranspileCondition(jsonlogic2sql.DialectPostgreSQL, schema, jsonLogic)
 ```
 
 ## Operator Compatibility by Dialect
@@ -55,7 +57,7 @@ Some operators generate different SQL based on the target dialect:
 
 | Operator | BigQuery | Spanner | PostgreSQL | DuckDB | ClickHouse |
 |----------|----------|---------|------------|--------|------------|
-| `merge` (arrays) | `ARRAY_CONCAT(a, b)` | `ARRAY_CONCAT(a, b)` | `(a \|\| b)` | `ARRAY_CONCAT(a, b)` | `arrayConcat(a, b)` |
+| `merge` (arrays/scalars) | `ARRAY_CONCAT(a, [x])` | `ARRAY_CONCAT(a, [x])` | `(a \|\| ARRAY[x])` | `ARRAY_CONCAT(a, [x])` | `arrayConcat(a, [x])` |
 | `map` (arrays) | `ARRAY(SELECT ... UNNEST)` | `ARRAY(SELECT ... UNNEST)` | `ARRAY(SELECT ... UNNEST)` | `ARRAY(SELECT ... UNNEST)` | `arrayMap(x -> ..., arr)` |
 | `filter` (arrays) | `ARRAY(SELECT ... WHERE)` | `ARRAY(SELECT ... WHERE)` | `ARRAY(SELECT ... WHERE)` | `ARRAY(SELECT ... WHERE)` | `arrayFilter(x -> ..., arr)` |
 | `substr` | `SUBSTR(s, i, n)` | `SUBSTR(s, i, n)` | `SUBSTR(s, i, n)` | `SUBSTR(s, i, n)` | `substring(s, i, n)` |

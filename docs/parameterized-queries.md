@@ -5,7 +5,12 @@ jsonlogic2sql can generate SQL with bind parameter placeholders instead of inlin
 ## Quick Example
 
 ```go
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+schema, _ := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+})
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 sql, params, err := transpiler.TranspileParameterizedCondition(
     `{"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}`,
@@ -20,7 +25,7 @@ For value-producing expressions, use `TranspileParameterizedValue`:
 sql, params, err := transpiler.TranspileParameterizedValue(
     `{"cat": ["Order ", {"var": "status"}]}`,
 )
-// sql    = "CONCAT(@p1, COALESCE(CAST(status AS STRING), ''))"
+// sql    = "CONCAT(@p1, COALESCE(status, ''))"
 // params = [{Name: "p1", Value: "Order "}]
 ```
 
@@ -41,6 +46,7 @@ The placeholder style is determined by the dialect:
 ```go
 sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectBigQuery,
+    schema,
     `{"==": [{"var": "email"}, "alice@example.com"]}`,
 )
 // sql    = "email = @p1"
@@ -52,6 +58,7 @@ sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
 ```go
 sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
     jsonlogic2sql.DialectPostgreSQL,
+    schema,
     `{"==": [{"var": "email"}, "alice@example.com"]}`,
 )
 // sql    = "email = $1"
@@ -111,11 +118,11 @@ All methods return `(string, []QueryParam, error)`.
 
 ### Package-Level Convenience Functions
 
-Each Transpiler method has a corresponding package-level function that takes a `Dialect` as the first argument:
+Each Transpiler method has a corresponding package-level function that takes a `Dialect` and required `*Schema` as the first arguments:
 
 ```go
-condition, params, err := jsonlogic2sql.TranspileParameterizedCondition(dialect, jsonLogic)
-value, params, err := jsonlogic2sql.TranspileParameterizedValue(dialect, jsonLogic)
+condition, params, err := jsonlogic2sql.TranspileParameterizedCondition(dialect, schema, jsonLogic)
+value, params, err := jsonlogic2sql.TranspileParameterizedValue(dialect, schema, jsonLogic)
 // ... plus FromMap and FromInterface variants for each mode
 ```
 
@@ -167,7 +174,7 @@ sql, params, _ := transpiler.TranspileParameterizedCondition(
 // params = [{Name: "p1", Value: int64(50000)}]  // coerced from string
 ```
 
-For equality and inequality, schema-aware numeric and boolean coercion happens
+For equality and inequality, schema-required numeric and boolean coercion happens
 before parameter collection:
 
 ```go
