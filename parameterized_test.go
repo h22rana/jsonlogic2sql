@@ -1365,6 +1365,9 @@ func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t
 			_ = tp.RegisterOperatorFunc("quote", func(_ string, args []OperatorArg) (OperatorResult, error) {
 				return ValueSQL(fmt.Sprintf("'%s'", args[0].SQL), args[0].Type), nil
 			})
+			_ = tp.RegisterOperatorFunc("comment", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				return ValueSQL(fmt.Sprintf("/* %s */ 1", args[0].SQL), ExpressionTypeNumber), nil
+			})
 
 			// Valid: placeholder stays as SQL expression and is bound.
 			sql, params, err := tp.TranspileParameterizedValue(`{"identity": ["hello"]}`)
@@ -1388,6 +1391,22 @@ func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t
 			}
 			if tpErr.Code != ErrCustomOperatorFailed {
 				t.Fatalf("error code = %q, want %q", tpErr.Code, ErrCustomOperatorFailed)
+			}
+			if !strings.Contains(tpErr.Message, tt.placeholder) {
+				t.Fatalf("error message = %q, want to contain placeholder %q", tpErr.Message, tt.placeholder)
+			}
+
+			// Invalid: placeholder hidden inside a SQL comment is not a real bind reference.
+			_, _, err = tp.TranspileParameterizedValue(`{"comment": ["hello"]}`)
+			if err == nil {
+				t.Fatal("expected error for commented placeholder in custom operator SQL")
+			}
+			tpErr, ok = AsTranspileError(err)
+			if !ok {
+				t.Fatalf("expected TranspileError, got %T (%v)", err, err)
+			}
+			if tpErr.Code != ErrUnreferencedPlaceholder {
+				t.Fatalf("error code = %q, want %q", tpErr.Code, ErrUnreferencedPlaceholder)
 			}
 			if !strings.Contains(tpErr.Message, tt.placeholder) {
 				t.Fatalf("error message = %q, want to contain placeholder %q", tpErr.Message, tt.placeholder)
