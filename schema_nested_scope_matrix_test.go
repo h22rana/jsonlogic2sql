@@ -7,7 +7,10 @@ import (
 )
 
 func nestedScopeAuditSchema() *Schema {
+	accountElementFields := nestedScopeAuditAccountElementFields()
 	return mustNewSchema([]FieldSchema{
+		{Name: "useBackup", Type: FieldTypeBoolean},
+		{Name: "useMetrics", Type: FieldTypeBoolean},
 		{
 			Name: "customer",
 			Type: FieldTypeObject,
@@ -24,54 +27,71 @@ func nestedScopeAuditSchema() *Schema {
 			},
 		},
 		{
-			Name: "accounts",
+			Name:          "accounts",
+			Type:          FieldTypeArray,
+			ElementFields: accountElementFields,
+		},
+		{
+			Name:          "backupAccounts",
+			Type:          FieldTypeArray,
+			ElementFields: accountElementFields,
+		},
+		{
+			Name: "metricAccounts",
 			Type: FieldTypeArray,
 			ElementFields: []FieldSchema{
-				{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "blocked"}},
+				{Name: "status", Type: FieldTypeNumber},
+			},
+		},
+	})
+}
+
+func nestedScopeAuditAccountElementFields() []FieldSchema {
+	return []FieldSchema{
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "blocked"}},
+		{
+			Name: "profile",
+			Type: FieldTypeObject,
+			Fields: []FieldSchema{
+				{Name: "region", Type: FieldTypeString},
+				{Name: "tier", Type: FieldTypeEnum, AllowedValues: []string{"gold", "silver"}},
+			},
+		},
+		{
+			Name: "transactions",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "amount", Type: FieldTypeNumber},
 				{
-					Name: "profile",
+					Name: "method",
 					Type: FieldTypeObject,
 					Fields: []FieldSchema{
-						{Name: "region", Type: FieldTypeString},
-						{Name: "tier", Type: FieldTypeEnum, AllowedValues: []string{"gold", "silver"}},
+						{Name: "type", Type: FieldTypeEnum, AllowedValues: []string{"BALANCE", "CARD"}},
+						{Name: "issuer", Type: FieldTypeString},
 					},
 				},
 				{
-					Name: "transactions",
+					Name: "flags",
 					Type: FieldTypeArray,
 					ElementFields: []FieldSchema{
-						{Name: "amount", Type: FieldTypeNumber},
-						{
-							Name: "method",
-							Type: FieldTypeObject,
-							Fields: []FieldSchema{
-								{Name: "type", Type: FieldTypeEnum, AllowedValues: []string{"BALANCE", "CARD"}},
-								{Name: "issuer", Type: FieldTypeString},
-							},
-						},
-						{
-							Name: "flags",
-							Type: FieldTypeArray,
-							ElementFields: []FieldSchema{
-								{Name: "code", Type: FieldTypeString},
-							},
-						},
+						{Name: "code", Type: FieldTypeString},
 					},
 				},
 			},
 		},
-	})
+	}
 }
 
 func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 	t.Parallel()
 
 	validCases := []struct {
-		name      string
-		logic     string
-		valueRoot bool
-		want      []string
-		paramLen  int
+		name       string
+		logic      string
+		valueRoot  bool
+		schemaOnly bool
+		want       []string
+		paramLen   int
 	}{
 		{
 			name:     "root object enum",
@@ -147,6 +167,39 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			want:      []string{"elem2.amount >", "elem1.method.type"},
 			paramLen:  1,
 		},
+		{
+			name:      "map over constant if array source preserves element schema",
+			logic:     `{"map":[{"if":[true,{"var":"accounts"},[]]},{"var":"profile.tier"}]}`,
+			valueRoot: true,
+			want:      []string{"elem.profile.tier"},
+		},
+		{
+			name:      "map over fallback or array source preserves element schema",
+			logic:     `{"map":[{"or":[false,{"var":"accounts"}]},{"var":"profile.region"}]}`,
+			valueRoot: true,
+			want:      []string{"elem.profile.region"},
+		},
+		{
+			name:       "map over dynamic if compatible array sources preserves element schema",
+			logic:      `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"var":"profile.tier"}]}`,
+			valueRoot:  true,
+			schemaOnly: true,
+			want:       []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE backupAccounts END", "elem.profile.tier"},
+		},
+		{
+			name:       "nested map over dynamic if compatible array sources preserves nested element schema",
+			logic:      `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"map":[{"var":"transactions"},{"var":"method.type"}]}]}`,
+			valueRoot:  true,
+			schemaOnly: true,
+			want:       []string{"elem.transactions", "elem1.method.type"},
+		},
+		{
+			name:       "some over dynamic if compatible array sources validates scoped enum",
+			logic:      `{"some":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"==":[{"var":"status"},"active"]}]}`,
+			schemaOnly: true,
+			want:       []string{"elem.status ="},
+			paramLen:   1,
+		},
 	}
 
 	modes := []struct {
@@ -173,6 +226,9 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 					for _, tc := range validCases {
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
+							if tc.schemaOnly && mode.schema == nil {
+								t.Skip("case requires schema to type the dynamic source condition")
+							}
 
 							sql, params, inlineErr := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, false)
 							if inlineErr != nil {
@@ -254,6 +310,12 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaAwareCases_AllDialects(t *tes
 			name:      "defaulted scoped enum var validates default value",
 			logic:     `{"some":[{"var":"accounts"},{"==":[{"var":["status","archived"]},"active"]}]}`,
 			wantError: "invalid enum value 'archived' for field 'accounts.status'",
+		},
+		{
+			name:      "dynamic array source rejects incompatible scoped field types",
+			logic:     `{"map":[{"if":[{"var":"useMetrics"},{"var":"accounts"},{"var":"metricAccounts"}]},{"var":"status"}]}`,
+			valueRoot: true,
+			wantError: "field 'status' has incompatible schema types across array source scopes",
 		},
 	}
 

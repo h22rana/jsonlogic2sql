@@ -3,7 +3,9 @@ package operators
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
@@ -35,6 +37,7 @@ type ArrayOperator struct {
 	valueScope    bool
 	lambdaScope   arrayLambdaScope
 	schemaScope   string
+	schemaScopes  []string
 	// valueSemantics means the current expression position returns a JSONLogic
 	// value, so and/or/if must preserve fallback values instead of boolean SQL.
 	valueSemantics     bool
@@ -87,6 +90,7 @@ func (a *ArrayOperator) withChildScope() *ArrayOperator {
 		valueScope:         a.valueScope,
 		lambdaScope:        a.lambdaScope,
 		schemaScope:        a.schemaScope,
+		schemaScopes:       append([]string{}, a.schemaScopes...),
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -114,6 +118,7 @@ func (a *ArrayOperator) withPath(path string) *ArrayOperator {
 		valueScope:         a.valueScope,
 		lambdaScope:        a.lambdaScope,
 		schemaScope:        a.schemaScope,
+		schemaScopes:       append([]string{}, a.schemaScopes...),
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -135,6 +140,7 @@ func (a *ArrayOperator) withValueScope(enabled bool) *ArrayOperator {
 		valueScope:         enabled,
 		lambdaScope:        a.lambdaScope,
 		schemaScope:        a.schemaScope,
+		schemaScopes:       append([]string{}, a.schemaScopes...),
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -156,6 +162,7 @@ func (a *ArrayOperator) withValueSemantics(enabled bool) *ArrayOperator {
 		valueScope:         a.valueScope,
 		lambdaScope:        a.lambdaScope,
 		schemaScope:        a.schemaScope,
+		schemaScopes:       append([]string{}, a.schemaScopes...),
 		valueSemantics:     enabled,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -177,6 +184,7 @@ func (a *ArrayOperator) withAccumulatorType(typ ExpressionType) *ArrayOperator {
 		valueScope:         a.valueScope,
 		lambdaScope:        a.lambdaScope,
 		schemaScope:        a.schemaScope,
+		schemaScopes:       append([]string{}, a.schemaScopes...),
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    typ,
 		hasAccumulatorType: true,
@@ -198,6 +206,7 @@ func (a *ArrayOperator) withLambdaScope(scope arrayLambdaScope) *ArrayOperator {
 		valueScope:         a.valueScope,
 		lambdaScope:        scope,
 		schemaScope:        a.schemaScope,
+		schemaScopes:       append([]string{}, a.schemaScopes...),
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -205,7 +214,12 @@ func (a *ArrayOperator) withLambdaScope(scope arrayLambdaScope) *ArrayOperator {
 	return child
 }
 
-func (a *ArrayOperator) withSchemaScope(scope string) *ArrayOperator {
+func (a *ArrayOperator) withSchemaScopes(scopes []string) *ArrayOperator {
+	scopes = normalizeSchemaScopes(scopes)
+	scope := ""
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
 	child := &ArrayOperator{
 		config:             a.config,
 		dataOp:             a.dataOp,
@@ -219,6 +233,7 @@ func (a *ArrayOperator) withSchemaScope(scope string) *ArrayOperator {
 		valueScope:         a.valueScope,
 		lambdaScope:        a.lambdaScope,
 		schemaScope:        scope,
+		schemaScopes:       append([]string{}, scopes...),
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
@@ -227,6 +242,42 @@ func (a *ArrayOperator) withSchemaScope(scope string) *ArrayOperator {
 		child.visibleScopes[len(child.visibleScopes)-1] = scope
 	}
 	return child
+}
+
+func singleSchemaScope(scope string) []string {
+	if scope == "" {
+		return nil
+	}
+	return []string{scope}
+}
+
+func normalizeSchemaScopes(scopes []string) []string {
+	if len(scopes) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(scopes))
+	normalized := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope == "" {
+			continue
+		}
+		if _, exists := seen[scope]; exists {
+			continue
+		}
+		seen[scope] = struct{}{}
+		normalized = append(normalized, scope)
+	}
+	return normalized
+}
+
+func (a *ArrayOperator) currentSchemaScopes() []string {
+	if a == nil {
+		return nil
+	}
+	if len(a.schemaScopes) > 0 {
+		return a.schemaScopes
+	}
+	return singleSchemaScope(a.schemaScope)
 }
 
 func (a *ArrayOperator) currentPath() string {
@@ -266,24 +317,97 @@ func (a *ArrayOperator) schemaExpressionType(fieldName string) ExpressionType {
 }
 
 func (a *ArrayOperator) resolveScopedFieldName(fieldName string) (string, error) {
-	return a.resolveFieldInScope(a.schemaScope, fieldName)
+	return a.resolveFieldInScopes(a.currentSchemaScopes(), fieldName)
+}
+
+func (a *ArrayOperator) resolveScopedFieldNames(fieldName string) []string {
+	resolved, err := a.resolveFieldNamesInScopes(a.currentSchemaScopes(), fieldName)
+	if err != nil {
+		return nil
+	}
+	return resolved
 }
 
 func (a *ArrayOperator) resolveFieldInScope(scopePath, fieldName string) (string, error) {
-	if fieldName == "" {
+	return a.resolveFieldInScopes(singleSchemaScope(scopePath), fieldName)
+}
+
+func (a *ArrayOperator) resolveFieldInScopes(scopePaths []string, fieldName string) (string, error) {
+	resolved, err := a.resolveFieldNamesInScopes(scopePaths, fieldName)
+	if err != nil {
+		return "", err
+	}
+	if len(resolved) == 0 {
 		return "", nil
+	}
+	return resolved[0], nil
+}
+
+func (a *ArrayOperator) resolveFieldNamesInScopes(scopePaths []string, fieldName string) ([]string, error) {
+	if fieldName == "" {
+		return nil, nil
 	}
 	schema := a.schema()
 	if schema == nil {
-		return fieldName, nil
+		return singleSchemaScope(fieldName), nil
 	}
 	if scoped, ok := schema.(ScopedSchemaProvider); ok {
-		return scoped.ResolveScopedField(scopePath, fieldName)
+		scopes := normalizeSchemaScopes(scopePaths)
+		if len(scopes) == 0 {
+			resolved, err := scoped.ResolveScopedField("", fieldName)
+			if err != nil {
+				return nil, err
+			}
+			return singleSchemaScope(resolved), nil
+		}
+
+		var firstType string
+		var firstAllowed []string
+		resolvedFields := make([]string, 0, len(scopes))
+		for i, scope := range scopes {
+			resolved, err := scoped.ResolveScopedField(scope, fieldName)
+			if err != nil {
+				return nil, err
+			}
+			resolvedFields = append(resolvedFields, resolved)
+			if i == 0 {
+				firstType = schema.GetFieldType(resolved)
+				firstAllowed = schema.GetAllowedValues(resolved)
+				continue
+			}
+			if typ := schema.GetFieldType(resolved); typ != firstType {
+				return nil, fmt.Errorf("field '%s' has incompatible schema types across array source scopes", fieldName)
+			}
+			if !sameStringSet(schema.GetAllowedValues(resolved), firstAllowed) {
+				return nil, fmt.Errorf("field '%s' has incompatible enum values across array source scopes", fieldName)
+			}
+		}
+		return normalizeSchemaScopes(resolvedFields), nil
 	}
 	if err := schema.ValidateField(fieldName); err != nil {
-		return "", err
+		return nil, err
 	}
-	return fieldName, nil
+	return singleSchemaScope(fieldName), nil
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	if len(left) == 0 {
+		return true
+	}
+	counts := make(map[string]int, len(left))
+	for _, value := range left {
+		counts[value]++
+	}
+	for _, value := range right {
+		counts[value]--
+		if counts[value] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *ArrayOperator) scopedSQLFieldResult(sql, fieldName string) ProcessedValue {
@@ -581,77 +705,82 @@ func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
 		return nil
 	}
 
-	fieldName := a.extractFieldNameFromValue(value)
-	if fieldName == "" {
+	fieldNames := a.arraySourceFieldNamesFromValue(value)
+	if len(fieldNames) == 0 {
 		return nil // Can't determine field name, skip validation
 	}
 
-	fieldType := a.schema().GetFieldType(fieldName)
-	if fieldType == "" {
-		return nil // Field not in schema, skip validation (existence checked by DataOperator)
-	}
+	for _, fieldName := range fieldNames {
+		fieldType := a.schema().GetFieldType(fieldName)
+		if fieldType == "" {
+			return nil // Field not in schema, skip validation (existence checked by DataOperator)
+		}
 
-	if !a.schema().IsArrayType(fieldName) {
-		return fmt.Errorf("array operation on non-array field '%s' (type: %s)", fieldName, fieldType)
+		if !a.schema().IsArrayType(fieldName) {
+			return fmt.Errorf("array operation on non-array field '%s' (type: %s)", fieldName, fieldType)
+		}
 	}
 
 	return nil
 }
 
-// extractFieldNameFromValue extracts field name from a value that might be a var expression.
-func (a *ArrayOperator) extractFieldNameFromValue(value interface{}) string {
-	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
-		return pv.FieldName
+func (a *ArrayOperator) arraySourceSchemaScopes(value interface{}) []string {
+	scopes, _, ok := a.arraySourceSchemaScopeInfo(value)
+	if ok {
+		return scopes
 	}
-	if varExpr, ok := value.(map[string]interface{}); ok {
-		if varName, hasVar := varExpr[OpVar]; hasVar {
-			return a.extractFieldName(varName)
-		}
-	}
-	return ""
+	return nil
 }
 
-func (a *ArrayOperator) arraySourceSchemaScope(value interface{}) string {
-	if fieldName := a.arraySourceFieldNameFromValue(value); fieldName != "" {
-		return fieldName
+func (a *ArrayOperator) arraySourceSchemaScopeInfo(value interface{}) ([]string, bool, bool) {
+	if isEmptyArrayLiteral(value) {
+		return nil, true, true
 	}
-
+	if fieldNames := a.arraySourceFieldNamesFromValue(value); len(fieldNames) > 0 {
+		return fieldNames, false, true
+	}
 	operator, args, ok := arrayOperatorArgs(value)
 	if !ok {
-		return ""
+		return nil, false, false
 	}
 
 	switch operator {
 	case OpFilter:
 		if len(args) != binaryArrayOperatorArgCount {
-			return ""
+			return nil, false, false
 		}
-		return a.arraySourceSchemaScope(args[arraySourceArgIndex])
+		return a.arraySourceSchemaScopeInfo(args[arraySourceArgIndex])
 	case OpMap:
 		if len(args) != binaryArrayOperatorArgCount || !isIdentityElementMapExpression(args[arrayExpressionArgIndex]) {
-			return ""
+			return nil, false, false
 		}
-		return a.arraySourceSchemaScope(args[arraySourceArgIndex])
+		return a.arraySourceSchemaScopeInfo(args[arraySourceArgIndex])
 	case OpMerge:
-		return a.mergedArraySourceSchemaScope(args)
+		return a.mergeArraySourceSchemaScopes(args)
+	case OpIf:
+		return a.ifArraySourceSchemaScope(args)
+	case OpOr:
+		return a.logicalArraySourceSchemaScope(OpOr, args)
+	case OpAnd:
+		return a.logicalArraySourceSchemaScope(OpAnd, args)
 	default:
-		return ""
+		return nil, false, false
 	}
 }
 
-func (a *ArrayOperator) arraySourceFieldNameFromValue(value interface{}) string {
+func (a *ArrayOperator) arraySourceFieldNamesFromValue(value interface{}) []string {
 	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
-		return pv.FieldName
+		return singleSchemaScope(pv.FieldName)
 	}
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr[OpVar]; hasVar {
-			if scoped := a.scopedFieldNameFromVarExpr(varName); scoped != "" {
+			if scoped := a.scopedFieldNamesFromVarExpr(varName); len(scoped) > 0 {
 				return scoped
 			}
-			return a.extractFieldName(varName)
+			return singleSchemaScope(a.extractFieldName(varName))
 		}
 	}
-	return ""
+	return nil
 }
 
 func isIdentityElementMapExpression(expr interface{}) bool {
@@ -666,25 +795,129 @@ func isIdentityElementMapExpression(expr interface{}) bool {
 	return varName == ""
 }
 
-func (a *ArrayOperator) mergedArraySourceSchemaScope(args []interface{}) string {
-	var scope string
+func (a *ArrayOperator) mergeArraySourceSchemaScopes(args []interface{}) ([]string, bool, bool) {
+	var scopes []string
 	for _, arg := range args {
-		if isEmptyArrayLiteral(arg) {
+		argScopes, empty, ok := a.arraySourceSchemaScopeInfo(arg)
+		if !ok {
+			return nil, false, false
+		}
+		if empty {
 			continue
 		}
-		argScope := a.arraySourceSchemaScope(arg)
-		if argScope == "" {
-			return ""
-		}
-		if scope == "" {
-			scope = argScope
-			continue
-		}
-		if scope != argScope {
-			return ""
-		}
+		scopes = append(scopes, argScopes...)
 	}
-	return scope
+	scopes = normalizeSchemaScopes(scopes)
+	if len(scopes) == 0 {
+		return nil, true, true
+	}
+	return scopes, false, true
+}
+
+func (a *ArrayOperator) ifArraySourceSchemaScope(args []interface{}) ([]string, bool, bool) {
+	if len(args) < 2 {
+		return nil, false, false
+	}
+
+	var candidates []interface{}
+	pairLimit := len(args)
+	hasElse := len(args)%2 == 1
+	if hasElse {
+		pairLimit = len(args) - 1
+	}
+
+	for i := 0; i < pairLimit; i += 2 {
+		if truthy, known := staticJSONLogicTruthiness(args[i]); known {
+			if truthy {
+				return a.arraySourceSchemaScopeInfo(args[i+1])
+			}
+			continue
+		}
+		candidates = append(candidates, args[i+1])
+	}
+
+	if hasElse {
+		candidates = append(candidates, args[len(args)-1])
+	} else if len(candidates) > 0 {
+		return nil, false, false
+	}
+	return a.mergeArraySourceSchemaScopes(candidates)
+}
+
+func (a *ArrayOperator) logicalArraySourceSchemaScope(operator string, args []interface{}) ([]string, bool, bool) {
+	if len(args) == 0 {
+		return nil, false, false
+	}
+
+	var candidates []interface{}
+	for _, arg := range args {
+		if truthy, known := staticJSONLogicTruthiness(arg); known {
+			switch {
+			case operator == OpOr && !truthy:
+				continue
+			case operator == OpOr && truthy:
+				return a.arraySourceSchemaScopeInfo(arg)
+			case operator == OpAnd && truthy:
+				continue
+			case operator == OpAnd && !truthy:
+				return a.arraySourceSchemaScopeInfo(arg)
+			}
+		}
+		candidates = append(candidates, arg)
+	}
+	return a.mergeArraySourceSchemaScopes(candidates)
+}
+
+func staticJSONLogicTruthiness(value interface{}) (bool, bool) {
+	switch v := value.(type) {
+	case nil:
+		return false, true
+	case bool:
+		return v, true
+	case string:
+		return v != "", true
+	case []interface{}:
+		return len(v) > 0, true
+	case json.Number:
+		f, err := strconv.ParseFloat(v.String(), 64)
+		if err != nil {
+			return false, false
+		}
+		return f != 0, true
+	case int:
+		return v != 0, true
+	case int8:
+		return v != 0, true
+	case int16:
+		return v != 0, true
+	case int32:
+		return v != 0, true
+	case int64:
+		return v != 0, true
+	case uint:
+		return v != 0, true
+	case uint8:
+		return v != 0, true
+	case uint16:
+		return v != 0, true
+	case uint32:
+		return v != 0, true
+	case uint64:
+		return v != 0, true
+	case float32:
+		f := float64(v)
+		if math.IsNaN(f) {
+			return false, true
+		}
+		return f != 0, true
+	case float64:
+		if math.IsNaN(v) {
+			return false, true
+		}
+		return v != 0, true
+	default:
+		return false, false
+	}
 }
 
 // extractFieldName extracts the field name from a var argument.
@@ -871,9 +1104,9 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 		return a.emptyArrayLiteralSQL()
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
-	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withSchemaScope(sourceFieldName).withValueSemantics(true)
+	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withSchemaScopes(sourceScopes).withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
@@ -915,11 +1148,11 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 		return a.emptyArrayLiteralSQL()
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScope(sourceFieldName).
+		withSchemaScopes(sourceScopes).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
@@ -973,7 +1206,7 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 		return initial, nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
 	// Second argument: reducer expression
 	reducerExpr := args[arrayExpressionArgIndex]
@@ -981,7 +1214,7 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	alias := a.elemAlias()
 
 	// Check for common reduction patterns and optimize
-	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).withSchemaScope(sourceFieldName)
+	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).withSchemaScopes(sourceScopes)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
 		// Build the element reference: "elem" or "elem.field" if field suffix exists
 		elemRef, quoteErr := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
@@ -1192,11 +1425,11 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScope(sourceFieldName).
+		withSchemaScopes(sourceScopes).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
@@ -1242,11 +1475,11 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScope(sourceFieldName).
+		withSchemaScopes(sourceScopes).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
@@ -1289,11 +1522,11 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 		return "TRUE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScope(sourceFieldName).
+		withSchemaScopes(sourceScopes).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
@@ -1856,66 +2089,74 @@ func unsupportedArrayScopeVarError(varName string) error {
 }
 
 func (a *ArrayOperator) scopedFieldNameFromVarExpr(varExpr interface{}) string {
+	fieldNames := a.scopedFieldNamesFromVarExpr(varExpr)
+	if len(fieldNames) == 0 {
+		return ""
+	}
+	return fieldNames[0]
+}
+
+func (a *ArrayOperator) scopedFieldNamesFromVarExpr(varExpr interface{}) []string {
 	switch v := varExpr.(type) {
 	case string:
-		return a.scopedFieldNameForVar(v)
+		return a.scopedFieldNamesForVar(v)
 	case []interface{}:
 		if len(v) == 0 {
-			return ""
+			return nil
 		}
 		switch first := v[0].(type) {
 		case string:
-			return a.scopedFieldNameForVar(first)
+			return a.scopedFieldNamesForVar(first)
 		case ProcessedValue:
 			if first.IsSQL && first.IsField {
-				return first.FieldName
+				return singleSchemaScope(first.FieldName)
 			}
 		}
 	case ProcessedValue:
 		if v.IsSQL && v.IsField {
-			return v.FieldName
+			return singleSchemaScope(v.FieldName)
 		}
 	}
-	return ""
+	return nil
 }
 
 func (a *ArrayOperator) scopedFieldNameForVar(varName string) string {
+	fieldNames := a.scopedFieldNamesForVar(varName)
+	if len(fieldNames) == 0 {
+		return ""
+	}
+	return fieldNames[0]
+}
+
+func (a *ArrayOperator) scopedFieldNamesForVar(varName string) []string {
 	switch a.lambdaScope {
 	case arrayLambdaScopeElement:
 		if varName == "" || isUnsupportedElementScopeVar(varName) {
-			return ""
+			return nil
 		}
-		resolved, err := a.resolveScopedFieldName(varName)
-		if err != nil {
-			return ""
-		}
-		return resolved
+		return a.resolveScopedFieldNames(varName)
 	case arrayLambdaScopeReduce:
 		if varName == "" || varName == CurrentVar || varName == AccumulatorVar || isUnsupportedReduceScopeVar(varName) {
-			return ""
+			return nil
 		}
 		if strings.HasPrefix(varName, CurrentVar+".") {
 			suffix := strings.TrimPrefix(varName, CurrentVar+".")
 			if suffix != "" {
-				resolved, err := a.resolveScopedFieldName(suffix)
-				if err != nil {
-					return ""
-				}
-				return resolved
+				return a.resolveScopedFieldNames(suffix)
 			}
 		}
 	case arrayLambdaScopeNone:
 		scope, fieldName := a.visibleElemScopeAndFieldName(varName)
 		if fieldName == "" {
-			return ""
+			return nil
 		}
 		resolved, err := a.resolveFieldInScope(scope, fieldName)
 		if err != nil {
-			return ""
+			return nil
 		}
-		return resolved
+		return singleSchemaScope(resolved)
 	}
-	return ""
+	return nil
 }
 
 func (a *ArrayOperator) visibleElemScopeAndFieldName(varName string) (string, string) {
@@ -2369,8 +2610,8 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 		return a.emptyArrayLiteralSQL()
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
-	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withSchemaScope(sourceFieldName).withValueSemantics(true)
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withSchemaScopes(sourceScopes).withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
@@ -2403,9 +2644,9 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 		return a.emptyArrayLiteralSQL()
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScope(sourceFieldName).
+		withSchemaScopes(sourceScopes).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
@@ -2443,11 +2684,11 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 		return initial, nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 	reducerExpr := args[arrayExpressionArgIndex]
 	alias := a.elemAlias()
 
-	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).withSchemaScope(sourceFieldName)
+	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).withSchemaScopes(sourceScopes)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
 		elemRef, quoteErr := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
 		if quoteErr != nil {
@@ -2514,9 +2755,9 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScope(sourceFieldName).
+		withSchemaScopes(sourceScopes).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
@@ -2550,9 +2791,9 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScope(sourceFieldName).
+		withSchemaScopes(sourceScopes).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
@@ -2585,9 +2826,9 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 		return "TRUE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScope(sourceFieldName).
+		withSchemaScopes(sourceScopes).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
