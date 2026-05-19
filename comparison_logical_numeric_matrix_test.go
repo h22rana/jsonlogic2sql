@@ -28,17 +28,17 @@ func TestRegressionMatrix_ComparisonLogicalNumeric_AllDialects(t *testing.T) {
 	}
 
 	type regressionCase struct {
-		name          string
-		logic         string
-		valueRoot     bool
-		schemaLessErr ErrorCode
+		name              string
+		logic             string
+		valueRoot         bool
+		schemaRequiredErr ErrorCode
 	}
 
 	cases := []regressionCase{
 		{
-			name:          "builtin_deep_mix",
-			logic:         `{"and":[{">=":[{"+":[{"var":"profile.age"},5]},21]},{"<":[{"var":"profile.score"},{"max":[80,{"*":[2,10]}]}]},{"!==":[{"var":"profile.name"},null]},{"==":[{"if":[{"!!":[{"var":"flags.active"}]},"Y","N"]},"Y"]}]}`,
-			schemaLessErr: ErrInvalidExpressionContext,
+			name:              "builtin_deep_mix",
+			logic:             `{"and":[{">=":[{"+":[{"var":"profile.age"},5]},21]},{"<":[{"var":"profile.score"},{"max":[80,{"*":[2,10]}]}]},{"!==":[{"var":"profile.name"},null]},{"==":[{"if":[{"!!":[{"var":"flags.active"}]},"Y","N"]},"Y"]}]}`,
+			schemaRequiredErr: ErrInvalidExpressionContext,
 		},
 		{
 			name:  "chained_compare",
@@ -69,8 +69,7 @@ func TestRegressionMatrix_ComparisonLogicalNumeric_AllDialects(t *testing.T) {
 		schema      *Schema
 		schemaAware bool
 	}{
-		{name: "schema-less", schema: nil, schemaAware: false},
-		{name: "schema-aware", schema: schema, schemaAware: true},
+		{name: "schema-required", schema: schema, schemaAware: true},
 	}
 
 	for _, mode := range modes {
@@ -99,36 +98,36 @@ func TestRegressionMatrix_ComparisonLogicalNumeric_AllDialects(t *testing.T) {
 							} else {
 								sql, err = tr.TranspileCondition(tc.logic)
 							}
-							if mode.schema == nil && tc.schemaLessErr != "" {
-								if !IsErrorCode(err, tc.schemaLessErr) {
-									t.Fatalf("transpile error = %v, want %s", err, tc.schemaLessErr)
+							if mode.schema == nil && tc.schemaRequiredErr != "" {
+								if !IsErrorCode(err, tc.schemaRequiredErr) {
+									t.Fatalf("transpile error = %v, want %s", err, tc.schemaRequiredErr)
 								}
 								logicMap := parseJSONLogicMap(t, tc.logic)
 								if tc.valueRoot {
 									_, _, err = tr.TranspileParameterizedValue(tc.logic)
-									if !IsErrorCode(err, tc.schemaLessErr) {
-										t.Fatalf("parameterized transpile error = %v, want %s", err, tc.schemaLessErr)
+									if !IsErrorCode(err, tc.schemaRequiredErr) {
+										t.Fatalf("parameterized transpile error = %v, want %s", err, tc.schemaRequiredErr)
 									}
 									_, _, err = tr.TranspileParameterizedValueFromMap(logicMap)
-									if !IsErrorCode(err, tc.schemaLessErr) {
-										t.Fatalf("parameterized from map error = %v, want %s", err, tc.schemaLessErr)
+									if !IsErrorCode(err, tc.schemaRequiredErr) {
+										t.Fatalf("parameterized from map error = %v, want %s", err, tc.schemaRequiredErr)
 									}
 									_, _, err = tr.TranspileParameterizedValueFromInterface(logicMap)
-									if !IsErrorCode(err, tc.schemaLessErr) {
-										t.Fatalf("parameterized from interface error = %v, want %s", err, tc.schemaLessErr)
+									if !IsErrorCode(err, tc.schemaRequiredErr) {
+										t.Fatalf("parameterized from interface error = %v, want %s", err, tc.schemaRequiredErr)
 									}
 								} else {
 									_, _, err = tr.TranspileParameterizedCondition(tc.logic)
-									if !IsErrorCode(err, tc.schemaLessErr) {
-										t.Fatalf("parameterized transpile error = %v, want %s", err, tc.schemaLessErr)
+									if !IsErrorCode(err, tc.schemaRequiredErr) {
+										t.Fatalf("parameterized transpile error = %v, want %s", err, tc.schemaRequiredErr)
 									}
 									_, _, err = tr.TranspileParameterizedConditionFromMap(logicMap)
-									if !IsErrorCode(err, tc.schemaLessErr) {
-										t.Fatalf("parameterized from map error = %v, want %s", err, tc.schemaLessErr)
+									if !IsErrorCode(err, tc.schemaRequiredErr) {
+										t.Fatalf("parameterized from map error = %v, want %s", err, tc.schemaRequiredErr)
 									}
 									_, _, err = tr.TranspileParameterizedConditionFromInterface(logicMap)
-									if !IsErrorCode(err, tc.schemaLessErr) {
-										t.Fatalf("parameterized from interface error = %v, want %s", err, tc.schemaLessErr)
+									if !IsErrorCode(err, tc.schemaRequiredErr) {
+										t.Fatalf("parameterized from interface error = %v, want %s", err, tc.schemaRequiredErr)
 									}
 								}
 								return
@@ -353,14 +352,14 @@ func validateComparisonLogicalNumericCase(
 		if schemaAware {
 			requireContains("profile.name = '123'")
 			if _, ok := params[0].Value.(string); !ok {
-				t.Fatalf("expected schema-aware param type string, got %T (%v)", params[0].Value, params[0].Value)
+				t.Fatalf("expected schema-required param type string, got %T (%v)", params[0].Value, params[0].Value)
 			}
 			return
 		}
 
 		requireContains("profile.name = 123")
 		if _, ok := params[0].Value.(float64); !ok {
-			t.Fatalf("expected schema-less param type float64, got %T (%v)", params[0].Value, params[0].Value)
+			t.Fatalf("expected schema-required param type float64, got %T (%v)", params[0].Value, params[0].Value)
 		}
 	}
 }

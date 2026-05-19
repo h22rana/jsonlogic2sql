@@ -49,6 +49,7 @@ type ArrayOperator struct {
 type typedValueSQL struct {
 	sql               string
 	typ               ExpressionType
+	elemType          ExpressionType
 	emptyArrayLiteral bool
 }
 
@@ -497,6 +498,32 @@ func inferLiteralValueExpressionType(expr interface{}) ExpressionType {
 	}
 }
 
+func inferArrayLiteralElementType(elements []interface{}) ExpressionType {
+	common := ExpressionTypeUnknown
+	sawNull := false
+	for _, elem := range elements {
+		elemType := inferLiteralValueExpressionType(elem)
+		if elemType == ExpressionTypeArray || elemType == ExpressionTypeUnknown {
+			return elemType
+		}
+		if elemType == ExpressionTypeNull {
+			sawNull = true
+			continue
+		}
+		if common == ExpressionTypeUnknown {
+			common = elemType
+			continue
+		}
+		if common != elemType {
+			return ExpressionTypeUnknown
+		}
+	}
+	if common == ExpressionTypeUnknown && sawNull {
+		return ExpressionTypeNull
+	}
+	return common
+}
+
 func (a *ArrayOperator) accumulatorSQLResult() ProcessedValue {
 	if a != nil && a.hasAccumulatorType && a.accumulatorType != ExpressionTypeUnknown {
 		return TypedSQLResult(AccumulatorVar, ExpressionKindValue, a.accumulatorType)
@@ -705,7 +732,7 @@ func (a *ArrayOperator) getLogicalOperator() *LogicalOperator {
 // validateArrayOperand checks if a field used in an array operation is of array type.
 func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
 	if a.schema() == nil {
-		return nil // No schema, no validation
+		return nil // Absent schema provider, no validation
 	}
 
 	// If it's a literal array, it's valid
@@ -730,6 +757,134 @@ func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
 	}
 
 	return nil
+}
+
+func validateArraySourceValue(value typedValueSQL) error {
+	if value.emptyArrayLiteral || value.typ == ExpressionTypeArray || value.typ == ExpressionTypeUnknown {
+		return nil
+	}
+	return fmt.Errorf("array operation on non-array value (type: %s)", arrayExpressionTypeName(value.typ))
+}
+
+func validateMergeElementCompatibility(values []typedValueSQL) (ExpressionType, error) {
+	common := ExpressionTypeUnknown
+	for _, value := range values {
+		if value.emptyArrayLiteral {
+			continue
+		}
+		elemType := value.typ
+		if value.typ == ExpressionTypeArray {
+			elemType = value.elemType
+		}
+		if elemType == ExpressionTypeUnknown || elemType == ExpressionTypeNull {
+			continue
+		}
+		if common == ExpressionTypeUnknown {
+			common = elemType
+			continue
+		}
+		if common != elemType {
+			return ExpressionTypeUnknown, fmt.Errorf(
+				"merge arguments have incompatible element types (%s and %s)",
+				arrayExpressionTypeName(common),
+				arrayExpressionTypeName(elemType),
+			)
+		}
+	}
+	return common, nil
+}
+
+func (a *ArrayOperator) mergeValueToArraySQL(value typedValueSQL, common ExpressionType) (string, bool, error) {
+	if value.emptyArrayLiteral {
+		return "", true, nil
+	}
+	if value.typ == ExpressionTypeArray {
+		if value.elemType == ExpressionTypeNull && common == ExpressionTypeUnknown {
+			return "", false, fmt.Errorf("merge null-only array argument requires a compatible typed operand")
+		}
+		return value.sql, false, nil
+	}
+	if value.typ == ExpressionTypeUnknown {
+		return "", false, fmt.Errorf("merge scalar argument requires a statically known value type")
+	}
+	scalarSQL := value.sql
+	if value.typ == ExpressionTypeNull {
+		if common == ExpressionTypeUnknown {
+			return "", false, fmt.Errorf("merge null scalar argument requires a compatible typed operand")
+		}
+		scalarSQL = a.typedNullSQL(common)
+	} else if common != ExpressionTypeUnknown && value.typ != common {
+		return "", false, fmt.Errorf(
+			"merge scalar argument has incompatible type %s; expected %s",
+			arrayExpressionTypeName(value.typ),
+			arrayExpressionTypeName(common),
+		)
+	}
+	arraySQL, err := a.arrayLiteral([]string{scalarSQL})
+	if err != nil {
+		return "", false, err
+	}
+	return arraySQL, false, nil
+}
+
+func (a *ArrayOperator) typedNullSQL(typ ExpressionType) string {
+	switch typ {
+	case ExpressionTypeBoolean:
+		switch a.getDialect() {
+		case dialect.DialectPostgreSQL:
+			return "CAST(NULL AS BOOLEAN)"
+		case dialect.DialectDuckDB:
+			return "CAST(NULL AS BOOLEAN)"
+		case dialect.DialectClickHouse:
+			return "CAST(NULL AS Nullable(Bool))"
+		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner:
+			return "CAST(NULL AS BOOL)"
+		}
+	case ExpressionTypeString:
+		switch a.getDialect() {
+		case dialect.DialectPostgreSQL:
+			return "CAST(NULL AS TEXT)"
+		case dialect.DialectDuckDB:
+			return "CAST(NULL AS VARCHAR)"
+		case dialect.DialectClickHouse:
+			return "CAST(NULL AS Nullable(String))"
+		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner:
+			return "CAST(NULL AS STRING)"
+		}
+	case ExpressionTypeNumber:
+		switch a.getDialect() {
+		case dialect.DialectPostgreSQL:
+			return "CAST(NULL AS DOUBLE PRECISION)"
+		case dialect.DialectDuckDB:
+			return "CAST(NULL AS DOUBLE)"
+		case dialect.DialectClickHouse:
+			return "CAST(NULL AS Nullable(Float64))"
+		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner:
+			return "CAST(NULL AS FLOAT64)"
+		}
+	case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeArray:
+		return "NULL"
+	}
+	return "NULL"
+}
+
+func arrayExpressionTypeName(typ ExpressionType) string {
+	switch typ {
+	case ExpressionTypeNull:
+		return "null"
+	case ExpressionTypeBoolean:
+		return "boolean"
+	case ExpressionTypeString:
+		return "string"
+	case ExpressionTypeNumber:
+		return "number"
+	case ExpressionTypeArray:
+		return "array"
+	case ExpressionTypeUnknown:
+		return "unknown"
+	default:
+		return "unknown"
+	}
 }
 
 func (a *ArrayOperator) arraySourceSchemaScopes(value interface{}) []string {
@@ -1111,6 +1266,9 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid map array argument: %w", validationErr)
+	}
 	if arrayValue.emptyArrayLiteral {
 		return a.emptyArrayLiteralSQL()
 	}
@@ -1154,6 +1312,9 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
+	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid filter array argument: %w", validationErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return a.emptyArrayLiteralSQL()
@@ -1212,6 +1373,9 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
+	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid reduce array argument: %w", validationErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return initial, nil
@@ -1432,6 +1596,9 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid all array argument: %w", validationErr)
+	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
 	}
@@ -1482,6 +1649,9 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid some array argument: %w", validationErr)
+	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
 	}
@@ -1529,6 +1699,9 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid none array argument: %w", validationErr)
+	}
 	if arrayValue.emptyArrayLiteral {
 		return "TRUE", nil
 	}
@@ -1548,7 +1721,7 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 }
 
 // handleMerge converts merge operator to SQL.
-// This merges multiple arrays into one.
+// JSONLogic merge casts scalar arguments into single-element arrays.
 // BigQuery/Spanner: ARRAY_CONCAT(array1, array2, ...)
 // PostgreSQL: array1 || array2 || ...
 func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
@@ -1563,28 +1736,33 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 		}
 	}
 
-	// Validate that all arguments are array types
-	for _, arg := range args {
-		if err := a.validateArrayOperand(arg); err != nil {
-			return "", err
-		}
-	}
-
-	// Convert non-empty array arguments to SQL. Empty literal arrays are the
-	// merge identity and PostgreSQL cannot render them without an element type.
-	arrays := make([]string, 0, len(args))
+	values := make([]typedValueSQL, 0, len(args))
 	for i, arg := range args {
 		if isEmptyArrayLiteral(arg) {
+			values = append(values, typedValueSQL{typ: ExpressionTypeArray, emptyArrayLiteral: true})
 			continue
 		}
 		arrayValue, err := a.valueToTypedSQLAtPath(arg, a.argPath(i))
 		if err != nil {
-			return "", fmt.Errorf("invalid merge array argument %d: %w", i, err)
+			return "", fmt.Errorf("invalid merge argument %d: %w", i, err)
 		}
-		if arrayValue.emptyArrayLiteral {
+		values = append(values, arrayValue)
+	}
+	common, err := validateMergeElementCompatibility(values)
+	if err != nil {
+		return "", err
+	}
+
+	arrays := make([]string, 0, len(values))
+	for i, value := range values {
+		arraySQL, skip, err := a.mergeValueToArraySQL(value, common)
+		if err != nil {
+			return "", fmt.Errorf("invalid merge argument %d: %w", i, err)
+		}
+		if skip {
 			continue
 		}
-		arrays = append(arrays, arrayValue.sql)
+		arrays = append(arrays, arraySQL)
 	}
 	return a.renderMergeSQL(arrays)
 }
@@ -1760,7 +1938,11 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 			if err != nil {
 				return typedValueSQL{}, err
 			}
-			return typedValueSQL{sql: sql, typ: a.inferValueExpressionType(value)}, nil
+			fieldType := a.schemaExpressionType(a.extractFieldName(varExpr))
+			if fieldType == ExpressionTypeUnknown {
+				fieldType = a.inferValueExpressionType(value)
+			}
+			return typedValueSQL{sql: sql, typ: fieldType}, nil
 		}
 		// Otherwise, it's a complex value expression.
 		res, err := a.valueExpressionResultWithContextAndPath(value, false, path)
@@ -1788,7 +1970,12 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		if err != nil {
 			return typedValueSQL{}, err
 		}
-		return typedValueSQL{sql: sql, typ: ExpressionTypeArray, emptyArrayLiteral: len(arr) == 0}, nil
+		return typedValueSQL{
+			sql:               sql,
+			typ:               ExpressionTypeArray,
+			elemType:          inferArrayLiteralElementType(arr),
+			emptyArrayLiteral: len(arr) == 0,
+		}, nil
 	}
 
 	// Handle primitive values
@@ -2617,6 +2804,9 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid map array argument: %w", validationErr)
+	}
 	if arrayValue.emptyArrayLiteral {
 		return a.emptyArrayLiteralSQL()
 	}
@@ -2650,6 +2840,9 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
+	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid filter array argument: %w", validationErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return a.emptyArrayLiteralSQL()
@@ -2690,6 +2883,9 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
+	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid reduce array argument: %w", validationErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return initial, nil
@@ -2762,6 +2958,9 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid all array argument: %w", validationErr)
+	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
 	}
@@ -2798,6 +2997,9 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid some array argument: %w", validationErr)
+	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
 	}
@@ -2833,6 +3035,9 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
+	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
+		return "", fmt.Errorf("invalid none array argument: %w", validationErr)
+	}
 	if arrayValue.emptyArrayLiteral {
 		return "TRUE", nil
 	}
@@ -2858,24 +3063,33 @@ func (a *ArrayOperator) handleMergeParam(args []interface{}, pc *params.ParamCol
 			return "", err
 		}
 	}
-	for _, arg := range args {
-		if err := a.validateArrayOperand(arg); err != nil {
-			return "", err
-		}
-	}
-	arrays := make([]string, 0, len(args))
+	values := make([]typedValueSQL, 0, len(args))
 	for i, arg := range args {
 		if isEmptyArrayLiteral(arg) {
+			values = append(values, typedValueSQL{typ: ExpressionTypeArray, emptyArrayLiteral: true})
 			continue
 		}
 		arrayValue, err := a.valueToTypedSQLParamAtPath(arg, pc, a.argPath(i))
 		if err != nil {
-			return "", fmt.Errorf("invalid merge array argument %d: %w", i, err)
+			return "", fmt.Errorf("invalid merge argument %d: %w", i, err)
 		}
-		if arrayValue.emptyArrayLiteral {
+		values = append(values, arrayValue)
+	}
+	common, err := validateMergeElementCompatibility(values)
+	if err != nil {
+		return "", err
+	}
+
+	arrays := make([]string, 0, len(values))
+	for i, value := range values {
+		arraySQL, skip, err := a.mergeValueToArraySQL(value, common)
+		if err != nil {
+			return "", fmt.Errorf("invalid merge argument %d: %w", i, err)
+		}
+		if skip {
 			continue
 		}
-		arrays = append(arrays, arrayValue.sql)
+		arrays = append(arrays, arraySQL)
 	}
 	return a.renderMergeSQL(arrays)
 }
@@ -3008,7 +3222,11 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 			if err != nil {
 				return typedValueSQL{}, err
 			}
-			return typedValueSQL{sql: sql, typ: a.inferValueExpressionType(value)}, nil
+			fieldType := a.schemaExpressionType(a.extractFieldName(varExpr))
+			if fieldType == ExpressionTypeUnknown {
+				fieldType = a.inferValueExpressionType(value)
+			}
+			return typedValueSQL{sql: sql, typ: fieldType}, nil
 		}
 		res, err := a.valueExpressionResultParamWithContextAndPath(value, pc, false, path)
 		if err != nil {
@@ -3034,7 +3252,12 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		if err != nil {
 			return typedValueSQL{}, err
 		}
-		return typedValueSQL{sql: sql, typ: ExpressionTypeArray, emptyArrayLiteral: len(arr) == 0}, nil
+		return typedValueSQL{
+			sql:               sql,
+			typ:               ExpressionTypeArray,
+			elemType:          inferArrayLiteralElementType(arr),
+			emptyArrayLiteral: len(arr) == 0,
+		}, nil
 	}
 
 	sql, err := a.dataOp.valueToSQLParam(value, pc)

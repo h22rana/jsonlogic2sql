@@ -83,8 +83,7 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-less", schema: nil},
-		{name: "schema-aware", schema: mustNewSchema([]FieldSchema{{Name: "bag.numbers", Type: FieldTypeArray}})},
+		{name: "schema-required", schema: mustNewSchema([]FieldSchema{{Name: "bag.numbers", Type: FieldTypeArray}})},
 	}
 
 	for _, mode := range modes {
@@ -137,7 +136,7 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 func TestArrayScopeIdentifierValidationAllowsSafeDottedPaths(t *testing.T) {
 	t.Parallel()
 
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
@@ -213,7 +212,7 @@ func TestRootArrayOperandDoesNotTreatElemAsInScopeAlias_WithSchema(t *testing.T)
 func TestNestedArrayOperandUsesBareOuterFieldsInChildScope(t *testing.T) {
 	t.Parallel()
 
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}

@@ -279,7 +279,7 @@ func TestDataOperator_convertVarName(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid identifiers rejected without schema", func(t *testing.T) {
+	t.Run("invalid identifiers rejected with no schema provider provider", func(t *testing.T) {
 		invalid := []string{
 			"",
 			"1; DROP TABLE users; --",

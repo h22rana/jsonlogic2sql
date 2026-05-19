@@ -29,8 +29,8 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-less", schema: nil},
-		{name: "schema-aware", schema: schema},
+		{name: "schema-required", schema: schema},
+		{name: "schema-required", schema: schema},
 	}
 
 	dialects := []Dialect{
@@ -348,7 +348,7 @@ func registerIdentifierQuotingCustomOperators(t *testing.T, tr *Transpiler) {
 	}
 }
 
-func TestIdentifierQuotingRegression_UnsafeNoSchemaIdentifiersRejected_AllDialects(t *testing.T) {
+func TestIdentifierQuotingRegression_UnsafeSchemaRequiredIdentifiersRejected_AllDialects(t *testing.T) {
 	t.Parallel()
 
 	logic := `{"==": [{"var": "metrics.24h;DROP.count"}, 1]}`
@@ -364,7 +364,7 @@ func TestIdentifierQuotingRegression_UnsafeNoSchemaIdentifiersRejected_AllDialec
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}

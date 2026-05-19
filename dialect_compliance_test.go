@@ -96,7 +96,7 @@ func TestDialectComplianceAllOperators(t *testing.T) {
 
 	for _, d := range dialects {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("Failed to create transpiler for %s: %v", d.String(), err)
 			}
@@ -209,7 +209,7 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for dialect, expected := range tt.expected {
 				t.Run(dialect.String(), func(t *testing.T) {
-					tr, err := NewTranspiler(dialect)
+					tr, err := NewTranspiler(dialect, defaultTestSchema())
 					if err != nil {
 						t.Fatalf("Failed to create transpiler for %s: %v", dialect.String(), err)
 					}
@@ -364,7 +364,7 @@ func TestDialectSpecificIdentifierQuoting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for d, expected := range tt.expected {
 				t.Run(d.String(), func(t *testing.T) {
-					tr, err := NewTranspiler(d)
+					tr, err := NewTranspiler(d, defaultTestSchema())
 					if err != nil {
 						t.Fatalf("Failed to create transpiler for %s: %v", d.String(), err)
 					}
@@ -431,7 +431,7 @@ func TestDialectSpecificStringFunctions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for dialect, expected := range tt.expected {
 				t.Run(dialect.String(), func(t *testing.T) {
-					tr, err := NewTranspiler(dialect)
+					tr, err := NewTranspiler(dialect, defaultTestSchema())
 					if err != nil {
 						t.Fatalf("Failed to create transpiler for %s: %v", dialect.String(), err)
 					}
@@ -452,7 +452,7 @@ func TestDialectSpecificStringFunctions(t *testing.T) {
 
 // TestEdgeCasesNullHandling tests null handling edge cases.
 func TestEdgeCasesNullHandling(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestEdgeCasesNullHandling(t *testing.T) {
 
 // TestEdgeCasesBooleanValues tests boolean value handling.
 func TestEdgeCasesBooleanValues(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestEdgeCasesBooleanValues(t *testing.T) {
 
 // TestEdgeCasesEmptyInputs tests handling of empty or minimal inputs.
 func TestEdgeCasesEmptyInputs(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -565,7 +565,7 @@ func TestEdgeCasesEmptyInputs(t *testing.T) {
 
 // TestEdgeCasesSpecialCharacters tests handling of special characters in strings.
 func TestEdgeCasesSpecialCharacters(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -578,7 +578,7 @@ func TestEdgeCasesSpecialCharacters(t *testing.T) {
 		{"single quote in string", `{"==": [{"var": "name"}, "O'Brien"]}`, "name = 'O''Brien'"},
 		{"unicode characters", `{"==": [{"var": "text"}, "日本語"]}`, "text = '日本語'"},
 		{"unicode with parentheses", `{"==": [{"var": "shop"}, "SPA(スパ)"]}`, "shop = 'SPA(スパ)'"},
-		{"empty string", `{"==": [{"var": "value"}, ""]}`, "value = ''"},
+		{"empty string", `{"==": [{"var": "text"}, ""]}`, "text = ''"},
 		{"string with spaces", `{"==": [{"var": "name"}, "John Doe"]}`, "name = 'John Doe'"},
 		{"string with SQL keywords", `{"==": [{"var": "desc"}, "SELECT * FROM users"]}`, "desc = 'SELECT * FROM users'"},
 		{"string with comparison operators", `{"==": [{"var": "formula"}, "a > b AND c < d"]}`, "formula = 'a > b AND c < d'"},
@@ -600,7 +600,7 @@ func TestEdgeCasesSpecialCharacters(t *testing.T) {
 
 // TestEdgeCasesNumericBoundaries tests handling of numeric boundary values.
 func TestEdgeCasesNumericBoundaries(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -636,7 +636,7 @@ func TestEdgeCasesNumericBoundaries(t *testing.T) {
 
 // TestEdgeCasesDeeplyNested tests handling of deeply nested expressions.
 func TestEdgeCasesDeeplyNested(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -772,7 +772,7 @@ func TestANSIComplianceCommonOperators(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, d := range dialects {
 				t.Run(d.String(), func(t *testing.T) {
-					tr, err := NewTranspiler(d)
+					tr, err := NewTranspiler(d, defaultTestSchema())
 					if err != nil {
 						t.Fatalf("Failed to create transpiler: %v", err)
 					}
@@ -823,7 +823,7 @@ func TestTranspileConditionAllDialects(t *testing.T) {
 
 	for _, d := range dialects {
 		t.Run(d.String(), func(t *testing.T) {
-			result, err := TranspileCondition(d, input)
+			result, err := TranspileCondition(d, defaultTestSchema(), input)
 			if err != nil {
 				t.Errorf("[%s] TranspileCondition() error = %v", d.String(), err)
 				return

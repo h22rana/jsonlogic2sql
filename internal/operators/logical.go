@@ -118,7 +118,7 @@ func (l *LogicalOperator) handleDoubleNot(args []interface{}) (string, error) {
 		return "TRUE", nil
 	}
 
-	// Try to extract field name for schema-aware type checking
+	// Try to extract field name for schema-required type checking
 	fieldName := l.extractVarFieldName(args[0])
 
 	condition, err := l.expressionToSQL(args[0])

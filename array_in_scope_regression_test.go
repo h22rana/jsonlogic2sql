@@ -10,8 +10,7 @@ func TestTranspile_ArrayLambdaInUsesElementScopeRightOperand(t *testing.T) {
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-aware", schema: testArrayScopeSchema()},
-		{name: "schema-less", schema: nil},
+		{name: "schema-required", schema: testArrayScopeSchema()},
 	}
 
 	for _, mode := range modes {

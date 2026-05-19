@@ -498,10 +498,10 @@ func TestNumericOperator_validateNumericOperand(t *testing.T) {
 		})
 	}
 
-	// Test with nil schema - should always pass
-	opNoSchema := NewNumericOperator(nil)
-	if err := opNoSchema.validateNumericOperand(map[string]interface{}{"var": "name"}); err != nil {
-		t.Errorf("validateNumericOperand() with nil schema should pass, got %v", err)
+	// Test with absent schema provider - should always pass
+	opSchemaRequired := NewNumericOperator(nil)
+	if err := opSchemaRequired.validateNumericOperand(map[string]interface{}{"var": "name"}); err != nil {
+		t.Errorf("validateNumericOperand() with absent schema provider should pass, got %v", err)
 	}
 }
 

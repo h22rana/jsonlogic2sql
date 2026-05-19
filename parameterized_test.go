@@ -99,7 +99,7 @@ func TestTranspileParameterized_Comparison(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(tt.dialect)
+			tp, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -116,7 +116,7 @@ func TestTranspileParameterized_Comparison(t *testing.T) {
 }
 
 func TestTranspileParameterized_EqualityConstantFoldsDoNotConsumeParams(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -176,7 +176,7 @@ func TestTranspile_EqualitySemanticsAcrossDialects(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%v", tt.dialect), func(t *testing.T) {
-			tp, err := NewTranspiler(tt.dialect)
+			tp, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -204,7 +204,7 @@ func TestTranspile_EqualitySemanticsAcrossDialects(t *testing.T) {
 }
 
 func TestTranspile_DefaultedVarEqualityWithSchema(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -277,7 +277,7 @@ func TestTranspile_EqualityBoundaryAndNestedSemanticsAcrossDialects(t *testing.T
 	for _, tt := range tests {
 		for _, d := range dialects {
 			t.Run(fmt.Sprintf("%s_%v", tt.name, d), func(t *testing.T) {
-				tp, err := NewTranspiler(d)
+				tp, err := NewTranspiler(d, defaultTestSchema())
 				if err != nil {
 					t.Fatalf("NewTranspiler() error = %v", err)
 				}
@@ -319,14 +319,14 @@ func TestTranspileParameterized_Logical(t *testing.T) {
 		},
 		{
 			name:       "or",
-			jsonLogic:  `{"or": [{"==": [{"var": "x"}, "a"]}, {"==": [{"var": "y"}, "b"]}]}`,
-			wantSQL:    "(x = @p1 OR y = @p2)",
+			jsonLogic:  `{"or": [{"==": [{"var": "field1"}, "a"]}, {"==": [{"var": "field2"}, "b"]}]}`,
+			wantSQL:    "(field1 = @p1 OR field2 = @p2)",
 			wantParams: []QueryParam{{Name: "p1", Value: "a"}, {Name: "p2", Value: "b"}},
 		},
 		{
 			name:       "not",
-			jsonLogic:  `{"!": [{"==": [{"var": "x"}, "off"]}]}`,
-			wantSQL:    "NOT (x = @p1)",
+			jsonLogic:  `{"!": [{"==": [{"var": "field1"}, "off"]}]}`,
+			wantSQL:    "NOT (field1 = @p1)",
 			wantParams: []QueryParam{{Name: "p1", Value: "off"}},
 		},
 		{
@@ -339,7 +339,7 @@ func TestTranspileParameterized_Logical(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(DialectBigQuery)
+			tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -393,7 +393,7 @@ func TestTranspileParameterized_Numeric(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(DialectBigQuery)
+			tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -419,7 +419,7 @@ func TestTranspileParameterized_String(t *testing.T) {
 		{
 			name:       "cat",
 			jsonLogic:  `{"cat": [{"var": "first"}, " ", {"var": "last"}]}`,
-			wantSQL:    "CONCAT(COALESCE(CAST(first AS STRING), ''), @p1, COALESCE(CAST(last AS STRING), ''))",
+			wantSQL:    "CONCAT(COALESCE(first, ''), @p1, COALESCE(last, ''))",
 			wantParams: []QueryParam{{Name: "p1", Value: " "}},
 		},
 		{
@@ -432,7 +432,7 @@ func TestTranspileParameterized_String(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(DialectBigQuery)
+			tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -463,7 +463,7 @@ func TestTranspile_StringNestedEqualitySemanticsWithSchema(t *testing.T) {
 
 	for _, d := range dialects {
 		t.Run(fmt.Sprintf("%v", d), func(t *testing.T) {
-			tp, err := NewTranspiler(d)
+			tp, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -489,8 +489,8 @@ func TestTranspile_StringNestedEqualitySemanticsWithSchema(t *testing.T) {
 	}
 }
 
-func TestTranspile_StringNestedEqualityNoSchema(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+func TestTranspile_StringNestedEqualitySchemaRequired(t *testing.T) {
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -500,7 +500,7 @@ func TestTranspile_StringNestedEqualityNoSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileCondition() error = %v", err)
 	}
-	if wantSQL := "CONCAT(CASE WHEN amount = 'abc' THEN 'true' ELSE 'false' END)"; gotSQL != wantSQL {
+	if wantSQL := "CONCAT('false')"; gotSQL != wantSQL {
 		t.Fatalf("TranspileCondition() SQL = %q, want %q", gotSQL, wantSQL)
 	}
 
@@ -508,14 +508,14 @@ func TestTranspile_StringNestedEqualityNoSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
-	if wantSQL := "CONCAT(CASE WHEN amount = @p1 THEN 'true' ELSE 'false' END)"; gotParamSQL != wantSQL {
+	if wantSQL := "CONCAT('false')"; gotParamSQL != wantSQL {
 		t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", gotParamSQL, wantSQL)
 	}
-	assertParams(t, gotParams, []QueryParam{{Name: "p1", Value: "abc"}})
+	assertParams(t, gotParams, nil)
 }
 
 func TestTranspile_StringNestedComparisonArithmeticPrecedence(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -585,7 +585,7 @@ func TestTranspileParameterized_Data(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(DialectBigQuery)
+			tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -602,7 +602,7 @@ func TestTranspileParameterized_Data(t *testing.T) {
 }
 
 func TestTranspileParameterizedCondition(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -630,11 +630,11 @@ func TestTranspileParameterized_AllDialects(t *testing.T) {
 		{DialectDuckDB, "$"},
 	}
 
-	jsonLogic := `{"==": [{"var": "x"}, "val"]}`
+	jsonLogic := `{"==": [{"var": "field1"}, "val"]}`
 
 	for _, d := range dialects {
 		t.Run(d.name.String(), func(t *testing.T) {
-			tp, err := NewTranspiler(d.name)
+			tp, err := NewTranspiler(d.name, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -659,7 +659,7 @@ func TestTranspileParameterized_SchemaCoercion(t *testing.T) {
 		{Name: "name", Type: FieldTypeString},
 	})
 
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -683,7 +683,7 @@ func TestTranspileParameterized_SchemaCoercion(t *testing.T) {
 }
 
 func TestTranspileParameterized_NoParamsForPureVarExpressions(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -703,6 +703,7 @@ func TestTranspileParameterized_NoParamsForPureVarExpressions(t *testing.T) {
 func TestTranspileParameterized_NullSafeFieldEquality(t *testing.T) {
 	tp, err := NewTranspilerWithConfig(&TranspilerConfig{
 		Dialect:               DialectBigQuery,
+		Schema:                defaultTestSchema(),
 		NullSafeFieldEquality: true,
 	})
 	if err != nil {
@@ -732,7 +733,7 @@ func TestTranspileParameterized_NullSafeFieldEquality(t *testing.T) {
 }
 
 func TestTranspileParameterized_CustomOperator(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -780,7 +781,7 @@ func TestTranspileParameterized_CustomOperator_OutOfRangeFloatsPreserved(t *test
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(DialectBigQuery)
+			tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -817,18 +818,18 @@ func TestTranspileParameterized_CustomOperator_OutOfRangeFloatsPreserved(t *test
 }
 
 func TestTranspileParameterized_DeepNesting(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
 
-	jsonLogic := `{"and": [{"==": [{"var": "a"}, "x"]}, {"or": [{"==": [{"var": "b"}, "y"]}, {">": [{"var": "c"}, 10]}]}]}`
+	jsonLogic := `{"and": [{"==": [{"var": "field1"}, "x"]}, {"or": [{"==": [{"var": "field2"}, "y"]}, {">": [{"var": "c"}, 10]}]}]}`
 	sql, params, err := tp.TranspileParameterizedCondition(jsonLogic)
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
-	if sql != "(a = @p1 AND (b = @p2 OR c > @p3))" {
-		t.Errorf("SQL = %q, want %q", sql, "(a = @p1 AND (b = @p2 OR c > @p3))")
+	if sql != "(field1 = @p1 AND (field2 = @p2 OR c > @p3))" {
+		t.Errorf("SQL = %q, want %q", sql, "(field1 = @p1 AND (field2 = @p2 OR c > @p3))")
 	}
 	if len(params) != 3 {
 		t.Fatalf("expected 3 params, got %d", len(params))
@@ -845,7 +846,7 @@ func TestTranspileParameterized_DeepNesting(t *testing.T) {
 }
 
 func TestTranspileParameterized_FromMap(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -870,7 +871,7 @@ func TestTranspileParameterized_FromMap(t *testing.T) {
 }
 
 func TestTranspileParameterized_FromInterface(t *testing.T) {
-	tp, err := NewTranspiler(DialectPostgreSQL)
+	tp, err := NewTranspiler(DialectPostgreSQL, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -895,18 +896,18 @@ func TestTranspileParameterized_FromInterface(t *testing.T) {
 }
 
 func TestTranspileParameterized_PackageFunctions(t *testing.T) {
-	sql, params, err := TranspileParameterizedCondition(DialectBigQuery, `{"==": [{"var": "x"}, "test"]}`)
+	sql, params, err := TranspileParameterizedCondition(DialectBigQuery, defaultTestSchema(), `{"==": [{"var": "field1"}, "test"]}`)
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
-	if sql != "x = @p1" {
-		t.Errorf("SQL = %q, want %q", sql, "x = @p1")
+	if sql != "field1 = @p1" {
+		t.Errorf("SQL = %q, want %q", sql, "field1 = @p1")
 	}
 	if len(params) != 1 {
 		t.Errorf("expected 1 param, got %d", len(params))
 	}
 
-	sql2, params2, err := TranspileParameterizedCondition(DialectPostgreSQL, `{">": [{"var": "age"}, 21]}`)
+	sql2, params2, err := TranspileParameterizedCondition(DialectPostgreSQL, defaultTestSchema(), `{">": [{"var": "age"}, 21]}`)
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
@@ -919,7 +920,7 @@ func TestTranspileParameterized_PackageFunctions(t *testing.T) {
 }
 
 func TestTranspileParameterized_InvalidJSON(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -933,7 +934,7 @@ func TestTranspileParameterized_InvalidJSON(t *testing.T) {
 }
 
 func TestParameterizedErrorParity(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -981,7 +982,7 @@ func TestParameterizedErrorParity(t *testing.T) {
 }
 
 func TestTranspileParameterized_BoolAndNullNotParameterized(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -998,7 +999,7 @@ func TestTranspileParameterized_BoolAndNullNotParameterized(t *testing.T) {
 }
 
 func TestTranspileParameterized_LargeIntegerPrecision(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -1026,7 +1027,7 @@ func TestTranspileParameterized_LargeIntegerPrecision(t *testing.T) {
 }
 
 func TestTranspileParameterized_UnquotedLargeIntegerPrecision(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -1073,7 +1074,7 @@ func TestTranspileParameterized_OutOfRangeFloats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(DialectBigQuery)
+			tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -1107,14 +1108,14 @@ func TestTranspileParameterized_InStringContainment(t *testing.T) {
 		wantParams []QueryParam
 	}{
 		{
-			name:       "string in var without schema (BigQuery)",
+			name:       "string in var with string schema (BigQuery)",
 			dialect:    DialectBigQuery,
 			jsonLogic:  `{"in": ["foo", {"var": "bar"}]}`,
 			wantSQL:    "STRPOS(bar, @p1) > 0",
 			wantParams: []QueryParam{{Name: "p1", Value: "foo"}},
 		},
 		{
-			name:       "string in var without schema (PostgreSQL)",
+			name:       "string in var with string schema (PostgreSQL)",
 			dialect:    DialectPostgreSQL,
 			jsonLogic:  `{"in": ["foo", {"var": "bar"}]}`,
 			wantSQL:    "POSITION($1 IN bar) > 0",
@@ -1124,7 +1125,7 @@ func TestTranspileParameterized_InStringContainment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(tt.dialect)
+			tp, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -1140,7 +1141,7 @@ func TestTranspileParameterized_InStringContainment(t *testing.T) {
 	}
 }
 
-func TestTranspileParameterized_InStringExpressionContainment_NoSchema(t *testing.T) {
+func TestTranspileParameterized_InStringExpressionContainment_SchemaRequired(t *testing.T) {
 	tests := []struct {
 		name       string
 		dialect    Dialect
@@ -1207,7 +1208,7 @@ func TestTranspileParameterized_InStringExpressionContainment_NoSchema(t *testin
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(tt.dialect)
+			tp, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -1271,7 +1272,7 @@ func TestTranspileParameterized_InSchemaCoercion(t *testing.T) {
 }
 
 func TestTranspileParameterized_InCustomOperatorPlaceholder(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -1291,7 +1292,7 @@ func TestTranspileParameterized_InCustomOperatorPlaceholder(t *testing.T) {
 }
 
 func TestTranspileParameterized_CustomOperatorQuotedPlaceholderRejected(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -1316,7 +1317,7 @@ func TestTranspileParameterized_CustomOperatorQuotedPlaceholderRejected(t *testi
 }
 
 func TestTranspileParameterized_CustomOperatorPlaceholderAsExpressionAllowed(t *testing.T) {
-	tp, err := NewTranspiler(DialectBigQuery)
+	tp, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -1350,7 +1351,7 @@ func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tp, err := NewTranspiler(tt.dialect)
+			tp, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}

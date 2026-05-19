@@ -10,8 +10,7 @@ func TestTranspile_ArrayLambdaMissingUsesElementScope(t *testing.T) {
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-aware", schema: testArrayScopeSchema()},
-		{name: "schema-less", schema: nil},
+		{name: "schema-required", schema: testArrayScopeSchema()},
 	}
 
 	tests := []struct {
@@ -100,8 +99,7 @@ func TestTranspile_ArrayLambdaMissingRejectsImplementationAliases(t *testing.T) 
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-aware", schema: testArrayScopeSchema()},
-		{name: "schema-less", schema: nil},
+		{name: "schema-required", schema: testArrayScopeSchema()},
 	}
 	aliases := []string{".name", "item.name", "current.name", "elem.name"}
 

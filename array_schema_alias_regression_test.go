@@ -293,10 +293,10 @@ func TestArrayPredicateLambdasUseTruthinessAllDialectsSchemaModes(t *testing.T) 
 						got, err = schemaAware.TranspileCondition(tt.logic)
 					}
 					if err != nil {
-						t.Fatalf("schema-aware inline error = %v", err)
+						t.Fatalf("schema-required inline error = %v", err)
 					}
 					if want := tt.want(d); !strings.Contains(got, want) {
-						t.Fatalf("schema-aware inline SQL = %q, want to contain %q", got, want)
+						t.Fatalf("schema-required inline SQL = %q, want to contain %q", got, want)
 					}
 
 					if tt.valueRoot {
@@ -305,35 +305,13 @@ func TestArrayPredicateLambdasUseTruthinessAllDialectsSchemaModes(t *testing.T) 
 						got, gotParams, err = schemaAware.TranspileParameterizedCondition(tt.logic)
 					}
 					if err != nil {
-						t.Fatalf("schema-aware parameterized error = %v", err)
+						t.Fatalf("schema-required parameterized error = %v", err)
 					}
 					if want := tt.want(d); !strings.Contains(got, want) {
-						t.Fatalf("schema-aware parameterized SQL = %q, want to contain %q", got, want)
+						t.Fatalf("schema-required parameterized SQL = %q, want to contain %q", got, want)
 					}
 					if len(gotParams) != 0 {
-						t.Fatalf("schema-aware params = %#v, want none", gotParams)
-					}
-
-					schemaLess, err := NewTranspiler(d)
-					if err != nil {
-						t.Fatalf("NewTranspiler() error = %v", err)
-					}
-					if tt.valueRoot {
-						_, err = schemaLess.TranspileValue(tt.logic)
-					} else {
-						_, err = schemaLess.TranspileCondition(tt.logic)
-					}
-					if !IsErrorCode(err, ErrInvalidExpressionContext) {
-						t.Fatalf("schema-less inline error = %v, want %s", err, ErrInvalidExpressionContext)
-					}
-					if tt.valueRoot {
-						got, gotParams, err = schemaLess.TranspileParameterizedValue(tt.logic)
-					} else {
-						got, gotParams, err = schemaLess.TranspileParameterizedCondition(tt.logic)
-					}
-					if !IsErrorCode(err, ErrInvalidExpressionContext) {
-						t.Fatalf("schema-less parameterized error = %v, want %s (SQL %q params %#v)",
-							err, ErrInvalidExpressionContext, got, gotParams)
+						t.Fatalf("schema-required params = %#v, want none", gotParams)
 					}
 				})
 			}
@@ -636,17 +614,11 @@ func TestTranspile_ArrayScopeUnknownFieldsRejectedWithSchema_AllDialects(t *test
 			if err != nil {
 				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
 			}
-			schemaLess, err := NewTranspiler(d)
-			if err != nil {
-				t.Fatalf("NewTranspiler() error: %v", err)
-			}
-
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
 
 					assertUnknownScopedFieldRejected(t, schemaAware, tc.logic, tc.valueRoot)
-					assertUnknownScopedFieldAllowedWithoutSchema(t, schemaLess, tc.logic, tc.valueRoot)
 				})
 			}
 		})
@@ -676,36 +648,12 @@ func assertUnknownScopedFieldRejected(t *testing.T, tr *Transpiler, logic string
 	}
 }
 
-func assertUnknownScopedFieldAllowedWithoutSchema(t *testing.T, tr *Transpiler, logic string, valueRoot bool) {
-	t.Helper()
-
-	var err error
-	if valueRoot {
-		_, err = tr.TranspileValue(logic)
-	} else {
-		_, err = tr.TranspileCondition(logic)
-	}
-	if err != nil {
-		t.Fatalf("schema-less inline error = %v, want nil", err)
-	}
-
-	if valueRoot {
-		_, _, err = tr.TranspileParameterizedValue(logic)
-	} else {
-		_, _, err = tr.TranspileParameterizedCondition(logic)
-	}
-	if err != nil {
-		t.Fatalf("schema-less parameterized error = %v, want nil", err)
-	}
-}
-
 func TestTranspile_ArrayLambdaVarSemantics_AllDialectsSchemaModes(t *testing.T) {
 	modes := []struct {
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-aware", schema: testArrayScopeSchema()},
-		{name: "schema-less", schema: nil},
+		{name: "schema-required", schema: testArrayScopeSchema()},
 	}
 
 	for _, mode := range modes {
@@ -782,8 +730,7 @@ func TestTranspile_ArrayLambdaRejectsLegacyElementAliases_AllDialectsSchemaModes
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-aware", schema: testArrayScopeSchema()},
-		{name: "schema-less", schema: nil},
+		{name: "schema-required", schema: testArrayScopeSchema()},
 	}
 
 	for _, mode := range modes {
@@ -836,7 +783,7 @@ func TestTranspile_ArrayLambdaRejectsTrailingDotReduceCurrent_AllDialects(t *tes
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d})
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: defaultTestSchema()})
 			if err != nil {
 				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
 			}

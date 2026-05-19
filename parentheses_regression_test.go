@@ -6,7 +6,7 @@ import (
 )
 
 func TestTranspile_ParenthesesNormalizationTrickyCases(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -21,7 +21,7 @@ func TestTranspile_ParenthesesNormalizationTrickyCases(t *testing.T) {
 			name:  "concat comparison with quoted closing parenthesis",
 			logic: `{"cat":[{"==":[{"var":"amount"},")"]}]}`,
 			value: true,
-			want:  "CONCAT(CASE WHEN amount = ')' THEN 'true' ELSE 'false' END)",
+			want:  "CONCAT('false')",
 		},
 		{
 			name:  "not preserves nested and precedence inside or",
@@ -56,7 +56,7 @@ func TestTranspile_ParenthesesNormalizationTrickyCases(t *testing.T) {
 }
 
 func TestTranspileParameterized_ParenthesesNormalizationTrickyCases(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -65,10 +65,10 @@ func TestTranspileParameterized_ParenthesesNormalizationTrickyCases(t *testing.T
 	if err != nil {
 		t.Fatalf("TranspileParameterizedValue() error = %v", err)
 	}
-	if wantSQL := "CONCAT(CASE WHEN amount = @p1 THEN 'true' ELSE 'false' END)"; gotSQL != wantSQL {
+	if wantSQL := "CONCAT('false')"; gotSQL != wantSQL {
 		t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", gotSQL, wantSQL)
 	}
-	if wantParams := []QueryParam{{Name: "p1", Value: ")"}}; !reflect.DeepEqual(gotParams, wantParams) {
+	if wantParams := []QueryParam(nil); !reflect.DeepEqual(gotParams, wantParams) {
 		t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
 	}
 

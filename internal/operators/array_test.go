@@ -8,8 +8,34 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
 
+type arrayTestSchemaProvider struct {
+	mockSchemaProvider
+}
+
+func (a *arrayTestSchemaProvider) GetFieldType(fieldName string) string {
+	if a.IsArrayType(fieldName) {
+		return "array"
+	}
+	return "number"
+}
+
+func (a *arrayTestSchemaProvider) IsArrayType(fieldName string) bool {
+	switch fieldName {
+	case "numbers", "scores", "values", "array1", "array2", "arr", "a", "b", "c", "d",
+		"moreNumbers", "ages", "statuses", "prices", "items", "readings", "transactions",
+		"logs", "flags", "temperatures":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *arrayTestSchemaProvider) IsNumericType(fieldName string) bool {
+	return !a.IsArrayType(fieldName)
+}
+
 func TestArrayOperator_ToSQL(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &arrayTestSchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -239,7 +265,7 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 
 	for _, d := range dialects {
 		t.Run(d.name, func(t *testing.T) {
-			config := NewOperatorConfig(d.dialect, nil)
+			config := NewOperatorConfig(d.dialect, &arrayTestSchemaProvider{})
 			op := NewArrayOperator(config)
 			literal123 := "[1, 2, 3]"
 			literal1234 := "[1, 2, 3, 4]"
@@ -544,7 +570,7 @@ func TestArrayOperator_MergeDialectSpecific(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := NewOperatorConfig(tt.dialect, nil)
+			config := NewOperatorConfig(tt.dialect, &arrayTestSchemaProvider{})
 			op := NewArrayOperator(config)
 
 			result, err := op.ToSQL("merge", tt.args)
@@ -564,7 +590,7 @@ func TestArrayOperator_DialectValidation(t *testing.T) {
 	operators := []string{"map", "filter", "reduce", "all", "some", "none", "merge"}
 
 	t.Run("unspecified dialect returns error", func(t *testing.T) {
-		config := NewOperatorConfig(dialect.DialectUnspecified, nil)
+		config := NewOperatorConfig(dialect.DialectUnspecified, &arrayTestSchemaProvider{})
 		op := NewArrayOperator(config)
 
 		for _, operator := range operators {
@@ -586,7 +612,7 @@ func TestArrayOperator_DialectValidation(t *testing.T) {
 	})
 
 	t.Run("BigQuery dialect succeeds", func(t *testing.T) {
-		config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		config := NewOperatorConfig(dialect.DialectBigQuery, &arrayTestSchemaProvider{})
 		op := NewArrayOperator(config)
 
 		// Test map as representative
@@ -598,7 +624,7 @@ func TestArrayOperator_DialectValidation(t *testing.T) {
 	})
 
 	t.Run("Spanner dialect succeeds", func(t *testing.T) {
-		config := NewOperatorConfig(dialect.DialectSpanner, nil)
+		config := NewOperatorConfig(dialect.DialectSpanner, &arrayTestSchemaProvider{})
 		op := NewArrayOperator(config)
 
 		// Test map as representative
@@ -673,7 +699,7 @@ func TestArrayOperator_valueToSQL(t *testing.T) {
 
 // TestArrayOperator_EdgeCases tests complex and edge case scenarios for array operators.
 func TestArrayOperator_EdgeCases(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &arrayTestSchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -949,7 +975,7 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 
 // TestArrayOperator_ClickHouse tests array operators with ClickHouse-specific syntax.
 func TestArrayOperator_ClickHouse(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectClickHouse, nil)
+	config := NewOperatorConfig(dialect.DialectClickHouse, &arrayTestSchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -1052,7 +1078,7 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 
 func newArrayOperatorWithParamParserBQ(t *testing.T) *ArrayOperator {
 	t.Helper()
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &arrayTestSchemaProvider{})
 	config.SetParamExpressionParser(func(expr any, path string, pc *params.ParamCollector) (string, error) {
 		return "", fmt.Errorf("unexpected ParamExpressionParser in test (path=%s, expr=%v)", path, expr)
 	})
@@ -1180,7 +1206,7 @@ func TestArrayOperator_ToSQLParam_UnsupportedOperator(t *testing.T) {
 }
 
 func TestArrayOperator_ToSQLParam_DialectValidation(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectUnspecified, nil)
+	config := NewOperatorConfig(dialect.DialectUnspecified, &arrayTestSchemaProvider{})
 	config.SetParamExpressionParser(func(expr any, path string, pc *params.ParamCollector) (string, error) {
 		return "", fmt.Errorf("unexpected ParamExpressionParser in dialect validation test")
 	})

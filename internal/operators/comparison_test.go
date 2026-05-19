@@ -359,7 +359,7 @@ func TestComparisonOperator_ToSQL_NullSafeFieldEquality(t *testing.T) {
 			wantSQL: "a IS NULL",
 		},
 		{
-			name:     "schema-less strict field literal remains unchanged",
+			name:     "schema-required strict field literal remains unchanged",
 			operator: "===",
 			args: []interface{}{
 				map[string]interface{}{"var": "a"},
@@ -1953,7 +1953,7 @@ func TestComparisonOperator_coerceValueForComparison(t *testing.T) {
 		},
 		// No coercion cases
 		{
-			name:      "nil schema returns value as-is",
+			name:      "absent schema provider returns value as-is",
 			value:     "test",
 			fieldName: "",
 			expected:  "test",
@@ -1993,11 +1993,11 @@ func TestComparisonOperator_coerceValueForComparison(t *testing.T) {
 		})
 	}
 
-	// Test with nil schema
-	opNoSchema := NewComparisonOperator(nil)
-	result := opNoSchema.coerceValueForComparison("50000", "age")
+	// Test with absent schema provider
+	opSchemaRequired := NewComparisonOperator(nil)
+	result := opSchemaRequired.coerceValueForComparison("50000", "age")
 	if result != "50000" {
-		t.Errorf("coerceValueForComparison() with nil schema = %v, want '50000'", result)
+		t.Errorf("coerceValueForComparison() with absent schema provider = %v, want '50000'", result)
 	}
 }
 
@@ -2090,10 +2090,10 @@ func TestComparisonOperator_validateEnumValue(t *testing.T) {
 		})
 	}
 
-	// Test with nil schema
-	opNoSchema := NewComparisonOperator(nil)
-	if err := opNoSchema.validateEnumValue("anything", "status"); err != nil {
-		t.Errorf("validateEnumValue() with nil schema should return nil, got %v", err)
+	// Test with absent schema provider
+	opSchemaRequired := NewComparisonOperator(nil)
+	if err := opSchemaRequired.validateEnumValue("anything", "status"); err != nil {
+		t.Errorf("validateEnumValue() with absent schema provider should return nil, got %v", err)
 	}
 }
 
@@ -2428,8 +2428,8 @@ func TestComparisonOperator_handleIn_WithVarRightSide(t *testing.T) {
 	}
 }
 
-func TestComparisonOperator_handleIn_NoSchema_VarRightSide(t *testing.T) {
-	// Without schema, test heuristic based on left side being a literal
+func TestComparisonOperator_handleIn_SchemaRequired_VarRightSide(t *testing.T) {
+	// With absent schema provider provider, test heuristic based on left side being a literal
 	op := NewComparisonOperator(nil)
 
 	tests := []struct {
@@ -2481,7 +2481,7 @@ func TestComparisonOperator_handleIn_NoSchema_VarRightSide(t *testing.T) {
 	}
 }
 
-func TestComparisonOperator_handleIn_NoSchema_StringExpressionHeuristic(t *testing.T) {
+func TestComparisonOperator_handleIn_SchemaRequired_StringExpressionHeuristic(t *testing.T) {
 	leftStringExpr := map[string]interface{}{
 		OpCat: []interface{}{
 			map[string]interface{}{
@@ -3151,11 +3151,11 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		assertQueryParams(t, pc.Params(), nil)
 	})
 
-	t.Run("string containment without schema", func(t *testing.T) {
-		noSchemaConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
-		noSchemaOp := NewComparisonOperator(noSchemaConfig)
+	t.Run("string containment with absent schema provider provider", func(t *testing.T) {
+		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
-		got, err := noSchemaOp.handleInParam("foo", map[string]interface{}{"var": "bar"}, pc)
+		got, err := schemaRequiredOp.handleInParam("foo", map[string]interface{}{"var": "bar"}, pc)
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
@@ -3256,10 +3256,10 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 	})
 
 	t.Run("ProcessedValue SQL literal treated as string containment", func(t *testing.T) {
-		noSchemaConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
-		noSchemaOp := NewComparisonOperator(noSchemaConfig)
+		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
-		got, err := noSchemaOp.handleInParam(
+		got, err := schemaRequiredOp.handleInParam(
 			ProcessedValue{IsSQL: true, Value: "'foo'"},
 			map[string]interface{}{"var": "col"},
 			pc,
@@ -3274,11 +3274,11 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 	})
 
 	t.Run("ProcessedValue placeholder for string param uses string containment", func(t *testing.T) {
-		noSchemaConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
-		noSchemaOp := NewComparisonOperator(noSchemaConfig)
+		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		pc.Add("hello") // @p1 = "hello" (string)
-		got, err := noSchemaOp.handleInParam(
+		got, err := schemaRequiredOp.handleInParam(
 			ProcessedValue{IsSQL: true, Value: "@p1"},
 			map[string]interface{}{"var": "col"},
 			pc,
@@ -3293,11 +3293,11 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 	})
 
 	t.Run("ProcessedValue placeholder for numeric param uses array membership", func(t *testing.T) {
-		noSchemaConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
-		noSchemaOp := NewComparisonOperator(noSchemaConfig)
+		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		pc.Add(float64(42)) // @p1 = 42 (numeric)
-		got, err := noSchemaOp.handleInParam(
+		got, err := schemaRequiredOp.handleInParam(
 			ProcessedValue{IsSQL: true, Value: "@p1"},
 			map[string]interface{}{"var": "col"},
 			pc,
@@ -3312,11 +3312,11 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 	})
 
 	t.Run("ProcessedValue SQL expression uses array membership", func(t *testing.T) {
-		noSchemaConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
-		noSchemaOp := NewComparisonOperator(noSchemaConfig)
+		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		pc.Add("hello") // @p1 = "hello"
-		got, err := noSchemaOp.handleInParam(
+		got, err := schemaRequiredOp.handleInParam(
 			ProcessedValue{IsSQL: true, Value: "LOWER(@p1)"},
 			map[string]interface{}{"var": "col"},
 			pc,
@@ -3331,7 +3331,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 	})
 }
 
-func TestComparisonOperator_handleInParam_NoSchema_StringExpressionHeuristic(t *testing.T) {
+func TestComparisonOperator_handleInParam_SchemaRequired_StringExpressionHeuristic(t *testing.T) {
 	leftStringExpr := map[string]interface{}{
 		OpCat: []interface{}{
 			map[string]interface{}{

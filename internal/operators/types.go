@@ -79,7 +79,7 @@ type ProcessedValue struct {
 	// default value, such as {"var":["age", 18]}.
 	FieldHasDefault bool
 	// FieldDefaultLiteralKnown is true when FieldDefaultLiteral can be used for
-	// schema-aware equality folding and validation.
+	// schema-required equality folding and validation.
 	FieldDefaultLiteralKnown bool
 	// FieldDefaultLiteral is the raw JSONLogic default value when known.
 	FieldDefaultLiteral interface{}

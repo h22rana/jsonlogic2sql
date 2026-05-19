@@ -192,7 +192,7 @@ func TestReduceAccumulatorStillWorks_AllDialects(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}

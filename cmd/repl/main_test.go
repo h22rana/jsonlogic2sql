@@ -11,6 +11,36 @@ import (
 	"github.com/h22rana/jsonlogic2sql"
 )
 
+func replTestSchema(t *testing.T) *jsonlogic2sql.Schema {
+	t.Helper()
+	schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+		{Name: "col", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "column", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "desc", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "name", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "email", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "code", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "status", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+		{Name: "country", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "deleted_at", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "active", Type: jsonlogic2sql.FieldTypeBoolean},
+		{Name: "failedAttempts", Type: jsonlogic2sql.FieldTypeNumber},
+		{Name: "transaction.amount", Type: jsonlogic2sql.FieldTypeNumber},
+		{Name: "user.verified", Type: jsonlogic2sql.FieldTypeBoolean},
+		{Name: "user.accountAgeDays", Type: jsonlogic2sql.FieldTypeNumber},
+		{Name: "age", Type: jsonlogic2sql.FieldTypeNumber},
+		{Name: "field", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "field1", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "field2", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "verified", Type: jsonlogic2sql.FieldTypeBoolean},
+	})
+	if err != nil {
+		t.Fatalf("NewSchema() error: %v", err)
+	}
+	return schema
+}
+
 func TestUnescapeSQLString(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -168,7 +198,7 @@ func TestParseContainsArgs(t *testing.T) {
 func setupTestTranspiler(t *testing.T) *jsonlogic2sql.Transpiler {
 	t.Helper()
 	currentDialect = jsonlogic2sql.DialectBigQuery
-	tr, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+	tr, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, replTestSchema(t))
 	if err != nil {
 		t.Fatalf("NewTranspiler: %v", err)
 	}
@@ -521,7 +551,7 @@ func TestTranspileParameterized_BigQuery(t *testing.T) {
 }
 
 func TestTranspileParameterized_PostgreSQL(t *testing.T) {
-	tr, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL)
+	tr, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL, replTestSchema(t))
 	if err != nil {
 		t.Fatalf("NewTranspiler: %v", err)
 	}
@@ -687,7 +717,7 @@ func TestTranspileParameterized_LikeOperators_PlaceholderNotQuoted(t *testing.T)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			currentDialect = tt.dialect
-			tr, err := jsonlogic2sql.NewTranspiler(tt.dialect)
+			tr, err := jsonlogic2sql.NewTranspiler(tt.dialect, replTestSchema(t))
 			if err != nil {
 				t.Fatalf("NewTranspiler: %v", err)
 			}
@@ -854,7 +884,7 @@ func TestContainsArrayPatternPostgreSQL(t *testing.T) {
 	t.Cleanup(func() { currentDialect = origDialect })
 
 	currentDialect = jsonlogic2sql.DialectPostgreSQL
-	tr, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL)
+	tr, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL, replTestSchema(t))
 	if err != nil {
 		t.Fatalf("NewTranspiler: %v", err)
 	}

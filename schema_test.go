@@ -495,7 +495,7 @@ func TestSchemaWithTranspiler(t *testing.T) {
 	})
 
 	// Create transpiler with schema
-	transpiler, err := NewTranspiler(DialectBigQuery)
+	transpiler, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() returned error: %v", err)
 	}
@@ -525,7 +525,7 @@ func TestSchemaInOperator(t *testing.T) {
 		{Name: "description", Type: FieldTypeString},
 	})
 
-	transpiler, err := NewTranspiler(DialectBigQuery)
+	transpiler, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() returned error: %v", err)
 	}
@@ -608,20 +608,23 @@ func TestSchemaInOperator_ArrayValuedLeftOperandFoldsFalseAllDialects(t *testing
 	}
 }
 
-func TestSchemaOptional(t *testing.T) {
-	// Test that transpiler works without schema (backward compatibility)
-	transpiler, err := NewTranspiler(DialectBigQuery)
+func TestSchemaRequiredAllowsLiteralOnlyEmptySchema(t *testing.T) {
+	transpiler, err := NewTranspiler(DialectBigQuery, emptyTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() returned error: %v", err)
 	}
 
-	result, err := transpiler.TranspileCondition(`{"==": [{"var": "any_field"}, 100]}`)
-	if err != nil {
-		t.Fatalf("Transpile without schema failed: %v", err)
+	if _, fieldErr := transpiler.TranspileCondition(`{"==": [{"var": "any_field"}, 100]}`); fieldErr == nil ||
+		!strings.Contains(fieldErr.Error(), "field 'any_field' is not defined in schema") {
+		t.Fatalf("field access with empty schema error = %v, want schema validation error", fieldErr)
 	}
-	expected := "any_field = 100"
-	if result != expected {
-		t.Errorf("TranspileCondition() = %q, want %q", result, expected)
+
+	result, err := transpiler.TranspileCondition(`{"==": [1, 1]}`)
+	if err != nil {
+		t.Fatalf("literal-only expression failed with empty schema: %v", err)
+	}
+	if result != "TRUE" {
+		t.Errorf("TranspileCondition() = %q, want TRUE", result)
 	}
 }
 

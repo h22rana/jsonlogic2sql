@@ -17,35 +17,35 @@ func TestNewOperatorConfig(t *testing.T) {
 		wantSchema  bool
 	}{
 		{
-			name:        "BigQuery without schema",
+			name:        "BigQuery with absent schema provider provider",
 			dialect:     dialect.DialectBigQuery,
 			schema:      nil,
 			wantDialect: dialect.DialectBigQuery,
 			wantSchema:  false,
 		},
 		{
-			name:        "Spanner without schema",
+			name:        "Spanner with absent schema provider provider",
 			dialect:     dialect.DialectSpanner,
 			schema:      nil,
 			wantDialect: dialect.DialectSpanner,
 			wantSchema:  false,
 		},
 		{
-			name:        "PostgreSQL without schema",
+			name:        "PostgreSQL with absent schema provider provider",
 			dialect:     dialect.DialectPostgreSQL,
 			schema:      nil,
 			wantDialect: dialect.DialectPostgreSQL,
 			wantSchema:  false,
 		},
 		{
-			name:        "DuckDB without schema",
+			name:        "DuckDB with absent schema provider provider",
 			dialect:     dialect.DialectDuckDB,
 			schema:      nil,
 			wantDialect: dialect.DialectDuckDB,
 			wantSchema:  false,
 		},
 		{
-			name:        "ClickHouse without schema",
+			name:        "ClickHouse with absent schema provider provider",
 			dialect:     dialect.DialectClickHouse,
 			schema:      nil,
 			wantDialect: dialect.DialectClickHouse,
@@ -81,7 +81,7 @@ func TestOperatorConfig_HasSchema(t *testing.T) {
 			want:   false,
 		},
 		{
-			name:   "config with nil schema",
+			name:   "config with absent schema provider",
 			config: &OperatorConfig{Dialect: dialect.DialectBigQuery, Schema: nil},
 			want:   false,
 		},

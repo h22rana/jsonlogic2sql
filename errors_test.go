@@ -6,7 +6,7 @@ import (
 )
 
 func TestAsTranspileError(t *testing.T) {
-	transpiler, err := NewTranspiler(DialectBigQuery)
+	transpiler, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestAsTranspileError(t *testing.T) {
 }
 
 func TestIsErrorCode(t *testing.T) {
-	transpiler, err := NewTranspiler(DialectBigQuery)
+	transpiler, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestIsErrorCode(t *testing.T) {
 }
 
 func TestTranspileErrorUnwrap(t *testing.T) {
-	transpiler, err := NewTranspiler(DialectBigQuery)
+	transpiler, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}

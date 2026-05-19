@@ -57,8 +57,8 @@ func (t *Transpiler) TranspileParameterizedValueFromInterface(logic interface{})
 
 // TranspileParameterizedCondition converts a JSON Logic string to a SQL condition
 // with bind parameter placeholders.
-func TranspileParameterizedCondition(d Dialect, jsonLogic string) (string, []QueryParam, error) {
-	t, err := NewTranspiler(d)
+func TranspileParameterizedCondition(d Dialect, schema *Schema, jsonLogic string) (string, []QueryParam, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", nil, err
 	}
@@ -67,8 +67,8 @@ func TranspileParameterizedCondition(d Dialect, jsonLogic string) (string, []Que
 
 // TranspileParameterizedConditionFromMap converts a pre-parsed JSON Logic map to
 // a SQL condition (without the WHERE keyword) with bind parameter placeholders.
-func TranspileParameterizedConditionFromMap(d Dialect, logic map[string]interface{}) (string, []QueryParam, error) {
-	t, err := NewTranspiler(d)
+func TranspileParameterizedConditionFromMap(d Dialect, schema *Schema, logic map[string]interface{}) (string, []QueryParam, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", nil, err
 	}
@@ -77,8 +77,8 @@ func TranspileParameterizedConditionFromMap(d Dialect, logic map[string]interfac
 
 // TranspileParameterizedConditionFromInterface converts any JSON Logic interface{}
 // to a SQL condition (without the WHERE keyword) with bind parameter placeholders.
-func TranspileParameterizedConditionFromInterface(d Dialect, logic interface{}) (string, []QueryParam, error) {
-	t, err := NewTranspiler(d)
+func TranspileParameterizedConditionFromInterface(d Dialect, schema *Schema, logic interface{}) (string, []QueryParam, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", nil, err
 	}
@@ -87,8 +87,8 @@ func TranspileParameterizedConditionFromInterface(d Dialect, logic interface{}) 
 
 // TranspileParameterizedValue converts a JSON Logic string to a parameterized
 // SQL value expression.
-func TranspileParameterizedValue(d Dialect, jsonLogic string) (string, []QueryParam, error) {
-	t, err := NewTranspiler(d)
+func TranspileParameterizedValue(d Dialect, schema *Schema, jsonLogic string) (string, []QueryParam, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", nil, err
 	}
@@ -97,8 +97,8 @@ func TranspileParameterizedValue(d Dialect, jsonLogic string) (string, []QueryPa
 
 // TranspileParameterizedValueFromMap converts a pre-parsed JSON Logic map to a
 // parameterized SQL value expression.
-func TranspileParameterizedValueFromMap(d Dialect, logic map[string]interface{}) (string, []QueryParam, error) {
-	t, err := NewTranspiler(d)
+func TranspileParameterizedValueFromMap(d Dialect, schema *Schema, logic map[string]interface{}) (string, []QueryParam, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", nil, err
 	}
@@ -107,8 +107,8 @@ func TranspileParameterizedValueFromMap(d Dialect, logic map[string]interface{})
 
 // TranspileParameterizedValueFromInterface converts any JSON Logic interface{}
 // to a parameterized SQL value expression.
-func TranspileParameterizedValueFromInterface(d Dialect, logic interface{}) (string, []QueryParam, error) {
-	t, err := NewTranspiler(d)
+func TranspileParameterizedValueFromInterface(d Dialect, schema *Schema, logic interface{}) (string, []QueryParam, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", nil, err
 	}

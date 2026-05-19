@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -17,15 +18,15 @@ func transpileTestExpression(tr *Transpiler, logic string) (string, error) {
 }
 
 func transpilePackageTestExpression(d Dialect, logic string) (string, error) {
-	sql, err := TranspileCondition(d, logic)
+	sql, err := TranspileCondition(d, defaultTestSchema(), logic)
 	if IsErrorCode(err, ErrInvalidExpressionContext) {
-		return TranspileValue(d, logic)
+		return TranspileValue(d, defaultTestSchema(), logic)
 	}
 	return sql, err
 }
 
 func TestNewTranspiler(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() returned error: %v", err)
 	}
@@ -39,7 +40,7 @@ func TestNewTranspiler(t *testing.T) {
 }
 
 func TestTranspiler_NullSafeFieldEquality(t *testing.T) {
-	defaultTr, err := NewTranspiler(DialectBigQuery)
+	defaultTr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -53,6 +54,7 @@ func TestTranspiler_NullSafeFieldEquality(t *testing.T) {
 
 	configTr, err := NewTranspilerWithConfig(&TranspilerConfig{
 		Dialect:               DialectBigQuery,
+		Schema:                defaultTestSchema(),
 		NullSafeFieldEquality: true,
 	})
 	if err != nil {
@@ -66,7 +68,7 @@ func TestTranspiler_NullSafeFieldEquality(t *testing.T) {
 		t.Fatalf("TranspileCondition() config = %q, want %q", configSQL, want)
 	}
 
-	setterTr, err := NewTranspiler(DialectBigQuery)
+	setterTr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() setter error = %v", err)
 	}
@@ -94,6 +96,7 @@ func TestTranspiler_NullSafeFieldEquality_AllDialects(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
 				Dialect:               d,
+				Schema:                defaultTestSchema(),
 				NullSafeFieldEquality: true,
 			})
 			if err != nil {
@@ -111,8 +114,18 @@ func TestTranspiler_NullSafeFieldEquality_AllDialects(t *testing.T) {
 }
 
 func TestTranspiler_NullSafeFieldEquality_DeeplyNested(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "a", Type: FieldTypeString},
+		{Name: "b", Type: FieldTypeString},
+		{Name: "c", Type: FieldTypeString},
+		{Name: "d", Type: FieldTypeString},
+		{Name: "e", Type: FieldTypeString},
+		{Name: "f", Type: FieldTypeString},
+		{Name: "score", Type: FieldTypeNumber},
+	})
 	tr, err := NewTranspilerWithConfig(&TranspilerConfig{
 		Dialect:               DialectBigQuery,
+		Schema:                schema,
 		NullSafeFieldEquality: true,
 	})
 	if err != nil {
@@ -159,6 +172,7 @@ func TestTranspiler_NullSafeFieldEquality_DeeplyNested(t *testing.T) {
 func TestTranspiler_NullSafeFieldEquality_ReviewRegressions(t *testing.T) {
 	tr, err := NewTranspilerWithConfig(&TranspilerConfig{
 		Dialect:               DialectBigQuery,
+		Schema:                defaultTestSchema(),
 		NullSafeFieldEquality: true,
 	})
 	if err != nil {
@@ -299,8 +313,8 @@ func TestTranspiler_NullSafeFieldEquality_AllDialectsSchemaModesNestedConditions
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-less"},
-		{name: "schema-aware", schema: schema},
+		{name: "schema-required", schema: schema},
+		{name: "schema-required", schema: schema},
 	}
 
 	logic := `{"and":[{"or":[{"==":[{"var":"a"},{"var":"b"}]},{"!=":[{"var":"c"},{"var":"d"}]}]},{"!":{"===":[{"var":"e"},{"var":"f"}]}},{"all":[{"var":"items"},{"or":[{"==":[{"var":"left"},{"var":"right"}]},{"!==":[{"var":"status"},{"var":"expected_status"}]}]}]}]}`
@@ -362,8 +376,8 @@ func TestTranspiler_NullSafeFieldEquality_CustomOperatorInteraction(t *testing.T
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-less"},
-		{name: "schema-aware", schema: schema},
+		{name: "schema-required", schema: schema},
+		{name: "schema-required", schema: schema},
 	}
 
 	logic := `{"and":[{"==":[{"var":"left"},{"var":"right"}]},{"==":[{"lower":[{"var":"name"}]},{"var":"normalized_name"}]},{"some":[{"var":"items"},{"==":[{"lower":[{"var":"code"}]},{"var":"normalized"}]}]}]}`
@@ -422,7 +436,7 @@ func registerNullSafeFieldEqualityCustomOperators(t *testing.T, tr *Transpiler) 
 }
 
 func TestTranspiler_Transpile(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 
 	tests := []struct {
 		name     string
@@ -506,7 +520,7 @@ func TestTranspiler_Transpile(t *testing.T) {
 	}
 }
 
-func TestTranspiler_InStringExpressionContainment_NoSchema(t *testing.T) {
+func TestTranspiler_InStringExpressionContainment_SchemaRequired(t *testing.T) {
 	tests := []struct {
 		name      string
 		dialect   Dialect
@@ -547,7 +561,7 @@ func TestTranspiler_InStringExpressionContainment_NoSchema(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr, err := NewTranspiler(tt.dialect)
+			tr, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -563,7 +577,7 @@ func TestTranspiler_InStringExpressionContainment_NoSchema(t *testing.T) {
 }
 
 func TestTranspiler_TranspileConditionFromMap(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 
 	tests := []struct {
 		name     string
@@ -612,7 +626,7 @@ func TestTranspiler_TranspileConditionFromMap(t *testing.T) {
 }
 
 func TestTranspiler_TranspileConditionFromInterface(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 
 	tests := []struct {
 		name     string
@@ -655,7 +669,7 @@ func TestTranspiler_TranspileConditionFromInterface(t *testing.T) {
 }
 
 func TestTranspileConditionFromMap_RejectsInvalidJSONNumberLiterals(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 
 	tests := []struct {
 		name  string
@@ -692,7 +706,7 @@ func TestTranspileConditionFromMap_RejectsInvalidJSONNumberLiterals(t *testing.T
 }
 
 func TestTranspileConditionFromInterface_RejectsInvalidJSONNumberLiterals(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 
 	logic := map[string]interface{}{
 		"==": []interface{}{
@@ -712,7 +726,7 @@ func TestTranspileConditionFromMap_SchemaEqualityRejectsInvalidJSONNumberBeforeF
 		{Name: "code", Type: FieldTypeString},
 		{Name: "amount", Type: FieldTypeInteger},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	tr.SetSchema(schema)
 
 	tests := []struct {
@@ -768,7 +782,7 @@ func TestTranspile_SchemaEqualityValidatesEnumDefaultsForVarOperands(t *testing.
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active"}},
 		{Name: "other", Type: FieldTypeString},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	tr.SetSchema(schema)
 
 	tests := []struct {
@@ -801,7 +815,7 @@ func TestTranspileConditionFromInterface_SchemaEqualityPreservesFloat32ForEnum(t
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"1.2"}},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	tr.SetSchema(schema)
 	logic := map[string]interface{}{
 		"==": []interface{}{
@@ -835,7 +849,7 @@ func TestTranspileConditionFromInterface_SchemaNumberStrictEqualityFoldsNonFinit
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "score", Type: FieldTypeNumber},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	tr.SetSchema(schema)
 
 	tests := []struct {
@@ -887,7 +901,7 @@ func TestTranspile_SchemaStringEqualityCanonicalizesNonFiniteNumbers(t *testing.
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"Infinity", "-Infinity"}},
 		{Name: "limited_status", Type: FieldTypeEnum, AllowedValues: []string{"active"}},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	tr.SetSchema(schema)
 
 	jsonSQL, err := tr.TranspileCondition(`{"==": [{"var": "code"}, 1e400]}`)
@@ -941,7 +955,7 @@ func TestTranspile_SchemaStringEqualityCanonicalizesNonFiniteNumbers(t *testing.
 }
 
 func TestTranspileConditionFromMap_CustomOperatorRejectsInvalidJSONNumberLiterals(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	_ = tr.RegisterOperatorFunc("identity", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		return ValueSQL(args[0].SQL, args[0].Type), nil
 	})
@@ -1013,7 +1027,7 @@ func TestTranspileConditionFromMapPackage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := TranspileConditionFromMap(DialectBigQuery, tt.input)
+			result, err := TranspileConditionFromMap(DialectBigQuery, defaultTestSchema(), tt.input)
 
 			if tt.hasError {
 				if err == nil {
@@ -1048,7 +1062,7 @@ func TestTranspileConditionFromInterfacePackage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := TranspileConditionFromInterface(DialectBigQuery, tt.input)
+			result, err := TranspileConditionFromInterface(DialectBigQuery, defaultTestSchema(), tt.input)
 
 			if tt.hasError {
 				if err == nil {
@@ -1152,8 +1166,8 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "double negation",
 			input:    `{"!!": [{"var": "value"}]}`,
-			expected: "",
-			hasError: true,
+			expected: "(value IS NOT NULL AND value != 0)",
+			hasError: false,
 		},
 		{
 			name:     "logical and",
@@ -1308,7 +1322,7 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "concatenate strings",
 			input:    `{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}`,
-			expected: "CONCAT(COALESCE(CAST(firstName AS STRING), ''), ' ', COALESCE(CAST(lastName AS STRING), ''))",
+			expected: "CONCAT(COALESCE(firstName, ''), ' ', COALESCE(lastName, ''))",
 			hasError: false,
 		},
 		{
@@ -1473,8 +1487,8 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		},
 		{
 			name:     "nested comparison in logical",
-			input:    `{"and": [{">": [{"var": "a"}, 1]}, {"<": [{"var": "b"}, 10]}, {"==": [{"var": "c"}, "test"]}]}`,
-			expected: "(a > 1 AND b < 10 AND c = 'test')",
+			input:    `{"and": [{">": [{"var": "a"}, 1]}, {"<": [{"var": "b"}, 10]}, {"==": [{"var": "field1"}, "test"]}]}`,
+			expected: "(a > 1 AND b < 10 AND field1 = 'test')",
 			hasError: false,
 		},
 		{
@@ -1534,7 +1548,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested string operations",
 			input:    `{"==": [{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}, "John Doe"]}`,
-			expected: "CONCAT(COALESCE(CAST(firstName AS STRING), ''), ' ', COALESCE(CAST(lastName AS STRING), '')) = 'John Doe'",
+			expected: "CONCAT(COALESCE(firstName, ''), ' ', COALESCE(lastName, '')) = 'John Doe'",
 			hasError: false,
 		},
 		{
@@ -1687,7 +1701,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "cat with nested if expression",
 			input:    `{"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}`,
-			expected: "CONCAT(COALESCE(CASE WHEN gender = 'M' THEN 'Mr. ' ELSE 'Ms. ' END, ''), COALESCE(CAST(first_name AS STRING), ''), ' ', COALESCE(CAST(last_name AS STRING), ''))",
+			expected: "CONCAT(COALESCE(CASE WHEN gender = 'M' THEN 'Mr. ' ELSE 'Ms. ' END, ''), COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))",
 			hasError: false,
 		},
 
@@ -1703,8 +1717,8 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "double NOT",
 			input:    `{"!": [{"!": [{"var": "flag"}]}]}`,
-			expected: "",
-			hasError: true,
+			expected: "NOT (NOT (flag IS TRUE))",
+			hasError: false,
 		},
 
 		// Five-value chained comparison
@@ -1743,7 +1757,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "triple nested if",
 			input:    `{"if": [{"==": [{"var": "a"}, true]}, {"if": [{"==": [{"var": "b"}, true]}, {"if": [{"==": [{"var": "c"}, true]}, "deep", "c_false"]}, "b_false"]}, "a_false"]}`,
-			expected: "CASE WHEN a = TRUE THEN CASE WHEN b = TRUE THEN CASE WHEN c = TRUE THEN 'deep' ELSE 'c_false' END ELSE 'b_false' END ELSE 'a_false' END",
+			expected: "CASE WHEN a = 1 THEN CASE WHEN b = 1 THEN CASE WHEN c = 1 THEN 'deep' ELSE 'c_false' END ELSE 'b_false' END ELSE 'a_false' END",
 			hasError: false,
 		},
 
@@ -1775,7 +1789,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "empty string in cat",
 			input:    `{"cat": ["", {"var": "name"}, ""]}`,
-			expected: "CONCAT('', COALESCE(CAST(name AS STRING), ''), '')",
+			expected: "CONCAT('', COALESCE(name, ''), '')",
 			hasError: false,
 		},
 
@@ -1799,8 +1813,8 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "or with literals",
 			input:    `{"or": [false, {"var": "flag"}, true]}`,
-			expected: "",
-			hasError: true,
+			expected: "CASE WHEN flag IS TRUE THEN flag ELSE TRUE END",
+			hasError: false,
 		},
 
 		// And with falsy values
@@ -1908,7 +1922,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 
 	for _, d := range dialects {
 		t.Run(d.name, func(t *testing.T) {
-			tr, err := NewTranspiler(d.dialect)
+			tr, err := NewTranspiler(d.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("Failed to create transpiler: %v", err)
 			}
@@ -2075,10 +2089,10 @@ func TestMergeOperatorDialectSpecific(t *testing.T) {
 			expected: "ARRAY_CONCAT(arr1, arr2)",
 		},
 		{
-			name:     "BigQuery merge three arrays",
+			name:     "BigQuery merge three scalars",
 			dialect:  DialectBigQuery,
 			input:    `{"merge": [{"var": "a"}, {"var": "b"}, {"var": "c"}]}`,
-			expected: "ARRAY_CONCAT(a, b, c)",
+			expected: "ARRAY_CONCAT([a], [b], [c])",
 		},
 		// Spanner
 		{
@@ -2095,10 +2109,10 @@ func TestMergeOperatorDialectSpecific(t *testing.T) {
 			expected: "(arr1 || arr2)",
 		},
 		{
-			name:     "PostgreSQL merge three arrays",
+			name:     "PostgreSQL merge three scalars",
 			dialect:  DialectPostgreSQL,
 			input:    `{"merge": [{"var": "a"}, {"var": "b"}, {"var": "c"}]}`,
-			expected: "(a || b || c)",
+			expected: "(ARRAY[a] || ARRAY[b] || ARRAY[c])",
 		},
 		{
 			name:     "PostgreSQL merge single array",
@@ -2114,16 +2128,16 @@ func TestMergeOperatorDialectSpecific(t *testing.T) {
 			expected: "ARRAY_CONCAT(arr1, arr2)",
 		},
 		{
-			name:     "DuckDB merge three arrays",
+			name:     "DuckDB merge three scalars",
 			dialect:  DialectDuckDB,
 			input:    `{"merge": [{"var": "a"}, {"var": "b"}, {"var": "c"}]}`,
-			expected: "ARRAY_CONCAT(a, b, c)",
+			expected: "ARRAY_CONCAT([a], [b], [c])",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr, err := NewTranspiler(tt.dialect)
+			tr, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("Failed to create transpiler: %v", err)
 			}
@@ -2142,7 +2156,7 @@ func TestMergeOperatorDialectSpecific(t *testing.T) {
 
 // TestTranspileCondition tests the TranspileCondition method that returns SQL without WHERE keyword.
 func TestTranspileCondition(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -2185,7 +2199,7 @@ func TestTranspileCondition(t *testing.T) {
 
 // TestTranspileConditionFromMap tests the TranspileConditionFromMap method.
 func TestTranspileConditionFromMap(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -2211,7 +2225,7 @@ func TestTranspileConditionFromMap(t *testing.T) {
 
 // TestTranspileConditionConvenienceFunction tests the standalone TranspileCondition function.
 func TestTranspileConditionConvenienceFunction(t *testing.T) {
-	result, err := TranspileCondition(DialectBigQuery, `{"==": [{"var": "status"}, "active"]}`)
+	result, err := TranspileCondition(DialectBigQuery, defaultTestSchema(), `{"==": [{"var": "status"}, "active"]}`)
 	if err != nil {
 		t.Errorf("TranspileCondition() unexpected error = %v", err)
 		return
@@ -2225,7 +2239,7 @@ func TestTranspileConditionConvenienceFunction(t *testing.T) {
 
 // TestTranspileConditionDoesNotAddWherePrefix verifies condition APIs return a bare predicate.
 func TestTranspileConditionDoesNotAddWherePrefix(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -2257,27 +2271,27 @@ func TestNewTranspilerWithConfig(t *testing.T) {
 	}{
 		{
 			name:      "BigQuery dialect",
-			config:    &TranspilerConfig{Dialect: DialectBigQuery},
+			config:    &TranspilerConfig{Dialect: DialectBigQuery, Schema: defaultTestSchema()},
 			wantError: false,
 		},
 		{
 			name:      "Spanner dialect",
-			config:    &TranspilerConfig{Dialect: DialectSpanner},
+			config:    &TranspilerConfig{Dialect: DialectSpanner, Schema: defaultTestSchema()},
 			wantError: false,
 		},
 		{
 			name:      "PostgreSQL dialect",
-			config:    &TranspilerConfig{Dialect: DialectPostgreSQL},
+			config:    &TranspilerConfig{Dialect: DialectPostgreSQL, Schema: defaultTestSchema()},
 			wantError: false,
 		},
 		{
 			name:      "DuckDB dialect",
-			config:    &TranspilerConfig{Dialect: DialectDuckDB},
+			config:    &TranspilerConfig{Dialect: DialectDuckDB, Schema: defaultTestSchema()},
 			wantError: false,
 		},
 		{
 			name:      "ClickHouse dialect",
-			config:    &TranspilerConfig{Dialect: DialectClickHouse},
+			config:    &TranspilerConfig{Dialect: DialectClickHouse, Schema: defaultTestSchema()},
 			wantError: false,
 		},
 		{
@@ -2343,24 +2357,19 @@ func TestNewTranspilerWithConfig_WithSchema(t *testing.T) {
 	}
 }
 
-func TestNewTranspilerWithConfig_NilSchemaPointer_UsesNoSchemaValidation(t *testing.T) {
+func TestNewTranspilerWithConfig_NilSchemaPointerRejected(t *testing.T) {
 	var nilSchema *Schema
-	tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+	_, err := NewTranspilerWithConfig(&TranspilerConfig{
 		Dialect: DialectBigQuery,
 		Schema:  nilSchema,
 	})
-	if err != nil {
-		t.Fatalf("NewTranspilerWithConfig() unexpected error: %v", err)
-	}
-
-	_, err = tr.TranspileCondition(`{"==": [{"var": "bad field"}, 1]}`)
-	if err == nil {
-		t.Fatal("expected invalid identifier error with nil schema")
+	if err == nil || !strings.Contains(err.Error(), "schema is required") {
+		t.Fatalf("NewTranspilerWithConfig() error = %v, want schema required", err)
 	}
 }
 
-func TestTranspiler_SetSchema_NilRestoresIdentifierValidation(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+func TestTranspiler_SetSchema_NilRejected(t *testing.T) {
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() unexpected error: %v", err)
 	}
@@ -2374,15 +2383,16 @@ func TestTranspiler_SetSchema_NilRestoresIdentifierValidation(t *testing.T) {
 		t.Fatalf("TranspileCondition() with schema unexpected error: %v", err)
 	}
 
-	// Clearing schema should restore no-schema identifier safety checks.
-	tr.SetSchema(nil)
-	if _, err := tr.TranspileCondition(`{"==": [{"var": "bad field"}, 1]}`); err == nil {
-		t.Fatal("expected invalid identifier error after SetSchema(nil)")
+	if err := tr.SetSchema(nil); err == nil || !strings.Contains(err.Error(), "schema is required") {
+		t.Fatalf("SetSchema(nil) error = %v, want schema required", err)
+	}
+	if _, err := tr.TranspileCondition(`{"==": [{"var": "bad field"}, 1]}`); err != nil {
+		t.Fatalf("schema should remain unchanged after SetSchema(nil), got error: %v", err)
 	}
 }
 
 func TestTranspile_PreservesLargeJSONIntegerLiterals(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() unexpected error: %v", err)
 	}
@@ -2423,7 +2433,7 @@ func TestTranspiler_GetDialect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr, err := NewTranspiler(tt.dialect)
+			tr, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}
@@ -2436,7 +2446,7 @@ func TestTranspiler_GetDialect(t *testing.T) {
 }
 
 func TestTranspiler_TranspileConditionFromInterfaceLegacyCases(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
@@ -2510,7 +2520,7 @@ func (d *DialectAwareTestOperator) ToSQLWithDialect(operator string, args []Oper
 }
 
 func TestTranspiler_RegisterDialectAwareOperator(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
@@ -2608,7 +2618,7 @@ func TestPackageLevel_TranspileConditionFromMap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := TranspileConditionFromMap(tt.dialect, tt.logic)
+			result, err := TranspileConditionFromMap(tt.dialect, defaultTestSchema(), tt.logic)
 			if tt.hasError {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -2706,7 +2716,7 @@ func TestPackageLevel_TranspileConditionFromInterface(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := TranspileConditionFromInterface(tt.dialect, tt.logic)
+			result, err := TranspileConditionFromInterface(tt.dialect, defaultTestSchema(), tt.logic)
 			if tt.hasError {
 				if err == nil {
 					t.Error("expected error, got nil")

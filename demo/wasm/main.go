@@ -13,6 +13,10 @@ import (
 var transpilers = map[int]*jsonlogic2sql.Transpiler{}
 var nextID = 1
 
+func emptySchema() (*jsonlogic2sql.Schema, error) {
+	return jsonlogic2sql.NewSchema(nil)
+}
+
 func dialetFromString(s string) (jsonlogic2sql.Dialect, bool) {
 	switch s {
 	case "bigquery":
@@ -40,7 +44,11 @@ func newTranspiler(_ js.Value, args []js.Value) interface{} {
 	if !ok {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
-	t, err := jsonlogic2sql.NewTranspiler(dialect)
+	schema, err := emptySchema()
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+	t, err := jsonlogic2sql.NewTranspiler(dialect, schema)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}
@@ -67,7 +75,9 @@ func setSchema(_ js.Value, args []js.Value) interface{} {
 	if err != nil {
 		return map[string]interface{}{"error": "invalid schema: " + err.Error()}
 	}
-	t.SetSchema(schema)
+	if err := t.SetSchema(schema); err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
 	return map[string]interface{}{"ok": true}
 }
 
@@ -201,7 +211,12 @@ func quickTranspileParameterizedValue(_ js.Value, args []js.Value) interface{} {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	sql, params, err := jsonlogic2sql.TranspileParameterizedValue(dialect, jsonLogic)
+	schema, err := emptySchema()
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+
+	sql, params, err := jsonlogic2sql.TranspileParameterizedValue(dialect, schema, jsonLogic)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}
@@ -225,7 +240,12 @@ func quickTranspileParameterizedCondition(_ js.Value, args []js.Value) interface
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	sql, params, err := jsonlogic2sql.TranspileParameterizedCondition(dialect, jsonLogic)
+	schema, err := emptySchema()
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+
+	sql, params, err := jsonlogic2sql.TranspileParameterizedCondition(dialect, schema, jsonLogic)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}
@@ -249,7 +269,12 @@ func quickTranspileValue(_ js.Value, args []js.Value) interface{} {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	sql, err := jsonlogic2sql.TranspileValue(dialect, jsonLogic)
+	schema, err := emptySchema()
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+
+	sql, err := jsonlogic2sql.TranspileValue(dialect, schema, jsonLogic)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}
@@ -269,7 +294,12 @@ func quickTranspileCondition(_ js.Value, args []js.Value) interface{} {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	sql, err := jsonlogic2sql.TranspileCondition(dialect, jsonLogic)
+	schema, err := emptySchema()
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+
+	sql, err := jsonlogic2sql.TranspileCondition(dialect, schema, jsonLogic)
 	if err != nil {
 		return map[string]interface{}{"error": err.Error()}
 	}

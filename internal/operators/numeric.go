@@ -44,7 +44,7 @@ func (n *NumericOperator) schema() SchemaProvider {
 // validateNumericOperand checks if a field used in a numeric operation is of numeric type.
 func (n *NumericOperator) validateNumericOperand(value interface{}) error {
 	if n.schema() == nil {
-		return nil // No schema, no validation
+		return nil // Absent schema provider, no validation
 	}
 
 	fieldName := n.extractFieldNameFromValue(value)

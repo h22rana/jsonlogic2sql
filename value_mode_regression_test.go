@@ -27,7 +27,7 @@ func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
 		t.Run(tt.dialect.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(tt.dialect)
+			tr, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -108,7 +108,7 @@ func TestTranspileValue_RejectsMalformedVarOperandsAllDialectsSchemaModes(t *tes
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
 						Dialect: d,
@@ -159,7 +159,7 @@ func TestTranspileValue_EmptyArrayFoldableContextsAllDialects(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -328,7 +328,7 @@ func TestArrayOperators_FoldedEmptyArraySourcesAllDialectsSchemaModes(t *testing
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -391,13 +391,234 @@ func TestArrayOperators_FoldedEmptyArraySourcesAllDialectsSchemaModes(t *testing
 	}
 }
 
+func TestArrayOperators_RejectKnownNonArraySourcesAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{
+			Name: "accounts",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "status", Type: FieldTypeString},
+			},
+		},
+	})
+
+	valueCases := []struct {
+		name      string
+		logic     string
+		wantError string
+	}{
+		{
+			name:      "map null literal source",
+			logic:     `{"map":[null,{"var":""}]}`,
+			wantError: "array operation on non-array value (type: null)",
+		},
+		{
+			name:      "filter folded missing if else source",
+			logic:     `{"filter":[{"if":[false,{"var":"accounts"}]},true]}`,
+			wantError: "array operation on non-array value (type: null)",
+		},
+		{
+			name:      "reduce folded missing if else source",
+			logic:     `{"reduce":[{"if":[false,{"var":"accounts"}]},{"var":"accumulator"},0]}`,
+			wantError: "array operation on non-array value (type: null)",
+		},
+		{
+			name:      "map folded string source",
+			logic:     `{"map":[{"if":[true,"abc",{"var":"accounts"}]},{"var":""}]}`,
+			wantError: "array operation on non-array value (type: string)",
+		},
+		{
+			name:      "map predicate-valued source",
+			logic:     `{"map":[{"==":[1,1]},{"var":""}]}`,
+			wantError: "array operation on non-array value (type: boolean)",
+		},
+	}
+
+	predicateCases := []struct {
+		name      string
+		logic     string
+		wantError string
+	}{
+		{
+			name:      "all folded missing if else source",
+			logic:     `{"all":[{"if":[false,{"var":"accounts"}]},true]}`,
+			wantError: "array operation on non-array value (type: null)",
+		},
+		{
+			name:      "some folded missing if else source",
+			logic:     `{"some":[{"if":[false,{"var":"accounts"}]},true]}`,
+			wantError: "array operation on non-array value (type: null)",
+		},
+		{
+			name:      "none folded missing if else source",
+			logic:     `{"none":[{"if":[false,{"var":"accounts"}]},true]}`,
+			wantError: "array operation on non-array value (type: null)",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range schemaRequiredModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					for _, tt := range valueCases {
+						t.Run(tt.name, func(t *testing.T) {
+							if sql, err := tr.TranspileValue(tt.logic); err == nil || !strings.Contains(err.Error(), tt.wantError) {
+								t.Fatalf("TranspileValue() SQL = %q, error = %v, want containing %q", sql, err, tt.wantError)
+							}
+							paramSQL, params, err := tr.TranspileParameterizedValue(tt.logic)
+							if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+								t.Fatalf("TranspileParameterizedValue() SQL = %q params = %#v, error = %v, want containing %q",
+									paramSQL, params, err, tt.wantError)
+							}
+						})
+					}
+
+					for _, tt := range predicateCases {
+						t.Run(tt.name, func(t *testing.T) {
+							if sql, err := tr.TranspileCondition(tt.logic); err == nil || !strings.Contains(err.Error(), tt.wantError) {
+								t.Fatalf("TranspileCondition() SQL = %q, error = %v, want containing %q", sql, err, tt.wantError)
+							}
+							paramSQL, params, err := tr.TranspileParameterizedCondition(tt.logic)
+							if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+								t.Fatalf("TranspileParameterizedCondition() SQL = %q params = %#v, error = %v, want containing %q",
+									paramSQL, params, err, tt.wantError)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_MergeCastsScalarsToArraysAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		dialect          Dialect
+		wantInline       string
+		wantParamSQL     string
+		wantNullInline   string
+		wantNullParamSQL string
+	}{
+		{
+			dialect:          DialectBigQuery,
+			wantInline:       "ARRAY_CONCAT([1], [2])",
+			wantParamSQL:     "ARRAY_CONCAT([@p1], [@p2])",
+			wantNullInline:   "ARRAY_CONCAT([1, NULL], [2])",
+			wantNullParamSQL: "ARRAY_CONCAT([@p1, NULL], [@p2])",
+		},
+		{
+			dialect:          DialectSpanner,
+			wantInline:       "ARRAY_CONCAT([1], [2])",
+			wantParamSQL:     "ARRAY_CONCAT([@p1], [@p2])",
+			wantNullInline:   "ARRAY_CONCAT([1, NULL], [2])",
+			wantNullParamSQL: "ARRAY_CONCAT([@p1, NULL], [@p2])",
+		},
+		{
+			dialect:          DialectPostgreSQL,
+			wantInline:       "(ARRAY[1] || ARRAY[2])",
+			wantParamSQL:     "(ARRAY[$1] || ARRAY[$2])",
+			wantNullInline:   "(ARRAY[1, NULL] || ARRAY[2])",
+			wantNullParamSQL: "(ARRAY[$1, NULL] || ARRAY[$2])",
+		},
+		{
+			dialect:          DialectDuckDB,
+			wantInline:       "ARRAY_CONCAT([1], [2])",
+			wantParamSQL:     "ARRAY_CONCAT([$1], [$2])",
+			wantNullInline:   "ARRAY_CONCAT([1, NULL], [2])",
+			wantNullParamSQL: "ARRAY_CONCAT([$1, NULL], [$2])",
+		},
+		{
+			dialect:          DialectClickHouse,
+			wantInline:       "arrayConcat([1], [2])",
+			wantParamSQL:     "arrayConcat([@p1], [@p2])",
+			wantNullInline:   "arrayConcat([1, NULL], [2])",
+			wantNullParamSQL: "arrayConcat([@p1, NULL], [@p2])",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dialect.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(tt.dialect, emptyTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			got, err := tr.TranspileValue(`{"merge":[1,[2]]}`)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if got != tt.wantInline {
+				t.Fatalf("TranspileValue() = %q, want %q", got, tt.wantInline)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedValue(`{"merge":[1,[2]]}`)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if gotParam != tt.wantParamSQL {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, tt.wantParamSQL)
+			}
+			if want := []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(2)}}; !reflect.DeepEqual(gotParams, want) {
+				t.Fatalf("params = %#v, want %#v", gotParams, want)
+			}
+
+			gotNull, err := tr.TranspileValue(`{"merge":[[1,null],2]}`)
+			if err != nil {
+				t.Fatalf("TranspileValue(null-containing merge) error = %v", err)
+			}
+			if gotNull != tt.wantNullInline {
+				t.Fatalf("TranspileValue(null-containing merge) = %q, want %q", gotNull, tt.wantNullInline)
+			}
+
+			gotNullParam, gotNullParams, err := tr.TranspileParameterizedValue(`{"merge":[[1,null],2]}`)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue(null-containing merge) error = %v", err)
+			}
+			if gotNullParam != tt.wantNullParamSQL {
+				t.Fatalf("TranspileParameterizedValue(null-containing merge) = %q, want %q", gotNullParam, tt.wantNullParamSQL)
+			}
+			if want := []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(2)}}; !reflect.DeepEqual(gotNullParams, want) {
+				t.Fatalf("null-containing merge params = %#v, want %#v", gotNullParams, want)
+			}
+
+			if _, err := tr.TranspileValue(`{"merge":[1,["x"]]}`); err == nil ||
+				!strings.Contains(err.Error(), "incompatible element types") {
+				t.Fatalf("TranspileValue(incompatible merge) error = %v, want incompatible element type error", err)
+			}
+			if sql, params, err := tr.TranspileParameterizedValue(`{"merge":[1,["x"]]}`); err == nil ||
+				!strings.Contains(err.Error(), "incompatible element types") {
+				t.Fatalf("TranspileParameterizedValue(incompatible merge) SQL = %q params %#v error = %v, want incompatible element type error",
+					sql, params, err)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_EmptyArrayUnaryAndReduceShortCircuitAllDialectsSchemaModes(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeNumber},
 	})
-	schemaModes := allSchemaModes(schema)
+	schemaRequiredModes := schemaRequiredModes(schema)
 
 	tests := []struct {
 		name       string
@@ -446,7 +667,7 @@ func TestTranspileValue_EmptyArrayUnaryAndReduceShortCircuitAllDialectsSchemaMod
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range schemaModes {
+			for _, mode := range schemaRequiredModes {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -583,7 +804,7 @@ func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -696,7 +917,7 @@ func TestTranspileValue_ReduceTruthinessUsesInferredTypeAllDialectsSchemaModes(t
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -782,7 +1003,7 @@ func TestTranspileValue_ReduceMinMaxAggregateIncludesInitialAllDialects(t *testi
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -825,7 +1046,7 @@ func TestTranspileValue_ReduceStringTruthinessUsesInferredTypeAllDialectsSchemaM
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -961,7 +1182,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -1021,11 +1242,11 @@ func TestTranspileValue_ReduceAccumulatorTruthinessRejectsUnknownInitialTypeAllD
 		logic string
 	}{
 		{
-			name:  "field initial without schema",
+			name:  "field initial with empty schema",
 			logic: `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},{"var":"current"}]},{"var":"seed"}]}`,
 		},
 		{
-			name:  "defaulted field initial without schema",
+			name:  "defaulted field initial with empty schema",
 			logic: `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},"x"]},{"var":["seed",""]}]}`,
 		},
 	}
@@ -1034,22 +1255,23 @@ func TestTranspileValue_ReduceAccumulatorTruthinessRejectsUnknownInitialTypeAllD
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
+			tr.SetSchema(emptyTestSchema())
 
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
 					got, valueErr := tr.TranspileValue(tt.logic)
-					if !IsErrorCode(valueErr, ErrInvalidExpressionContext) {
-						t.Fatalf("TranspileValue() = %q, error = %v, want %s", got, valueErr, ErrInvalidExpressionContext)
+					if valueErr == nil || !strings.Contains(valueErr.Error(), "field 'seed' is not defined in schema") {
+						t.Fatalf("TranspileValue() = %q, error = %v, want seed schema validation error", got, valueErr)
 					}
 
 					gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
-					if !IsErrorCode(err, ErrInvalidExpressionContext) {
-						t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want %s",
-							gotParam, gotParams, err, ErrInvalidExpressionContext)
+					if err == nil || !strings.Contains(err.Error(), "field 'seed' is not defined in schema") {
+						t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want seed schema validation error",
+							gotParam, gotParams, err)
 					}
 				})
 			}
@@ -1073,7 +1295,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesTypedCustomInitialAllDial
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -1166,7 +1388,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesSchemaInitialTypeAllDiale
 }
 
 func TestTranspileValue_PostgreSQLEmptyArrayScannerSkipsStringLiterals(t *testing.T) {
-	tr, err := NewTranspiler(DialectPostgreSQL)
+	tr, err := NewTranspiler(DialectPostgreSQL, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -1197,9 +1419,9 @@ func TestTranspileValue_PostgreSQLEmptyArrayScannerAllowsTypedSQL(t *testing.T) 
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "arr", Type: FieldTypeArray},
 	})
-	schemaModes := allSchemaModes(schema)
+	schemaRequiredModes := schemaRequiredModes(schema)
 
-	for _, mode := range schemaModes {
+	for _, mode := range schemaRequiredModes {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -1275,12 +1497,12 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeNumber},
 	})
-	schemaModes := []struct {
+	schemaRequiredModes := []struct {
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-less"},
-		{name: "schema-aware", schema: schema},
+		{name: "schema-required", schema: schema},
+		{name: "schema-required", schema: schema},
 	}
 
 	valueCases := []struct {
@@ -1370,7 +1592,7 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range schemaModes {
+			for _, mode := range schemaRequiredModes {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -1513,7 +1735,7 @@ func TestTranspileValue_OverflowJSONNumberComparisonsDoNotShortCircuitAllDialect
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -1559,7 +1781,7 @@ func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeNumber},
 	})
-	schemaModes := allSchemaModes(schema)
+	schemaRequiredModes := schemaRequiredModes(schema)
 
 	valueLogic := map[string]interface{}{
 		"or": []interface{}{math.NaN(), "fallback"},
@@ -1609,7 +1831,7 @@ func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range schemaModes {
+			for _, mode := range schemaRequiredModes {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -1786,7 +2008,7 @@ func TestTranspileValue_RejectsReturnedNativeNonFiniteFloatsAllDialectsSchemaMod
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -1846,7 +2068,7 @@ func TestTranspileValue_ArrayValueFallbackStringLiteralsNotRewritten(t *testing.
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -1928,7 +2150,7 @@ func TestTranspileValue_ArrayOperatorArrayLiteralElementsAsExpressions(t *testin
 		t.Run(tt.dialect.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(tt.dialect)
+			tr, err := NewTranspiler(tt.dialect, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -2021,7 +2243,7 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaModes(t *t
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -2062,7 +2284,7 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaModes(t *t
 }
 
 func TestTranspileValue_NestedValueLogicals(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -2210,7 +2432,7 @@ func TestTranspileValue_NumericOperandsCoercePredicatesAllDialectsSchemaModes(t 
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -2364,8 +2586,8 @@ func TestTranspileValue_NotNormalizesNullablePredicatesAllDialectsSchemaModes(t 
 				name   string
 				schema *Schema
 			}{
-				{name: "schema-less"},
-				{name: "schema-aware", schema: schema},
+				{name: "schema-required", schema: schema},
+				{name: "schema-required", schema: schema},
 			} {
 				t.Run(cfg.name, func(t *testing.T) {
 					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
@@ -2606,7 +2828,7 @@ func TestTranspileValue_IfConstantTestsShortCircuit(t *testing.T) {
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -2745,7 +2967,7 @@ func TestTranspileValue_LiteralPredicateFallbacksAllDialects(t *testing.T) {
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -2822,7 +3044,7 @@ func TestTranspileValue_NestedFieldMetadataPreservesSchemaValidation(t *testing.
 	}
 }
 
-func TestTranspileValue_SchemaLessUnknownTruthinessRejectedAllDialects(t *testing.T) {
+func TestTranspileValue_EmptySchemaFieldTruthinessRejectedAllDialects(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
@@ -2830,12 +3052,12 @@ func TestTranspileValue_SchemaLessUnknownTruthinessRejectedAllDialects(t *testin
 		{Name: "flag", Type: FieldTypeBoolean},
 	})
 
-	schemaLessValueCases := []string{
+	schemaRequiredValueCases := []string{
 		`{"or":[{"var":"nickname"},"unknown"]}`,
 		`{"and":[{"var":"nickname"},"known"]}`,
 		`{"if":[{"var":"nickname"},"yes","no"]}`,
 	}
-	schemaLessConditionCases := []string{
+	schemaRequiredConditionCases := []string{
 		`{"!!":{"var":"nickname"}}`,
 		`{"!":{"var":"nickname"}}`,
 	}
@@ -2844,31 +3066,33 @@ func TestTranspileValue_SchemaLessUnknownTruthinessRejectedAllDialects(t *testin
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			schemaLess, err := NewTranspiler(d)
+			schemaRequired, err := NewTranspiler(d, emptyTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
-			for _, logic := range schemaLessValueCases {
-				t.Run("schema-less/value/"+logic, func(t *testing.T) {
-					if _, valueErr := schemaLess.TranspileValue(logic); !IsErrorCode(valueErr, ErrInvalidExpressionContext) {
-						t.Fatalf("TranspileValue() error = %v, want %s", valueErr, ErrInvalidExpressionContext)
+			for _, logic := range schemaRequiredValueCases {
+				t.Run("schema-required/value/"+logic, func(t *testing.T) {
+					if _, valueErr := schemaRequired.TranspileValue(logic); valueErr == nil ||
+						!strings.Contains(valueErr.Error(), "field 'nickname' is not defined in schema") {
+						t.Fatalf("TranspileValue() error = %v, want nickname schema validation error", valueErr)
 					}
-					sql, params, paramErr := schemaLess.TranspileParameterizedValue(logic)
-					if !IsErrorCode(paramErr, ErrInvalidExpressionContext) {
-						t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
-							paramErr, ErrInvalidExpressionContext, sql, params)
+					sql, params, paramErr := schemaRequired.TranspileParameterizedValue(logic)
+					if paramErr == nil || !strings.Contains(paramErr.Error(), "field 'nickname' is not defined in schema") {
+						t.Fatalf("TranspileParameterizedValue() error = %v, want nickname schema validation error (SQL %q params %#v)",
+							paramErr, sql, params)
 					}
 				})
 			}
-			for _, logic := range schemaLessConditionCases {
-				t.Run("schema-less/condition/"+logic, func(t *testing.T) {
-					if _, conditionErr := schemaLess.TranspileCondition(logic); !IsErrorCode(conditionErr, ErrInvalidExpressionContext) {
-						t.Fatalf("TranspileCondition() error = %v, want %s", conditionErr, ErrInvalidExpressionContext)
+			for _, logic := range schemaRequiredConditionCases {
+				t.Run("schema-required/condition/"+logic, func(t *testing.T) {
+					if _, conditionErr := schemaRequired.TranspileCondition(logic); conditionErr == nil ||
+						!strings.Contains(conditionErr.Error(), "field 'nickname' is not defined in schema") {
+						t.Fatalf("TranspileCondition() error = %v, want nickname schema validation error", conditionErr)
 					}
-					sql, params, paramErr := schemaLess.TranspileParameterizedCondition(logic)
-					if !IsErrorCode(paramErr, ErrInvalidExpressionContext) {
-						t.Fatalf("TranspileParameterizedCondition() error = %v, want %s (SQL %q params %#v)",
-							paramErr, ErrInvalidExpressionContext, sql, params)
+					sql, params, paramErr := schemaRequired.TranspileParameterizedCondition(logic)
+					if paramErr == nil || !strings.Contains(paramErr.Error(), "field 'nickname' is not defined in schema") {
+						t.Fatalf("TranspileParameterizedCondition() error = %v, want nickname schema validation error (SQL %q params %#v)",
+							paramErr, sql, params)
 					}
 				})
 			}
@@ -2883,48 +3107,48 @@ func TestTranspileValue_SchemaLessUnknownTruthinessRejectedAllDialects(t *testin
 
 			got, err := schemaAware.TranspileValue(`{"or":[{"var":"nickname"},"unknown"]}`)
 			if err != nil {
-				t.Fatalf("schema-aware TranspileValue(or) error = %v", err)
+				t.Fatalf("schema-required TranspileValue(or) error = %v", err)
 			}
 			if want := "CASE WHEN (nickname IS NOT NULL AND nickname != '') THEN nickname ELSE 'unknown' END"; got != want {
-				t.Fatalf("schema-aware TranspileValue(or) = %q, want %q", got, want)
+				t.Fatalf("schema-required TranspileValue(or) = %q, want %q", got, want)
 			}
 
 			gotParam, gotParams, err := schemaAware.TranspileParameterizedValue(`{"or":[{"var":"nickname"},"unknown"]}`)
 			if err != nil {
-				t.Fatalf("schema-aware TranspileParameterizedValue(or) error = %v", err)
+				t.Fatalf("schema-required TranspileParameterizedValue(or) error = %v", err)
 			}
 			if want := fmt.Sprintf("CASE WHEN (nickname IS NOT NULL AND nickname != '') THEN nickname ELSE %s END", testPlaceholder(d, 1)); gotParam != want {
-				t.Fatalf("schema-aware TranspileParameterizedValue(or) = %q, want %q", gotParam, want)
+				t.Fatalf("schema-required TranspileParameterizedValue(or) = %q, want %q", gotParam, want)
 			}
 			if want := []QueryParam{{Name: "p1", Value: "unknown"}}; !reflect.DeepEqual(gotParams, want) {
-				t.Fatalf("schema-aware params = %#v, want %#v", gotParams, want)
+				t.Fatalf("schema-required params = %#v, want %#v", gotParams, want)
 			}
 
 			got, err = schemaAware.TranspileValue(`{"if":[{"var":"flag"},"yes","no"]}`)
 			if err != nil {
-				t.Fatalf("schema-aware TranspileValue(if) error = %v", err)
+				t.Fatalf("schema-required TranspileValue(if) error = %v", err)
 			}
 			if want := "CASE WHEN flag IS TRUE THEN 'yes' ELSE 'no' END"; got != want {
-				t.Fatalf("schema-aware TranspileValue(if) = %q, want %q", got, want)
+				t.Fatalf("schema-required TranspileValue(if) = %q, want %q", got, want)
 			}
 
 			gotCond, err := schemaAware.TranspileCondition(`{"!!":{"var":"nickname"}}`)
 			if err != nil {
-				t.Fatalf("schema-aware TranspileCondition(!!) error = %v", err)
+				t.Fatalf("schema-required TranspileCondition(!!) error = %v", err)
 			}
 			if want := "(nickname IS NOT NULL AND nickname != '')"; gotCond != want {
-				t.Fatalf("schema-aware TranspileCondition(!!) = %q, want %q", gotCond, want)
+				t.Fatalf("schema-required TranspileCondition(!!) = %q, want %q", gotCond, want)
 			}
 
 			gotParamCond, gotCondParams, err := schemaAware.TranspileParameterizedCondition(`{"!!":{"var":"nickname"}}`)
 			if err != nil {
-				t.Fatalf("schema-aware TranspileParameterizedCondition(!!) error = %v", err)
+				t.Fatalf("schema-required TranspileParameterizedCondition(!!) error = %v", err)
 			}
 			if want := "(nickname IS NOT NULL AND nickname != '')"; gotParamCond != want {
-				t.Fatalf("schema-aware TranspileParameterizedCondition(!!) = %q, want %q", gotParamCond, want)
+				t.Fatalf("schema-required TranspileParameterizedCondition(!!) = %q, want %q", gotParamCond, want)
 			}
 			if len(gotCondParams) != 0 {
-				t.Fatalf("schema-aware condition params = %#v, want none", gotCondParams)
+				t.Fatalf("schema-required condition params = %#v, want none", gotCondParams)
 			}
 		})
 	}
@@ -2935,7 +3159,7 @@ func TestTranspileValue_CatStringifiesBuiltInPredicate(t *testing.T) {
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -3037,7 +3261,7 @@ func TestTranspileValue_CatNullSafeStringificationAllDialectsSchemaModes(t *test
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -3179,7 +3403,7 @@ func TestTranspileCatNullSafeBehaviorAcrossModesAllDialects(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -3262,7 +3486,7 @@ func TestTranspileCatNullSafeCustomOperatorDeepNestingAllDialects(t *testing.T) 
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -3445,7 +3669,7 @@ func TestTranspileValue_CatStringifiesMixedLogicalBranchesAllDialectsSchemaModes
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -3563,7 +3787,7 @@ func TestTranspileValue_CatRejectsStaticArrayValuesAllDialectsSchemaModes(t *tes
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -3714,7 +3938,7 @@ func TestTranspileValue_PredicateResultsAreTwoValuedBooleansAllDialectsSchemaMod
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -3863,7 +4087,7 @@ func TestTranspileValue_LiteralComparisonsEmitFoldedBooleanValuesAllDialects(t *
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -4029,7 +4253,7 @@ func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -4061,7 +4285,7 @@ func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 }
 
 func TestTranspileValue_CatStringifiesCustomPredicate(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -4090,7 +4314,7 @@ func TestTranspileValue_CatStringifiesLowercaseCaseBooleanValue(t *testing.T) {
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -4130,7 +4354,7 @@ func TestTranspileValue_CatStringifiesLowercaseCaseBooleanValue(t *testing.T) {
 func TestTranspileValue_IfUsesTypedCustomPredicateCondition(t *testing.T) {
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -4171,7 +4395,7 @@ func TestTranspileValue_IfUsesTypedCustomPredicateCondition(t *testing.T) {
 }
 
 func TestTranspileValue_TypedCustomOperatorUsesValueContext(t *testing.T) {
-	tr, err := NewTranspiler(DialectPostgreSQL)
+	tr, err := NewTranspiler(DialectPostgreSQL, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -4295,7 +4519,7 @@ func TestTranspileParameterizedValue_NestedValueLogicalsRollbackSkippedParams(t 
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -4427,7 +4651,7 @@ func TestTranspileValue_NestedValueLogicalsPreserveSchemaValidation(t *testing.T
 }
 
 func TestTranspileValue_ArrayTransformationsUseValueSemantics(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -4458,7 +4682,7 @@ func TestTranspileValue_ArrayTransformationsUseValueSemantics(t *testing.T) {
 }
 
 func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
@@ -4506,7 +4730,7 @@ func TestTranspileValue_ArrayPredicateContextsUseTruthinessLogicals(t *testing.T
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -4546,7 +4770,7 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -4576,7 +4800,7 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultSkippedByValueLogical(t *
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -4606,7 +4830,7 @@ func TestTranspileParameterizedValue_ArrayCustomPredicateKeepsTypeMetadata(t *te
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
@@ -4684,7 +4908,7 @@ func TestTranspileValue_CustomPredicateBooleanConstantsShortCircuitAllDialectsSc
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range allSchemaModes(schema) {
+			for _, mode := range schemaRequiredModes(schema) {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 

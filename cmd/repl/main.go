@@ -382,31 +382,39 @@ func processInput(input string, transpiler *jsonlogic2sql.Transpiler) {
 	fmt.Printf("SQL: %s\n", result)
 }
 
-// promptSchema optionally loads a schema from a user-provided path.
-// Returns nil if the user skips or if loading fails.
+// promptSchema loads a schema from a user-provided path, or returns an empty
+// schema for literal-only expressions when the user leaves the path blank.
 func promptSchema(scanner *bufio.Scanner) *jsonlogic2sql.Schema {
-	fmt.Print("Enter schema path (optional, leave empty to skip): ")
+	fmt.Print("Enter schema path (leave empty for literal-only empty schema): ")
 	if !scanner.Scan() {
-		return nil
+		return emptySchema()
 	}
 	schemaPath := strings.TrimSpace(scanner.Text())
 	if schemaPath == "" {
-		return nil
+		return emptySchema()
 	}
 
 	data, err := os.ReadFile(filepath.Clean(schemaPath))
 	if err != nil {
 		fmt.Printf("Error reading schema file: %v\n\n", err)
-		return nil
+		return emptySchema()
 	}
 
 	schema, err := jsonlogic2sql.NewSchemaFromJSON(data)
 	if err != nil {
 		fmt.Printf("Error parsing schema file: %v\n\n", err)
-		return nil
+		return emptySchema()
 	}
 
 	fmt.Printf("Schema loaded: %s\n\n", schemaPath)
+	return schema
+}
+
+func emptySchema() *jsonlogic2sql.Schema {
+	schema, err := jsonlogic2sql.NewSchema(nil)
+	if err != nil {
+		panic(err)
+	}
 	return schema
 }
 
@@ -566,7 +574,10 @@ func handleSchemaCommand(parts []string, transpiler *jsonlogic2sql.Transpiler) {
 	}
 
 	currentSchema = schema
-	transpiler.SetSchema(schema)
+	if err := transpiler.SetSchema(schema); err != nil {
+		fmt.Printf("Error setting schema: %v\n", err)
+		return
+	}
 	fmt.Printf("Schema loaded: %s\n\n", schemaPath)
 }
 

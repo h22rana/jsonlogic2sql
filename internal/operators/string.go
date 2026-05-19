@@ -37,7 +37,7 @@ func (s *StringOperator) schema() SchemaProvider {
 // Rejects array and object types.
 func (s *StringOperator) validateStringOperand(value interface{}) error {
 	if s.schema() == nil {
-		return nil // No schema, no validation
+		return nil // Absent schema provider, no validation
 	}
 
 	fieldName := s.extractFieldNameFromValue(value)

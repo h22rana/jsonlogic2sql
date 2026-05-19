@@ -55,7 +55,7 @@ type OperatorConfig struct {
 	ValueTypeInferer           ValueTypeInferer
 }
 
-// NewOperatorConfig creates a new operator config with dialect and optional schema.
+// NewOperatorConfig creates a new operator config with dialect and schema provider.
 func NewOperatorConfig(d dialect.Dialect, schema SchemaProvider) *OperatorConfig {
 	return &OperatorConfig{
 		Dialect: d,

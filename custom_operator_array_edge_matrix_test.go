@@ -97,7 +97,7 @@ func assertNoWholeWordToken(t *testing.T, sql, token string) {
 	}
 }
 
-func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
+func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 	type matrixCase struct {
 		name      string
 		logic     string
@@ -321,8 +321,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-aware", schema: matrixSchema()},
-		{name: "schema-less", schema: nil},
+		{name: "schema-required", schema: matrixSchema()},
 	}
 
 	dialects := []Dialect{
@@ -385,31 +384,24 @@ func TestCustomOperatorArrayEdgeMatrix_SchemaValidationParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("with-schema transpiler init failed: %v", err)
 			}
-			noSchema, err := NewTranspilerWithConfig(&TranspilerConfig{
+			emptySchemaTr, err := NewTranspilerWithConfig(&TranspilerConfig{
 				Dialect: d,
-				Schema:  nil,
+				Schema:  emptyTestSchema(),
 			})
 			if err != nil {
-				t.Fatalf("no-schema transpiler init failed: %v", err)
+				t.Fatalf("empty schema transpiler init failed: %v", err)
 			}
 			registerArrayEdgeCustomOperators(t, withSchema)
-			registerArrayEdgeCustomOperators(t, noSchema)
+			registerArrayEdgeCustomOperators(t, emptySchemaTr)
 
 			_, err = withSchema.TranspileValue(logic)
 			if err == nil || !strings.Contains(err.Error(), "is not defined in schema") {
 				t.Fatalf("expected schema validation error, got: %v", err)
 			}
 
-			sql, err := noSchema.TranspileValue(logic)
-			if err != nil {
-				t.Fatalf("no-schema transpile should pass, got: %v", err)
-			}
-			want := "ARRAY(SELECT (elem * 2) FROM UNNEST(unknown.values) AS elem)"
-			if d == DialectClickHouse {
-				want = "arrayMap(elem -> (elem * 2), unknown.values)"
-			}
-			if sql != want {
-				t.Fatalf("no-schema SQL = %q, want %q", sql, want)
+			_, err = emptySchemaTr.TranspileValue(logic)
+			if err == nil || !strings.Contains(err.Error(), "is not defined in schema") {
+				t.Fatalf("expected empty-schema validation error, got: %v", err)
 			}
 		})
 	}

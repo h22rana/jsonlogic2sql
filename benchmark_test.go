@@ -7,7 +7,7 @@ import (
 
 // BenchmarkSimpleComparison benchmarks a simple equality comparison.
 func BenchmarkSimpleComparison(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"==": [{"var": "status"}, "active"]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -17,7 +17,7 @@ func BenchmarkSimpleComparison(b *testing.B) {
 
 // BenchmarkChainedComparison benchmarks a between-style chained comparison.
 func BenchmarkChainedComparison(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"<=": [18, {"var": "age"}, 65]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -27,7 +27,7 @@ func BenchmarkChainedComparison(b *testing.B) {
 
 // BenchmarkNestedLogical benchmarks nested AND/OR with multiple conditions.
 func BenchmarkNestedLogical(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"and": [{">=": [{"var": "age"}, 18]}, {"or": [{"==": [{"var": "role"}, "admin"]}, {"==": [{"var": "role"}, "moderator"]}]}, {"!=": [{"var": "status"}, "banned"]}]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -37,7 +37,7 @@ func BenchmarkNestedLogical(b *testing.B) {
 
 // BenchmarkArithmeticExpression benchmarks nested arithmetic operations.
 func BenchmarkArithmeticExpression(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{">": [{"+": [{"var": "price"}, {"*": [{"var": "tax_rate"}, {"var": "price"}]}]}, 100]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -47,7 +47,7 @@ func BenchmarkArithmeticExpression(b *testing.B) {
 
 // BenchmarkArrayAll benchmarks the all array operator.
 func BenchmarkArrayAll(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"all": [{"var": "scores"}, {">=": [{"var": ""}, 70]}]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -57,7 +57,7 @@ func BenchmarkArrayAll(b *testing.B) {
 
 // BenchmarkArrayReduce benchmarks the reduce operator with SUM pattern.
 func BenchmarkArrayReduce(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"reduce": [{"var": "amounts"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -67,7 +67,7 @@ func BenchmarkArrayReduce(b *testing.B) {
 
 // BenchmarkStringConcat benchmarks string concatenation.
 func BenchmarkStringConcat(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"cat": [{"var": "first_name"}, " ", {"var": "last_name"}]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -77,7 +77,7 @@ func BenchmarkStringConcat(b *testing.B) {
 
 // BenchmarkIfCondition benchmarks the if/ternary operator.
 func BenchmarkIfCondition(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"if": [{">": [{"var": "score"}, 90]}, "A", {">": [{"var": "score"}, 80]}, "B", {">": [{"var": "score"}, 70]}, "C", "F"]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -87,7 +87,7 @@ func BenchmarkIfCondition(b *testing.B) {
 
 // BenchmarkDeeplyNested benchmarks a deeply nested expression combining multiple operator types.
 func BenchmarkDeeplyNested(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"and": [{"some": [{"filter": [{"var": "data"}, {">": [{"var": "value"}, 0]}]}, {">": [{"var": "score"}, 50]}]}, {">": [{"reduce": [{"var": "totals"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}, 1000]}]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -131,7 +131,7 @@ func BenchmarkDialects(b *testing.B) {
 
 	for _, d := range dialects {
 		b.Run(d.name, func(b *testing.B) {
-			tr, _ := NewTranspiler(d.dialect)
+			tr, _ := NewTranspiler(d.dialect, defaultTestSchema())
 			b.ResetTimer()
 			for b.Loop() {
 				_, _ = tr.TranspileCondition(input)
@@ -142,7 +142,7 @@ func BenchmarkDialects(b *testing.B) {
 
 // BenchmarkInOperator benchmarks the in operator with a large array.
 func BenchmarkInOperator(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"in": [{"var": "code"}, ["A001", "A002", "A003", "A004", "A005", "A006", "A007", "A008", "A009", "A010", "A011", "A012", "A013", "A014", "A015", "A016", "A017", "A018", "A019", "A020"]]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -152,7 +152,7 @@ func BenchmarkInOperator(b *testing.B) {
 
 // BenchmarkTranspileCondition benchmarks TranspileCondition (without WHERE prefix).
 func BenchmarkTranspileCondition(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := `{"and": [{">=": [{"var": "age"}, 18]}, {"==": [{"var": "active"}, true]}]}`
 	b.ResetTimer()
 	for b.Loop() {
@@ -162,7 +162,7 @@ func BenchmarkTranspileCondition(b *testing.B) {
 
 // BenchmarkTranspileConditionFromMap benchmarks TranspileConditionFromMap with pre-parsed input.
 func BenchmarkTranspileConditionFromMap(b *testing.B) {
-	tr, _ := NewTranspiler(DialectBigQuery)
+	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	input := map[string]interface{}{
 		"and": []interface{}{
 			map[string]interface{}{">=": []interface{}{map[string]interface{}{"var": "age"}, 18}},
@@ -376,7 +376,7 @@ func benchmarkDialects() []benchmarkDialectCase {
 
 func mustBenchmarkTranspiler(b *testing.B, d Dialect) *Transpiler {
 	b.Helper()
-	tr, err := NewTranspiler(d)
+	tr, err := NewTranspiler(d, defaultTestSchema())
 	if err != nil {
 		b.Fatal(err)
 	}

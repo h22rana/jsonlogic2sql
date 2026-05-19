@@ -247,8 +247,7 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-aware", schema: nestedScopeAuditSchema()},
-		{name: "schema-less"},
+		{name: "schema-required", schema: nestedScopeAuditSchema()},
 	}
 
 	for _, mode := range modes {

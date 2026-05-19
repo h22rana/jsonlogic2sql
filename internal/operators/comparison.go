@@ -107,7 +107,7 @@ func (c *ComparisonOperator) strposFunc(haystack, needle string) string {
 // Rejects array, object, and boolean types.
 func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator string) error {
 	if c.schema() == nil {
-		return nil // No schema, no validation
+		return nil // Absent schema provider, no validation
 	}
 
 	fieldName := c.extractFieldNameFromValue(value)
@@ -1856,15 +1856,15 @@ func numericOrderingOperand(value interface{}) interface{} {
 	return pv
 }
 
-// isStringLikeInOperandNoSchema classifies whether the left operand of "in"
-// should be treated as a string in schema-less mode.
+// isStringLikeInOperandSchemaRequired classifies whether the left operand of "in"
+// should be treated as a string in schema-required mode.
 //
 // This is intentionally heuristic (not a full type system). It covers:
 // - literal strings
 // - SQL string literals
 // - ProcessedValue placeholders bound to string params
 // - expressions rooted in known string-producing operators (cat/substr/if branches).
-func (c *ComparisonOperator) isStringLikeInOperandNoSchema(
+func (c *ComparisonOperator) isStringLikeInOperandSchemaRequired(
 	value interface{},
 	pc *params.ParamCollector,
 	depth int,
@@ -1914,12 +1914,12 @@ func (c *ComparisonOperator) isStringLikeInOperandNoSchema(
 				// Branch results are at odd indexes and (for odd-length forms)
 				// the trailing else value at the last index.
 				for i := 1; i < len(arr); i += 2 {
-					if !c.isStringLikeInOperandNoSchema(arr[i], pc, depth+1) {
+					if !c.isStringLikeInOperandSchemaRequired(arr[i], pc, depth+1) {
 						return false
 					}
 				}
 				if len(arr)%2 == 1 {
-					return c.isStringLikeInOperandNoSchema(arr[len(arr)-1], pc, depth+1)
+					return c.isStringLikeInOperandSchemaRequired(arr[len(arr)-1], pc, depth+1)
 				}
 				return true
 			default:
@@ -1981,10 +1981,10 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 				}
 			}
 
-			// No schema or unknown type: use heuristic based on left operand type.
+			// Absent schema provider or unknown type: use heuristic based on left operand type.
 			// Known string-producing expressions (cat/substr) and string literals
 			// use containment; otherwise fall back to array membership.
-			if c.isStringLikeInOperandNoSchema(leftOriginal, nil, 0) || isSQLStringLiteral(leftSQL) {
+			if c.isStringLikeInOperandSchemaRequired(leftOriginal, nil, 0) || isSQLStringLiteral(leftSQL) {
 				// Use STRPOS/position for string containment
 				needleSQL, err := c.stringContainmentNeedleSQL(leftOriginal, leftSQL)
 				if err != nil {
@@ -2188,7 +2188,7 @@ func (c *ComparisonOperator) handleInSQLRight(
 		}
 	}
 
-	if c.isStringLikeInOperandNoSchema(leftOriginal, nil, 0) || isSQLStringLiteral(leftSQL) {
+	if c.isStringLikeInOperandSchemaRequired(leftOriginal, nil, 0) || isSQLStringLiteral(leftSQL) {
 		needleSQL, err := c.stringContainmentNeedleSQL(leftOriginal, leftSQL)
 		if err != nil {
 			return "", fmt.Errorf("invalid left operand for string containment: %w", err)
@@ -2613,10 +2613,10 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 				}
 			}
 
-			// No schema: infer from left operand shape/type in a heuristic way.
+			// Absent schema provider: infer from left operand shape/type in a heuristic way.
 			// This improves string-containment detection for nested string
 			// expressions (cat/substr) while still falling back safely.
-			isLeftString := c.isStringLikeInOperandNoSchema(leftOriginal, pc, 0)
+			isLeftString := c.isStringLikeInOperandSchemaRequired(leftOriginal, pc, 0)
 
 			if isLeftString {
 				sql, lErr := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
@@ -2660,7 +2660,7 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
 			return boolSQL(false), nil
 		case ExpressionTypeUnknown:
-			if c.isStringLikeInOperandNoSchema(leftOriginal, pc, 0) {
+			if c.isStringLikeInOperandSchemaRequired(leftOriginal, pc, 0) {
 				sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
 				if err != nil {
 					return "", fmt.Errorf("invalid left operand for string containment: %w", err)
@@ -2760,7 +2760,7 @@ func (c *ComparisonOperator) handleInSQLRightParam(
 		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
 			return boolSQL(false), nil
 		case ExpressionTypeUnknown:
-			if c.isStringLikeInOperandNoSchema(leftOriginal, pc, 0) {
+			if c.isStringLikeInOperandSchemaRequired(leftOriginal, pc, 0) {
 				sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
 				if err != nil {
 					return "", fmt.Errorf("invalid left operand for string containment: %w", err)
@@ -2807,7 +2807,7 @@ func (c *ComparisonOperator) handleInSQLRightParamWithLeftSQL(
 		}
 	}
 
-	if c.isStringLikeInOperandNoSchema(leftOriginal, pc, 0) {
+	if c.isStringLikeInOperandSchemaRequired(leftOriginal, pc, 0) {
 		needleSQL, err := c.stringContainmentNeedleSQLParam(leftOriginal, leftSQL, pc)
 		if err != nil {
 			return "", fmt.Errorf("invalid left operand for string containment: %w", err)

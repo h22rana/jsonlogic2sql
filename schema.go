@@ -202,7 +202,7 @@ func NewSchemaFromFile(path string) (*Schema, error) {
 // HasField checks if a field exists in the schema.
 func (s *Schema) HasField(fieldName string) bool {
 	if s == nil {
-		return true // No schema means all fields are allowed
+		return false
 	}
 	_, exists := s.fields[fieldName]
 	return exists
@@ -211,7 +211,7 @@ func (s *Schema) HasField(fieldName string) bool {
 // ValidateField checks if a field exists in the schema and returns an error if not.
 func (s *Schema) ValidateField(fieldName string) error {
 	if s == nil {
-		return nil // No schema means no validation
+		return fmt.Errorf("schema is required")
 	}
 	if s.validationErr != nil {
 		return s.validationErr
@@ -227,7 +227,7 @@ func (s *Schema) ValidateField(fieldName string) error {
 // to "payments.type" and validates against that nested schema entry.
 func (s *Schema) ResolveScopedField(scopePath, fieldName string) (string, error) {
 	if s == nil {
-		return fieldName, nil
+		return "", fmt.Errorf("schema is required")
 	}
 	if s.validationErr != nil {
 		return "", s.validationErr
@@ -302,7 +302,7 @@ func (s *Schema) GetAllowedValues(fieldName string) []string {
 // Returns nil if valid, error if invalid.
 func (s *Schema) ValidateEnumValue(fieldName, value string) error {
 	if s == nil {
-		return nil // No schema means no validation
+		return fmt.Errorf("schema is required")
 	}
 
 	if !s.IsEnumType(fieldName) {
@@ -332,7 +332,7 @@ func (s *Schema) GetFieldType(fieldName string) string {
 // GetFieldTypeFieldType returns the type of a field as FieldType (internal use).
 func (s *Schema) GetFieldTypeFieldType(fieldName string) FieldType {
 	if s == nil {
-		return "" // No schema means unknown type
+		return ""
 	}
 	if field, exists := s.fields[fieldName]; exists {
 		return field.Type

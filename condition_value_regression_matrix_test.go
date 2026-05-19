@@ -36,20 +36,20 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 	t.Parallel()
 
 	schema := conditionValueRegressionSchema()
-	schemaModes := allSchemaModes(schema)
+	schemaRequiredModes := schemaRequiredModes(schema)
 
 	valueCases := []struct {
-		name          string
-		logic         string
-		schemaLessErr ErrorCode
-		wantSQL       func(Dialect, bool) string
-		wantParam     func(Dialect, bool) string
-		wantParams    []QueryParam
+		name              string
+		logic             string
+		schemaRequiredErr ErrorCode
+		wantSQL           func(Dialect, bool) string
+		wantParam         func(Dialect, bool) string
+		wantParams        []QueryParam
 	}{
 		{
-			name:          "if value condition uses typed truthiness",
-			logic:         `{"if":[{"var":"flag"},"yes","no"]}`,
-			schemaLessErr: ErrInvalidExpressionContext,
+			name:              "if value condition uses typed truthiness",
+			logic:             `{"if":[{"var":"flag"},"yes","no"]}`,
+			schemaRequiredErr: ErrInvalidExpressionContext,
 			wantSQL: func(_ Dialect, _ bool) string {
 				condition := "flag IS TRUE"
 				return fmt.Sprintf("CASE WHEN %s THEN 'yes' ELSE 'no' END", condition)
@@ -180,7 +180,7 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range schemaModes {
+			for _, mode := range schemaRequiredModes {
 				t.Run(mode.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -203,14 +203,14 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 					for _, tc := range valueCases {
 						t.Run("value/"+tc.name, func(t *testing.T) {
 							gotSQL, err := tr.TranspileValue(tc.logic)
-							if mode.schema == nil && tc.schemaLessErr != "" {
-								if !IsErrorCode(err, tc.schemaLessErr) {
-									t.Fatalf("TranspileValue() error = %v, want %s", err, tc.schemaLessErr)
+							if mode.schema == nil && tc.schemaRequiredErr != "" {
+								if !IsErrorCode(err, tc.schemaRequiredErr) {
+									t.Fatalf("TranspileValue() error = %v, want %s", err, tc.schemaRequiredErr)
 								}
 								gotParamSQL, gotParams, paramErr := tr.TranspileParameterizedValue(tc.logic)
-								if !IsErrorCode(paramErr, tc.schemaLessErr) {
+								if !IsErrorCode(paramErr, tc.schemaRequiredErr) {
 									t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
-										paramErr, tc.schemaLessErr, gotParamSQL, gotParams)
+										paramErr, tc.schemaRequiredErr, gotParamSQL, gotParams)
 								}
 								return
 							}

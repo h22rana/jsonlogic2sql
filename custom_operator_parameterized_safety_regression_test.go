@@ -75,7 +75,7 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d})
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: defaultTestSchema()})
 					if err != nil {
 						t.Fatalf("NewTranspilerWithConfig() error: %v", err)
 					}

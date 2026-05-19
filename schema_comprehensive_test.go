@@ -18,7 +18,7 @@ func transpileSchemaExpression(transpiler *Transpiler, logic string) (string, er
 // setupTestTranspiler creates a transpiler with custom operators registered
 // similar to how the REPL does it.
 func setupTestTranspiler() *Transpiler {
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 
 	// startsWith operator: column LIKE 'value%'
 	transpiler.RegisterOperatorFunc("startsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
@@ -159,7 +159,7 @@ func TestSchemaValidationComprehensive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			transpiler, _ := NewTranspiler(DialectBigQuery)
+			transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 			transpiler.SetSchema(schema)
 
 			result, err := transpileSchemaExpression(transpiler, tt.jsonLogic)
@@ -187,7 +187,7 @@ func TestSchemaTypeAwareBehavior(t *testing.T) {
 		{Name: "status", Type: FieldTypeString},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -428,38 +428,21 @@ func TestSchemaWithCustomOperators(t *testing.T) {
 	}
 }
 
-// TestSchemaBackwardCompatibility tests that the transpiler works without schema.
-func TestSchemaBackwardCompatibility(t *testing.T) {
+// TestSchemaRequiredValidation verifies that the required schema is enforced.
+func TestSchemaRequiredValidation(t *testing.T) {
 	transpiler := setupTestTranspiler()
-	// No schema set - should accept any field
 
-	tests := []struct {
-		name      string
-		jsonLogic string
-		expected  string
-	}{
-		{
-			name:      "any field without schema",
-			jsonLogic: `{"==": [{"var": "any.random.field"}, "value"]}`,
-			expected:  "any.random.field = 'value'",
-		},
-		{
-			name:      "nested fields without schema",
-			jsonLogic: `{"and":[{"==":[{"var":"field1"},"a"]},{"==":[{"var":"field2"},"b"]}]}`,
-			expected:  "(field1 = 'a' AND field2 = 'b')",
-		},
+	result, err := transpiler.TranspileCondition(`{"and":[{"==":[{"var":"field1"},"a"]},{"==":[{"var":"field2"},"b"]}]}`)
+	if err != nil {
+		t.Fatalf("known schema fields returned error: %v", err)
+	}
+	if expected := "(field1 = 'a' AND field2 = 'b')"; result != expected {
+		t.Fatalf("Expected: %s\nGot: %s", expected, result)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.TranspileCondition(tt.jsonLogic)
-			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
-			}
-			if result != tt.expected {
-				t.Errorf("Expected: %s\nGot: %s", tt.expected, result)
-			}
-		})
+	if _, err := transpiler.TranspileCondition(`{"==": [{"var": "any.random.field"}, "value"]}`); err == nil ||
+		!strings.Contains(err.Error(), "field 'any.random.field' is not defined in schema") {
+		t.Fatalf("unknown field error = %v, want schema validation error", err)
 	}
 }
 
@@ -509,7 +492,7 @@ func TestInOperatorWithSchemaIntegration(t *testing.T) {
 		{Name: "status", Type: FieldTypeString},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -555,7 +538,7 @@ func TestEdgeCasesWithSchema(t *testing.T) {
 		{Name: "active", Type: FieldTypeBoolean},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -612,7 +595,7 @@ func TestTypeAwareOperators(t *testing.T) {
 		{Name: "metadata", Type: FieldTypeObject},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -753,10 +736,9 @@ func TestTypeAwareOperators(t *testing.T) {
 			errorMsg:    "array operation on non-array field 'amount'",
 		},
 		{
-			name:        "array merge with string field",
+			name:        "array merge casts string field",
 			jsonLogic:   `{"merge": [{"var": "tags"}, {"var": "name"}]}`,
-			expectError: true,
-			errorMsg:    "array operation on non-array field 'name'",
+			expectError: false,
 		},
 
 		// Comparison operators (ordering) - valid cases
@@ -836,29 +818,28 @@ func TestTypeAwareOperators(t *testing.T) {
 	}
 }
 
-// TestTypeValidationWithoutSchema verifies that validation is skipped without schema.
-func TestTypeValidationWithoutSchema(t *testing.T) {
-	transpiler, _ := NewTranspiler(DialectBigQuery)
-	// No schema set - all operations should pass
+// TestTypeValidationWithRequiredSchema verifies type validation with a schema.
+func TestTypeValidationWithRequiredSchema(t *testing.T) {
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 
 	tests := []struct {
 		name      string
 		jsonLogic string
 	}{
 		{
-			name:      "numeric on any field without schema",
-			jsonLogic: `{"+": [{"var": "anyField"}, 10]}`,
+			name:      "numeric on numeric field",
+			jsonLogic: `{"+": [{"var": "value"}, 10]}`,
 		},
 		{
-			name:      "string on any field without schema",
+			name:      "string on string fields",
 			jsonLogic: `{"cat": [{"var": "field1"}, {"var": "field2"}]}`,
 		},
 		{
-			name:      "array on any field without schema",
+			name:      "array on array field",
 			jsonLogic: `{"some": [{"var": "items"}, {"==": [{"var": ""}, "x"]}]}`,
 		},
 		{
-			name:      "ordering on any field without schema",
+			name:      "ordering on numeric field",
 			jsonLogic: `{">": [{"var": "value"}, 100]}`,
 		},
 	}
@@ -867,28 +848,24 @@ func TestTypeValidationWithoutSchema(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := transpileSchemaExpression(transpiler, tt.jsonLogic)
 			if err != nil {
-				t.Errorf("Without schema, should not validate types. Got error: %v", err)
+				t.Errorf("Expected schema-valid expression, got error: %v", err)
 			}
 		})
 	}
 }
 
-// TestTypeValidationWithFieldNotInSchema verifies that fields not in schema pass validation.
+// TestTypeValidationWithFieldNotInSchema verifies that fields not in schema are rejected.
 func TestTypeValidationWithFieldNotInSchema(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "known_field", Type: FieldTypeInteger},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	transpiler.SetSchema(schema)
 
-	// Field not in schema should pass validation (existence is checked separately)
 	_, err := transpileSchemaExpression(transpiler, `{"+": [{"var": "unknown_field"}, 10]}`)
-	if err != nil {
-		// If there's an error, it should be about field not being in schema, not about type
-		if strings.Contains(err.Error(), "non-numeric") {
-			t.Errorf("Fields not in schema should skip type validation. Got: %v", err)
-		}
+	if err == nil || !strings.Contains(err.Error(), "field 'unknown_field' is not defined in schema") {
+		t.Fatalf("unknown field error = %v, want schema validation error", err)
 	}
 }
 
@@ -900,7 +877,7 @@ func TestEnumTypeSupport(t *testing.T) {
 		{Name: "name", Type: FieldTypeString},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	transpiler.SetSchema(schema)
 
 	t.Run("valid enum comparisons", func(t *testing.T) {
@@ -1047,7 +1024,7 @@ func TestEnumWithComplexExpressions(t *testing.T) {
 		{Name: "amount", Type: FieldTypeInteger},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -1111,7 +1088,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("string field with numeric array elements should quote values", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileCondition(`{"in":[{"var":"code"},[5960,9000]]}`)
@@ -1125,7 +1102,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("string field with mixed array elements should coerce numbers", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileCondition(`{"in":[{"var":"status"},["active",123,"pending"]]}`)
@@ -1139,7 +1116,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("numeric field with string array elements should unquote values", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileCondition(`{"in":[{"var":"amount"},["100","200","300"]]}`)
@@ -1153,7 +1130,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("numeric field with numeric array elements stays unchanged", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileCondition(`{"in":[{"var":"amount"},[100,200,300]]}`)
@@ -1167,7 +1144,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("string field with string array elements stays unchanged", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileCondition(`{"in":[{"var":"status"},["active","pending"]]}`)
@@ -1180,22 +1157,21 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		}
 	})
 
-	t.Run("no schema should not coerce", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		// No schema set
+	t.Run("string field should coerce numeric values", func(t *testing.T) {
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 
 		result, err := transpiler.TranspileCondition(`{"in":[{"var":"code"},[5960,9000]]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "code IN (5960, 9000)"
+		expected := "code IN ('5960', '9000')"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
 	t.Run("string field with float values should quote correctly", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileCondition(`{"in":[{"var":"status"},[1.5,2.7]]}`)
@@ -1209,7 +1185,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("string containment with number literal coerces to string", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileCondition(`{"in":[123,{"var":"bio"}]}`)
@@ -1223,7 +1199,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("string containment with float literal coerces to string", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileCondition(`{"in":[3.14,{"var":"bio"}]}`)
@@ -1237,7 +1213,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("string containment with string literal stays unchanged", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileCondition(`{"in":["hello",{"var":"bio"}]}`)
@@ -1259,7 +1235,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 			DialectClickHouse,
 		}
 		for _, d := range dialects {
-			transpiler, _ := NewTranspiler(d)
+			transpiler, _ := NewTranspiler(d, defaultTestSchema())
 			transpiler.SetSchema(schema)
 
 			result, err := transpiler.TranspileCondition(`{"in":[{"var":"code"},[5960,9000]]}`)
@@ -1275,7 +1251,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 
 	// TranspileConditionFromMap tests: Go native int types bypass JSON unmarshaling (float64)
 	t.Run("TranspileConditionFromMap: string field with Go int array", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
@@ -1294,7 +1270,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("TranspileConditionFromMap: string field with Go int64 array", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
@@ -1313,7 +1289,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("TranspileConditionFromMap: int in string var (containment)", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
@@ -1332,7 +1308,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("TranspileConditionFromMap: string field == Go int", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
@@ -1351,7 +1327,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("TranspileConditionFromInterface: string field == large Go int64", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 		logic := map[string]interface{}{
 			"==": []interface{}{
@@ -1384,7 +1360,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("TranspileConditionFromInterface: string field == Go float32", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 		logic := map[string]interface{}{
 			"==": []interface{}{
@@ -1417,7 +1393,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("TranspileConditionFromInterface: number field == large Go uint64", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 		logic := map[string]interface{}{
 			"==": []interface{}{
@@ -1453,7 +1429,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if ^uint(0) <= uint(0xffffffff) {
 			t.Skip("large uint literal requires 64-bit uint")
 		}
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 		largeUint := uint(uint64(9007199254740993))
 		logic := map[string]interface{}{
@@ -1487,7 +1463,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 	})
 
 	t.Run("TranspileConditionFromMap: integer field with Go string array", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 		transpiler.SetSchema(schema)
 
 		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
@@ -1517,7 +1493,7 @@ func TestTypeCoercionForComparisons(t *testing.T) {
 		{Name: "active", Type: FieldTypeBoolean},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	transpiler.SetSchema(schema)
 
 	tests := []struct {

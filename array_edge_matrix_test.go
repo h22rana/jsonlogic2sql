@@ -201,7 +201,7 @@ func assertNotContains(t *testing.T, sql, fragment string) {
 	}
 }
 
-func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
+func TestArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 	type matrixCase struct {
 		name      string
 		logic     string
@@ -385,8 +385,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-aware", schema: matrixSchema()},
-		{name: "schema-less", schema: nil},
+		{name: "schema-required", schema: matrixSchema()},
 	}
 
 	dialects := []Dialect{
@@ -430,7 +429,7 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndNoSchema(t *testing.T) {
 	}
 }
 
-func TestArrayEdgeMatrix_SchemaVsNoSchemaValidation(t *testing.T) {
+func TestArrayEdgeMatrix_SchemaVsSchemaRequiredValidation(t *testing.T) {
 	dialects := []Dialect{
 		DialectBigQuery,
 		DialectSpanner,
@@ -440,7 +439,7 @@ func TestArrayEdgeMatrix_SchemaVsNoSchemaValidation(t *testing.T) {
 	}
 
 	schemaTrByDialect := make(map[Dialect]*Transpiler, len(dialects))
-	noSchemaTrByDialect := make(map[Dialect]*Transpiler, len(dialects))
+	emptySchemaTrByDialect := make(map[Dialect]*Transpiler, len(dialects))
 
 	for _, d := range dialects {
 		withSchema, err := NewTranspilerWithConfig(&TranspilerConfig{
@@ -450,46 +449,31 @@ func TestArrayEdgeMatrix_SchemaVsNoSchemaValidation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("with schema transpiler init failed: %v", err)
 		}
-		noSchema, err := NewTranspilerWithConfig(&TranspilerConfig{
+		emptySchemaTr, err := NewTranspilerWithConfig(&TranspilerConfig{
 			Dialect: d,
-			Schema:  nil,
+			Schema:  emptyTestSchema(),
 		})
 		if err != nil {
-			t.Fatalf("no schema transpiler init failed: %v", err)
+			t.Fatalf("empty schema transpiler init failed: %v", err)
 		}
 		schemaTrByDialect[d] = withSchema
-		noSchemaTrByDialect[d] = noSchema
+		emptySchemaTrByDialect[d] = emptySchemaTr
 	}
 
 	tests := []struct {
 		name          string
 		logic         string
 		wantSchemaErr string
-		wantNoSchema  map[Dialect]string
 	}{
 		{
 			name:          "unknown field rejected with schema",
 			logic:         `{"map":[{"var":"unknown.arr"},{"+":[{"var":""},1]}]}`,
 			wantSchemaErr: "is not defined in schema",
-			wantNoSchema: map[Dialect]string{
-				DialectBigQuery:   "ARRAY(SELECT (elem + 1) FROM UNNEST(unknown.arr) AS elem)",
-				DialectSpanner:    "ARRAY(SELECT (elem + 1) FROM UNNEST(unknown.arr) AS elem)",
-				DialectPostgreSQL: "ARRAY(SELECT (elem + 1) FROM UNNEST(unknown.arr) AS elem)",
-				DialectDuckDB:     "ARRAY(SELECT (elem + 1) FROM UNNEST(unknown.arr) AS elem)",
-				DialectClickHouse: "arrayMap(elem -> (elem + 1), unknown.arr)",
-			},
 		},
 		{
 			name:          "non-array field rejected with schema",
 			logic:         `{"map":[{"var":"metrics.amount"},{"+":[{"var":""},1]}]}`,
 			wantSchemaErr: "array operation on non-array field",
-			wantNoSchema: map[Dialect]string{
-				DialectBigQuery:   "ARRAY(SELECT (elem + 1) FROM UNNEST(metrics.amount) AS elem)",
-				DialectSpanner:    "ARRAY(SELECT (elem + 1) FROM UNNEST(metrics.amount) AS elem)",
-				DialectPostgreSQL: "ARRAY(SELECT (elem + 1) FROM UNNEST(metrics.amount) AS elem)",
-				DialectDuckDB:     "ARRAY(SELECT (elem + 1) FROM UNNEST(metrics.amount) AS elem)",
-				DialectClickHouse: "arrayMap(elem -> (elem + 1), metrics.amount)",
-			},
 		},
 	}
 
@@ -502,13 +486,9 @@ func TestArrayEdgeMatrix_SchemaVsNoSchemaValidation(t *testing.T) {
 						t.Fatalf("expected schema error containing %q, got: %v", tc.wantSchemaErr, err)
 					}
 
-					// No-schema mode should accept and produce SQL shape.
-					sql, err := noSchemaTrByDialect[d].TranspileValue(tc.logic)
-					if err != nil {
-						t.Fatalf("no-schema mode should pass, got error: %v", err)
-					}
-					if sql != tc.wantNoSchema[d] {
-						t.Fatalf("no-schema SQL = %q, want %q", sql, tc.wantNoSchema[d])
+					_, err = emptySchemaTrByDialect[d].TranspileValue(tc.logic)
+					if err == nil || !strings.Contains(err.Error(), "is not defined in schema") {
+						t.Fatalf("expected empty-schema field validation error, got: %v", err)
 					}
 				})
 			}
@@ -530,19 +510,19 @@ func TestArrayEdgeMatrix_PackageFunctionsSmoke(t *testing.T) {
 
 	for _, d := range dialects {
 		t.Run(d.String(), func(t *testing.T) {
-			sql1, err := TranspileValue(d, logic)
+			sql1, err := TranspileValue(d, matrixSchema(), logic)
 			if err != nil {
 				t.Fatalf("TranspileValue() error: %v", err)
 			}
-			sql2, err := TranspileValueFromMap(d, logicMap)
+			sql2, err := TranspileValueFromMap(d, matrixSchema(), logicMap)
 			if err != nil {
 				t.Fatalf("TranspileValueFromMap() error: %v", err)
 			}
-			sql3, err := TranspileValueFromInterface(d, logicAny)
+			sql3, err := TranspileValueFromInterface(d, matrixSchema(), logicAny)
 			if err != nil {
 				t.Fatalf("TranspileValueFromInterface() error: %v", err)
 			}
-			cond, err := TranspileValue(d, logic)
+			cond, err := TranspileValue(d, matrixSchema(), logic)
 			if err != nil {
 				t.Fatalf("TranspileValue() error: %v", err)
 			}
@@ -553,14 +533,14 @@ func TestArrayEdgeMatrix_PackageFunctionsSmoke(t *testing.T) {
 				t.Fatalf("package condition mismatch: sql=%q cond=%q", sql1, cond)
 			}
 
-			psql, params, err := TranspileParameterizedValue(d, logic)
+			psql, params, err := TranspileParameterizedValue(d, matrixSchema(), logic)
 			if err != nil {
 				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}
 			if len(params) != 1 {
 				t.Fatalf("expected 1 param, got %d", len(params))
 			}
-			pcond, cparams, err := TranspileParameterizedValue(d, logic)
+			pcond, cparams, err := TranspileParameterizedValue(d, matrixSchema(), logic)
 			if err != nil {
 				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}

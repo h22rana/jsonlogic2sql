@@ -23,7 +23,7 @@ func TestNestedBareFieldUsesInnerAlias_AllDialects(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}
@@ -105,7 +105,7 @@ func TestNestedArrayPredicatePreservesOuterScope_AllDialects(t *testing.T) {
 			t.Run(d.String()+"/"+tc.name, func(t *testing.T) {
 				t.Parallel()
 
-				tr, err := NewTranspiler(d)
+				tr, err := NewTranspiler(d, defaultTestSchema())
 				if err != nil {
 					t.Fatalf("NewTranspiler() error: %v", err)
 				}
@@ -167,7 +167,7 @@ func TestScopedNestedArrayPredicatesAreTwoValuedInValueMode_AllDialects(t *testi
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}
@@ -228,8 +228,8 @@ func TestScopedNestedArrayValuesUseTruthinessInArrayLambdaPredicates_AllDialects
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-less"},
-		{name: "schema-aware", schema: schema},
+		{name: "schema-required", schema: schema},
+		{name: "schema-required", schema: schema},
 	}
 
 	cases := []struct {
@@ -397,8 +397,8 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaModes(t *tes
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-less", schema: nil},
-		{name: "schema-aware", schema: schema},
+		{name: "schema-required", schema: schema},
+		{name: "schema-required", schema: schema},
 	}
 
 	cases := []struct {
@@ -638,7 +638,7 @@ func assertNestedArrayPredicateScope(
 func TestCustomOperatorPathInsideArrayContexts_InlineAndParam(t *testing.T) {
 	t.Parallel()
 
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}

@@ -27,7 +27,7 @@ type Dialect = dialect.Dialect
 // TranspilerConfig holds configuration options for the transpiler.
 type TranspilerConfig struct {
 	Dialect               Dialect // Required: target SQL dialect
-	Schema                *Schema // Optional schema for field validation
+	Schema                *Schema // Required: schema for field validation and type checking
 	NullSafeFieldEquality bool    // Optional: match JSONLogic null equality for field-to-field equality
 }
 
@@ -40,23 +40,21 @@ type Transpiler struct {
 	customOperators *OperatorRegistry
 }
 
-// schemaProvider returns a nil interface when schema is nil, avoiding typed-nil
-// interface values that can bypass no-schema identifier validation.
 func schemaProvider(schema *Schema) operators.SchemaProvider {
-	if schema == nil {
-		return nil
-	}
 	return schema
 }
 
-// SetSchema sets the schema for field validation and type checking
-// This is optional - if not set, no schema validation will be performed.
-func (t *Transpiler) SetSchema(schema *Schema) {
+// SetSchema sets the required schema for field validation and type checking.
+func (t *Transpiler) SetSchema(schema *Schema) error {
+	if schema == nil {
+		return fmt.Errorf("schema is required")
+	}
 	t.operatorConfig.Schema = schemaProvider(schema)
 	if t.config != nil {
 		t.config.Schema = schema
 	}
 	// All operators automatically see the new schema through the shared config
+	return nil
 }
 
 // SetNullSafeFieldEquality enables or disables null-safe field-to-field equality.
@@ -69,19 +67,24 @@ func (t *Transpiler) SetNullSafeFieldEquality(enabled bool) {
 	}
 }
 
-// NewTranspiler creates a new transpiler instance with the specified dialect.
-// Dialect is required - use DialectBigQuery, DialectSpanner, DialectPostgreSQL, or DialectDuckDB.
-func NewTranspiler(d Dialect) (*Transpiler, error) {
+// NewTranspiler creates a new transpiler instance with the specified dialect
+// and schema. Dialect and schema are required. Use NewSchema([]FieldSchema{})
+// for literal-only JSONLogic that does not access fields.
+func NewTranspiler(d Dialect, schema *Schema) (*Transpiler, error) {
 	if err := d.Validate(); err != nil {
 		return nil, err
 	}
+	if schema == nil {
+		return nil, fmt.Errorf("schema is required")
+	}
 
-	opConfig := operators.NewOperatorConfig(d, nil)
+	opConfig := operators.NewOperatorConfig(d, schemaProvider(schema))
 	t := &Transpiler{
 		parser:         parser.NewParser(opConfig),
 		operatorConfig: opConfig,
 		config: &TranspilerConfig{
 			Dialect: d,
+			Schema:  schema,
 		},
 		customOperators: NewOperatorRegistry(),
 	}
@@ -90,13 +93,16 @@ func NewTranspiler(d Dialect) (*Transpiler, error) {
 }
 
 // NewTranspilerWithConfig creates a new transpiler instance with custom configuration.
-// Config.Dialect is required - use DialectBigQuery or DialectSpanner.
+// Config.Dialect and Config.Schema are required.
 func NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
 	if err := config.Dialect.Validate(); err != nil {
 		return nil, err
+	}
+	if config.Schema == nil {
+		return nil, fmt.Errorf("schema is required")
 	}
 
 	opConfig := operators.NewOperatorConfig(config.Dialect, schemaProvider(config.Schema))
@@ -134,7 +140,10 @@ func (t *Transpiler) GetDialect() Dialect {
 //
 // Example:
 //
-//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+//	schema, _ := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+//	    {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+//	})
+//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 //	transpiler.RegisterOperator("length", &LengthOperator{})
 //	sql, _ := transpiler.TranspileValue(`{"length": [{"var": "email"}]}`)
 //	// Output: LENGTH(email)
@@ -155,7 +164,10 @@ func (t *Transpiler) RegisterOperator(name string, handler OperatorHandler) erro
 //
 // Example:
 //
-//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+//	schema, _ := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+//	    {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+//	})
+//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 //	transpiler.RegisterOperatorFunc("length", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
 //	    if len(args) != 1 {
 //	        return jsonlogic2sql.OperatorResult{}, fmt.Errorf("length requires exactly 1 argument")
@@ -181,7 +193,8 @@ func (t *Transpiler) RegisterOperatorFunc(name string, fn OperatorFunc) error {
 //
 // Example:
 //
-//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+//	schema, _ := jsonlogic2sql.NewSchema(nil)
+//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 //	transpiler.RegisterDialectAwareOperator("now", &CurrentTimeOperator{})
 //	sql, _ := transpiler.TranspileValue(`{"now": []}`)
 //	// BigQuery: CURRENT_TIMESTAMP()
@@ -205,7 +218,8 @@ func (t *Transpiler) RegisterDialectAwareOperator(name string, handler DialectAw
 //
 // Example:
 //
-//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+//	schema, _ := jsonlogic2sql.NewSchema(nil)
+//	transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 //	transpiler.RegisterDialectAwareOperatorFunc("now", func(op string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
 //	    switch dialect {
 //	    case jsonlogic2sql.DialectBigQuery:
@@ -315,8 +329,8 @@ func (t *Transpiler) TranspileValueFromInterface(logic interface{}) (string, err
 
 // TranspileCondition converts a JSON Logic string to a SQL condition without the WHERE keyword.
 // Dialect is required - use DialectBigQuery, DialectSpanner, DialectPostgreSQL, or DialectDuckDB.
-func TranspileCondition(d Dialect, jsonLogic string) (string, error) {
-	t, err := NewTranspiler(d)
+func TranspileCondition(d Dialect, schema *Schema, jsonLogic string) (string, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", err
 	}
@@ -325,8 +339,8 @@ func TranspileCondition(d Dialect, jsonLogic string) (string, error) {
 
 // TranspileConditionFromMap converts a pre-parsed JSON Logic map to a SQL condition without the WHERE keyword.
 // Dialect is required - use DialectBigQuery, DialectSpanner, DialectPostgreSQL, or DialectDuckDB.
-func TranspileConditionFromMap(d Dialect, logic map[string]interface{}) (string, error) {
-	t, err := NewTranspiler(d)
+func TranspileConditionFromMap(d Dialect, schema *Schema, logic map[string]interface{}) (string, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", err
 	}
@@ -335,8 +349,8 @@ func TranspileConditionFromMap(d Dialect, logic map[string]interface{}) (string,
 
 // TranspileConditionFromInterface converts any JSON Logic interface{} to a SQL condition without the WHERE keyword.
 // Dialect is required - use DialectBigQuery, DialectSpanner, DialectPostgreSQL, or DialectDuckDB.
-func TranspileConditionFromInterface(d Dialect, logic interface{}) (string, error) {
-	t, err := NewTranspiler(d)
+func TranspileConditionFromInterface(d Dialect, schema *Schema, logic interface{}) (string, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", err
 	}
@@ -344,8 +358,8 @@ func TranspileConditionFromInterface(d Dialect, logic interface{}) (string, erro
 }
 
 // TranspileValue converts a JSON Logic string to a SQL value expression.
-func TranspileValue(d Dialect, jsonLogic string) (string, error) {
-	t, err := NewTranspiler(d)
+func TranspileValue(d Dialect, schema *Schema, jsonLogic string) (string, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", err
 	}
@@ -353,8 +367,8 @@ func TranspileValue(d Dialect, jsonLogic string) (string, error) {
 }
 
 // TranspileValueFromMap converts a pre-parsed JSON Logic map to a SQL value expression.
-func TranspileValueFromMap(d Dialect, logic map[string]interface{}) (string, error) {
-	t, err := NewTranspiler(d)
+func TranspileValueFromMap(d Dialect, schema *Schema, logic map[string]interface{}) (string, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", err
 	}
@@ -362,8 +376,8 @@ func TranspileValueFromMap(d Dialect, logic map[string]interface{}) (string, err
 }
 
 // TranspileValueFromInterface converts any JSON Logic interface{} to a SQL value expression.
-func TranspileValueFromInterface(d Dialect, logic interface{}) (string, error) {
-	t, err := NewTranspiler(d)
+func TranspileValueFromInterface(d Dialect, schema *Schema, logic interface{}) (string, error) {
+	t, err := NewTranspiler(d, schema)
 	if err != nil {
 		return "", err
 	}

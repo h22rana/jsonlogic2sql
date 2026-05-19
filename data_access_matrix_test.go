@@ -58,8 +58,7 @@ func TestRegressionMatrix_DataAccess_AllDialects(t *testing.T) {
 		schema *Schema
 		aware  bool
 	}{
-		{name: "schema-less", schema: nil, aware: false},
-		{name: "schema-aware", schema: schema, aware: true},
+		{name: "schema-required", schema: schema, aware: true},
 	}
 
 	for _, mode := range modes {
@@ -81,7 +80,7 @@ func TestRegressionMatrix_DataAccess_AllDialects(t *testing.T) {
 
 					for _, tc := range cases {
 						t.Run(tc.name, func(t *testing.T) {
-							// schema-aware/schema-less expected error paths
+							// schema-required/schema-required expected error paths
 							if mode.aware && tc.expectSchemaAwareErr {
 								assertDataAccessAllErrorPaths(t, tr, tc.logic)
 								return
@@ -302,10 +301,10 @@ func validateDataAccessCase(
 
 	case "unknown_field":
 		if schemaAware {
-			t.Fatalf("unknown_field should have errored in schema-aware mode")
+			t.Fatalf("unknown_field should have errored in schema-required mode")
 		}
 		if cond != "unknown.field IS NULL" {
-			t.Fatalf("unexpected schema-less SQL for unknown_field: %q", cond)
+			t.Fatalf("unexpected schema-required SQL for unknown_field: %q", cond)
 		}
 	}
 }
