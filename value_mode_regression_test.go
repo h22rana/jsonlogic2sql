@@ -3078,6 +3078,311 @@ func TestTranspileValue_CatNullSafeStringificationAllDialectsSchemaModes(t *test
 	}
 }
 
+func TestTranspileCatNullSafeBehaviorAcrossModesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "name", Type: FieldTypeString},
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		want       func(Dialect, bool) string
+		wantParam  func(Dialect, bool) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "string field and literal",
+			logic: `{"cat":[{"var":"name"},"-x"]}`,
+			want: func(d Dialect, schemaAware bool) string {
+				nameSQL := "COALESCE(name, '')"
+				if !schemaAware {
+					nameSQL = fmt.Sprintf("COALESCE(%s, '')", testStringCastSQL(d, "name"))
+				}
+				return fmt.Sprintf("CONCAT(%s, '-x')", nameSQL)
+			},
+			wantParam: func(d Dialect, schemaAware bool) string {
+				nameSQL := "COALESCE(name, '')"
+				if !schemaAware {
+					nameSQL = fmt.Sprintf("COALESCE(%s, '')", testStringCastSQL(d, "name"))
+				}
+				return fmt.Sprintf("CONCAT(%s, %s)", nameSQL, testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "-x"}},
+		},
+		{
+			name:  "number field",
+			logic: `{"cat":["#",{"var":"amount"}]}`,
+			want: func(d Dialect, _ bool) string {
+				return fmt.Sprintf("CONCAT('#', COALESCE(%s, ''))", testStringCastSQL(d, "amount"))
+			},
+			wantParam: func(d Dialect, _ bool) string {
+				return fmt.Sprintf("CONCAT(%s, COALESCE(%s, ''))", testPlaceholder(d, 1), testStringCastSQL(d, "amount"))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "#"}},
+		},
+		{
+			name:  "boolean field",
+			logic: `{"cat":[{"var":"flag"}]}`,
+			want: func(d Dialect, schemaAware bool) string {
+				if schemaAware {
+					return "CONCAT(CASE WHEN flag THEN 'true' ELSE 'false' END)"
+				}
+				return fmt.Sprintf("CONCAT(COALESCE(%s, ''))", testStringCastSQL(d, "flag"))
+			},
+			wantParam: func(d Dialect, schemaAware bool) string {
+				if schemaAware {
+					return "CONCAT(CASE WHEN flag THEN 'true' ELSE 'false' END)"
+				}
+				return fmt.Sprintf("CONCAT(COALESCE(%s, ''))", testStringCastSQL(d, "flag"))
+			},
+		},
+		{
+			name:  "predicate operand",
+			logic: `{"cat":[{"==":[{"var":"amount"},10]}]}`,
+			want: func(_ Dialect, _ bool) string {
+				return "CONCAT(CASE WHEN amount = 10 THEN 'true' ELSE 'false' END)"
+			},
+			wantParam: func(d Dialect, _ bool) string {
+				return fmt.Sprintf("CONCAT(CASE WHEN amount = %s THEN 'true' ELSE 'false' END)", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: float64(10)}},
+		},
+		{
+			name:  "omitted if else",
+			logic: `{"cat":[{"if":[{"==":[{"var":"amount"},10]},"yes"]},"z"]}`,
+			want: func(_ Dialect, _ bool) string {
+				condition := "amount = 10"
+				return fmt.Sprintf("CONCAT(COALESCE(CASE WHEN %s THEN 'yes' ELSE NULL END, ''), 'z')", condition)
+			},
+			wantParam: func(d Dialect, _ bool) string {
+				condition := fmt.Sprintf("amount = %s", testPlaceholder(d, 1))
+				return fmt.Sprintf(
+					"CONCAT(COALESCE(CASE WHEN %s THEN %s ELSE NULL END, ''), %s)",
+					condition,
+					testPlaceholder(d, 2),
+					testPlaceholder(d, 3),
+				)
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(10)},
+				{Name: "p2", Value: "yes"},
+				{Name: "p3", Value: "z"},
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+					schemaAware := mode.schema != nil
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							if _, err := tr.TranspileCondition(tt.logic); !IsErrorCode(err, ErrInvalidExpressionContext) {
+								t.Fatalf("TranspileCondition() error = %v, want %s", err, ErrInvalidExpressionContext)
+							}
+
+							gotValue, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if want := tt.want(d, schemaAware); gotValue != want {
+								t.Fatalf("TranspileValue() = %q, want %q", gotValue, want)
+							}
+
+							gotFallback, err := transpileTestExpression(tr, tt.logic)
+							if err != nil {
+								t.Fatalf("fallback transpile error = %v", err)
+							}
+							if gotFallback != gotValue {
+								t.Fatalf("fallback transpile = %q, want value SQL %q", gotFallback, gotValue)
+							}
+
+							if _, _, condErr := tr.TranspileParameterizedCondition(tt.logic); !IsErrorCode(condErr, ErrInvalidExpressionContext) {
+								t.Fatalf("TranspileParameterizedCondition() error = %v, want %s", condErr, ErrInvalidExpressionContext)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d, schemaAware); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+
+							gotParamFallback, gotFallbackParams, err := transpileParameterizedExpression(tr, tt.logic)
+							if err != nil {
+								t.Fatalf("fallback parameterized transpile error = %v", err)
+							}
+							if gotParamFallback != gotParam {
+								t.Fatalf("fallback parameterized SQL = %q, want %q", gotParamFallback, gotParam)
+							}
+							if !reflect.DeepEqual(gotFallbackParams, gotParams) {
+								t.Fatalf("fallback params = %#v, want %#v", gotFallbackParams, gotParams)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileCatNullSafeCustomOperatorDeepNestingAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "first", Type: FieldTypeString},
+		{Name: "last", Type: FieldTypeString},
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+	logic := `{"cat":[{"if":[{"==":[{"var":"flag"},true]},{"cat":[{"prefix":["pre-",{"var":"first"}]},{"or":[null,{"upper":[{"var":"last"}]}]}]},{"cat":[{"prefix":["pre-",{"var":"amount"}]},"-fallback"]}]},"!"]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+					if regErr := registerCatDeepNestingOperators(tr); regErr != nil {
+						t.Fatalf("registerCatDeepNestingOperators() error = %v", regErr)
+					}
+
+					got, err := tr.TranspileValue(logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					want := catDeepNestingSQL(d, mode.schema != nil, false)
+					if got != want {
+						t.Fatalf("TranspileValue() = %q, want %q", got, want)
+					}
+
+					gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					wantParam := catDeepNestingSQL(d, mode.schema != nil, true)
+					if gotParam != wantParam {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
+					}
+					wantParams := []QueryParam{
+						{Name: "p1", Value: "pre-"},
+						{Name: "p2", Value: "pre-"},
+						{Name: "p3", Value: "-fallback"},
+						{Name: "p4", Value: "!"},
+					}
+					if !reflect.DeepEqual(gotParams, wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+					}
+				})
+			}
+		})
+	}
+}
+
+func registerCatDeepNestingOperators(tr *Transpiler) error {
+	if err := tr.RegisterDialectAwareOperatorFunc("upper", func(_ string, args []OperatorArg, d Dialect) (OperatorResult, error) {
+		if len(args) != 1 {
+			return OperatorResult{}, fmt.Errorf("upper requires one argument")
+		}
+		return ValueSQL(fmt.Sprintf("UPPER(%s)", customStringArgSQL(d, args[0])), ExpressionTypeString), nil
+	}); err != nil {
+		return err
+	}
+	return tr.RegisterDialectAwareOperatorFunc("prefix", func(_ string, args []OperatorArg, d Dialect) (OperatorResult, error) {
+		if len(args) != 2 {
+			return OperatorResult{}, fmt.Errorf("prefix requires two arguments")
+		}
+		return ValueSQL(fmt.Sprintf("CONCAT(%s, %s)", args[0].SQL, customStringArgSQL(d, args[1])), ExpressionTypeString), nil
+	})
+}
+
+func customStringArgSQL(d Dialect, arg OperatorArg) string {
+	if arg.Kind == ExpressionKindPredicate || arg.Type == ExpressionTypeBoolean {
+		return fmt.Sprintf("CASE WHEN %s THEN 'true' ELSE 'false' END", arg.SQL)
+	}
+	switch arg.Type {
+	case ExpressionTypeNull:
+		return "''"
+	case ExpressionTypeBoolean:
+		return fmt.Sprintf("CASE WHEN %s THEN 'true' ELSE 'false' END", arg.SQL)
+	case ExpressionTypeString:
+		return fmt.Sprintf("COALESCE(%s, '')", arg.SQL)
+	case ExpressionTypeNumber, ExpressionTypeUnknown:
+		return fmt.Sprintf("COALESCE(%s, '')", testStringCastSQL(d, arg.SQL))
+	case ExpressionTypeArray:
+		return arg.SQL
+	}
+	return arg.SQL
+}
+
+func catDeepNestingSQL(d Dialect, schemaAware, parameterized bool) string {
+	prefixOne := "'pre-'"
+	prefixTwo := "'pre-'"
+	fallback := "'-fallback'"
+	bang := "'!'"
+	if parameterized {
+		prefixOne = testPlaceholder(d, 1)
+		prefixTwo = testPlaceholder(d, 2)
+		fallback = testPlaceholder(d, 3)
+		bang = testPlaceholder(d, 4)
+	}
+
+	firstSQL := fmt.Sprintf("COALESCE(%s, '')", testStringCastSQL(d, "first"))
+	if schemaAware {
+		firstSQL = "COALESCE(first, '')"
+	}
+	lastSQL := fmt.Sprintf("COALESCE(%s, '')", testStringCastSQL(d, "last"))
+	if schemaAware {
+		lastSQL = "COALESCE(last, '')"
+	}
+
+	thenNested := fmt.Sprintf(
+		"CONCAT(COALESCE(CONCAT(%s, %s), ''), COALESCE(UPPER(%s), ''))",
+		prefixOne,
+		firstSQL,
+		lastSQL,
+	)
+	elseNested := fmt.Sprintf(
+		"CONCAT(COALESCE(CONCAT(%s, COALESCE(%s, '')), ''), %s)",
+		prefixTwo,
+		testStringCastSQL(d, "amount"),
+		fallback,
+	)
+	condition := "flag = TRUE"
+	branch := fmt.Sprintf("COALESCE(CASE WHEN %s THEN %s ELSE %s END, '')", condition, thenNested, elseNested)
+	return fmt.Sprintf("CONCAT(%s, %s)", branch, bang)
+}
+
 func TestTranspileValue_CatStringifiesMixedLogicalBranchesAllDialectsSchemaModes(t *testing.T) {
 	t.Parallel()
 
