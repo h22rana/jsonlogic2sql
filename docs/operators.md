@@ -205,9 +205,9 @@ NOT (isDeleted IS TRUE)
 {"!!": [{"var": "value"}]}
 ```
 
-Without schema, field truthiness is rejected because the transpiler cannot know
-whether `value` should be treated as a string, number, boolean, or array. With
-schema, the `!!` operator generates type-appropriate SQL. See
+Field truthiness requires schema metadata because the transpiler must know
+whether `value` should be treated as a string, number, boolean, or array. With a
+declared field type, the `!!` operator generates type-appropriate SQL. See
 [Schema-Aware Truthiness](schema-validation.md#schema-required-truthiness) for
 details.
 

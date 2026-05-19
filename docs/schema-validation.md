@@ -215,9 +215,11 @@ sql, _ = transpiler.TranspileCondition(`{"in": ["hello", {"var": "name"}]}`)
 fmt.Println(sql) // Output: STRPOS(name, 'hello') > 0
 ```
 
-### In Operator Behavior Without Schema
+### In Operator Behavior for Unknown Expressions
 
-When no schema is provided, `in` uses heuristics to infer whether to generate:
+When an `in` operand is a nested expression whose result type is not fully
+known from schema metadata, the transpiler uses conservative heuristics to
+infer whether to generate:
 
 - string containment (`STRPOS` / `POSITION` / `position`)
 - array membership (`IN UNNEST` / `= ANY` / `list_contains` / `has`)
@@ -241,7 +243,7 @@ When a schema is provided, the transpiler automatically coerces literal values t
 sql, _ := transpiler.TranspileCondition(`{"in": [{"var": "category_code"}, [5960, 9000]]}`)
 fmt.Println(sql)
 // Output: category_code IN ('5960', '9000')
-// Without schema: category_code IN (5960, 9000) - would fail in BigQuery
+// If category_code were not declared in the schema, transpilation would fail.
 ```
 
 For equality, this is a canonical string match. For example, `code == 5` emits
@@ -255,7 +257,7 @@ same number at runtime, such as `"05"`, `"5.0"`, or `" 5 "`.
 sql, _ := transpiler.TranspileCondition(`{">=": [{"var": "amount"}, "50000"]}`)
 fmt.Println(sql)
 // Output: amount >= 50000
-// Without schema: amount >= '50000'
+// If amount were not declared in the schema, transpilation would fail.
 ```
 
 For equality and inequality, numeric string literals follow JavaScript-like
@@ -364,10 +366,11 @@ When a schema is provided, the `!!` operator generates type-appropriate SQL to a
 | Array (BigQuery/Spanner/PostgreSQL/DuckDB) | `{"!!": {"var": "tags"}}` | `(tags IS NOT NULL AND CARDINALITY(tags) > 0)` |
 | Array (ClickHouse) | `{"!!": {"var": "tags"}}` | `(tags IS NOT NULL AND length(tags) > 0)` |
 
-Without a schema, field truthiness is rejected with `ErrInvalidExpressionContext`
-instead of emitting non-portable mixed-type comparisons. Add field types to the
-schema before using a `var` operand directly in `!!`, `!`, value-mode `and` /
-`or`, or value-mode `if` conditions.
+Field truthiness is rejected with `ErrInvalidExpressionContext` when the schema
+does not provide a concrete field type, instead of emitting non-portable
+mixed-type comparisons. Add field types to the schema before using a `var`
+operand directly in `!!`, `!`, value-mode `and` / `or`, or value-mode `if`
+conditions.
 
 ## Enum Type Support
 
