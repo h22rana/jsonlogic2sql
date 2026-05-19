@@ -120,6 +120,33 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			want:      []string{"elem.transactions", "elem1.flags", "elem2.code ="},
 			paramLen:  1,
 		},
+		{
+			name:      "map over filtered array preserves element schema",
+			logic:     `{"map":[{"filter":[{"var":"accounts"},{"==":[{"var":"status"},"active"]}]},{"var":"profile.tier"}]}`,
+			valueRoot: true,
+			want:      []string{"elem.status =", "elem.profile.tier"},
+			paramLen:  1,
+		},
+		{
+			name:     "some over filtered array preserves element schema",
+			logic:    `{"some":[{"filter":[{"var":"accounts"},{"==":[{"var":"status"},"active"]}]},{"==":[{"var":"profile.tier"},"gold"]}]}`,
+			want:     []string{"elem.status =", "elem.profile.tier ="},
+			paramLen: 2,
+		},
+		{
+			name:      "filter over identity map preserves element schema",
+			logic:     `{"filter":[{"map":[{"var":"accounts"},{"var":""}]},{"==":[{"var":"profile.region"},"JP"]}]}`,
+			valueRoot: true,
+			want:      []string{"elem.profile.region ="},
+			paramLen:  1,
+		},
+		{
+			name:      "nested map over filtered scoped array preserves element schema",
+			logic:     `{"map":[{"var":"accounts"},{"map":[{"filter":[{"var":"transactions"},{">":[{"var":"amount"},0]}]},{"var":"method.type"}]}]}`,
+			valueRoot: true,
+			want:      []string{"elem2.amount >", "elem1.method.type"},
+			paramLen:  1,
+		},
 	}
 
 	modes := []struct {
@@ -216,6 +243,12 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaAwareCases_AllDialects(t *tes
 			name:      "array operator rejects non-array nested object field source",
 			logic:     `{"some":[{"var":"accounts"},{"some":[{"var":"profile.region"},true]}]}`,
 			wantError: "array operation on non-array field 'accounts.profile.region' (type: string)",
+		},
+		{
+			name:      "map over filtered array rejects unknown scoped field",
+			logic:     `{"map":[{"filter":[{"var":"accounts"},{"==":[{"var":"status"},"active"]}]},{"var":"unknown"}]}`,
+			valueRoot: true,
+			wantError: "field 'unknown' is not defined in schema scope 'accounts'",
 		},
 		{
 			name:      "defaulted scoped enum var validates default value",

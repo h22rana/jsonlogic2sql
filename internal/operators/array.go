@@ -611,6 +611,82 @@ func (a *ArrayOperator) extractFieldNameFromValue(value interface{}) string {
 	return ""
 }
 
+func (a *ArrayOperator) arraySourceSchemaScope(value interface{}) string {
+	if fieldName := a.arraySourceFieldNameFromValue(value); fieldName != "" {
+		return fieldName
+	}
+
+	operator, args, ok := arrayOperatorArgs(value)
+	if !ok {
+		return ""
+	}
+
+	switch operator {
+	case OpFilter:
+		if len(args) != binaryArrayOperatorArgCount {
+			return ""
+		}
+		return a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	case OpMap:
+		if len(args) != binaryArrayOperatorArgCount || !isIdentityElementMapExpression(args[arrayExpressionArgIndex]) {
+			return ""
+		}
+		return a.arraySourceSchemaScope(args[arraySourceArgIndex])
+	case OpMerge:
+		return a.mergedArraySourceSchemaScope(args)
+	default:
+		return ""
+	}
+}
+
+func (a *ArrayOperator) arraySourceFieldNameFromValue(value interface{}) string {
+	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+		return pv.FieldName
+	}
+	if varExpr, ok := value.(map[string]interface{}); ok {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
+			if scoped := a.scopedFieldNameFromVarExpr(varName); scoped != "" {
+				return scoped
+			}
+			return a.extractFieldName(varName)
+		}
+	}
+	return ""
+}
+
+func isIdentityElementMapExpression(expr interface{}) bool {
+	exprMap, ok := expr.(map[string]interface{})
+	if !ok || len(exprMap) != 1 {
+		return false
+	}
+	varName, ok := exprMap[OpVar]
+	if !ok {
+		return false
+	}
+	return varName == ""
+}
+
+func (a *ArrayOperator) mergedArraySourceSchemaScope(args []interface{}) string {
+	var scope string
+	for _, arg := range args {
+		if isEmptyArrayLiteral(arg) {
+			continue
+		}
+		argScope := a.arraySourceSchemaScope(arg)
+		if argScope == "" {
+			return ""
+		}
+		if scope == "" {
+			scope = argScope
+			continue
+		}
+		if scope != argScope {
+			return ""
+		}
+	}
+	return scope
+}
+
 // extractFieldName extracts the field name from a var argument.
 func (a *ArrayOperator) extractFieldName(varName interface{}) string {
 	if pv, ok := varName.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
@@ -795,7 +871,7 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 		return a.emptyArrayLiteralSQL()
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 
 	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withSchemaScope(sourceFieldName).withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], false, a.argPath(arrayExpressionArgIndex))
@@ -839,7 +915,7 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 		return a.emptyArrayLiteralSQL()
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
@@ -897,7 +973,7 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 		return initial, nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 
 	// Second argument: reducer expression
 	reducerExpr := args[arrayExpressionArgIndex]
@@ -1116,7 +1192,7 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
@@ -1166,7 +1242,7 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
@@ -1213,7 +1289,7 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 		return "TRUE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
@@ -2293,7 +2369,7 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 		return a.emptyArrayLiteralSQL()
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withSchemaScope(sourceFieldName).withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
@@ -2327,7 +2403,7 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 		return a.emptyArrayLiteralSQL()
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScope(sourceFieldName).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
@@ -2367,7 +2443,7 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 		return initial, nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 	reducerExpr := args[arrayExpressionArgIndex]
 	alias := a.elemAlias()
 
@@ -2438,7 +2514,7 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScope(sourceFieldName).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
@@ -2474,7 +2550,7 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScope(sourceFieldName).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
@@ -2509,7 +2585,7 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 		return "TRUE", nil
 	}
 	array := arrayValue.sql
-	sourceFieldName := a.extractFieldNameFromValue(args[arraySourceArgIndex])
+	sourceFieldName := a.arraySourceSchemaScope(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScope(sourceFieldName).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
