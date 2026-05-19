@@ -126,7 +126,11 @@ Use `:schema` to load a schema file for field validation and type-aware SQL:
 Schema loaded: schema.json
 ```
 
-Schema field names should be raw, unquoted identifiers. The REPL uses the same dialect-aware identifier quoting as the library, including numeric-leading path segments in array lambdas such as `{"var":"24h"}` and reduce scopes such as `{"var":"current.24h"}`.
+Schema field names should be raw, unquoted identifier segments containing only
+letters, digits, and underscores. The REPL uses the same dialect-aware
+identifier quoting as the library, including numeric-leading path segments in
+array lambdas such as `{"var":"24h"}` and reduce scopes such as
+`{"var":"current.24h"}`.
 
 ## Examples Command
 

@@ -471,8 +471,10 @@ func NewSchema(fields []FieldSchema) (*Schema, error)
 Create a new schema from field definitions. `NewSchema` validates the schema by
 default and returns an error for invalid field names, unsupported or missing
 types, invalid nested `fields` / `elementFields` usage, invalid enum metadata,
-duplicate flattened field paths, or empty path segments. Field names must be
-raw, unquoted identifiers; the transpiler handles quoting automatically.
+duplicate flattened field paths, empty path segments, quote characters, or
+SQL-control punctuation. Field path segments must be raw, unquoted identifier
+tokens containing only letters, digits, and underscores. Numeric-leading
+segments such as `24h` are accepted and quoted automatically by the transpiler.
 
 ### ValidateSchemaFields
 
