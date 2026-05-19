@@ -53,7 +53,10 @@ func (c *ComparisonOperator) schema() SchemaProvider {
 	return schemaFromConfig(c.config)
 }
 
-const arrayMembershipElementAlias = "__j2s_member"
+const (
+	arrayMembershipElementAlias = "__j2s_member"
+	arrayMembershipTableAlias   = "__j2s_members"
+)
 
 // arrayMembershipSQL generates JSONLogic-strict array membership SQL.
 // JSONLogic array membership follows JavaScript indexOf semantics, so NULL
@@ -69,11 +72,12 @@ func (c *ComparisonOperator) arrayMembershipSQL(valueSQL, arraySQL string) strin
 	switch d {
 	case dialect.DialectClickHouse:
 		return fmt.Sprintf("arrayExists(%s -> %s, %s)", arrayMembershipElementAlias, condition, arraySQL)
+	case dialect.DialectPostgreSQL, dialect.DialectDuckDB:
+		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s(%s) WHERE %s)",
+			arraySQL, arrayMembershipTableAlias, arrayMembershipElementAlias, condition)
 	case dialect.DialectUnspecified,
 		dialect.DialectBigQuery,
-		dialect.DialectSpanner,
-		dialect.DialectPostgreSQL,
-		dialect.DialectDuckDB:
+		dialect.DialectSpanner:
 		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)",
 			arraySQL, arrayMembershipElementAlias, condition)
 	}

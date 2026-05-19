@@ -42,6 +42,9 @@ func testNullSafeArrayMembershipSQL(d dialect.Dialect, valueSQL, arraySQL string
 	if d == dialect.DialectClickHouse {
 		return fmt.Sprintf("arrayExists(__j2s_member -> %s, %s)", condition, arraySQL)
 	}
+	if d == dialect.DialectPostgreSQL || d == dialect.DialectDuckDB {
+		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_members(__j2s_member) WHERE %s)", arraySQL, condition)
+	}
 	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_member WHERE %s)", arraySQL, condition)
 }
 

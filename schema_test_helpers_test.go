@@ -54,8 +54,15 @@ func testRuntimeStringContainmentSQL(d Dialect, haystack, needle string) string 
 
 func testNullSafeArrayMembershipSQL(d Dialect, valueSQL, arraySQL string) string {
 	condition := testNullSafeArrayMemberEqualitySQL("__j2s_member", valueSQL)
-	if d == DialectClickHouse {
+	switch d {
+	case DialectClickHouse:
 		return fmt.Sprintf("arrayExists(__j2s_member -> %s, %s)", condition, arraySQL)
+	case DialectPostgreSQL, DialectDuckDB:
+		return fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_members(__j2s_member) WHERE %s)",
+			arraySQL,
+			condition,
+		)
 	}
 	return fmt.Sprintf(
 		"EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_member WHERE %s)",

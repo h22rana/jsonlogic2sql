@@ -210,8 +210,10 @@ The `in` operator behavior depends on the field type:
 // Array field: uses null-safe JSONLogic membership
 sql, _ := transpiler.TranspileCondition(`{"in": ["admin", {"var": "tags"}]}`)
 fmt.Println(sql)
-// BigQuery/Spanner/PostgreSQL/DuckDB:
+// BigQuery/Spanner:
 // EXISTS (SELECT 1 FROM UNNEST(tags) AS __j2s_member WHERE ((__j2s_member IS NULL AND 'admin' IS NULL) OR (__j2s_member IS NOT NULL AND 'admin' IS NOT NULL AND __j2s_member = 'admin')))
+// PostgreSQL/DuckDB:
+// EXISTS (SELECT 1 FROM UNNEST(tags) AS __j2s_members(__j2s_member) WHERE ((__j2s_member IS NULL AND 'admin' IS NULL) OR (__j2s_member IS NOT NULL AND 'admin' IS NOT NULL AND __j2s_member = 'admin')))
 // ClickHouse:
 // arrayExists(__j2s_member -> ((__j2s_member IS NULL AND 'admin' IS NULL) OR (__j2s_member IS NOT NULL AND 'admin' IS NOT NULL AND __j2s_member = 'admin')), tags)
 
