@@ -17,8 +17,9 @@ type NumericOperator struct {
 	comparisonOp *ComparisonOperator
 }
 
-// NewNumericOperator creates a new NumericOperator instance with optional config.
+// NewNumericOperator creates a new NumericOperator instance.
 func NewNumericOperator(config *OperatorConfig) *NumericOperator {
+	config = normalizeOperatorConfig(config)
 	return &NumericOperator{
 		config:       config,
 		dataOp:       NewDataOperator(config),
@@ -33,20 +34,12 @@ func unaryMinusSQL(operand string) string {
 	return fmt.Sprintf("(-%s)", operand)
 }
 
-// schema returns the schema from config, or nil if not configured.
 func (n *NumericOperator) schema() SchemaProvider {
-	if n.config == nil {
-		return nil
-	}
-	return n.config.Schema
+	return schemaFromConfig(n.config)
 }
 
 // validateNumericOperand checks if a field used in a numeric operation is of numeric type.
 func (n *NumericOperator) validateNumericOperand(value interface{}) error {
-	if n.schema() == nil {
-		return nil // Absent schema provider, no validation
-	}
-
 	fieldName := n.extractFieldNameFromValue(value)
 	if fieldName == "" {
 		return nil // Can't determine field name, skip validation

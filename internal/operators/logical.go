@@ -15,8 +15,9 @@ type LogicalOperator struct {
 	dataOp       *DataOperator
 }
 
-// NewLogicalOperator creates a new logical operator with optional config.
+// NewLogicalOperator creates a new logical operator.
 func NewLogicalOperator(config *OperatorConfig) *LogicalOperator {
+	config = normalizeOperatorConfig(config)
 	return &LogicalOperator{
 		config:       config,
 		comparisonOp: NewComparisonOperator(config),
@@ -126,13 +127,13 @@ func (l *LogicalOperator) handleDoubleNot(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid !! argument: %w", err)
 	}
 
-	// If we have a schema and a field name, generate type-appropriate SQL
-	if fieldName != "" && l.config != nil && l.config.Schema != nil {
+	// If this is a field, generate type-appropriate SQL from schema metadata.
+	if fieldName != "" {
 		return l.generateTypeSafeTruthiness(condition, fieldName)
 	}
 
-	// Fallback: generic truthiness check for non-null/truthy values
-	// This checks for non-null, non-false, non-zero, non-empty string
+	// Non-field computed expressions do not have schema metadata, so use
+	// JSONLogic's generic scalar truthiness checks.
 	return fmt.Sprintf("(%s IS NOT NULL AND %s != FALSE AND %s != 0 AND %s != '')",
 		condition, condition, condition, condition), nil
 }
@@ -194,7 +195,7 @@ func (l *LogicalOperator) generateTypeSafeTruthiness(condition, fieldName string
 		return fmt.Sprintf("(%s IS NOT NULL AND %s > 0)", condition, lengthCheck), nil
 
 	default:
-		// Unknown type or field not in schema: use generic check
+		// Unknown expression type: use generic checks for non-field operands.
 		return fmt.Sprintf("(%s IS NOT NULL AND %s != FALSE AND %s != 0 AND %s != '')",
 			condition, condition, condition, condition), nil
 	}
@@ -498,7 +499,7 @@ func (l *LogicalOperator) handleDoubleNotParam(args []interface{}, pc *params.Pa
 		return "", fmt.Errorf("invalid !! argument: %w", err)
 	}
 
-	if fieldName != "" && l.config != nil && l.config.Schema != nil {
+	if fieldName != "" {
 		return l.generateTypeSafeTruthiness(condition, fieldName)
 	}
 

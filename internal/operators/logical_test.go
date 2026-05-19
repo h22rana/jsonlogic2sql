@@ -10,7 +10,7 @@ import (
 )
 
 func TestLogicalOperator_ToSQL(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -210,7 +210,7 @@ func TestLogicalOperator_ToSQL(t *testing.T) {
 }
 
 func TestLogicalOperator_expressionToSQL(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -295,7 +295,7 @@ func TestLogicalOperator_expressionToSQL(t *testing.T) {
 }
 
 func TestLogicalOperator_isPrimitive(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		input    interface{}
@@ -323,7 +323,7 @@ func TestLogicalOperator_isPrimitive(t *testing.T) {
 }
 
 func TestLogicalOperator_handleDoubleNot(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -401,7 +401,7 @@ func TestLogicalOperator_handleDoubleNot(t *testing.T) {
 }
 
 func TestLogicalOperator_handleIf_EdgeCases(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -683,7 +683,7 @@ func TestLogicalOperator_ClickHouseArrayTruthiness(t *testing.T) {
 }
 
 func TestLogicalOperator_extractVarFieldName(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -743,7 +743,7 @@ func TestLogicalOperator_extractVarFieldName(t *testing.T) {
 }
 
 func TestLogicalOperator_expressionToSQL_Extended(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -885,7 +885,7 @@ func TestLogicalOperator_expressionToSQL_Extended(t *testing.T) {
 }
 
 func TestLogicalOperator_expressionToSQL_ArrayOperators(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewLogicalOperator(config)
 
 	tests := []struct {
@@ -933,7 +933,7 @@ func TestLogicalOperator_expressionToSQL_ArrayOperators(t *testing.T) {
 }
 
 func TestLogicalOperator_expressionToSQL_ExpressionParserCallback(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		return "CUSTOM_LOGICAL()", nil
 	})
@@ -950,7 +950,7 @@ func TestLogicalOperator_expressionToSQL_ExpressionParserCallback(t *testing.T) 
 }
 
 func TestLogicalOperator_processArgs(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name        string
@@ -1004,7 +1004,7 @@ func TestLogicalOperator_processArgs(t *testing.T) {
 }
 
 func TestLogicalOperator_isPrimitive_Extended(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	// Test additional types for completeness
 	tests := []struct {
@@ -1035,7 +1035,7 @@ func TestLogicalOperator_isPrimitive_Extended(t *testing.T) {
 }
 
 func TestLogicalOperator_handleIf_MultiCondition(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	// Test with 7 args (3 condition/value pairs + else)
 	result, err := op.handleIf([]interface{}{
@@ -1057,7 +1057,7 @@ func TestLogicalOperator_handleIf_MultiCondition(t *testing.T) {
 }
 
 func TestLogicalOperator_ToSQLParam(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name      string
@@ -1146,7 +1146,7 @@ func TestLogicalOperator_ToSQLParam(t *testing.T) {
 }
 
 func TestLogicalOperator_expressionToSQLParam(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	t.Run("primitive string", func(t *testing.T) {
 		pc := params.NewParamCollector(params.PlaceholderNamed)
@@ -1216,7 +1216,7 @@ func TestLogicalOperator_expressionToSQLParam(t *testing.T) {
 }
 
 func TestLogicalOperator_handleIfParam(t *testing.T) {
-	op := NewLogicalOperator(nil)
+	op := NewLogicalOperator(testFieldOnlyConfig())
 
 	t.Run("simple if with else", func(t *testing.T) {
 		pc := params.NewParamCollector(params.PlaceholderNamed)
@@ -1268,7 +1268,7 @@ func TestLogicalOperator_handleIfParam(t *testing.T) {
 }
 
 func TestLogicalOperator_processArgsParam(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.SetParamExpressionParser(func(expr any, path string, pc *params.ParamCollector) (string, error) {
 		if m, ok := expr.(map[string]interface{}); ok {
 			if varName, ok := m["var"]; ok {

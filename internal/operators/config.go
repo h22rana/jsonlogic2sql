@@ -55,17 +55,74 @@ type OperatorConfig struct {
 	ValueTypeInferer           ValueTypeInferer
 }
 
+type emptySchemaProvider struct{}
+
+func (emptySchemaProvider) HasField(_ string) bool { return false }
+
+func (emptySchemaProvider) GetFieldType(_ string) string { return "" }
+
+func (emptySchemaProvider) ValidateField(fieldName string) error {
+	return fmt.Errorf("field '%s' is not defined in schema", fieldName)
+}
+
+func (emptySchemaProvider) IsArrayType(_ string) bool { return false }
+
+func (emptySchemaProvider) IsStringType(_ string) bool { return false }
+
+func (emptySchemaProvider) IsNumericType(_ string) bool { return false }
+
+func (emptySchemaProvider) IsBooleanType(_ string) bool { return false }
+
+func (emptySchemaProvider) IsEnumType(_ string) bool { return false }
+
+func (emptySchemaProvider) GetAllowedValues(_ string) []string { return nil }
+
+func (emptySchemaProvider) ValidateEnumValue(_, _ string) error { return nil }
+
+func (emptySchemaProvider) ResolveScopedField(scopePath, fieldName string) (string, error) {
+	if scopePath == "" {
+		return "", fmt.Errorf("field '%s' is not defined in schema", fieldName)
+	}
+	return "", fmt.Errorf("field '%s' is not defined in schema scope '%s'", fieldName, scopePath)
+}
+
+func normalizeSchemaProvider(schema SchemaProvider) SchemaProvider {
+	if schema == nil {
+		return emptySchemaProvider{}
+	}
+	return schema
+}
+
+func normalizeOperatorConfig(config *OperatorConfig) *OperatorConfig {
+	if config == nil {
+		return NewOperatorConfig(dialect.DialectUnspecified, nil)
+	}
+	config.Schema = normalizeSchemaProvider(config.Schema)
+	return config
+}
+
+func schemaFromConfig(config *OperatorConfig) SchemaProvider {
+	if config == nil {
+		return emptySchemaProvider{}
+	}
+	return normalizeSchemaProvider(config.Schema)
+}
+
 // NewOperatorConfig creates a new operator config with dialect and schema provider.
 func NewOperatorConfig(d dialect.Dialect, schema SchemaProvider) *OperatorConfig {
 	return &OperatorConfig{
 		Dialect: d,
-		Schema:  schema,
+		Schema:  normalizeSchemaProvider(schema),
 	}
 }
 
-// HasSchema returns true if a schema is configured.
-func (c *OperatorConfig) HasSchema() bool {
-	return c != nil && c.Schema != nil
+// SetSchema replaces the schema provider, normalizing nil to an empty
+// schema that rejects field access.
+func (c *OperatorConfig) SetSchema(schema SchemaProvider) {
+	if c == nil {
+		return
+	}
+	c.Schema = normalizeSchemaProvider(schema)
 }
 
 // GetDialect returns the configured dialect.

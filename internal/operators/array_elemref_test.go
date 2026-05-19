@@ -10,7 +10,7 @@ import (
 // TestArrayOperator_ElementRefNoCorruption verifies that field names containing
 // "item" or "current" as substrings are NOT corrupted by array-scope mapping.
 func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -118,7 +118,7 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 // TestArrayOperator_DottedIdentifierPreservation verifies that dotted identifiers
 // like "account.current" and "order.item" are NOT corrupted by the post-SQL safety net.
 func TestArrayOperator_DottedIdentifierPreservation(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		if m, ok := expr.(map[string]interface{}); ok {
 			for _, args := range m {
@@ -181,7 +181,7 @@ func TestArrayOperator_DottedIdentifierPreservation(t *testing.T) {
 // TestArrayOperator_CustomOpLiteralSQL verifies that custom operators emitting
 // literal legacy alias SQL are no longer rewritten after SQL generation.
 func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		if m, ok := expr.(map[string]interface{}); ok {
 			for op := range m {
@@ -253,7 +253,7 @@ func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
 // TestArrayOperator_ReduceAccumulatorEdgeCases tests reduce-specific edge cases
 // including initial value preservation and nested reduces.
 func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -320,7 +320,7 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 // TestArrayOperator_ClickHouseElementRefRewrite verifies element reference
 // rewriting works correctly with ClickHouse-specific array syntax.
 func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectClickHouse, nil)
+	config := NewOperatorConfig(dialect.DialectClickHouse, &fieldOnlySchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -376,7 +376,7 @@ func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
 
 // TestArrayOperator_ArrayFormVarRewrite verifies scoped defaulted var expressions.
 func TestArrayOperator_ArrayFormVarRewrite(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {

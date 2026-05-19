@@ -12,8 +12,8 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
 
-// validIdentifierSegment matches a conservative identifier segment allowlist
-// used when no schema is configured.
+// validIdentifierSegment matches the raw identifier segments accepted in
+// array-lambda scope paths before dialect-specific quoting is applied.
 var validIdentifierSegment = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 // validJSONNumberLiteral matches strict JSON numeric literals.
@@ -32,17 +32,14 @@ const (
 	maxVarArrayEntries = 2
 )
 
-// NewDataOperator creates a new data operator with optional config.
+// NewDataOperator creates a new data operator.
 func NewDataOperator(config *OperatorConfig) *DataOperator {
+	config = normalizeOperatorConfig(config)
 	return &DataOperator{config: config}
 }
 
-// schema returns the schema from config, or nil if not configured.
 func (d *DataOperator) schema() SchemaProvider {
-	if d.config == nil {
-		return nil
-	}
-	return d.config.Schema
+	return schemaFromConfig(d.config)
 }
 
 func (d *DataOperator) columnNameForVar(varName string) (string, error) {
@@ -50,10 +47,8 @@ func (d *DataOperator) columnNameForVar(varName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if d.schema() != nil {
-		if err := d.schema().ValidateField(varName); err != nil {
-			return "", err
-		}
+	if err := d.schema().ValidateField(varName); err != nil {
+		return "", err
 	}
 	return columnName, nil
 }
@@ -266,8 +261,6 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 // convertVarName converts a JSON Logic variable name to a SQL column reference.
 // It splits the name on dots, quotes any segment that is not a valid unquoted SQL
 // identifier (e.g. starts with a digit like "24h"), and rejoins with dots.
-// When no schema is configured, it still validates each raw segment against a
-// conservative allowlist before quoting to avoid accepting arbitrary SQL text.
 // Returns an error if any segment contains quote characters (backtick, double
 // quote, or single quote), since the transpiler handles quoting automatically.
 func (d *DataOperator) convertVarName(varName string) (string, error) {
@@ -281,9 +274,6 @@ func (d *DataOperator) convertVarName(varName string) (string, error) {
 		if dialect.ContainsQuoteCharacters(seg) {
 			return "", fmt.Errorf("variable name %q contains quote characters; "+
 				"use raw identifiers — the transpiler handles quoting automatically", varName)
-		}
-		if d.schema() == nil && (seg == "" || !validIdentifierSegment.MatchString(seg)) {
-			return "", fmt.Errorf("invalid identifier %q: each segment must match [a-zA-Z0-9_]+", varName)
 		}
 		if dialect.NeedsQuoting(seg) {
 			segments[i] = dialect.QuoteIdentifierSegment(seg, dl)

@@ -16,30 +16,23 @@ type StringOperator struct {
 	dataOp *DataOperator
 }
 
-// NewStringOperator creates a new StringOperator instance with optional config.
+// NewStringOperator creates a new StringOperator instance.
 func NewStringOperator(config *OperatorConfig) *StringOperator {
+	config = normalizeOperatorConfig(config)
 	return &StringOperator{
 		config: config,
 		dataOp: NewDataOperator(config),
 	}
 }
 
-// schema returns the schema from config, or nil if not configured.
 func (s *StringOperator) schema() SchemaProvider {
-	if s.config == nil {
-		return nil
-	}
-	return s.config.Schema
+	return schemaFromConfig(s.config)
 }
 
 // validateStringOperand checks if a field used in a string operation is of compatible type
 // Allows string types and numeric types (implicit conversion is common)
 // Rejects array and object types.
 func (s *StringOperator) validateStringOperand(value interface{}) error {
-	if s.schema() == nil {
-		return nil // Absent schema provider, no validation
-	}
-
 	fieldName := s.extractFieldNameFromValue(value)
 	if fieldName == "" {
 		return nil // Can't determine field name, skip validation
@@ -194,7 +187,7 @@ func primitiveExpressionType(value interface{}) (ExpressionType, bool) {
 
 func (s *StringOperator) varExpressionType(args interface{}) ExpressionType {
 	fieldName := s.extractFieldName(args)
-	if fieldName == "" || s.schema() == nil {
+	if fieldName == "" {
 		return ExpressionTypeUnknown
 	}
 	switch {

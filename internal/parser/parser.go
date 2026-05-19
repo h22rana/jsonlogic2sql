@@ -40,10 +40,10 @@ type Parser struct {
 }
 
 // NewParser creates a new parser instance with config.
-// If config is nil, defaults to BigQuery dialect for backward compatibility.
+// If config is nil, defaults to BigQuery with an empty schema for internal
+// literal-only usage.
 func NewParser(config *operators.OperatorConfig) *Parser {
 	if config == nil {
-		// Default to BigQuery for backward compatibility in internal usage
 		config = operators.NewOperatorConfig(dialect.DialectBigQuery, nil)
 	}
 	p := &Parser{
@@ -124,7 +124,7 @@ func (p *Parser) SetCustomOperatorLookup(lookup CustomOperatorLookup) {
 
 // SetSchema sets the schema provider for field validation and type checking.
 func (p *Parser) SetSchema(schema operators.SchemaProvider) {
-	p.config.Schema = schema
+	p.config.SetSchema(schema)
 	// All operators share the same config, so they automatically see the new schema
 }
 
@@ -481,7 +481,7 @@ func valueTypeOf(res expressionResult) operators.ExpressionType {
 }
 
 func (p *Parser) fieldExpressionType(fieldName string) operators.ExpressionType {
-	if p.config == nil || p.config.Schema == nil || fieldName == "" {
+	if fieldName == "" {
 		return operators.ExpressionTypeUnknown
 	}
 	switch {
@@ -1793,7 +1793,7 @@ func (p *Parser) stringifiedCatResult(res expressionResult, path string) (expres
 }
 
 func (p *Parser) validateCatStringifiableResult(res expressionResult, path string) error {
-	if p.config != nil && p.config.Schema != nil && res.fieldValue && res.fieldName != "" {
+	if res.fieldValue && res.fieldName != "" {
 		fieldType := p.config.Schema.GetFieldType(res.fieldName)
 		if fieldType != "" {
 			if p.config.Schema.IsStringType(res.fieldName) || p.config.Schema.IsNumericType(res.fieldName) {

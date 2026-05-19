@@ -13,9 +13,9 @@ import (
 )
 
 func TestNewParser(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 	if p == nil {
-		t.Fatal("NewParser(nil) returned nil")
+		t.Fatal("newTestParser() returned nil")
 		return
 	}
 	if p.validator == nil {
@@ -33,7 +33,7 @@ func TestNewParser(t *testing.T) {
 }
 
 func TestParser_Parse(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	tests := []struct {
 		name     string
@@ -280,7 +280,7 @@ func TestParser_Parse(t *testing.T) {
 }
 
 func TestParser_parseOperator(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	tests := []struct {
 		name     string
@@ -354,7 +354,7 @@ func TestParser_parseOperator(t *testing.T) {
 }
 
 func TestParser_isPrimitive(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	tests := []struct {
 		input    interface{}
@@ -456,10 +456,36 @@ func (m *mockSchemaProvider) ValidateEnumValue(fieldName, value string) error {
 	return nil
 }
 
+type fieldOnlyParserSchema struct{}
+
+func (m *fieldOnlyParserSchema) HasField(_ string) bool { return true }
+
+func (m *fieldOnlyParserSchema) GetFieldType(_ string) string { return "" }
+
+func (m *fieldOnlyParserSchema) ValidateField(_ string) error { return nil }
+
+func (m *fieldOnlyParserSchema) IsArrayType(_ string) bool { return false }
+
+func (m *fieldOnlyParserSchema) IsStringType(_ string) bool { return false }
+
+func (m *fieldOnlyParserSchema) IsNumericType(_ string) bool { return false }
+
+func (m *fieldOnlyParserSchema) IsBooleanType(_ string) bool { return false }
+
+func (m *fieldOnlyParserSchema) IsEnumType(_ string) bool { return false }
+
+func (m *fieldOnlyParserSchema) GetAllowedValues(_ string) []string { return nil }
+
+func (m *fieldOnlyParserSchema) ValidateEnumValue(_, _ string) error { return nil }
+
+func newTestParser() *Parser {
+	return NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlyParserSchema{}))
+}
+
 // --- Tests for ParseCondition (0% coverage) ---
 
 func TestParser_ParseCondition(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	tests := []struct {
 		name     string
@@ -538,7 +564,7 @@ func TestParser_ParseCondition(t *testing.T) {
 
 func TestParser_SetCustomOperatorLookup(t *testing.T) {
 	t.Run("sets custom operator lookup and validates through validator", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		lengthHandler := &mockCustomHandler{
 			toSQL: func(op string, args []interface{}) (string, error) {
@@ -569,7 +595,7 @@ func TestParser_SetCustomOperatorLookup(t *testing.T) {
 	})
 
 	t.Run("nil lookup function in validator checker returns false", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		// SetCustomOperatorLookup with nil triggers the internal checker
 		p.SetCustomOperatorLookup(nil)
@@ -584,7 +610,7 @@ func TestParser_SetCustomOperatorLookup(t *testing.T) {
 	})
 
 	t.Run("custom operator with single non-array arg", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		singleHandler := &mockCustomHandler{
 			toSQL: func(op string, args []interface{}) (string, error) {
@@ -617,7 +643,7 @@ func TestParser_SetCustomOperatorLookup(t *testing.T) {
 
 func TestParser_SetSchema(t *testing.T) {
 	t.Run("sets schema on shared config", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		schema := &mockSchemaProvider{
 			fields: map[string]string{
@@ -641,7 +667,7 @@ func TestParser_SetSchema(t *testing.T) {
 	})
 
 	t.Run("schema affects field validation in operators", func(t *testing.T) {
-		config := operators.NewOperatorConfig(dialect.DialectBigQuery, nil)
+		config := operators.NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlyParserSchema{})
 		p := NewParser(config)
 
 		schema := &mockSchemaProvider{
@@ -664,8 +690,8 @@ func TestParser_SetSchema(t *testing.T) {
 		}
 	})
 
-	t.Run("set schema to nil clears schema", func(t *testing.T) {
-		p := NewParser(nil)
+	t.Run("set schema to nil installs empty schema", func(t *testing.T) {
+		p := newTestParser()
 
 		schema := &mockSchemaProvider{
 			fields: map[string]string{"amount": "number"},
@@ -676,8 +702,14 @@ func TestParser_SetSchema(t *testing.T) {
 		}
 
 		p.SetSchema(nil)
-		if p.config.Schema != nil {
-			t.Error("SetSchema(nil) should have cleared schema")
+		if p.config.Schema == nil {
+			t.Fatal("SetSchema(nil) should install an empty schema provider")
+		}
+		if p.config.Schema.HasField("amount") {
+			t.Error("SetSchema(nil) should not preserve previous schema fields")
+		}
+		if err := p.config.Schema.ValidateField("amount"); err == nil {
+			t.Error("SetSchema(nil) empty schema should reject field access")
 		}
 	})
 }
@@ -685,7 +717,7 @@ func TestParser_SetSchema(t *testing.T) {
 // --- Tests for wrapOperatorError (33.3% -> higher coverage) ---
 
 func TestParser_wrapOperatorError(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	t.Run("nil error returns nil", func(t *testing.T) {
 		result := p.wrapOperatorError("==", "$", nil)
@@ -738,7 +770,7 @@ func TestParser_wrapOperatorError(t *testing.T) {
 // --- Tests for parseOperator additional branches (59.3% -> higher) ---
 
 func TestParser_parseOperator_AdditionalBranches(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	tests := []struct {
 		name     string
@@ -1050,7 +1082,7 @@ func TestParser_parseOperator_AdditionalBranches(t *testing.T) {
 
 func TestParser_CustomOperatorFlow(t *testing.T) {
 	t.Run("custom operator with var arg processes to SQL", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "length" {
@@ -1076,7 +1108,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator with literal string arg", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "repeat" {
@@ -1102,7 +1134,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator with literal bool arg", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "flagCheck" {
@@ -1128,7 +1160,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator with literal false arg", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "flagCheck" {
@@ -1154,7 +1186,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator with nil arg", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "nullCheck" {
@@ -1180,7 +1212,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator with numeric arg", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "power" {
@@ -1206,7 +1238,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator returning error", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "failing" {
@@ -1235,7 +1267,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator with nested custom operator in args", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			switch operatorName {
@@ -1273,7 +1305,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator with single non-array arg (processCustomOperatorArgs single path)", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "stringify" {
@@ -1300,7 +1332,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator with primitive single arg", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "literal" {
@@ -1327,7 +1359,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 	})
 
 	t.Run("custom operator with arg processing error", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "myop" {
@@ -1355,7 +1387,7 @@ func TestParser_CustomOperatorFlow(t *testing.T) {
 // --- Tests for primitiveToSQL (0% coverage) ---
 
 func TestParser_primitiveToSQL(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	tests := []struct {
 		name     string
@@ -1423,7 +1455,7 @@ func TestParser_primitiveToSQL(t *testing.T) {
 
 func TestParser_processArg_AdditionalBranches(t *testing.T) {
 	t.Run("multi-key map is rejected", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 		multiKeyMap := map[string]interface{}{"a": 1, "b": 2}
 		if _, err := p.processArg(multiKeyMap, "$", 0); !isTranspileErrorCode(err, tperrors.ErrMultipleKeys) {
 			t.Fatalf("processArg() error = %v, want %s", err, tperrors.ErrMultipleKeys)
@@ -1431,7 +1463,7 @@ func TestParser_processArg_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("array arg is processed recursively", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 		arrArg := []interface{}{1, "hello", true}
 		result, err := p.processArg(arrArg, "$", 0)
 		if err != nil {
@@ -1447,7 +1479,7 @@ func TestParser_processArg_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("primitive arg is returned as-is", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 		result, err := p.processArg(42, "$", 0)
 		if err != nil {
 			t.Fatalf("processArg() unexpected error: %v", err)
@@ -1458,7 +1490,7 @@ func TestParser_processArg_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("custom operator in nested expression gets parsed to SQL", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "toLower" {
@@ -1494,7 +1526,7 @@ func TestParser_processArg_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("built-in operator with nested custom operator gets processed", func(t *testing.T) {
-		p := NewParser(nil)
+		p := newTestParser()
 
 		p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 			if operatorName == "toUpper" {
@@ -1533,7 +1565,7 @@ func TestParser_processArg_AdditionalBranches(t *testing.T) {
 // --- Tests for custom operator integrated in comparison context ---
 
 func TestParser_CustomOperatorInComparison(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 		if operatorName == "length" {
@@ -1567,7 +1599,7 @@ func TestParser_CustomOperatorInComparison(t *testing.T) {
 // --- Tests for custom operator in logical context ---
 
 func TestParser_CustomOperatorInLogicalContext(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 		switch operatorName {
@@ -1616,7 +1648,7 @@ func TestParser_CustomOperatorInLogicalContext(t *testing.T) {
 // --- Tests for custom operator in unary (!) context with non-array arg ---
 
 func TestParser_CustomOperatorInUnaryContext(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 		if operatorName == "isEmpty" {
@@ -1650,7 +1682,7 @@ func TestParser_CustomOperatorInUnaryContext(t *testing.T) {
 // --- Tests for ParseCondition with custom operator ---
 
 func TestParser_ParseCondition_WithCustomOperator(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 		if operatorName == "length" {
@@ -1684,7 +1716,7 @@ func TestParser_ParseCondition_WithCustomOperator(t *testing.T) {
 // --- Tests for NewParser with explicit config ---
 
 func TestNewParser_WithExplicitConfig(t *testing.T) {
-	config := operators.NewOperatorConfig(dialect.DialectPostgreSQL, nil)
+	config := operators.NewOperatorConfig(dialect.DialectPostgreSQL, &fieldOnlyParserSchema{})
 	p := NewParser(config)
 	if p == nil {
 		t.Fatal("NewParser() with config returned nil")
@@ -1698,7 +1730,7 @@ func TestNewParser_WithExplicitConfig(t *testing.T) {
 // --- Tests for isBuiltInOperator ---
 
 func TestParser_isBuiltInOperator(t *testing.T) {
-	p := NewParser(nil)
+	p := newTestParser()
 
 	builtInOps := []string{
 		"var", "missing", "missing_some",
@@ -1740,7 +1772,7 @@ func assertQueryParams(t *testing.T, got, want []params.QueryParam) {
 }
 
 func TestParser_ParseParameterized(t *testing.T) {
-	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, nil))
+	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlyParserSchema{}))
 
 	tests := []struct {
 		name       string
@@ -1829,7 +1861,7 @@ func TestParser_ParseParameterized(t *testing.T) {
 }
 
 func TestParser_ParseParameterized_PostgreSQL(t *testing.T) {
-	p := NewParser(operators.NewOperatorConfig(dialect.DialectPostgreSQL, nil))
+	p := NewParser(operators.NewOperatorConfig(dialect.DialectPostgreSQL, &fieldOnlyParserSchema{}))
 
 	tests := []struct {
 		name       string
@@ -1918,7 +1950,7 @@ func TestParser_ParseParameterized_PostgreSQL(t *testing.T) {
 }
 
 func TestParser_ParseConditionParameterized(t *testing.T) {
-	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, nil))
+	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlyParserSchema{}))
 
 	input := map[string]interface{}{
 		"==": []interface{}{map[string]interface{}{"var": "x"}, "val"},
@@ -1938,7 +1970,7 @@ func TestParser_ParseConditionParameterized(t *testing.T) {
 }
 
 func TestParser_ParseParameterized_Errors(t *testing.T) {
-	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, nil))
+	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlyParserSchema{}))
 
 	t.Run("nil logic", func(t *testing.T) {
 		_, _, err := p.ParseParameterized(nil)
@@ -1970,7 +2002,7 @@ func TestParser_ParseParameterized_Errors(t *testing.T) {
 }
 
 func TestParser_ParseParameterized_CustomOperator(t *testing.T) {
-	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, nil))
+	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlyParserSchema{}))
 
 	p.SetCustomOperatorLookup(func(operatorName string) (CustomOperatorHandler, bool) {
 		if operatorName == "twice" {
@@ -2006,7 +2038,7 @@ func TestParser_ParseParameterized_CustomOperator(t *testing.T) {
 // TestParser_primitiveToSQLParam exercises primitiveToSQLParam indirectly: strings and
 // numbers become bind params; bool and nil stay inline in SQL.
 func TestParser_primitiveToSQLParam(t *testing.T) {
-	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, nil))
+	p := NewParser(operators.NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlyParserSchema{}))
 
 	t.Run("string literal via equality", func(t *testing.T) {
 		_, gotParams, err := p.ParseParameterized(map[string]interface{}{

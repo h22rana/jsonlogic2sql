@@ -35,8 +35,7 @@ type FieldSchema struct {
 
 // Schema represents the collection of field schemas.
 type Schema struct {
-	fields        map[string]FieldSchema // Map field name to schema for O(1) lookup
-	validationErr error
+	fields map[string]FieldSchema // Map field name to schema for O(1) lookup
 }
 
 // NewSchema validates field definitions and creates a new schema.
@@ -46,17 +45,13 @@ func NewSchema(fields []FieldSchema) (*Schema, error) {
 	if err := ValidateSchemaFields(fields); err != nil {
 		return nil, err
 	}
-	return newSchemaUnchecked(fields), nil
-}
-
-func newSchemaUnchecked(fields []FieldSchema) *Schema {
 	s := &Schema{
 		fields: make(map[string]FieldSchema),
 	}
 	for _, field := range fields {
 		s.addField("", field)
 	}
-	return s
+	return s, nil
 }
 
 func (s *Schema) addField(prefix string, field FieldSchema) {
@@ -213,9 +208,6 @@ func (s *Schema) ValidateField(fieldName string) error {
 	if s == nil {
 		return fmt.Errorf("schema is required")
 	}
-	if s.validationErr != nil {
-		return s.validationErr
-	}
 	if !s.HasField(fieldName) {
 		return fmt.Errorf("field '%s' is not defined in schema", fieldName)
 	}
@@ -228,9 +220,6 @@ func (s *Schema) ValidateField(fieldName string) error {
 func (s *Schema) ResolveScopedField(scopePath, fieldName string) (string, error) {
 	if s == nil {
 		return "", fmt.Errorf("schema is required")
-	}
-	if s.validationErr != nil {
-		return "", s.validationErr
 	}
 	if fieldName == "" {
 		return scopePath, nil

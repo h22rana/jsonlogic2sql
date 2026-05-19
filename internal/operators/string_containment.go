@@ -55,13 +55,13 @@ func (c *ComparisonOperator) stringContainmentNeedleSQL(value interface{}, curre
 		if pv.HasExpressionInfo {
 			return c.stringContainmentNeedleSQLForType(pv.Type, currentSQL)
 		}
-		if pv.IsField && pv.FieldName != "" && c.schema() != nil {
+		if pv.IsField && pv.FieldName != "" {
 			return c.stringContainmentNeedleSQLForField(pv.FieldName, currentSQL)
 		}
 		return currentSQL, nil
 	}
 
-	if fieldName := c.extractFieldNameFromValue(value); fieldName != "" && c.schema() != nil {
+	if fieldName := c.extractFieldNameFromValue(value); fieldName != "" {
 		return c.stringContainmentNeedleSQLForField(fieldName, currentSQL)
 	}
 
@@ -87,13 +87,13 @@ func (c *ComparisonOperator) stringContainmentNeedleSQLParam(
 		if pv.HasExpressionInfo {
 			return c.stringContainmentNeedleSQLForType(pv.Type, currentSQL)
 		}
-		if pv.IsField && pv.FieldName != "" && c.schema() != nil {
+		if pv.IsField && pv.FieldName != "" {
 			return c.stringContainmentNeedleSQLForField(pv.FieldName, currentSQL)
 		}
 		return currentSQL, nil
 	}
 
-	if fieldName := c.extractFieldNameFromValue(value); fieldName != "" && c.schema() != nil {
+	if fieldName := c.extractFieldNameFromValue(value); fieldName != "" {
 		return c.stringContainmentNeedleSQLForField(fieldName, currentSQL)
 	}
 

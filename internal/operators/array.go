@@ -53,8 +53,9 @@ type typedValueSQL struct {
 	emptyArrayLiteral bool
 }
 
-// NewArrayOperator creates a new ArrayOperator instance with optional config.
+// NewArrayOperator creates a new ArrayOperator instance.
 func NewArrayOperator(config *OperatorConfig) *ArrayOperator {
+	config = normalizeOperatorConfig(config)
 	return &ArrayOperator{
 		config:         config,
 		dataOp:         NewDataOperator(config),
@@ -301,7 +302,7 @@ func (a *ArrayOperator) inferValueExpressionType(expr interface{}) ExpressionTyp
 }
 
 func (a *ArrayOperator) schemaExpressionType(fieldName string) ExpressionType {
-	if fieldName == "" || a.schema() == nil {
+	if fieldName == "" {
 		return ExpressionTypeUnknown
 	}
 	switch a.schema().GetFieldType(fieldName) {
@@ -319,7 +320,7 @@ func (a *ArrayOperator) schemaExpressionType(fieldName string) ExpressionType {
 }
 
 func (a *ArrayOperator) validateScopedFieldName(fieldName string) error {
-	if a.schema() != nil && fieldName != "" && len(a.currentSchemaScopes()) == 0 {
+	if fieldName != "" && len(a.currentSchemaScopes()) == 0 {
 		return fmt.Errorf("field '%s' cannot be validated because the array element schema is unknown", fieldName)
 	}
 	_, err := a.resolveFieldInScopes(a.currentSchemaScopes(), fieldName)
@@ -327,7 +328,7 @@ func (a *ArrayOperator) validateScopedFieldName(fieldName string) error {
 }
 
 func (a *ArrayOperator) resolveScopedFieldNames(fieldName string) []string {
-	if a.schema() != nil && fieldName != "" && len(a.currentSchemaScopes()) == 0 {
+	if fieldName != "" && len(a.currentSchemaScopes()) == 0 {
 		return nil
 	}
 	resolved, err := a.resolveFieldNamesInScopes(a.currentSchemaScopes(), fieldName)
@@ -357,9 +358,6 @@ func (a *ArrayOperator) resolveFieldNamesInScopes(scopePaths []string, fieldName
 		return nil, nil
 	}
 	schema := a.schema()
-	if schema == nil {
-		return singleSchemaScope(fieldName), nil
-	}
 	if scoped, ok := schema.(ScopedSchemaProvider); ok {
 		scopes := normalizeSchemaScopes(scopePaths)
 		if len(scopes) == 0 {
@@ -705,12 +703,8 @@ func (a *ArrayOperator) varNameReferencesCurrentScopeAlias(varName string) bool 
 	}
 }
 
-// schema returns the schema from config, or nil if not configured.
 func (a *ArrayOperator) schema() SchemaProvider {
-	if a.config == nil {
-		return nil
-	}
-	return a.config.Schema
+	return schemaFromConfig(a.config)
 }
 
 // getDialect returns the configured dialect, or DialectUnspecified if not configured.
@@ -731,10 +725,6 @@ func (a *ArrayOperator) getLogicalOperator() *LogicalOperator {
 
 // validateArrayOperand checks if a field used in an array operation is of array type.
 func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
-	if a.schema() == nil {
-		return nil // Absent schema provider, no validation
-	}
-
 	// If it's a literal array, it's valid
 	if _, ok := value.([]interface{}); ok {
 		return nil
@@ -1266,8 +1256,8 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid map array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid map array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return a.emptyArrayLiteralSQL()
@@ -1313,8 +1303,8 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid filter array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid filter array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return a.emptyArrayLiteralSQL()
@@ -1374,8 +1364,8 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid reduce array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid reduce array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return initial, nil
@@ -1596,8 +1586,8 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid all array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid all array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
@@ -1649,8 +1639,8 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid some array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid some array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
@@ -1699,8 +1689,8 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid none array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid none array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "TRUE", nil
@@ -2804,8 +2794,8 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 	if err != nil {
 		return "", fmt.Errorf("invalid map array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid map array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid map array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return a.emptyArrayLiteralSQL()
@@ -2841,8 +2831,8 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 	if err != nil {
 		return "", fmt.Errorf("invalid filter array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid filter array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid filter array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return a.emptyArrayLiteralSQL()
@@ -2884,8 +2874,8 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid reduce array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid reduce array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return initial, nil
@@ -2958,8 +2948,8 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid all array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid all array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
@@ -2997,8 +2987,8 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid some array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid some array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
@@ -3035,8 +3025,8 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
-	if validationErr := validateArraySourceValue(arrayValue); validationErr != nil {
-		return "", fmt.Errorf("invalid none array argument: %w", validationErr)
+	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return "", fmt.Errorf("invalid none array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "TRUE", nil

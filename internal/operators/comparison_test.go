@@ -13,7 +13,7 @@ import (
 )
 
 func TestComparisonOperator_ToSQL(t *testing.T) {
-	op := NewComparisonOperator(nil)
+	op := NewComparisonOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -266,7 +266,7 @@ func TestComparisonOperator_ToSQL(t *testing.T) {
 }
 
 func TestComparisonOperator_ToSQL_NullSafeFieldEquality(t *testing.T) {
-	defaultConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	defaultConfig := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	defaultOp := NewComparisonOperator(defaultConfig)
 	got, err := defaultOp.ToSQL("==", []interface{}{
 		map[string]interface{}{"var": "a"},
@@ -279,7 +279,7 @@ func TestComparisonOperator_ToSQL_NullSafeFieldEquality(t *testing.T) {
 		t.Fatalf("ToSQL() default = %q, want %q", got, "a = b")
 	}
 
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.NullSafeFieldEquality = true
 	op := NewComparisonOperator(config)
 
@@ -383,7 +383,7 @@ func TestComparisonOperator_ToSQL_NullSafeFieldEquality(t *testing.T) {
 }
 
 func TestComparisonOperator_valueToSQL(t *testing.T) {
-	op := NewComparisonOperator(nil)
+	op := NewComparisonOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -518,7 +518,7 @@ func TestComparisonOperator_strposFunc(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var config *OperatorConfig
 			if tt.name != "nil config defaults to STRPOS" {
-				config = NewOperatorConfig(tt.dialect, nil)
+				config = NewOperatorConfig(tt.dialect, &fieldOnlySchemaProvider{})
 			}
 			op := NewComparisonOperator(config)
 			result := op.strposFunc(tt.haystack, tt.needle)
@@ -530,7 +530,7 @@ func TestComparisonOperator_strposFunc(t *testing.T) {
 }
 
 func TestComparisonOperator_processArithmeticExpression(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -639,7 +639,7 @@ func TestComparisonOperator_processArithmeticExpression(t *testing.T) {
 }
 
 func TestComparisonOperator_processComparisonExpression(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -755,7 +755,7 @@ func TestComparisonOperator_processComparisonExpression(t *testing.T) {
 }
 
 func TestComparisonOperator_processMinMaxExpression(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -1821,9 +1821,9 @@ func TestComparisonOperator_arrayMembershipSQL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var op *ComparisonOperator
 			if tt.name == "nil config - fallback to IN UNNEST" {
-				op = NewComparisonOperator(nil)
+				op = NewComparisonOperator(testFieldOnlyConfig())
 			} else {
-				config := NewOperatorConfig(tt.dialect, nil)
+				config := NewOperatorConfig(tt.dialect, &fieldOnlySchemaProvider{})
 				op = NewComparisonOperator(config)
 			}
 			result := op.arrayMembershipSQL(tt.valueSQL, tt.arraySQL)
@@ -1953,7 +1953,7 @@ func TestComparisonOperator_coerceValueForComparison(t *testing.T) {
 		},
 		// No coercion cases
 		{
-			name:      "absent schema provider returns value as-is",
+			name:      "empty field name returns value as-is",
 			value:     "test",
 			fieldName: "",
 			expected:  "test",
@@ -1993,11 +1993,11 @@ func TestComparisonOperator_coerceValueForComparison(t *testing.T) {
 		})
 	}
 
-	// Test with absent schema provider
-	opSchemaRequired := NewComparisonOperator(nil)
-	result := opSchemaRequired.coerceValueForComparison("50000", "age")
+	// A field-only schema has no type metadata, so no coercion is applied.
+	opFieldOnly := NewComparisonOperator(testFieldOnlyConfig())
+	result := opFieldOnly.coerceValueForComparison("50000", "age")
 	if result != "50000" {
-		t.Errorf("coerceValueForComparison() with absent schema provider = %v, want '50000'", result)
+		t.Errorf("coerceValueForComparison() with field-only schema = %v, want '50000'", result)
 	}
 }
 
@@ -2090,15 +2090,15 @@ func TestComparisonOperator_validateEnumValue(t *testing.T) {
 		})
 	}
 
-	// Test with absent schema provider
-	opSchemaRequired := NewComparisonOperator(nil)
-	if err := opSchemaRequired.validateEnumValue("anything", "status"); err != nil {
-		t.Errorf("validateEnumValue() with absent schema provider should return nil, got %v", err)
+	// A field-only schema has no enum metadata, so enum validation is a no-op.
+	opFieldOnly := NewComparisonOperator(testFieldOnlyConfig())
+	if err := opFieldOnly.validateEnumValue("anything", "status"); err != nil {
+		t.Errorf("validateEnumValue() with field-only schema should return nil, got %v", err)
 	}
 }
 
 func TestComparisonOperator_extractFieldName(t *testing.T) {
-	op := NewComparisonOperator(nil)
+	op := NewComparisonOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -2148,7 +2148,7 @@ func TestComparisonOperator_extractFieldName(t *testing.T) {
 }
 
 func TestComparisonOperator_valueToSQL_Extended(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -2429,8 +2429,8 @@ func TestComparisonOperator_handleIn_WithVarRightSide(t *testing.T) {
 }
 
 func TestComparisonOperator_handleIn_SchemaRequired_VarRightSide(t *testing.T) {
-	// With absent schema provider provider, test heuristic based on left side being a literal
-	op := NewComparisonOperator(nil)
+	// With field-only schema metadata, test heuristic based on left side being a literal.
+	op := NewComparisonOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -2546,7 +2546,7 @@ func TestComparisonOperator_handleIn_SchemaRequired_StringExpressionHeuristic(t 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			op := NewComparisonOperator(NewOperatorConfig(tt.d, nil))
+			op := NewComparisonOperator(NewOperatorConfig(tt.d, &fieldOnlySchemaProvider{}))
 			got, err := op.ToSQL("in", []interface{}{tt.leftArg, rightVar})
 			if tt.expectedError {
 				if err == nil {
@@ -2695,7 +2695,7 @@ func TestComparisonOperator_handleIn_WithSchemaArrayVar(t *testing.T) {
 }
 
 func TestComparisonOperator_valueToSQL_ExpressionParserCallback(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		return "CUSTOM_FUNC()", nil
 	})
@@ -2749,7 +2749,7 @@ func assertQueryParams(t *testing.T, got, want []params.QueryParam) {
 }
 
 func TestComparisonOperator_ToSQLParam(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -2876,7 +2876,7 @@ func TestComparisonOperator_ToSQLParam(t *testing.T) {
 }
 
 func TestComparisonOperator_ToSQLParam_NullSafeFieldEquality(t *testing.T) {
-	defaultConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	defaultConfig := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	defaultOp := NewComparisonOperator(defaultConfig)
 	pc := params.NewParamCollector(params.PlaceholderNamed)
 	got, err := defaultOp.ToSQLParam("==", []interface{}{
@@ -2891,7 +2891,7 @@ func TestComparisonOperator_ToSQLParam_NullSafeFieldEquality(t *testing.T) {
 	}
 	assertQueryParams(t, pc.Params(), nil)
 
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.NullSafeFieldEquality = true
 	op := NewComparisonOperator(config)
 
@@ -2985,7 +2985,7 @@ func TestComparisonOperator_ToSQLParam_NullSafeFieldEquality(t *testing.T) {
 }
 
 func TestComparisonOperator_valueToSQLParam(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -3151,11 +3151,11 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		assertQueryParams(t, pc.Params(), nil)
 	})
 
-	t.Run("string containment with absent schema provider provider", func(t *testing.T) {
-		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
-		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
+	t.Run("string containment with field-only schema", func(t *testing.T) {
+		fieldOnlyConfig := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
+		fieldOnlyOp := NewComparisonOperator(fieldOnlyConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
-		got, err := schemaRequiredOp.handleInParam("foo", map[string]interface{}{"var": "bar"}, pc)
+		got, err := fieldOnlyOp.handleInParam("foo", map[string]interface{}{"var": "bar"}, pc)
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
@@ -3256,7 +3256,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 	})
 
 	t.Run("ProcessedValue SQL literal treated as string containment", func(t *testing.T) {
-		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		got, err := schemaRequiredOp.handleInParam(
@@ -3274,7 +3274,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 	})
 
 	t.Run("ProcessedValue placeholder for string param uses string containment", func(t *testing.T) {
-		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		pc.Add("hello") // @p1 = "hello" (string)
@@ -3293,7 +3293,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 	})
 
 	t.Run("ProcessedValue placeholder for numeric param uses array membership", func(t *testing.T) {
-		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		pc.Add(float64(42)) // @p1 = 42 (numeric)
@@ -3312,7 +3312,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 	})
 
 	t.Run("ProcessedValue SQL expression uses array membership", func(t *testing.T) {
-		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		schemaRequiredConfig := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 		schemaRequiredOp := NewComparisonOperator(schemaRequiredConfig)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		pc.Add("hello") // @p1 = "hello"
@@ -3430,7 +3430,7 @@ func TestComparisonOperator_handleInParam_SchemaRequired_StringExpressionHeurist
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			op := NewComparisonOperator(NewOperatorConfig(tt.d, nil))
+			op := NewComparisonOperator(NewOperatorConfig(tt.d, &fieldOnlySchemaProvider{}))
 			pc := params.NewParamCollector(tt.style)
 			got, err := op.ToSQLParam("in", []interface{}{tt.leftArg, rightVar}, pc)
 			if err != nil {
@@ -3487,7 +3487,7 @@ func TestComparisonOperator_InDoesNotMutateInputArray(t *testing.T) {
 }
 
 func TestComparisonOperator_processArithmeticExpressionParam(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -3559,7 +3559,7 @@ func TestComparisonOperator_processArithmeticExpressionParam(t *testing.T) {
 }
 
 func TestComparisonOperator_processComparisonExpressionParam(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -3622,7 +3622,7 @@ func TestComparisonOperator_processComparisonExpressionParam(t *testing.T) {
 }
 
 func TestComparisonOperator_processMinMaxExpressionParam(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -4180,7 +4180,7 @@ func TestComparisonOperator_ToSQLParam_EqualityConstantFoldsValidateSchema(t *te
 }
 
 func TestComparisonOperator_valueToSQLParam_ExpressionParserCallback(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.SetParamExpressionParser(func(expr any, path string, pc *params.ParamCollector) (string, error) {
 		return "CUSTOM_PARAM()", nil
 	})

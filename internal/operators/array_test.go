@@ -637,7 +637,7 @@ func TestArrayOperator_DialectValidation(t *testing.T) {
 }
 
 func TestArrayOperator_valueToSQL(t *testing.T) {
-	op := NewArrayOperator(nil)
+	op := NewArrayOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string

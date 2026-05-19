@@ -10,7 +10,7 @@ import (
 )
 
 func TestStringOperator_ToSQL(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -188,7 +188,7 @@ func TestStringOperator_ToSQL(t *testing.T) {
 }
 
 func TestStringOperator_valueToSQL(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -273,7 +273,7 @@ func TestStripRedundantOuterParens(t *testing.T) {
 }
 
 func TestStringOperator_NestedOperations(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -434,7 +434,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 }
 
 func TestStringOperator_processArithmeticExpression(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -535,7 +535,7 @@ func TestStringOperator_processArithmeticExpression(t *testing.T) {
 }
 
 func TestStringOperator_processNotExpression(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -589,7 +589,7 @@ func TestStringOperator_processNotExpression(t *testing.T) {
 }
 
 func TestStringOperator_processBooleanCoercion(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -643,7 +643,7 @@ func TestStringOperator_processBooleanCoercion(t *testing.T) {
 }
 
 func TestStringOperator_valueToSQL_Extended(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -720,7 +720,7 @@ func TestStringOperator_valueToSQL_Extended(t *testing.T) {
 }
 
 func TestStringOperator_ClickHouseDialect(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectClickHouse, nil)
+	config := NewOperatorConfig(dialect.DialectClickHouse, &fieldOnlySchemaProvider{})
 	op := NewStringOperator(config)
 
 	result, err := op.ToSQL("substr", []interface{}{"Hello World", 6, 5})
@@ -734,7 +734,7 @@ func TestStringOperator_ClickHouseDialect(t *testing.T) {
 }
 
 func TestStringOperator_valueToSQL_ExpressionParserCallback(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		return "CUSTOM_STRING()", nil
 	})
@@ -750,7 +750,7 @@ func TestStringOperator_valueToSQL_ExpressionParserCallback(t *testing.T) {
 }
 
 func TestStringOperator_convertStartIndex_ComplexExpression(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	result, err := op.ToSQL("substr", []interface{}{
 		map[string]interface{}{"var": "name"},
@@ -885,7 +885,7 @@ func TestStringOperator_validateStringOperand(t *testing.T) {
 }
 
 func TestStringOperator_extractFieldName(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -930,7 +930,7 @@ func TestStringOperator_extractFieldName(t *testing.T) {
 }
 
 func TestStringOperator_processComparisonExpression(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -1080,7 +1080,7 @@ func TestStringOperator_processComparisonExpression(t *testing.T) {
 
 func TestStringOperator_ToSQLParam(t *testing.T) {
 	t.Run("cat with strings", func(t *testing.T) {
-		op := NewStringOperator(nil)
+		op := NewStringOperator(testFieldOnlyConfig())
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		sql, err := op.ToSQLParam("cat", []interface{}{"hello", " ", "world"}, pc)
 		if err != nil {
@@ -1101,7 +1101,7 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 	})
 
 	t.Run("cat with var and string", func(t *testing.T) {
-		config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 		config.SetParamExpressionParser(func(expr any, path string, pc *params.ParamCollector) (string, error) {
 			if m, ok := expr.(map[string]interface{}); ok {
 				if v, ok := m["var"]; ok {
@@ -1130,7 +1130,7 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 	})
 
 	t.Run("cat with null", func(t *testing.T) {
-		op := NewStringOperator(nil)
+		op := NewStringOperator(testFieldOnlyConfig())
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		sql, err := op.ToSQLParam("cat", []interface{}{nil, "world"}, pc)
 		if err != nil {
@@ -1147,7 +1147,7 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 	})
 
 	t.Run("cat preserves comparison if branches in parameterized mode", func(t *testing.T) {
-		op := NewStringOperator(nil)
+		op := NewStringOperator(testFieldOnlyConfig())
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		sql, err := op.ToSQLParam("cat", []interface{}{
 			map[string]interface{}{
@@ -1184,7 +1184,7 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 	})
 
 	t.Run("cat stringifies explicit if else branch in parameterized mode", func(t *testing.T) {
-		op := NewStringOperator(nil)
+		op := NewStringOperator(testFieldOnlyConfig())
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		sql, err := op.ToSQLParam("cat", []interface{}{
 			map[string]interface{}{
@@ -1212,7 +1212,7 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 	})
 
 	t.Run("substr with string and indices", func(t *testing.T) {
-		config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+		config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 		op := NewStringOperator(config)
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		sql, err := op.ToSQLParam("substr", []interface{}{"hello", float64(0), float64(3)}, pc)
@@ -1234,7 +1234,7 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 	})
 
 	t.Run("unsupported string operator", func(t *testing.T) {
-		op := NewStringOperator(nil)
+		op := NewStringOperator(testFieldOnlyConfig())
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		_, err := op.ToSQLParam("unsupported", []interface{}{"x"}, pc)
 		if err == nil {
@@ -1244,7 +1244,7 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 }
 
 func TestStringOperator_valueToSQLParam(t *testing.T) {
-	op := NewStringOperator(nil)
+	op := NewStringOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name       string
@@ -1354,7 +1354,7 @@ func TestStringOperator_ToSQLParam_Dialects(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.dialect.String(), func(t *testing.T) {
-			config := NewOperatorConfig(tt.dialect, nil)
+			config := NewOperatorConfig(tt.dialect, &fieldOnlySchemaProvider{})
 			op := NewStringOperator(config)
 			pc := params.NewParamCollector(params.PlaceholderNamed)
 			sql, err := op.ToSQLParam("substr", args, pc)

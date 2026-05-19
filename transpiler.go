@@ -40,16 +40,12 @@ type Transpiler struct {
 	customOperators *OperatorRegistry
 }
 
-func schemaProvider(schema *Schema) operators.SchemaProvider {
-	return schema
-}
-
 // SetSchema sets the required schema for field validation and type checking.
 func (t *Transpiler) SetSchema(schema *Schema) error {
 	if schema == nil {
 		return fmt.Errorf("schema is required")
 	}
-	t.operatorConfig.Schema = schemaProvider(schema)
+	t.operatorConfig.SetSchema(schema)
 	if t.config != nil {
 		t.config.Schema = schema
 	}
@@ -78,7 +74,7 @@ func NewTranspiler(d Dialect, schema *Schema) (*Transpiler, error) {
 		return nil, fmt.Errorf("schema is required")
 	}
 
-	opConfig := operators.NewOperatorConfig(d, schemaProvider(schema))
+	opConfig := operators.NewOperatorConfig(d, schema)
 	t := &Transpiler{
 		parser:         parser.NewParser(opConfig),
 		operatorConfig: opConfig,
@@ -105,7 +101,7 @@ func NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error) {
 		return nil, fmt.Errorf("schema is required")
 	}
 
-	opConfig := operators.NewOperatorConfig(config.Dialect, schemaProvider(config.Schema))
+	opConfig := operators.NewOperatorConfig(config.Dialect, config.Schema)
 	opConfig.NullSafeFieldEquality = config.NullSafeFieldEquality
 	t := &Transpiler{
 		parser:          parser.NewParser(opConfig),

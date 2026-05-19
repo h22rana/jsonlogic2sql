@@ -8,7 +8,7 @@ import (
 )
 
 func TestNumericOperator_ToSQL(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -296,7 +296,7 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 }
 
 func TestNumericOperator_valueToSQL(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -498,10 +498,10 @@ func TestNumericOperator_validateNumericOperand(t *testing.T) {
 		})
 	}
 
-	// Test with absent schema provider - should always pass
-	opSchemaRequired := NewNumericOperator(nil)
-	if err := opSchemaRequired.validateNumericOperand(map[string]interface{}{"var": "name"}); err != nil {
-		t.Errorf("validateNumericOperand() with absent schema provider should pass, got %v", err)
+	// A field-only schema has no numeric metadata, so validation is a no-op.
+	opFieldOnly := NewNumericOperator(testFieldOnlyConfig())
+	if err := opFieldOnly.validateNumericOperand(map[string]interface{}{"var": "name"}); err != nil {
+		t.Errorf("validateNumericOperand() with field-only schema should pass, got %v", err)
 	}
 }
 
@@ -539,7 +539,7 @@ func TestNumericOperator_ToSQL_WithSchemaValidation(t *testing.T) {
 }
 
 func TestNumericOperator_valueToSQL_ProcessedValue(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -695,7 +695,7 @@ func TestNumericOperator_valueToSQL_ProcessedValue(t *testing.T) {
 }
 
 func TestNumericOperator_generateComplexSQL(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -838,7 +838,7 @@ func TestNumericOperator_generateComplexSQL(t *testing.T) {
 }
 
 func TestNumericOperator_valueToSQL_NestedComparison(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	// processComplexArgsForComparison now wraps results in SQLResult,
 	// so the comparison operator sees them as pre-processed SQL:
@@ -856,7 +856,7 @@ func TestNumericOperator_valueToSQL_NestedComparison(t *testing.T) {
 }
 
 func TestNumericOperator_valueToSQL_NestedIf(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	// Test nested if expression
 	input := map[string]interface{}{
@@ -877,7 +877,7 @@ func TestNumericOperator_valueToSQL_NestedIf(t *testing.T) {
 }
 
 func TestNumericOperator_valueToSQL_NestedLogical(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -939,7 +939,7 @@ func TestNumericOperator_valueToSQL_NestedLogical(t *testing.T) {
 }
 
 func TestNumericOperator_valueToSQL_ExpressionParserCallback(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		return "CUSTOM_NUMERIC()", nil
 	})
@@ -956,7 +956,7 @@ func TestNumericOperator_valueToSQL_ExpressionParserCallback(t *testing.T) {
 }
 
 func TestNumericOperator_processComplexArgsForComparison(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	t.Run("var and primitive pass through", func(t *testing.T) {
 		args := []interface{}{
@@ -1036,7 +1036,7 @@ func TestNumericOperator_processComplexArgsForComparison(t *testing.T) {
 }
 
 func TestNumericOperator_extractFieldName(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -1081,7 +1081,7 @@ func TestNumericOperator_extractFieldName(t *testing.T) {
 }
 
 func TestNumericOperator_extractFieldNameFromValue(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -1159,7 +1159,7 @@ func toFloat64ForCompare(v interface{}) (float64, bool) {
 }
 
 func TestNumericOperator_ToSQLParam(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name       string
@@ -1363,7 +1363,7 @@ func TestNumericOperator_ToSQLParam(t *testing.T) {
 }
 
 func TestNumericOperator_valueToSQLParam(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name       string
@@ -1533,7 +1533,7 @@ func TestNumericOperator_ToSQLParam_WithSchemaValidation(t *testing.T) {
 }
 
 func TestNumericOperator_valueToSQLParam_ExpressionParserCallback(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 	config.SetParamExpressionParser(func(expr any, path string, pc *params.ParamCollector) (string, error) {
 		if pc == nil {
 			t.Error("ParamCollector should be non-nil")
@@ -1556,7 +1556,7 @@ func TestNumericOperator_valueToSQLParam_ExpressionParserCallback(t *testing.T) 
 }
 
 func TestNumericOperator_processComplexArgsParam(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	pc := params.NewParamCollector(params.PlaceholderNamed)
 	out, err := op.processComplexArgsParam([]interface{}{
@@ -1575,7 +1575,7 @@ func TestNumericOperator_processComplexArgsParam(t *testing.T) {
 }
 
 func TestNumericOperator_processComplexArgsForComparisonParam(t *testing.T) {
-	op := NewNumericOperator(nil)
+	op := NewNumericOperator(testFieldOnlyConfig())
 
 	t.Run("var and primitive pass through", func(t *testing.T) {
 		pc := params.NewParamCollector(params.PlaceholderNamed)

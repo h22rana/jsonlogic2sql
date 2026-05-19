@@ -39,20 +39,17 @@ type jsNumberLiteral struct {
 	integral bool
 }
 
-// NewComparisonOperator creates a new comparison operator with optional config.
+// NewComparisonOperator creates a new comparison operator.
 func NewComparisonOperator(config *OperatorConfig) *ComparisonOperator {
+	config = normalizeOperatorConfig(config)
 	return &ComparisonOperator{
 		config: config,
 		dataOp: NewDataOperator(config), // Same config, no propagation needed
 	}
 }
 
-// schema returns the schema from config, or nil if not configured.
 func (c *ComparisonOperator) schema() SchemaProvider {
-	if c.config == nil {
-		return nil
-	}
-	return c.config.Schema
+	return schemaFromConfig(c.config)
 }
 
 // arrayMembershipSQL generates dialect-specific SQL for checking if a value exists in an array column.
@@ -106,10 +103,6 @@ func (c *ComparisonOperator) strposFunc(haystack, needle string) string {
 // Only numeric and string types support ordering comparisons (>, >=, <, <=)
 // Rejects array, object, and boolean types.
 func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator string) error {
-	if c.schema() == nil {
-		return nil // Absent schema provider, no validation
-	}
-
 	fieldName := c.extractFieldNameFromValue(value)
 	if fieldName == "" {
 		return nil // Can't determine field name, skip validation
@@ -148,7 +141,7 @@ func (c *ComparisonOperator) isKnownArrayOperand(value interface{}) bool {
 		return true
 	}
 	fieldName := c.extractFieldNameFromValue(value)
-	return fieldName != "" && c.schema() != nil && c.schema().IsArrayType(fieldName)
+	return fieldName != "" && c.schema().IsArrayType(fieldName)
 }
 
 // extractFieldName extracts the field name from a var argument.
@@ -1023,7 +1016,7 @@ func normalizeExponentString(s string) string {
 }
 
 func (c *ComparisonOperator) fieldEqualityKind(fieldName string) string {
-	if c.schema() == nil || fieldName == "" {
+	if fieldName == "" {
 		return ""
 	}
 	switch {
@@ -1047,7 +1040,7 @@ func (c *ComparisonOperator) setLiteralForFieldSide(dec *equalityDecision, field
 }
 
 func (c *ComparisonOperator) validateEqualityFieldOperand(field equalityFieldOperand) error {
-	if c.schema() == nil || field.fieldName == "" {
+	if field.fieldName == "" {
 		return nil
 	}
 	if err := c.schema().ValidateField(field.fieldName); err != nil {
@@ -1462,7 +1455,7 @@ func (c *ComparisonOperator) applySchemaComparisonCoercion(leftArg, rightArg int
 // This ensures proper SQL comparisons like "field >= 50000" instead of "field >= '50000'"
 // and "string_field IN ('5960', '9000')" instead of "string_field IN (5960, 9000)".
 func (c *ComparisonOperator) coerceValueForComparison(value interface{}, fieldName string) interface{} {
-	if c.schema() == nil || fieldName == "" {
+	if fieldName == "" {
 		return value
 	}
 
@@ -1524,7 +1517,7 @@ func (c *ComparisonOperator) coerceValueForComparison(value interface{}, fieldNa
 // validateEnumValue validates that a value is valid for an enum field.
 // Returns nil if valid or if not an enum field.
 func (c *ComparisonOperator) validateEnumValue(value interface{}, fieldName string) error {
-	if c.schema() == nil || fieldName == "" {
+	if fieldName == "" {
 		return nil
 	}
 
@@ -1964,7 +1957,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 			}
 
 			// Use schema to determine type if available
-			if c.schema() != nil && fieldName != "" {
+			if fieldName != "" {
 				if c.schema().IsArrayType(fieldName) {
 					// Array type: use dialect-specific array membership syntax
 					return c.arrayMembershipSQL(leftSQL, rightSQL), nil
@@ -1981,7 +1974,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 				}
 			}
 
-			// Absent schema provider or unknown type: use heuristic based on left operand type.
+			// Unknown type: use heuristic based on left operand type.
 			// Known string-producing expressions (cat/substr) and string literals
 			// use containment; otherwise fall back to array membership.
 			if c.isStringLikeInOperandSchemaRequired(leftOriginal, nil, 0) || isSQLStringLiteral(leftSQL) {
@@ -2015,7 +2008,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 		}
 
 		// Validate enum values if left side is an enum field
-		if leftFieldName != "" && c.schema() != nil && c.schema().IsEnumType(leftFieldName) {
+		if leftFieldName != "" && c.schema().IsEnumType(leftFieldName) {
 			for _, item := range arr {
 				if err := c.validateEnumValue(item, leftFieldName); err != nil {
 					return "", err
@@ -2024,7 +2017,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 		}
 
 		// Apply type coercion based on schema for array elements
-		if leftFieldName != "" && c.schema() != nil {
+		if leftFieldName != "" {
 			coerced := make([]interface{}, len(arr))
 			copy(coerced, arr)
 			arr = coerced
@@ -2088,7 +2081,7 @@ func (c *ComparisonOperator) handleInStringifiableLiteralNeedle(
 				return "", true, fmt.Errorf("invalid variable in IN operator: %w", err)
 			}
 			fieldName := c.extractFieldName(varName)
-			if c.schema() != nil && fieldName != "" {
+			if fieldName != "" {
 				if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 					sql, err := c.stringContainmentSQL(rightSQL, leftArg, needleSQL)
 					return sql, true, err
@@ -2126,7 +2119,7 @@ func (c *ComparisonOperator) handleInStringifiableLiteralNeedleSQLRight(
 	rightType ExpressionType,
 	hasRightType bool,
 ) (string, bool, error) {
-	if c.schema() != nil && fieldName != "" {
+	if fieldName != "" {
 		if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 			sql, err := c.stringContainmentSQL(rightSQL, leftArg, needleSQL)
 			return sql, true, err
@@ -2156,7 +2149,7 @@ func (c *ComparisonOperator) handleInSQLRight(
 	rightType ExpressionType,
 	hasRightType bool,
 ) (string, error) {
-	if c.schema() != nil && fieldName != "" {
+	if fieldName != "" {
 		if c.schema().IsArrayType(fieldName) {
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 		}
@@ -2595,7 +2588,7 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 				}
 			}
 
-			if c.schema() != nil && fieldName != "" {
+			if fieldName != "" {
 				if c.schema().IsArrayType(fieldName) {
 					leftSQL, lErr := c.valueToSQLParam(leftOriginal, pc)
 					if lErr != nil {
@@ -2613,8 +2606,8 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 				}
 			}
 
-			// Absent schema provider: infer from left operand shape/type in a heuristic way.
-			// This improves string-containment detection for nested string
+			// Infer from left operand shape/type in a heuristic way. This
+			// improves string-containment detection for nested string
 			// expressions (cat/substr) while still falling back safely.
 			isLeftString := c.isStringLikeInOperandSchemaRequired(leftOriginal, pc, 0)
 
@@ -2696,7 +2689,7 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 	}
 
 	if arr, ok := rightValue.([]interface{}); ok {
-		if leftFieldName != "" && c.schema() != nil && c.schema().IsEnumType(leftFieldName) {
+		if leftFieldName != "" && c.schema().IsEnumType(leftFieldName) {
 			for _, item := range arr {
 				if err := c.validateEnumValue(item, leftFieldName); err != nil {
 					return "", err
@@ -2704,7 +2697,7 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 			}
 		}
 
-		if leftFieldName != "" && c.schema() != nil {
+		if leftFieldName != "" {
 			coerced := make([]interface{}, len(arr))
 			copy(coerced, arr)
 			arr = coerced
@@ -2736,7 +2729,7 @@ func (c *ComparisonOperator) handleInSQLRightParam(
 	hasRightType bool,
 	pc *params.ParamCollector,
 ) (string, error) {
-	if c.schema() != nil && fieldName != "" {
+	if fieldName != "" {
 		if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 			sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
 			if err != nil {
@@ -2787,7 +2780,7 @@ func (c *ComparisonOperator) handleInSQLRightParamWithLeftSQL(
 	hasRightType bool,
 	pc *params.ParamCollector,
 ) (string, error) {
-	if c.schema() != nil && fieldName != "" && c.schema().IsArrayType(fieldName) {
+	if fieldName != "" && c.schema().IsArrayType(fieldName) {
 		return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 	}
 
