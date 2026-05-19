@@ -625,6 +625,117 @@ func TestTranspile_ArrayScopeUnknownFieldsRejectedWithSchema_AllDialects(t *test
 	}
 }
 
+func TestTranspile_ArrayElementFieldsAreScopedOnly_AllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{
+			Name: "accounts",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "status", Type: FieldTypeString},
+				{Name: "elem", Type: FieldTypeObject, Fields: []FieldSchema{
+					{Name: "x", Type: FieldTypeString},
+				}},
+				{Name: "elem2", Type: FieldTypeObject, Fields: []FieldSchema{
+					{Name: "x", Type: FieldTypeString},
+				}},
+				{Name: "elem10", Type: FieldTypeObject, Fields: []FieldSchema{
+					{Name: "score", Type: FieldTypeNumber},
+				}},
+			},
+		},
+	})
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: schema})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+
+			for _, logic := range []string{
+				`{"==":[{"var":"accounts.status"},"active"]}`,
+				`{"==":[{"var":"accounts.elem2.x"},"active"]}`,
+			} {
+				if _, err := tr.TranspileCondition(logic); err == nil {
+					t.Fatalf("TranspileCondition(%s) should reject root access to array element field", logic)
+				}
+				if _, _, err := tr.TranspileParameterizedCondition(logic); err == nil {
+					t.Fatalf("TranspileParameterizedCondition(%s) should reject root access to array element field", logic)
+				}
+			}
+
+			for _, tc := range []struct {
+				name  string
+				logic string
+				want  string
+			}{
+				{
+					name:  "map base elem-prefixed field",
+					logic: `{"map":[{"var":"accounts"},{"var":"elem.x"}]}`,
+					want:  "elem.elem.x",
+				},
+				{
+					name:  "map numbered elem-prefixed field",
+					logic: `{"map":[{"var":"accounts"},{"var":"elem2.x"}]}`,
+					want:  "elem.elem2.x",
+				},
+				{
+					name:  "some numbered elem-prefixed field",
+					logic: `{"some":[{"var":"accounts"},{"==":[{"var":"elem2.x"},"active"]}]}`,
+					want:  "elem.elem2.x",
+				},
+				{
+					name:  "reduce current numbered elem-prefixed field",
+					logic: `{"reduce":[{"var":"accounts"},{"cat":[{"var":"accumulator"},{"var":"current.elem2.x"}]},""]}`,
+					want:  "elem.elem2.x",
+				},
+				{
+					name:  "map multi-digit elem-prefixed field",
+					logic: `{"map":[{"var":"accounts"},{"var":"elem10.score"}]}`,
+					want:  "elem.elem10.score",
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					assertArrayElementScopedSQLContains(t, tr, tc.logic, tc.want)
+				})
+			}
+			assertArrayScopeAliasRejected(t, tr, `{"map":[{"var":"accounts"},{"var":"elem.type"}]}`, true)
+		})
+	}
+}
+
+func assertArrayElementScopedSQLContains(t *testing.T, tr *Transpiler, logic, want string) {
+	t.Helper()
+
+	inlineSQL, inlineErr := tr.TranspileValue(logic)
+	if inlineErr != nil {
+		inlineSQL, inlineErr = tr.TranspileCondition(logic)
+	}
+	if inlineErr != nil {
+		t.Fatalf("inline transpilation error = %v", inlineErr)
+	}
+	if !strings.Contains(inlineSQL, want) {
+		t.Fatalf("inline SQL = %q, want to contain %q", inlineSQL, want)
+	}
+
+	paramSQL, _, paramErr := tr.TranspileParameterizedValue(logic)
+	if paramErr != nil {
+		paramSQL, _, paramErr = tr.TranspileParameterizedCondition(logic)
+	}
+	if paramErr != nil {
+		t.Fatalf("parameterized transpilation error = %v", paramErr)
+	}
+	if !strings.Contains(paramSQL, want) {
+		t.Fatalf("parameterized SQL = %q, want to contain %q", paramSQL, want)
+	}
+}
+
 func assertUnknownScopedFieldRejected(t *testing.T, tr *Transpiler, logic string, valueRoot bool) {
 	t.Helper()
 

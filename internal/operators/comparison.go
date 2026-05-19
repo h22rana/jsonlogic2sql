@@ -31,6 +31,7 @@ type equalityFieldOperand struct {
 	hasDefault          bool
 	defaultLiteral      interface{}
 	defaultLiteralKnown bool
+	processed           bool
 }
 
 type jsNumberLiteral struct {
@@ -204,7 +205,7 @@ func (c *ComparisonOperator) extractEqualityFieldOperand(value interface{}) (equ
 }
 
 func equalityFieldOperandFromProcessedValue(pv ProcessedValue) equalityFieldOperand {
-	operand := equalityFieldOperand{fieldName: pv.FieldName}
+	operand := equalityFieldOperand{fieldName: pv.FieldName, processed: true}
 	if pv.FieldHasDefault {
 		operand.hasDefault = true
 		if pv.FieldDefaultLiteralKnown {
@@ -1039,8 +1040,12 @@ func (c *ComparisonOperator) validateEqualityFieldOperand(field equalityFieldOpe
 	if field.fieldName == "" {
 		return nil
 	}
-	if err := c.schema().ValidateField(field.fieldName); err != nil {
-		return err
+	if !field.processed {
+		if err := c.schema().ValidateField(field.fieldName); err != nil {
+			return err
+		}
+	} else if !c.schema().HasField(field.fieldName) {
+		return fmt.Errorf("field '%s' is not defined in schema", field.fieldName)
 	}
 	if !field.hasDefault || !field.defaultLiteralKnown {
 		return nil

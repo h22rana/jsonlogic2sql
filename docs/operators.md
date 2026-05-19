@@ -404,7 +404,7 @@ ARRAY(SELECT elem.type FROM UNNEST(records) AS elem)
 
 Use `{"var": ""}` for the current element itself, and array-form vars for defaults, for example `{"var":["type","unknown"]}` -> `COALESCE(elem.type, 'unknown')`.
 
-The implementation-specific dotted aliases `.type`, `item.type`, `current.type`, and `elem.type` are not supported in these lambdas. In `reduce`, use official JSONLogic names: `{"var":"current"}`, `{"var":"current.type"}`, and `{"var":"accumulator"}`. The whole reduce scope (`{"var":""}`) is an object in JSONLogic and is not emitted as a scalar SQL expression.
+The implementation-specific dotted aliases `.type`, `item.type`, `current.type`, and generated SQL aliases such as `elem.type` are not supported in these lambdas. If the element schema really defines a nested field with that name, for example an `elem` object with a `type` field, `{"var":"elem.type"}` is treated as normal JSONLogic data access and emitted under the current SQL element alias. In `reduce`, use official JSONLogic names: `{"var":"current"}`, `{"var":"current.type"}`, and `{"var":"accumulator"}`. The whole reduce scope (`{"var":""}`) is an object in JSONLogic and is not emitted as a scalar SQL expression.
 
 For nested array operators, the transpiler keeps inner and outer generated SQL aliases distinct (for example `elem`, `elem1`) when needed.
 

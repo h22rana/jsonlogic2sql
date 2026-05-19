@@ -122,6 +122,16 @@ func TestNestedSchemaObjectAndArrayEnumValidation(t *testing.T) {
 			t.Fatalf("schema should expose flattened field %q", fieldName)
 		}
 	}
+	for _, fieldName := range []string{"profile.country", "profile.status", "payments"} {
+		if err := schema.ValidateField(fieldName); err != nil {
+			t.Fatalf("ValidateField(%q) error = %v", fieldName, err)
+		}
+	}
+	for _, fieldName := range []string{"payments.type", "payments.amount", "payments.details.issuer"} {
+		if err := schema.ValidateField(fieldName); err == nil {
+			t.Fatalf("ValidateField(%q) should reject array element fields outside array scope", fieldName)
+		}
+	}
 	if !schema.IsEnumType("profile.status") || !schema.IsEnumType("payments.type") {
 		t.Fatal("nested enum fields should keep enum metadata")
 	}

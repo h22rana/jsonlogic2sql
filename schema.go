@@ -36,7 +36,8 @@ type FieldSchema struct {
 
 // Schema represents the collection of field schemas.
 type Schema struct {
-	fields map[string]FieldSchema // Map field name to schema for O(1) lookup
+	fields     map[string]FieldSchema // All schema paths, including array element fields, for O(1) lookup.
+	rootFields map[string]struct{}    // Paths that can be referenced directly from the root SQL row.
 }
 
 // NewSchema validates field definitions and creates a new schema.
@@ -47,25 +48,29 @@ func NewSchema(fields []FieldSchema) (*Schema, error) {
 		return nil, err
 	}
 	s := &Schema{
-		fields: make(map[string]FieldSchema),
+		fields:     make(map[string]FieldSchema),
+		rootFields: make(map[string]struct{}),
 	}
 	for _, field := range fields {
-		s.addField("", field)
+		s.addField("", field, true)
 	}
 	return s, nil
 }
 
-func (s *Schema) addField(prefix string, field FieldSchema) {
+func (s *Schema) addField(prefix string, field FieldSchema, rootAccessible bool) {
 	fieldName := joinSchemaPath(prefix, field.Name)
 	stored := field
 	stored.Name = fieldName
 	s.fields[fieldName] = stored
+	if rootAccessible {
+		s.rootFields[fieldName] = struct{}{}
+	}
 
 	for _, child := range field.Fields {
-		s.addField(fieldName, child)
+		s.addField(fieldName, child, rootAccessible)
 	}
 	for _, child := range field.ElementFields {
-		s.addField(fieldName, child)
+		s.addField(fieldName, child, false)
 	}
 }
 
@@ -223,7 +228,7 @@ func (s *Schema) ValidateField(fieldName string) error {
 	if s == nil {
 		return fmt.Errorf("schema is required")
 	}
-	if !s.HasField(fieldName) {
+	if _, exists := s.rootFields[fieldName]; !exists {
 		return fmt.Errorf("field '%s' is not defined in schema", fieldName)
 	}
 	return nil

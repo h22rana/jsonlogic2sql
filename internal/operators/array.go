@@ -327,6 +327,23 @@ func (a *ArrayOperator) validateScopedFieldName(fieldName string) error {
 	return err
 }
 
+func (a *ArrayOperator) hasScopedField(fieldName string) bool {
+	if fieldName == "" {
+		return true
+	}
+	scopes := a.currentSchemaScopes()
+	if len(scopes) == 0 {
+		return false
+	}
+	schema := a.schema()
+	for _, scope := range scopes {
+		if schema.HasField(scope + "." + fieldName) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *ArrayOperator) resolveScopedFieldNames(fieldName string) []string {
 	if fieldName != "" && len(a.currentSchemaScopes()) == 0 {
 		return nil
@@ -687,7 +704,7 @@ func (a *ArrayOperator) varExprReferencesCurrentScopeAlias(varExpr interface{}) 
 func (a *ArrayOperator) varNameReferencesCurrentScopeAlias(varName string) bool {
 	switch a.lambdaScope {
 	case arrayLambdaScopeElement:
-		return !isUnsupportedElementScopeVar(varName)
+		return !a.isUnsupportedElementScopeVar(varName)
 	case arrayLambdaScopeReduce:
 		if varName == CurrentVar {
 			return true
@@ -2203,7 +2220,7 @@ func (a *ArrayOperator) mapArrayScopeVar(varName string) (string, bool, error) {
 }
 
 func (a *ArrayOperator) mapElementScopeVar(varName string) (string, bool, error) {
-	if isUnsupportedElementScopeVar(varName) {
+	if a.isUnsupportedElementScopeVar(varName) {
 		return "", true, unsupportedArrayScopeVarError(varName)
 	}
 	if varName == "" {
@@ -2248,28 +2265,41 @@ func (a *ArrayOperator) mapReduceScopeVar(varName string) (string, bool, error) 
 	}
 }
 
-func isUnsupportedElementScopeVar(varName string) bool {
+func (a *ArrayOperator) isUnsupportedElementScopeVar(varName string) bool {
+	if isAlwaysUnsupportedElementScopeVar(varName) {
+		return true
+	}
+	return (isBaseElemAliasPath(varName) || isNumberedElemAliasPath(varName)) && !a.hasScopedField(varName)
+}
+
+func isAlwaysUnsupportedElementScopeVar(varName string) bool {
 	return strings.HasPrefix(varName, ".") ||
 		strings.HasPrefix(varName, ItemVar+".") ||
-		strings.HasPrefix(varName, CurrentVar+".") ||
-		isInternalElemAliasPath(varName)
+		strings.HasPrefix(varName, CurrentVar+".")
 }
 
 func isUnsupportedReduceScopeVar(varName string) bool {
 	return strings.HasPrefix(varName, ".") ||
 		strings.HasPrefix(varName, ItemVar+".") ||
-		isInternalElemAliasPath(varName)
+		isBaseElemAliasPath(varName) ||
+		isNumberedElemAliasPath(varName)
 }
 
-func isInternalElemAliasPath(varName string) bool {
+func isBaseElemAliasPath(varName string) bool {
+	return strings.HasPrefix(varName, ElemVar+".")
+}
+
+func isNumberedElemAliasPath(varName string) bool {
 	if !strings.HasPrefix(varName, ElemVar) {
 		return false
 	}
 	rest := varName[len(ElemVar):]
+	hasDigit := false
 	for len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9' {
+		hasDigit = true
 		rest = rest[1:]
 	}
-	return strings.HasPrefix(rest, ".")
+	return hasDigit && strings.HasPrefix(rest, ".")
 }
 
 func unsupportedArrayScopeVarError(varName string) error {
@@ -2319,7 +2349,7 @@ func (a *ArrayOperator) scopedFieldNameForVar(varName string) string {
 func (a *ArrayOperator) scopedFieldNamesForVar(varName string) []string {
 	switch a.lambdaScope {
 	case arrayLambdaScopeElement:
-		if varName == "" || isUnsupportedElementScopeVar(varName) {
+		if varName == "" || a.isUnsupportedElementScopeVar(varName) {
 			return nil
 		}
 		return a.resolveScopedFieldNames(varName)
