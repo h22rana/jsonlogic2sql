@@ -3187,7 +3187,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
-		want := "STRPOS(@p1, CAST(amount AS STRING)) > 0"
+		want := "STRPOS(@p1, COALESCE(CAST(amount AS STRING), 'null')) > 0"
 		if got != want {
 			t.Errorf("handleInParam() = %q, want %q", got, want)
 		}
@@ -3200,7 +3200,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
-		want := "STRPOS(@p1, CASE WHEN flag IS TRUE THEN 'true' ELSE 'false' END) > 0"
+		want := "STRPOS(@p1, CASE WHEN flag IS TRUE THEN 'true' WHEN flag IS FALSE THEN 'false' ELSE 'null' END) > 0"
 		if got != want {
 			t.Errorf("handleInParam() = %q, want %q", got, want)
 		}

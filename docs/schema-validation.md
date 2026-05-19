@@ -165,7 +165,7 @@ When a schema is provided, operators perform strict type validation:
 | Operator Category | Allowed Types | Rejected Types |
 |------------------|---------------|----------------|
 | Numeric (`+`, `-`, `*`, `/`, `%`, `max`, `min`) | integer, number | string, array, object, boolean |
-| String (`cat`, `substr`) | string, integer, number | array, object |
+| String (`cat`, `substr`) | `cat`: string, integer, number, boolean; `substr`: string, integer, number | array, object |
 | Array (`all`, `some`, `none`, `map`, `filter`, `reduce`, `merge`) | array | all non-array types |
 | Comparison (`>`, `>=`, `<`, `<=`) | integer, number, string | array, object, boolean |
 | Equality (`==`, `!=`, `===`, `!==`) | any | unsupported loose string/enum-string vs boolean literal |

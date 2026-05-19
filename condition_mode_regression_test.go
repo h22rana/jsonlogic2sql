@@ -1504,8 +1504,11 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 			return fmt.Sprintf("CAST(%s AS STRING)", expr)
 		}
 	}
+	jsonStringCastSQL := func(d Dialect, expr string) string {
+		return fmt.Sprintf("COALESCE(%s, 'null')", stringCastSQL(d, expr))
+	}
 	boolStringSQL := func(expr string) string {
-		return fmt.Sprintf("CASE WHEN %s IS TRUE THEN 'true' ELSE 'false' END", expr)
+		return fmt.Sprintf("CASE WHEN %s IS TRUE THEN 'true' WHEN %s IS FALSE THEN 'false' ELSE 'null' END", expr, expr)
 	}
 
 	tests := []struct {
@@ -1519,10 +1522,10 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 			name:  "schema numeric field needle casts for string containment",
 			logic: `{"in":[{"var":"amount"},"12345"]}`,
 			wantSQL: func(d Dialect) string {
-				return stringContainmentSQL(d, "'12345'", stringCastSQL(d, "amount"))
+				return stringContainmentSQL(d, "'12345'", jsonStringCastSQL(d, "amount"))
 			},
 			wantParam: func(d Dialect) string {
-				return stringContainmentSQL(d, testPlaceholder(d, 1), stringCastSQL(d, "amount"))
+				return stringContainmentSQL(d, testPlaceholder(d, 1), jsonStringCastSQL(d, "amount"))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "12345"}},
 		},
@@ -1536,6 +1539,17 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 				return stringContainmentSQL(d, testPlaceholder(d, 1), boolStringSQL("flag"))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "true"}},
+		},
+		{
+			name:  "schema string field needle preserves null string coercion",
+			logic: `{"in":[{"var":"name"},"null"]}`,
+			wantSQL: func(d Dialect) string {
+				return stringContainmentSQL(d, "'null'", "COALESCE(name, 'null')")
+			},
+			wantParam: func(d Dialect) string {
+				return stringContainmentSQL(d, testPlaceholder(d, 1), "COALESCE(name, 'null')")
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "null"}},
 		},
 		{
 			name:  "literal number needle stringifies for typed string expression",

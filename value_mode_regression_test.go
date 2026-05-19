@@ -2538,7 +2538,7 @@ func TestTranspileValue_IfConditionsUseTruthiness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileValue() nested boolean if error = %v", err)
 	}
-	want = "CONCAT(CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) THEN 'true' ELSE 'false' END)"
+	want = "CONCAT(CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) IS TRUE THEN 'true' WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) IS FALSE THEN 'false' ELSE '' END)"
 	if got != want {
 		t.Fatalf("TranspileValue() nested boolean if = %q, want %q", got, want)
 	}
@@ -3351,13 +3351,13 @@ func TestTranspileCatNullSafeBehaviorAcrossModesAllDialects(t *testing.T) {
 			logic: `{"cat":[{"var":"flag"}]}`,
 			want: func(d Dialect, schemaAware bool) string {
 				if schemaAware {
-					return "CONCAT(CASE WHEN flag THEN 'true' ELSE 'false' END)"
+					return "CONCAT(CASE WHEN flag IS TRUE THEN 'true' WHEN flag IS FALSE THEN 'false' ELSE '' END)"
 				}
 				return fmt.Sprintf("CONCAT(COALESCE(%s, ''))", testStringCastSQL(d, "flag"))
 			},
 			wantParam: func(d Dialect, schemaAware bool) string {
 				if schemaAware {
-					return "CONCAT(CASE WHEN flag THEN 'true' ELSE 'false' END)"
+					return "CONCAT(CASE WHEN flag IS TRUE THEN 'true' WHEN flag IS FALSE THEN 'false' ELSE '' END)"
 				}
 				return fmt.Sprintf("CONCAT(COALESCE(%s, ''))", testStringCastSQL(d, "flag"))
 			},
@@ -4320,7 +4320,7 @@ func TestTranspileValue_CatStringifiesLowercaseCaseBooleanValue(t *testing.T) {
 				t.Fatalf("RegisterOperatorFunc() error = %v", err)
 			}
 
-			want := "CONCAT(CASE WHEN (case when flag then true else false end) THEN 'true' ELSE 'false' END)"
+			want := "CONCAT(CASE WHEN (case when flag then true else false end) IS TRUE THEN 'true' WHEN (case when flag then true else false end) IS FALSE THEN 'false' ELSE '' END)"
 			got, err := tr.TranspileValue(logic)
 			if err != nil {
 				t.Fatalf("TranspileValue() error = %v", err)
@@ -4586,7 +4586,7 @@ func TestTranspileParameterizedValue_TruthinessDoesNotLeakSkippedParams(t *testi
 		{
 			name:       "nested boolean if in cat stringifies without params",
 			logic:      `{"cat":[{"if":[{"var":"flag"},true,false]}]}`,
-			wantSQL:    "CONCAT(CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) THEN 'true' ELSE 'false' END)",
+			wantSQL:    "CONCAT(CASE WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) IS TRUE THEN 'true' WHEN (CASE WHEN flag IS TRUE THEN TRUE ELSE FALSE END) IS FALSE THEN 'false' ELSE '' END)",
 			wantParams: nil,
 		},
 	}

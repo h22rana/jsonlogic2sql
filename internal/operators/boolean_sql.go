@@ -62,9 +62,21 @@ func BooleanValueNumberSQL(sql string) string {
 	return fmt.Sprintf("(CASE WHEN %s IS TRUE THEN %s ELSE %s END)", expr, predicateNumberTrue, predicateNumberFalse)
 }
 
-// BooleanValueStringSQL converts a boolean SQL value into a JSONLogic-style
-// string value. IS TRUE keeps NULL aligned with JavaScript's falsy coercion.
+// BooleanValueStringSQL converts a boolean SQL value into JavaScript-style
+// string coercion for JSONLogic string containment. SQL NULL represents
+// JSONLogic null/missing and stringifies to "null" in this context.
 func BooleanValueStringSQL(sql string) string {
+	return booleanValueStringSQL(sql, "'null'")
+}
+
+// BooleanCatStringSQL converts a boolean SQL value into JSONLogic cat's
+// join-style stringification. null/missing becomes empty, while false remains
+// "false".
+func BooleanCatStringSQL(sql string) string {
+	return booleanValueStringSQL(sql, "''")
+}
+
+func booleanValueStringSQL(sql, nullSQL string) string {
 	if value, ok := sqlBooleanConstant(sql); ok {
 		if value {
 			return "'true'"
@@ -75,7 +87,7 @@ func BooleanValueStringSQL(sql string) string {
 	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(expr)), "CASE ") {
 		expr = fmt.Sprintf("(%s)", expr)
 	}
-	return fmt.Sprintf("CASE WHEN %s IS TRUE THEN 'true' ELSE 'false' END", expr)
+	return fmt.Sprintf("CASE WHEN %s IS TRUE THEN 'true' WHEN %s IS FALSE THEN 'false' ELSE %s END", expr, expr, nullSQL)
 }
 
 // PredicateStringSQL converts a SQL predicate into JSONLogic-style string
@@ -102,7 +114,7 @@ func ConcatStringSQL(config *OperatorConfig, sql string, kind ExpressionKind, ty
 		return PredicateStringSQL(sql)
 	}
 	if typ == ExpressionTypeBoolean {
-		return PredicateStringSQL(sql)
+		return BooleanCatStringSQL(sql)
 	}
 
 	expr := StripRedundantOuterParens(sql)
@@ -117,7 +129,7 @@ func ConcatStringSQL(config *OperatorConfig, sql string, kind ExpressionKind, ty
 	case ExpressionTypeNull:
 		return "''"
 	case ExpressionTypeBoolean:
-		return PredicateStringSQL(expr)
+		return BooleanCatStringSQL(expr)
 	case ExpressionTypeString:
 		return fmt.Sprintf("COALESCE(%s, '')", expr)
 	case ExpressionTypeNumber, ExpressionTypeUnknown:

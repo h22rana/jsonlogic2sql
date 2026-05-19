@@ -483,6 +483,11 @@ instead of generating dialect-specific invalid array SQL.
 POSITION('hello' IN 'hello world') > 0
 ```
 
+For string containment, non-string needles are coerced with JavaScript-style
+stringification before searching. For example, nullable field needles become
+`COALESCE(value, 'null')`, while boolean needles become `'true'`, `'false'`,
+or `'null'`.
+
 ### Concatenate Strings
 
 ```json

@@ -491,31 +491,31 @@ func TestTranspiler_InStringExpressionContainment_SchemaRequired(t *testing.T) {
 			name:      "bigquery",
 			dialect:   DialectBigQuery,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')) > 0",
+			wantSQL:   "STRPOS(profile.name, COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')) > 0",
 		},
 		{
 			name:      "spanner",
 			dialect:   DialectSpanner,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')) > 0",
+			wantSQL:   "STRPOS(profile.name, COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')) > 0",
 		},
 		{
 			name:      "postgresql",
 			dialect:   DialectPostgreSQL,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "POSITION(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x') IN profile.name) > 0",
+			wantSQL:   "POSITION(COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null') IN profile.name) > 0",
 		},
 		{
 			name:      "duckdb",
 			dialect:   DialectDuckDB,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')) > 0",
+			wantSQL:   "STRPOS(profile.name, COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')) > 0",
 		},
 		{
 			name:      "clickhouse",
 			dialect:   DialectClickHouse,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "position(profile.name, CONCAT(COALESCE(substring(profile.first, 1, 2), ''), '-x')) > 0",
+			wantSQL:   "position(profile.name, COALESCE(CONCAT(COALESCE(substring(profile.first, 1, 2), ''), '-x'), 'null')) > 0",
 		},
 	}
 

@@ -130,9 +130,9 @@ func (c *ComparisonOperator) stringContainmentNeedleSQLParamAuto(
 func (c *ComparisonOperator) stringContainmentNeedleSQLForField(fieldName, currentSQL string) (string, error) {
 	switch {
 	case c.schema().IsStringType(fieldName), c.schema().IsEnumType(fieldName):
-		return currentSQL, nil
+		return fmt.Sprintf("COALESCE(%s, 'null')", currentSQL), nil
 	case c.schema().IsNumericType(fieldName):
-		return c.config.StringCast(currentSQL), nil
+		return fmt.Sprintf("COALESCE(%s, 'null')", c.config.StringCast(currentSQL)), nil
 	case c.schema().IsBooleanType(fieldName):
 		return BooleanValueStringSQL(currentSQL), nil
 	case c.schema().IsArrayType(fieldName):
@@ -148,9 +148,9 @@ func (c *ComparisonOperator) stringContainmentNeedleSQLForType(
 ) (string, error) {
 	switch exprType {
 	case ExpressionTypeString:
-		return currentSQL, nil
+		return fmt.Sprintf("COALESCE(%s, 'null')", currentSQL), nil
 	case ExpressionTypeNumber:
-		return c.config.StringCast(currentSQL), nil
+		return fmt.Sprintf("COALESCE(%s, 'null')", c.config.StringCast(currentSQL)), nil
 	case ExpressionTypeBoolean:
 		return BooleanValueStringSQL(currentSQL), nil
 	case ExpressionTypeNull:

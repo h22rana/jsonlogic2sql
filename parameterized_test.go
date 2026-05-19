@@ -1156,7 +1156,7 @@ func TestTranspileParameterized_InStringExpressionContainment_SchemaRequired(t *
 			name:      "bigquery",
 			dialect:   DialectBigQuery,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
+			wantSQL:   "STRPOS(profile.name, COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, (@p1 + 1), @p2), ''), @p3), 'null')) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -1167,7 +1167,7 @@ func TestTranspileParameterized_InStringExpressionContainment_SchemaRequired(t *
 			name:      "spanner",
 			dialect:   DialectSpanner,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
+			wantSQL:   "STRPOS(profile.name, COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, (@p1 + 1), @p2), ''), @p3), 'null')) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -1178,7 +1178,7 @@ func TestTranspileParameterized_InStringExpressionContainment_SchemaRequired(t *
 			name:      "postgresql",
 			dialect:   DialectPostgreSQL,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "POSITION(CONCAT(COALESCE(SUBSTR(profile.first, ($1 + 1), $2), ''), $3) IN profile.name) > 0",
+			wantSQL:   "POSITION(COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, ($1 + 1), $2), ''), $3), 'null') IN profile.name) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -1189,7 +1189,7 @@ func TestTranspileParameterized_InStringExpressionContainment_SchemaRequired(t *
 			name:      "duckdb",
 			dialect:   DialectDuckDB,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, ($1 + 1), $2), ''), $3)) > 0",
+			wantSQL:   "STRPOS(profile.name, COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, ($1 + 1), $2), ''), $3), 'null')) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -1200,7 +1200,7 @@ func TestTranspileParameterized_InStringExpressionContainment_SchemaRequired(t *
 			name:      "clickhouse",
 			dialect:   DialectClickHouse,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "position(profile.name, CONCAT(COALESCE(substring(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
+			wantSQL:   "position(profile.name, COALESCE(CONCAT(COALESCE(substring(profile.first, (@p1 + 1), @p2), ''), @p3), 'null')) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -1287,7 +1287,7 @@ func TestTranspileParameterized_InCustomOperatorPlaceholder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
-	wantSQL := "STRPOS(col, @p1) > 0"
+	wantSQL := "STRPOS(col, COALESCE(@p1, 'null')) > 0"
 	if gotSQL != wantSQL {
 		t.Errorf("SQL = %q, want %q", gotSQL, wantSQL)
 	}
