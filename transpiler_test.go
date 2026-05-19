@@ -2374,19 +2374,20 @@ func TestTranspiler_SetSchema_NilRejected(t *testing.T) {
 		t.Fatalf("NewTranspiler() unexpected error: %v", err)
 	}
 
-	// With schema set, unusual names are allowed and validated by schema.
+	// With schema set, field names are validated by schema and remain in place
+	// if a later nil SetSchema call is rejected.
 	tr.SetSchema(mustNewSchema([]FieldSchema{
-		{Name: "bad field", Type: FieldTypeNumber},
+		{Name: "safe_field", Type: FieldTypeNumber},
 	}))
 
-	if _, err := tr.TranspileCondition(`{"==": [{"var": "bad field"}, 1]}`); err != nil {
+	if _, err := tr.TranspileCondition(`{"==": [{"var": "safe_field"}, 1]}`); err != nil {
 		t.Fatalf("TranspileCondition() with schema unexpected error: %v", err)
 	}
 
 	if err := tr.SetSchema(nil); err == nil || !strings.Contains(err.Error(), "schema is required") {
 		t.Fatalf("SetSchema(nil) error = %v, want schema required", err)
 	}
-	if _, err := tr.TranspileCondition(`{"==": [{"var": "bad field"}, 1]}`); err != nil {
+	if _, err := tr.TranspileCondition(`{"==": [{"var": "safe_field"}, 1]}`); err != nil {
 		t.Fatalf("schema should remain unchanged after SetSchema(nil), got error: %v", err)
 	}
 }

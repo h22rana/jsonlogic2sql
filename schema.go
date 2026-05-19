@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
@@ -39,8 +40,8 @@ type Schema struct {
 }
 
 // NewSchema validates field definitions and creates a new schema.
-// Schema field names must be raw, unquoted identifiers; the transpiler handles
-// quoting automatically.
+// Schema field names must be raw, unquoted identifier segments; the transpiler
+// handles numeric-leading segment quoting automatically.
 func NewSchema(fields []FieldSchema) (*Schema, error) {
 	if err := ValidateSchemaFields(fields); err != nil {
 		return nil, err
@@ -69,8 +70,9 @@ func (s *Schema) addField(prefix string, field FieldSchema) {
 }
 
 // ValidateSchemaFields validates schema field definitions without constructing
-// a Schema. Field names must be raw, unquoted identifiers; the transpiler
-// applies SQL identifier quoting automatically based on the target dialect.
+// a Schema. Field names must be raw, unquoted identifier segments; the
+// transpiler applies SQL identifier quoting automatically based on the target
+// dialect for numeric-leading segments.
 func ValidateSchemaFields(fields []FieldSchema) error {
 	seen := make(map[string]struct{})
 	for _, field := range fields {
@@ -105,6 +107,10 @@ func validateSchemaField(prefix string, field FieldSchema, seen map[string]struc
 				"schema field %q contains quote characters; "+
 					"use raw identifiers; the transpiler handles quoting automatically", fieldName)
 		}
+		if !isSafeSchemaIdentifierSegment(seg) {
+			return fmt.Errorf("schema field %q contains invalid identifier segment %q; "+
+				"each segment must contain only letters, digits, or underscores", fieldName, seg)
+		}
 	}
 	if _, exists := seen[fieldName]; exists {
 		return fmt.Errorf("schema field %q is defined more than once", fieldName)
@@ -138,6 +144,15 @@ func validateSchemaField(prefix string, field FieldSchema, seen map[string]struc
 		}
 	}
 	return nil
+}
+
+func isSafeSchemaIdentifierSegment(segment string) bool {
+	for _, r := range segment {
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateEnumAllowedValues(fieldName string, allowedValues []string) error {

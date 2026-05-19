@@ -796,10 +796,66 @@ func TestSchemaConstructors_RejectQuotedFieldNames(t *testing.T) {
 	}
 }
 
+func TestSchemaConstructors_RejectUnsafeIdentifierSegments(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields []FieldSchema
+	}{
+		{
+			name:   "semicolon in root field",
+			fields: []FieldSchema{{Name: "metrics.24h;DROP.count", Type: FieldTypeInteger}},
+		},
+		{
+			name: "sql comment in object child",
+			fields: []FieldSchema{
+				{
+					Name: "profile",
+					Type: FieldTypeObject,
+					Fields: []FieldSchema{
+						{Name: "name--", Type: FieldTypeString},
+					},
+				},
+			},
+		},
+		{
+			name: "block comment token in array element",
+			fields: []FieldSchema{
+				{
+					Name: "items",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Name: "amount/*", Type: FieldTypeNumber},
+					},
+				},
+			},
+		},
+		{
+			name:   "parenthesis in field",
+			fields: []FieldSchema{{Name: "name)OR(TRUE", Type: FieldTypeString}},
+		},
+		{
+			name:   "whitespace in field",
+			fields: []FieldSchema{{Name: "display name", Type: FieldTypeString}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateSchemaFields(tt.fields); err == nil {
+				t.Fatal("ValidateSchemaFields() expected unsafe identifier error, got nil")
+			}
+			if _, err := NewSchema(tt.fields); err == nil {
+				t.Fatal("NewSchema() expected unsafe identifier error, got nil")
+			}
+		})
+	}
+}
+
 func TestNewSchema_AcceptsRawFieldNames(t *testing.T) {
 	schema, err := NewSchema([]FieldSchema{
 		{Name: "fixture.history.24h.events.total", Type: FieldTypeInteger},
 		{Name: "user.name", Type: FieldTypeString},
+		{Name: "metrics.\uff124h.count", Type: FieldTypeInteger},
 		{Name: "tags", Type: FieldTypeArray},
 	})
 	if err != nil {
@@ -807,6 +863,9 @@ func TestNewSchema_AcceptsRawFieldNames(t *testing.T) {
 	}
 	if !schema.HasField("fixture.history.24h.events.total") {
 		t.Error("schema should have field fixture.history.24h.events.total")
+	}
+	if !schema.HasField("metrics.\uff124h.count") {
+		t.Error("schema should have field metrics.\uff124h.count")
 	}
 }
 
