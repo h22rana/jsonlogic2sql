@@ -1421,11 +1421,11 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
 			// Standard SQL: aggregate the array once and combine it with the
 			// initial accumulator according to the reducer operator.
-			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM UNNEST(%s) AS %s)", pattern.function, elemRef, array, alias)
+			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 		}
 		// Fallback for any future dialects
-		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM UNNEST(%s) AS %s)", pattern.function, elemRef, array, alias)
+		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 		return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 	}
 
@@ -1447,9 +1447,9 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 		return fmt.Sprintf("arrayFold((acc, %s) -> %s, %s, %s)", alias, reducerWithElem, array, initial), nil
 	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
 		// Standard SQL using a subquery
-		return fmt.Sprintf("(SELECT %s FROM UNNEST(%s) AS %s)", reducerWithElem, array, alias), nil
+		return fmt.Sprintf("(SELECT %s FROM %s)", reducerWithElem, a.unnestSourceSQL(array, alias)), nil
 	}
-	return fmt.Sprintf("(SELECT %s FROM UNNEST(%s) AS %s)", reducerWithElem, array, alias), nil
+	return fmt.Sprintf("(SELECT %s FROM %s)", reducerWithElem, a.unnestSourceSQL(array, alias)), nil
 }
 
 // aggregatePattern represents a detected aggregate pattern with optional field suffix.
@@ -2935,10 +2935,10 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 			aggregateSQL := fmt.Sprintf("arrayReduce('%s', %s)", strings.ToLower(pattern.function), aggregateInput)
 			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, true, array), nil
 		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM UNNEST(%s) AS %s)", pattern.function, elemRef, array, alias)
+			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 		}
-		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM UNNEST(%s) AS %s)", pattern.function, elemRef, array, alias)
+		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 		return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 	}
 
@@ -2953,9 +2953,9 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	case dialect.DialectClickHouse:
 		return fmt.Sprintf("arrayFold((acc, %s) -> %s, %s, %s)", alias, reducerWithElem, array, initial), nil
 	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("(SELECT %s FROM UNNEST(%s) AS %s)", reducerWithElem, array, alias), nil
+		return fmt.Sprintf("(SELECT %s FROM %s)", reducerWithElem, a.unnestSourceSQL(array, alias)), nil
 	}
-	return fmt.Sprintf("(SELECT %s FROM UNNEST(%s) AS %s)", reducerWithElem, array, alias), nil
+	return fmt.Sprintf("(SELECT %s FROM %s)", reducerWithElem, a.unnestSourceSQL(array, alias)), nil
 }
 
 // handleAllParam is the parameterized variant of handleAll. Keep in sync.

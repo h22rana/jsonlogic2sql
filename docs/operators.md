@@ -348,6 +348,9 @@ When the right-hand side is an array-typed field (with schema), `in` emits
 null-safe element membership SQL so JSONLogic `null in [null]` stays true.
 BigQuery, Spanner, PostgreSQL, and DuckDB use an `EXISTS ... UNNEST(...)`
 predicate; ClickHouse uses `arrayExists(...)`.
+DuckDB uses explicit column aliases in these `UNNEST` scopes, for example
+`UNNEST(tags) AS elem(elem)`, so the lambda variable resolves to the array
+element rather than DuckDB's default `unnest` column.
 
 When the right-hand side is a known non-container value such as a number,
 boolean, null, or an empty array literal, `in` folds to `FALSE` because

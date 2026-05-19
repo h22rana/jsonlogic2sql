@@ -395,6 +395,9 @@ func assertIdentifierQuotingSQL(
 ) {
 	t.Helper()
 
+	expectedInline = testDuckDBUnnestSourceAliases(d, expectedInline)
+	expectedParamSQL = testDuckDBUnnestSourceAliases(d, expectedParamSQL)
+
 	sql, err := tr.TranspileCondition(logic)
 	valueMode := IsErrorCode(err, ErrInvalidExpressionContext)
 	if valueMode {

@@ -2,11 +2,21 @@ package operators
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
+
+var arrayTestUnnestAliasPattern = regexp.MustCompile(`FROM UNNEST\(([^)]*)\) AS (elem[0-9]*)`)
+
+func arrayTestDuckDBUnnestSourceAliases(d dialect.Dialect, sql string) string {
+	if d != dialect.DialectDuckDB {
+		return sql
+	}
+	return arrayTestUnnestAliasPattern.ReplaceAllString(sql, `FROM UNNEST($1) AS $2($2)`)
+}
 
 type arrayTestSchemaProvider struct {
 	mockSchemaProvider
@@ -459,8 +469,9 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 						t.Errorf("[%s] Unexpected error: %v", d.name, err)
 						return
 					}
-					if result != tt.expected {
-						t.Errorf("[%s] Expected %s, got %s", d.name, tt.expected, result)
+					expected := arrayTestDuckDBUnnestSourceAliases(d.dialect, tt.expected)
+					if result != expected {
+						t.Errorf("[%s] Expected %s, got %s", d.name, expected, result)
 					}
 				})
 			}

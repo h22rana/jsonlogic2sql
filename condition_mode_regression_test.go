@@ -520,13 +520,13 @@ func TestTranspileCondition_BooleanConstantsArePredicates(t *testing.T) {
 				if d == DialectClickHouse {
 					return "arrayExists(elem -> TRUE, items)"
 				}
-				return "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE TRUE)"
+				return testDuckDBUnnestSourceAliases(d, "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE TRUE)")
 			},
 			wantParam: func(d Dialect) string {
 				if d == DialectClickHouse {
 					return "arrayExists(elem -> TRUE, items)"
 				}
-				return "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE TRUE)"
+				return testDuckDBUnnestSourceAliases(d, "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE TRUE)")
 			},
 		},
 	}
@@ -692,6 +692,9 @@ func TestTranspileCondition_ArrayPredicateLambdasAcceptTruthinessFallbacks(t *te
 			if d == DialectClickHouse {
 				want = "arrayExists(elem -> elem = 1, items)"
 				wantParam = "arrayExists(elem -> elem = " + testPlaceholder(d, 1) + ", items)"
+			} else {
+				want = testDuckDBUnnestSourceAliases(d, want)
+				wantParam = testDuckDBUnnestSourceAliases(d, wantParam)
 			}
 
 			got, err := tr.TranspileCondition(logic)

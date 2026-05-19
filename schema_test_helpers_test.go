@@ -104,6 +104,108 @@ func testArrayLiteralMembershipSQL(valueSQL string, itemSQLs ...string) string {
 	}
 }
 
+func testDuckDBUnnestSourceAliases(d Dialect, sql string) string {
+	if d != DialectDuckDB {
+		return sql
+	}
+	return testDuckDBColumnAliasUNNEST(sql)
+}
+
+func testDuckDBColumnAliasUNNEST(sql string) string {
+	const prefix = "FROM UNNEST("
+
+	var out strings.Builder
+	start := 0
+	for {
+		idx := strings.Index(sql[start:], prefix)
+		if idx < 0 {
+			out.WriteString(sql[start:])
+			return out.String()
+		}
+		idx += start
+		openParen := idx + len("FROM UNNEST")
+		closeParen := testMatchingSQLParen(sql, openParen)
+		if closeParen < 0 {
+			out.WriteString(sql[start:])
+			return out.String()
+		}
+
+		aliasPrefixStart := closeParen + 1
+		if !strings.HasPrefix(sql[aliasPrefixStart:], " AS ") {
+			out.WriteString(sql[start : closeParen+1])
+			start = closeParen + 1
+			continue
+		}
+
+		aliasStart := aliasPrefixStart + len(" AS ")
+		aliasEnd := aliasStart
+		for aliasEnd < len(sql) && testIsIdentifierChar(sql[aliasEnd]) {
+			aliasEnd++
+		}
+		alias := sql[aliasStart:aliasEnd]
+		if !testIsArrayElementAlias(alias) || (aliasEnd < len(sql) && sql[aliasEnd] == '(') {
+			out.WriteString(sql[start:aliasEnd])
+			start = aliasEnd
+			continue
+		}
+
+		out.WriteString(sql[start:aliasEnd])
+		out.WriteString("(")
+		out.WriteString(alias)
+		out.WriteString(")")
+		start = aliasEnd
+	}
+}
+
+func testMatchingSQLParen(sql string, openParen int) int {
+	if openParen >= len(sql) || sql[openParen] != '(' {
+		return -1
+	}
+	depth := 0
+	inString := false
+	for i := openParen; i < len(sql); i++ {
+		switch sql[i] {
+		case '\'':
+			if inString && i+1 < len(sql) && sql[i+1] == '\'' {
+				i++
+				continue
+			}
+			inString = !inString
+		case '(':
+			if !inString {
+				depth++
+			}
+		case ')':
+			if !inString {
+				depth--
+				if depth == 0 {
+					return i
+				}
+			}
+		}
+	}
+	return -1
+}
+
+func testIsIdentifierChar(ch byte) bool {
+	return ch == '_' || (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+func testIsArrayElementAlias(alias string) bool {
+	if alias == "elem" {
+		return true
+	}
+	if !strings.HasPrefix(alias, "elem") {
+		return false
+	}
+	for _, ch := range alias[len("elem"):] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return len(alias) > len("elem")
+}
+
 func defaultTestSchema() *Schema {
 	return mustNewSchema([]FieldSchema{
 		{Name: "a", Type: FieldTypeNumber},

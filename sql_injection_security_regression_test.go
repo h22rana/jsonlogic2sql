@@ -141,6 +141,7 @@ func TestSQLInjectionSecurity_LiteralPayloadsEscapedOrParameterized_AllDialects(
 					if byDialect := tc.inlineBy[d]; byDialect != "" {
 						inlineWant = byDialect
 					}
+					inlineWant = testDuckDBUnnestSourceAliases(d, inlineWant)
 					if inlineSQL != inlineWant {
 						t.Fatalf("inline SQL = %q, want %q", inlineSQL, inlineWant)
 					}
@@ -155,7 +156,7 @@ func TestSQLInjectionSecurity_LiteralPayloadsEscapedOrParameterized_AllDialects(
 					if err != nil {
 						t.Fatalf("parameterized transpilation error = %v", err)
 					}
-					if want := tc.paramWant[d]; paramSQL != want {
+					if want := testDuckDBUnnestSourceAliases(d, tc.paramWant[d]); paramSQL != want {
 						t.Fatalf("parameterized SQL = %q, want %q", paramSQL, want)
 					}
 					if strings.Contains(paramSQL, injectionPayload) {

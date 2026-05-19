@@ -23,14 +23,21 @@ func (a *ArrayOperator) arrayLengthSQL(array string) string {
 	return a.config.ArrayLengthFunc(array)
 }
 
+func (a *ArrayOperator) unnestSourceSQL(array, alias string) string {
+	if a.getDialect() == dialect.DialectDuckDB {
+		return fmt.Sprintf("UNNEST(%s) AS %s(%s)", array, alias, alias)
+	}
+	return fmt.Sprintf("UNNEST(%s) AS %s", array, alias)
+}
+
 func (a *ArrayOperator) renderMapSQL(alias, transformation, array string) string {
 	switch a.getDialect() {
 	case dialect.DialectClickHouse:
 		return fmt.Sprintf("arrayMap(%s -> %s, %s)", alias, transformation, array)
 	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s)", transformation, array, alias)
+		return fmt.Sprintf("ARRAY(SELECT %s FROM %s)", transformation, a.unnestSourceSQL(array, alias))
 	}
-	return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s)", transformation, array, alias)
+	return fmt.Sprintf("ARRAY(SELECT %s FROM %s)", transformation, a.unnestSourceSQL(array, alias))
 }
 
 func (a *ArrayOperator) renderFilterSQL(alias, array, condition string) string {
@@ -38,9 +45,9 @@ func (a *ArrayOperator) renderFilterSQL(alias, array, condition string) string {
 	case dialect.DialectClickHouse:
 		return fmt.Sprintf("arrayFilter(%s -> %s, %s)", alias, condition, array)
 	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s WHERE %s)", alias, array, alias, condition)
+		return fmt.Sprintf("ARRAY(SELECT %s FROM %s WHERE %s)", alias, a.unnestSourceSQL(array, alias), condition)
 	}
-	return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(%s) AS %s WHERE %s)", alias, array, alias, condition)
+	return fmt.Sprintf("ARRAY(SELECT %s FROM %s WHERE %s)", alias, a.unnestSourceSQL(array, alias), condition)
 }
 
 func (a *ArrayOperator) renderAllSQL(alias, array, condition string) string {
@@ -49,9 +56,9 @@ func (a *ArrayOperator) renderAllSQL(alias, array, condition string) string {
 	case dialect.DialectClickHouse:
 		return fmt.Sprintf("(%s > 0 AND arrayAll(%s -> %s, %s))", lengthCheck, alias, condition, array)
 	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE NOT (%s)))", lengthCheck, array, alias, condition)
+		return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM %s WHERE NOT (%s)))", lengthCheck, a.unnestSourceSQL(array, alias), condition)
 	}
-	return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE NOT (%s)))", lengthCheck, array, alias, condition)
+	return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM %s WHERE NOT (%s)))", lengthCheck, a.unnestSourceSQL(array, alias), condition)
 }
 
 func (a *ArrayOperator) renderSomeSQL(alias, array, condition string) string {
@@ -59,9 +66,9 @@ func (a *ArrayOperator) renderSomeSQL(alias, array, condition string) string {
 	case dialect.DialectClickHouse:
 		return fmt.Sprintf("arrayExists(%s -> %s, %s)", alias, condition, array)
 	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition)
+		return fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE %s)", a.unnestSourceSQL(array, alias), condition)
 	}
-	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition)
+	return fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE %s)", a.unnestSourceSQL(array, alias), condition)
 }
 
 func (a *ArrayOperator) renderNoneSQL(alias, array, condition string) string {
@@ -69,9 +76,9 @@ func (a *ArrayOperator) renderNoneSQL(alias, array, condition string) string {
 	case dialect.DialectClickHouse:
 		return fmt.Sprintf("NOT arrayExists(%s -> %s, %s)", alias, condition, array)
 	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition)
+		return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", a.unnestSourceSQL(array, alias), condition)
 	}
-	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", array, alias, condition)
+	return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE %s)", a.unnestSourceSQL(array, alias), condition)
 }
 
 func (a *ArrayOperator) renderMergeSQL(arrays []string) (string, error) {

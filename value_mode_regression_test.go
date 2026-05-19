@@ -369,7 +369,7 @@ func TestArrayOperators_FoldedEmptyArraySourcesAllDialectsSchemaRequired(t *test
 							if err != nil {
 								t.Fatalf("TranspileValue() error = %v", err)
 							}
-							if want := tt.wantSQL(d); got != want {
+							if want := testDuckDBUnnestSourceAliases(d, tt.wantSQL(d)); got != want {
 								t.Fatalf("TranspileValue() = %q, want %q", got, want)
 							}
 
@@ -377,7 +377,7 @@ func TestArrayOperators_FoldedEmptyArraySourcesAllDialectsSchemaRequired(t *test
 							if err != nil {
 								t.Fatalf("TranspileParameterizedValue() error = %v", err)
 							}
-							if want := tt.wantParam(d); gotParam != want {
+							if want := testDuckDBUnnestSourceAliases(d, tt.wantParam(d)); gotParam != want {
 								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
 							}
 							if !reflect.DeepEqual(gotParams, tt.wantParams) {
@@ -825,7 +825,7 @@ func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
 					if err != nil {
 						t.Fatalf("TranspileValue() error = %v", err)
 					}
-					if want := tt.wantSQL(d); got != want {
+					if want := testDuckDBUnnestSourceAliases(d, tt.wantSQL(d)); got != want {
 						t.Fatalf("TranspileValue() = %q, want %q", got, want)
 					}
 					if paramErr != nil {
@@ -854,7 +854,7 @@ func TestTranspileValue_ReduceTruthinessUsesInferredTypeAllDialectsSchemaRequire
 		if d == DialectClickHouse {
 			return fmt.Sprintf("%s + coalesce(arrayReduce('sum', arr), 0)", initial)
 		}
-		return fmt.Sprintf("%s + COALESCE((SELECT SUM(elem) FROM UNNEST(arr) AS elem), 0)", initial)
+		return testDuckDBUnnestSourceAliases(d, fmt.Sprintf("%s + COALESCE((SELECT SUM(elem) FROM UNNEST(arr) AS elem), 0)", initial))
 	}
 	numericTruthiness := func(expr string) string {
 		return fmt.Sprintf("(%s IS NOT NULL AND %s != 0)", expr, expr)
@@ -935,7 +935,7 @@ func TestTranspileValue_ReduceTruthinessUsesInferredTypeAllDialectsSchemaRequire
 							if err != nil {
 								t.Fatalf("TranspileValue() error = %v", err)
 							}
-							if want := tt.wantSQL(d); got != want {
+							if want := testDuckDBUnnestSourceAliases(d, tt.wantSQL(d)); got != want {
 								t.Fatalf("TranspileValue() = %q, want %q", got, want)
 							}
 							if strings.Contains(got, "!= FALSE") || strings.Contains(got, "!= ''") {
@@ -946,7 +946,7 @@ func TestTranspileValue_ReduceTruthinessUsesInferredTypeAllDialectsSchemaRequire
 							if err != nil {
 								t.Fatalf("TranspileParameterizedValue() error = %v", err)
 							}
-							if want := tt.wantParam(d); gotParam != want {
+							if want := testDuckDBUnnestSourceAliases(d, tt.wantParam(d)); gotParam != want {
 								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
 							}
 							if strings.Contains(gotParam, "!= FALSE") || strings.Contains(gotParam, "!= ''") {
@@ -1014,7 +1014,7 @@ func TestTranspileValue_ReduceMinMaxAggregateIncludesInitialAllDialects(t *testi
 					if err != nil {
 						t.Fatalf("TranspileValue() error = %v", err)
 					}
-					if want := tt.wantSQL(d, fmt.Sprintf("%.0f", tt.initial)); got != want {
+					if want := testDuckDBUnnestSourceAliases(d, tt.wantSQL(d, fmt.Sprintf("%.0f", tt.initial))); got != want {
 						t.Fatalf("TranspileValue() = %q, want %q", got, want)
 					}
 
@@ -1022,7 +1022,7 @@ func TestTranspileValue_ReduceMinMaxAggregateIncludesInitialAllDialects(t *testi
 					if err != nil {
 						t.Fatalf("TranspileParameterizedValue() error = %v", err)
 					}
-					if want := tt.wantSQL(d, testPlaceholder(d, 1)); gotParam != want {
+					if want := testDuckDBUnnestSourceAliases(d, tt.wantSQL(d, testPlaceholder(d, 1))); gotParam != want {
 						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
 					}
 					if !reflect.DeepEqual(gotParams, tt.wantParams) {
@@ -1100,7 +1100,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 		if d == DialectClickHouse {
 			return fmt.Sprintf("arrayFold((acc, elem) -> %s, arr, %s)", reducer, initial)
 		}
-		return fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer)
+		return testDuckDBUnnestSourceAliases(d, fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer))
 	}
 
 	tests := []struct {
@@ -1288,7 +1288,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesTypedCustomInitialAllDial
 		if d == DialectClickHouse {
 			return fmt.Sprintf("arrayFold((acc, elem) -> %s, arr, 0)", reducer)
 		}
-		return fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer)
+		return testDuckDBUnnestSourceAliases(d, fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer))
 	}
 
 	for _, d := range allDialects() {
@@ -1360,6 +1360,8 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesSchemaInitialTypeAllDiale
 			want := fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer)
 			if d == DialectClickHouse {
 				want = fmt.Sprintf("arrayFold((acc, elem) -> %s, arr, seed)", reducer)
+			} else {
+				want = testDuckDBUnnestSourceAliases(d, want)
 			}
 
 			got, err := tr.TranspileValue(logic)
@@ -2081,6 +2083,8 @@ func TestTranspileValue_ArrayValueFallbackStringLiteralsNotRewritten(t *testing.
 					want := fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", tt.literal)
 					if d == DialectClickHouse {
 						want = fmt.Sprintf("arrayMap(elem -> %s, arr)", tt.literal)
+					} else {
+						want = testDuckDBUnnestSourceAliases(d, want)
 					}
 					if got != want {
 						t.Fatalf("TranspileValue() = %q, want %q", got, want)
@@ -2094,6 +2098,8 @@ func TestTranspileValue_ArrayValueFallbackStringLiteralsNotRewritten(t *testing.
 					wantParam := fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", placeholder)
 					if d == DialectClickHouse {
 						wantParam = fmt.Sprintf("arrayMap(elem -> %s, arr)", placeholder)
+					} else {
+						wantParam = testDuckDBUnnestSourceAliases(d, wantParam)
 					}
 					if gotParam != wantParam {
 						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
@@ -2158,16 +2164,18 @@ func TestTranspileValue_ArrayOperatorArrayLiteralElementsAsExpressions(t *testin
 			if err != nil {
 				t.Fatalf("TranspileValue() error = %v", err)
 			}
-			if got != tt.want {
-				t.Fatalf("TranspileValue() = %q, want %q", got, tt.want)
+			want := testDuckDBUnnestSourceAliases(tt.dialect, tt.want)
+			if got != want {
+				t.Fatalf("TranspileValue() = %q, want %q", got, want)
 			}
 
 			paramSQL, params, err := tr.TranspileParameterizedValue(logic)
 			if err != nil {
 				t.Fatalf("TranspileParameterizedValue() error = %v", err)
 			}
-			if paramSQL != tt.wantParam {
-				t.Fatalf("TranspileParameterizedValue() = %q, want %q", paramSQL, tt.wantParam)
+			wantParam := testDuckDBUnnestSourceAliases(tt.dialect, tt.wantParam)
+			if paramSQL != wantParam {
+				t.Fatalf("TranspileParameterizedValue() = %q, want %q", paramSQL, wantParam)
 			}
 			if !reflect.DeepEqual(params, []QueryParam{{Name: "p1", Value: float64(5)}}) {
 				t.Fatalf("params = %#v, want p1=5", params)
@@ -2193,7 +2201,7 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaRequired(t
 		if d == DialectClickHouse {
 			return fmt.Sprintf("arrayMap(elem -> %s, arr)", transformation)
 		}
-		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", transformation)
+		return testDuckDBUnnestSourceAliases(d, fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", transformation))
 	}
 
 	tests := []struct {
@@ -2346,7 +2354,7 @@ func TestTranspileValue_NumericOperandsCoercePredicatesAllDialectsSchemaRequired
 		if d == DialectClickHouse {
 			return fmt.Sprintf("arrayMap(elem -> %s, arr)", expr)
 		}
-		return fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", expr)
+		return testDuckDBUnnestSourceAliases(d, fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", expr))
 	}
 
 	tests := []struct {
@@ -2684,7 +2692,7 @@ func TestTranspileValue_TruthinessOnlyExpressionsAllowMixedValueBranchesAllDiale
 					if err != nil {
 						t.Fatalf("TranspileParameterizedValue() error = %v", err)
 					}
-					if want := tt.wantParam(d); gotParam != want {
+					if want := testDuckDBUnnestSourceAliases(d, tt.wantParam(d)); gotParam != want {
 						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
 					}
 					if !reflect.DeepEqual(gotParams, tt.wantParams) {
@@ -3865,14 +3873,14 @@ func TestTranspileValue_PredicateResultsAreTwoValuedBooleansAllDialectsSchemaReq
 				if d == DialectClickHouse {
 					return "arrayMap(elem -> CASE WHEN elem = 1 THEN TRUE ELSE FALSE END, arr)"
 				}
-				return "ARRAY(SELECT CASE WHEN elem = 1 THEN TRUE ELSE FALSE END FROM UNNEST(arr) AS elem)"
+				return testDuckDBUnnestSourceAliases(d, "ARRAY(SELECT CASE WHEN elem = 1 THEN TRUE ELSE FALSE END FROM UNNEST(arr) AS elem)")
 			},
 			wantParam: func(d Dialect) string {
 				placeholder := testPlaceholder(d, 1)
 				if d == DialectClickHouse {
 					return fmt.Sprintf("arrayMap(elem -> CASE WHEN elem = %s THEN TRUE ELSE FALSE END, arr)", placeholder)
 				}
-				return fmt.Sprintf("ARRAY(SELECT CASE WHEN elem = %s THEN TRUE ELSE FALSE END FROM UNNEST(arr) AS elem)", placeholder)
+				return testDuckDBUnnestSourceAliases(d, fmt.Sprintf("ARRAY(SELECT CASE WHEN elem = %s THEN TRUE ELSE FALSE END FROM UNNEST(arr) AS elem)", placeholder))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
 		},
@@ -4208,7 +4216,7 @@ func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 					if err != nil {
 						t.Fatalf("TranspileValue() error = %v", err)
 					}
-					if want := tt.wantSQL(d); got != want {
+					if want := testDuckDBUnnestSourceAliases(d, tt.wantSQL(d)); got != want {
 						t.Fatalf("TranspileValue() = %q, want %q", got, want)
 					}
 
@@ -4216,7 +4224,7 @@ func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 					if err != nil {
 						t.Fatalf("TranspileParameterizedValue() error = %v", err)
 					}
-					if want := tt.wantParam(d); gotParam != want {
+					if want := testDuckDBUnnestSourceAliases(d, tt.wantParam(d)); gotParam != want {
 						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
 					}
 					if !reflect.DeepEqual(gotParams, tt.params) {
@@ -4684,6 +4692,9 @@ func TestTranspileValue_ArrayPredicateContextsUseTruthinessLogicals(t *testing.T
 			if d == DialectClickHouse {
 				want = "arrayFilter(elem -> elem = 1, items)"
 				wantParam = "arrayFilter(elem -> elem = " + testPlaceholder(d, 1) + ", items)"
+			} else {
+				want = testDuckDBUnnestSourceAliases(d, want)
+				wantParam = testDuckDBUnnestSourceAliases(d, wantParam)
 			}
 
 			got, err := tr.TranspileValue(logic)
@@ -4757,6 +4768,8 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultSkippedByValueLogical(t *
 			wantSQL := fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(items) AS elem)", wantValue)
 			if d == DialectClickHouse {
 				wantSQL = fmt.Sprintf("arrayMap(elem -> %s, items)", wantValue)
+			} else {
+				wantSQL = testDuckDBUnnestSourceAliases(d, wantSQL)
 			}
 			if gotSQL != wantSQL {
 				t.Fatalf("SQL = %q, want %q", gotSQL, wantSQL)

@@ -64,6 +64,12 @@ Some operators generate different SQL based on the target dialect:
 | `in` (array) | `EXISTS ... UNNEST(array)` | `EXISTS ... UNNEST(array)` | `EXISTS ... UNNEST(array)` | `EXISTS ... UNNEST(array)` | `arrayExists(...)` |
 | `in` (string) | `STRPOS(h, n) > 0` | `STRPOS(h, n) > 0` | `POSITION(n IN h) > 0` | `STRPOS(h, n) > 0` | `position(h, n) > 0` |
 
+DuckDB `UNNEST` scopes use an explicit column alias, for example
+`UNNEST(items) AS elem(elem)`, because DuckDB otherwise exposes the element as
+a struct-like `unnest` column. BigQuery, Spanner, and PostgreSQL use the shorter
+`UNNEST(items) AS elem` form. ClickHouse uses lambda array functions instead of
+`UNNEST`.
+
 PostgreSQL array literals use `ARRAY[...]`. Empty-array value results are
 rejected whenever the emitted SQL would contain an untyped `ARRAY[]`, because
 PostgreSQL requires an explicit element type and the transpiler does not always

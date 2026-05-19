@@ -219,6 +219,7 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 						t.Errorf("[%s] transpile error = %v", dialect.String(), err)
 						return
 					}
+					expected = testDuckDBUnnestSourceAliases(dialect, expected)
 					if result != expected {
 						t.Errorf("[%s] transpile = %q, want %q", dialect.String(), result, expected)
 					}

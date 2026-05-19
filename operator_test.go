@@ -1123,8 +1123,9 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 					t.Errorf("[%s] map with custom operator: got %s", d.name, sql)
 				}
 			} else {
-				if sql != "ARRAY(SELECT LOWER(elem) FROM UNNEST(tags) AS elem)" {
-					t.Errorf("[%s] map with custom operator: got %s", d.name, sql)
+				expectedMap := testDuckDBUnnestSourceAliases(d.dialect, "ARRAY(SELECT LOWER(elem) FROM UNNEST(tags) AS elem)")
+				if sql != expectedMap {
+					t.Errorf("[%s] map with custom operator: got %s, want %s", d.name, sql, expectedMap)
 				}
 			}
 
@@ -1141,7 +1142,7 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			case DialectPostgreSQL:
 				expectedAll = "(CARDINALITY(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
 			case DialectDuckDB:
-				expectedAll = "(length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
+				expectedAll = testDuckDBUnnestSourceAliases(d.dialect, "(length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))")
 			default: // BigQuery, Spanner
 				expectedAll = "(ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
 			}
@@ -1161,7 +1162,7 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			case DialectPostgreSQL:
 				expectedAnd = "((CARDINALITY(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
 			case DialectDuckDB:
-				expectedAnd = "((length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
+				expectedAnd = testDuckDBUnnestSourceAliases(d.dialect, "((length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))")
 			default:
 				expectedAnd = "((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
 			}

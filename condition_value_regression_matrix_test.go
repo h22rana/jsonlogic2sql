@@ -199,7 +199,7 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaRequired(t *testing.T)
 					if err != nil {
 						t.Fatalf("TranspileValue() error = %v", err)
 					}
-					if want := tc.wantSQL(d); gotSQL != want {
+					if want := testDuckDBUnnestSourceAliases(d, tc.wantSQL(d)); gotSQL != want {
 						t.Fatalf("TranspileValue() = %q, want %q", gotSQL, want)
 					}
 
@@ -207,7 +207,7 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaRequired(t *testing.T)
 					if err != nil {
 						t.Fatalf("TranspileParameterizedValue() error = %v", err)
 					}
-					if want := tc.wantParam(d); gotParamSQL != want {
+					if want := testDuckDBUnnestSourceAliases(d, tc.wantParam(d)); gotParamSQL != want {
 						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParamSQL, want)
 					}
 					if !regressionParamsEqual(gotParams, tc.wantParams) {

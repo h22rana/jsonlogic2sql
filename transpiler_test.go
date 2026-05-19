@@ -308,7 +308,7 @@ func TestTranspiler_NullSafeFieldEquality_AllDialectsSchemaRequiredNestedConditi
 					if d == DialectClickHouse {
 						assertContains(t, out.inlineSQL, "arrayAll(elem ->")
 					} else {
-						assertContains(t, out.inlineSQL, "NOT EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE NOT")
+						assertContains(t, out.inlineSQL, testDuckDBUnnestSourceAliases(d, "NOT EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE NOT"))
 					}
 					if out.paramSQL != out.inlineSQL {
 						t.Fatalf("parameterized SQL = %q, want inline SQL %q", out.paramSQL, out.inlineSQL)
@@ -372,7 +372,7 @@ func TestTranspiler_NullSafeFieldEquality_CustomOperatorInteraction(t *testing.T
 					if d == DialectClickHouse {
 						assertContains(t, out.inlineSQL, "arrayExists(elem -> LOWER(elem.code) = elem.normalized, items)")
 					} else {
-						assertContains(t, out.inlineSQL, "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE LOWER(elem.code) = elem.normalized)")
+						assertContains(t, out.inlineSQL, testDuckDBUnnestSourceAliases(d, "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE LOWER(elem.code) = elem.normalized)"))
 					}
 					if out.paramSQL != out.inlineSQL {
 						t.Fatalf("parameterized SQL = %q, want inline SQL %q", out.paramSQL, out.inlineSQL)
@@ -2044,8 +2044,9 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 						t.Errorf("[%s] TranspileCondition() unexpected error = %v", d.name, err)
 						return
 					}
-					if result != tt.expected {
-						t.Errorf("[%s] TranspileCondition() = %v, expected %v", d.name, result, tt.expected)
+					expected := testDuckDBUnnestSourceAliases(d.dialect, tt.expected)
+					if result != expected {
+						t.Errorf("[%s] TranspileCondition() = %v, expected %v", d.name, result, expected)
 					}
 				})
 			}
