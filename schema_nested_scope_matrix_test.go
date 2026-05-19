@@ -11,6 +11,7 @@ func nestedScopeAuditSchema() *Schema {
 	return mustNewSchema([]FieldSchema{
 		{Name: "useBackup", Type: FieldTypeBoolean},
 		{Name: "useMetrics", Type: FieldTypeBoolean},
+		{Name: "useAlt", Type: FieldTypeBoolean},
 		{
 			Name: "customer",
 			Type: FieldTypeObject,
@@ -41,6 +42,20 @@ func nestedScopeAuditSchema() *Schema {
 			Type: FieldTypeArray,
 			ElementFields: []FieldSchema{
 				{Name: "status", Type: FieldTypeNumber},
+			},
+		},
+		{
+			Name: "altAccounts",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "archived"}},
+			},
+		},
+		{
+			Name: "lightAccounts",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "blocked"}},
 			},
 		},
 	})
@@ -200,6 +215,20 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			want:       []string{"elem.status ="},
 			paramLen:   1,
 		},
+		{
+			name:       "map over overflowed truthy if source chooses reachable schema",
+			logic:      `{"map":[{"if":[1e9999,{"var":"accounts"},{"var":"metricAccounts"}]},{"var":"status"}]}`,
+			valueRoot:  true,
+			schemaOnly: true,
+			want:       []string{"accounts", "elem.status"},
+		},
+		{
+			name:       "map over underflowed falsy if source chooses reachable schema",
+			logic:      `{"map":[{"if":[1e-9999,{"var":"accounts"},{"var":"metricAccounts"}]},{"var":"status"}]}`,
+			valueRoot:  true,
+			schemaOnly: true,
+			want:       []string{"metricAccounts", "elem.status"},
+		},
 	}
 
 	modes := []struct {
@@ -316,6 +345,17 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaAwareCases_AllDialects(t *tes
 			logic:     `{"map":[{"if":[{"var":"useMetrics"},{"var":"accounts"},{"var":"metricAccounts"}]},{"var":"status"}]}`,
 			valueRoot: true,
 			wantError: "field 'status' has incompatible schema types across array source scopes",
+		},
+		{
+			name:      "dynamic array source rejects incompatible scoped enum values",
+			logic:     `{"some":[{"if":[{"var":"useAlt"},{"var":"accounts"},{"var":"altAccounts"}]},{"==":[{"var":"status"},"active"]}]}`,
+			wantError: "field 'status' has incompatible enum values across array source scopes",
+		},
+		{
+			name:      "dynamic array source rejects field missing from one source scope",
+			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"lightAccounts"}]},{"var":"profile.tier"}]}`,
+			valueRoot: true,
+			wantError: "field 'profile.tier' is not defined in schema scope 'lightAccounts'",
 		},
 	}
 

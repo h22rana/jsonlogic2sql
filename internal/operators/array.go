@@ -2,6 +2,7 @@ package operators
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -881,6 +882,9 @@ func staticJSONLogicTruthiness(value interface{}) (bool, bool) {
 	case json.Number:
 		f, err := strconv.ParseFloat(v.String(), 64)
 		if err != nil {
+			if errors.Is(err, strconv.ErrRange) {
+				return f != 0, true
+			}
 			return false, false
 		}
 		return f != 0, true
