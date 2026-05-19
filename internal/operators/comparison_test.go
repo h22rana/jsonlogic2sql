@@ -275,12 +275,11 @@ func TestComparisonOperator_ToSQL_NullSafeFieldEquality(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToSQL() default unexpected error = %v", err)
 	}
-	if got != "a = b" {
-		t.Fatalf("ToSQL() default = %q, want %q", got, "a = b")
+	if want := "((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))"; got != want {
+		t.Fatalf("ToSQL() default = %q, want %q", got, want)
 	}
 
 	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
-	config.NullSafeFieldEquality = true
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -1394,7 +1393,7 @@ func TestComparisonOperator_ToSQL_EqualitySemanticsWithSchema(t *testing.T) {
 			name:     "defaulted enum preserves valid default with var on right",
 			operator: "==",
 			args:     []interface{}{map[string]interface{}{"var": []interface{}{"status", "active"}}, map[string]interface{}{"var": "other"}},
-			wantSQL:  "COALESCE(status, 'active') = other",
+			wantSQL:  "((COALESCE(status, 'active') IS NULL AND other IS NULL) OR (COALESCE(status, 'active') IS NOT NULL AND other IS NOT NULL AND COALESCE(status, 'active') = other))",
 		},
 		{
 			name:      "defaulted var malformed json number default errors before strict fold",
@@ -1651,7 +1650,6 @@ func TestComparisonOperator_ToSQL_NullSafeFieldEqualityPreservesSchemaLiteralSem
 		"code":   "string",
 	})
 	config := NewOperatorConfig(dialect.DialectBigQuery, schema)
-	config.NullSafeFieldEquality = true
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -2886,13 +2884,12 @@ func TestComparisonOperator_ToSQLParam_NullSafeFieldEquality(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToSQLParam() default unexpected error = %v", err)
 	}
-	if got != "a = b" {
-		t.Fatalf("ToSQLParam() default = %q, want %q", got, "a = b")
+	if want := "((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))"; got != want {
+		t.Fatalf("ToSQLParam() default = %q, want %q", got, want)
 	}
 	assertQueryParams(t, pc.Params(), nil)
 
 	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
-	config.NullSafeFieldEquality = true
 	op := NewComparisonOperator(config)
 
 	tests := []struct {
@@ -3992,7 +3989,7 @@ func TestComparisonOperator_ToSQLParam_EqualitySemanticsWithSchema(t *testing.T)
 			name:       "defaulted enum preserves valid default with var on right",
 			operator:   "==",
 			args:       []interface{}{map[string]interface{}{"var": []interface{}{"status", "active"}}, map[string]interface{}{"var": "other"}},
-			wantSQL:    "COALESCE(status, @p1) = other",
+			wantSQL:    "((COALESCE(status, @p1) IS NULL AND other IS NULL) OR (COALESCE(status, @p1) IS NOT NULL AND other IS NOT NULL AND COALESCE(status, @p1) = other))",
 			wantParams: []params.QueryParam{{Name: "p1", Value: "active"}},
 		},
 		{

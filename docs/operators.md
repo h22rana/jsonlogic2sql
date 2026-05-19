@@ -159,26 +159,21 @@ deleted_at IS NULL
 field IS NOT NULL
 ```
 
-### Opt-In Null-Safe Field Equality
+### Null-Safe Field Equality
 
-By default, field-to-field equality uses ordinary SQL comparison:
+Field-to-field equality uses JSONLogic-compatible null-safe SQL by default:
 
 ```json
 {"==": [{"var": "a"}, {"var": "b"}]}
 ```
 ```sql
-a = b
-```
-
-Set `NullSafeFieldEquality` or call `SetNullSafeFieldEquality(true)` to also
-match rows where both compared fields are `NULL`, matching JSONLogic's
-`null == null` and `null === null` behavior:
-
-```sql
 ((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))
 ```
 
-For inequality, the opt-in fallback checks one-null-only rows plus the ordinary
+This matches JSONLogic's `null == null` and `null === null` behavior when both
+compared fields are `NULL`.
+
+For inequality, the null-safe fallback checks one-null-only rows plus the ordinary
 comparison:
 
 ```sql

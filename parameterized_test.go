@@ -648,7 +648,9 @@ func TestTranspileParameterized_AllDialects(t *testing.T) {
 			if params[0].Value != "val" {
 				t.Errorf("param value = %v, want %q", params[0].Value, "val")
 			}
-			_ = sql // SQL format differs by dialect, checked specifically in other tests
+			if !strings.Contains(sql, d.wantPrefix) {
+				t.Errorf("SQL = %q, want placeholder prefix %q", sql, d.wantPrefix)
+			}
 		})
 	}
 }
@@ -692,8 +694,8 @@ func TestTranspileParameterized_NoParamsForPureVarExpressions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
-	if sql != "x = y" {
-		t.Errorf("SQL = %q, want %q", sql, "x = y")
+	if want := "((x IS NULL AND y IS NULL) OR (x IS NOT NULL AND y IS NOT NULL AND x = y))"; sql != want {
+		t.Errorf("SQL = %q, want %q", sql, want)
 	}
 	if len(params) != 0 {
 		t.Errorf("expected 0 params for var-to-var comparison, got %d", len(params))
@@ -702,9 +704,8 @@ func TestTranspileParameterized_NoParamsForPureVarExpressions(t *testing.T) {
 
 func TestTranspileParameterized_NullSafeFieldEquality(t *testing.T) {
 	tp, err := NewTranspilerWithConfig(&TranspilerConfig{
-		Dialect:               DialectBigQuery,
-		Schema:                defaultTestSchema(),
-		NullSafeFieldEquality: true,
+		Dialect: DialectBigQuery,
+		Schema:  defaultTestSchema(),
 	})
 	if err != nil {
 		t.Fatalf("NewTranspilerWithConfig() error = %v", err)
@@ -995,7 +996,9 @@ func TestTranspileParameterized_BoolAndNullNotParameterized(t *testing.T) {
 	if len(params) != 0 {
 		t.Errorf("expected 0 params for boolean literal, got %d: %v", len(params), params)
 	}
-	_ = sql
+	if sql != "active = TRUE" {
+		t.Errorf("SQL = %q, want %q", sql, "active = TRUE")
+	}
 }
 
 func TestTranspileParameterized_LargeIntegerPrecision(t *testing.T) {

@@ -40,48 +40,16 @@ func TestNewTranspiler(t *testing.T) {
 }
 
 func TestTranspiler_NullSafeFieldEquality(t *testing.T) {
-	defaultTr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error = %v", err)
 	}
-	defaultSQL, err := defaultTr.TranspileCondition(`{"==": [{"var": "a"}, {"var": "b"}]}`)
+	got, err := tr.TranspileCondition(`{"==": [{"var": "a"}, {"var": "b"}]}`)
 	if err != nil {
-		t.Fatalf("TranspileCondition() default error = %v", err)
+		t.Fatalf("TranspileCondition() error = %v", err)
 	}
-	if defaultSQL != "a = b" {
-		t.Fatalf("TranspileCondition() default = %q, want %q", defaultSQL, "a = b")
-	}
-
-	configTr, err := NewTranspilerWithConfig(&TranspilerConfig{
-		Dialect:               DialectBigQuery,
-		Schema:                defaultTestSchema(),
-		NullSafeFieldEquality: true,
-	})
-	if err != nil {
-		t.Fatalf("NewTranspilerWithConfig() error = %v", err)
-	}
-	configSQL, err := configTr.TranspileCondition(`{"==": [{"var": "a"}, {"var": "b"}]}`)
-	if err != nil {
-		t.Fatalf("TranspileCondition() config error = %v", err)
-	}
-	if want := "((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))"; configSQL != want {
-		t.Fatalf("TranspileCondition() config = %q, want %q", configSQL, want)
-	}
-
-	setterTr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
-	if err != nil {
-		t.Fatalf("NewTranspiler() setter error = %v", err)
-	}
-	setterTr.SetNullSafeFieldEquality(true)
-	if !setterTr.config.NullSafeFieldEquality || !setterTr.operatorConfig.NullSafeFieldEquality {
-		t.Fatal("SetNullSafeFieldEquality(true) did not update public and operator config")
-	}
-	setterSQL, err := setterTr.TranspileCondition(`{"!==": [{"var": "a"}, {"var": "b"}]}`)
-	if err != nil {
-		t.Fatalf("TranspileCondition() setter error = %v", err)
-	}
-	if want := "((a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a <> b))"; setterSQL != want {
-		t.Fatalf("TranspileCondition() setter = %q, want %q", setterSQL, want)
+	if want := "((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))"; got != want {
+		t.Fatalf("TranspileCondition() = %q, want %q", got, want)
 	}
 }
 
@@ -95,9 +63,8 @@ func TestTranspiler_NullSafeFieldEquality_AllDialects(t *testing.T) {
 	} {
 		t.Run(d.String(), func(t *testing.T) {
 			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
-				Dialect:               d,
-				Schema:                defaultTestSchema(),
-				NullSafeFieldEquality: true,
+				Dialect: d,
+				Schema:  defaultTestSchema(),
 			})
 			if err != nil {
 				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
@@ -124,9 +91,8 @@ func TestTranspiler_NullSafeFieldEquality_DeeplyNested(t *testing.T) {
 		{Name: "score", Type: FieldTypeNumber},
 	})
 	tr, err := NewTranspilerWithConfig(&TranspilerConfig{
-		Dialect:               DialectBigQuery,
-		Schema:                schema,
-		NullSafeFieldEquality: true,
+		Dialect: DialectBigQuery,
+		Schema:  schema,
 	})
 	if err != nil {
 		t.Fatalf("NewTranspilerWithConfig() error = %v", err)
@@ -171,9 +137,8 @@ func TestTranspiler_NullSafeFieldEquality_DeeplyNested(t *testing.T) {
 
 func TestTranspiler_NullSafeFieldEquality_ReviewRegressions(t *testing.T) {
 	tr, err := NewTranspilerWithConfig(&TranspilerConfig{
-		Dialect:               DialectBigQuery,
-		Schema:                defaultTestSchema(),
-		NullSafeFieldEquality: true,
+		Dialect: DialectBigQuery,
+		Schema:  defaultTestSchema(),
 	})
 	if err != nil {
 		t.Fatalf("NewTranspilerWithConfig() error = %v", err)
@@ -241,9 +206,8 @@ func TestTranspiler_NullSafeFieldEquality_ReviewRegressions(t *testing.T) {
 		},
 	})
 	enumTr, err := NewTranspilerWithConfig(&TranspilerConfig{
-		Dialect:               DialectBigQuery,
-		Schema:                schema,
-		NullSafeFieldEquality: true,
+		Dialect: DialectBigQuery,
+		Schema:  schema,
 	})
 	if err != nil {
 		t.Fatalf("NewTranspilerWithConfig() enum schema error = %v", err)
@@ -314,7 +278,6 @@ func TestTranspiler_NullSafeFieldEquality_AllDialectsSchemaModesNestedConditions
 		schema *Schema
 	}{
 		{name: "schema-required", schema: schema},
-		{name: "schema-required", schema: schema},
 	}
 
 	logic := `{"and":[{"or":[{"==":[{"var":"a"},{"var":"b"}]},{"!=":[{"var":"c"},{"var":"d"}]}]},{"!":{"===":[{"var":"e"},{"var":"f"}]}},{"all":[{"var":"items"},{"or":[{"==":[{"var":"left"},{"var":"right"}]},{"!==":[{"var":"status"},{"var":"expected_status"}]}]}]}]}`
@@ -324,9 +287,8 @@ func TestTranspiler_NullSafeFieldEquality_AllDialectsSchemaModesNestedConditions
 			for _, d := range allDialects() {
 				t.Run(d.String(), func(t *testing.T) {
 					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
-						Dialect:               d,
-						Schema:                mode.schema,
-						NullSafeFieldEquality: true,
+						Dialect: d,
+						Schema:  mode.schema,
 					})
 					if err != nil {
 						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
@@ -377,7 +339,6 @@ func TestTranspiler_NullSafeFieldEquality_CustomOperatorInteraction(t *testing.T
 		schema *Schema
 	}{
 		{name: "schema-required", schema: schema},
-		{name: "schema-required", schema: schema},
 	}
 
 	logic := `{"and":[{"==":[{"var":"left"},{"var":"right"}]},{"==":[{"lower":[{"var":"name"}]},{"var":"normalized_name"}]},{"some":[{"var":"items"},{"==":[{"lower":[{"var":"code"}]},{"var":"normalized"}]}]}]}`
@@ -387,9 +348,8 @@ func TestTranspiler_NullSafeFieldEquality_CustomOperatorInteraction(t *testing.T
 			for _, d := range allDialects() {
 				t.Run(d.String(), func(t *testing.T) {
 					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
-						Dialect:               d,
-						Schema:                mode.schema,
-						NullSafeFieldEquality: true,
+						Dialect: d,
+						Schema:  mode.schema,
 					})
 					if err != nil {
 						t.Fatalf("NewTranspilerWithConfig() error = %v", err)

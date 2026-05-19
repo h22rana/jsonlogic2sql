@@ -43,7 +43,6 @@ type ValueTypeInferer func(expr any, accumulatorType ExpressionType) ExpressionT
 type OperatorConfig struct {
 	Schema                     SchemaProvider
 	Dialect                    dialect.Dialect
-	NullSafeFieldEquality      bool
 	ExpressionParser           ExpressionParser
 	ParamExpressionParser      ParamExpressionParser
 	ValueExpressionParser      TypedExpressionParser

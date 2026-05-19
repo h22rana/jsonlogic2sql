@@ -59,9 +59,6 @@ func TestNewOperatorConfig(t *testing.T) {
 			if err := config.Schema.ValidateField("missing"); err == nil {
 				t.Fatal("empty schema provider should reject field access")
 			}
-			if config.NullSafeFieldEquality {
-				t.Errorf("NullSafeFieldEquality = true, want false by default")
-			}
 		})
 	}
 }

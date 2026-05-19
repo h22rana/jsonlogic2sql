@@ -227,12 +227,8 @@ func isEqualityOperator(operator string) bool {
 	return operator == "==" || operator == "===" || operator == "!=" || operator == "!=="
 }
 
-func (c *ComparisonOperator) nullSafeFieldEqualityEnabled() bool {
-	return c.config != nil && c.config.NullSafeFieldEquality
-}
-
 func (c *ComparisonOperator) shouldUseNullSafeFieldEquality(operator string, leftArg, rightArg interface{}) bool {
-	if !c.nullSafeFieldEqualityEnabled() || !isEqualityOperator(operator) {
+	if !isEqualityOperator(operator) {
 		return false
 	}
 	return c.isNullSafeFieldOperand(leftArg) && c.isNullSafeFieldOperand(rightArg)

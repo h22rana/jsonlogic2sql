@@ -76,9 +76,6 @@
                     <input type="checkbox" id="parameterized"> Parameterized
                 </label>
                 <label style="min-width: auto;">
-                    <input type="checkbox" id="nullSafeFieldEquality"> Null-safe field equality
-                </label>
-                <label style="min-width: auto;">
                     <input type="checkbox" id="allDialects"> Compare all dialects
                 </label>
             </div>
@@ -146,16 +143,6 @@
         const allDialectsList = ['bigquery', 'spanner', 'postgresql', 'duckdb', 'clickhouse'];
         const dialectLabels = { bigquery: 'BigQuery', spanner: 'Spanner', postgresql: 'PostgreSQL', duckdb: 'DuckDB', clickhouse: 'ClickHouse' };
 
-        function nullSafeFieldEqualityEnabled() {
-            return document.getElementById('nullSafeFieldEquality').checked;
-        }
-
-        function applyNullSafeFieldEquality(id) {
-            const result = jsonlogic2sql.setNullSafeFieldEquality(id, nullSafeFieldEqualityEnabled());
-            if (result.error) { showError(result.error); return false; }
-            return true;
-        }
-
         function createTranspiler() {
             const dialect = document.getElementById('dialect').value;
             if (transpilerID !== null) {
@@ -164,7 +151,6 @@
             const result = jsonlogic2sql.newTranspiler(dialect);
             if (result.error) { showError(result.error); return; }
             transpilerID = result.id;
-            if (!applyNullSafeFieldEquality(transpilerID)) return;
             if (schemaJSON) applySchema(schemaJSON);
             doTranspile();
         }
@@ -190,7 +176,6 @@
                 const t = jsonlogic2sql.newTranspiler(dialect);
                 if (!t.error) {
                     transpilerID = t.id;
-                    applyNullSafeFieldEquality(transpilerID);
                 }
             } else {
                 schemaJSON = json;
@@ -291,10 +276,6 @@
             for (const d of allDialectsList) {
                 const t = jsonlogic2sql.newTranspiler(d);
                 if (t.error) continue;
-                if (!applyNullSafeFieldEquality(t.id)) {
-                    jsonlogic2sql.destroyTranspiler(t.id);
-                    continue;
-                }
                 if (schemaJSON) jsonlogic2sql.setSchema(t.id, schemaJSON);
                 let fn;
                 if (isParam) {
@@ -376,10 +357,6 @@
         });
         document.getElementById('dialect').addEventListener('change', createTranspiler);
         document.getElementById('parameterized').addEventListener('change', doTranspile);
-        document.getElementById('nullSafeFieldEquality').addEventListener('change', () => {
-            if (transpilerID !== null) applyNullSafeFieldEquality(transpilerID);
-            doTranspile();
-        });
         document.getElementById('allDialects').addEventListener('change', doTranspile);
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {

@@ -233,8 +233,7 @@ func BenchmarkTranspileValueFallbackWithSchema(b *testing.B) {
 
 func BenchmarkNullSafeFieldEquality(b *testing.B) {
 	tr := mustBenchmarkTranspilerWithConfig(b, &TranspilerConfig{
-		Dialect:               DialectBigQuery,
-		NullSafeFieldEquality: true,
+		Dialect: DialectBigQuery,
 	})
 	input := `{"and":[{"==":[{"var":"left"},{"var":"right"}]},{"!==":[{"var":["primary",null]},{"var":["secondary",null]}]}]}`
 

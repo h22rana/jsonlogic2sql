@@ -83,8 +83,7 @@ const paramValue = jsonlogic2sql.transpileParameterizedValue(t.id, '{"cat": ["He
 const coerced = jsonlogic2sql.transpileCondition(t.id, '{"in": [{"var": "status"}, [5960, 9000]]}');
 // coerced = { sql: "status IN ('5960', '9000')" }
 
-// Enable null-safe field-to-field equality
-jsonlogic2sql.setNullSafeFieldEquality(t.id, true);
+// Field-to-field equality is null-safe by default.
 const nullSafe = jsonlogic2sql.transpileCondition(t.id, '{"==": [{"var": "a"}, {"var": "b"}]}');
 // nullSafe = { sql: "((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))" }
 
@@ -137,7 +136,7 @@ The included `index.html` demo provides:
 - **Dialect picker** - switch between all 5 SQL dialects
 - **Compare all dialects** - view output for all dialects side-by-side
 - **Parameterized mode** - toggle bind placeholders with a separate parameter list
-- **Null-safe field equality** - toggle JSONLogic-compatible null handling for field-to-field equality
+- **Null-safe field equality** - field-to-field equality follows JSONLogic `null == null` semantics
 - **Schema support** - import from JSON file, load a sample schema, or type manually
 - **Condition/value mode** - switch between boolean predicates and value expressions
 - **Sample expressions** - built-in examples covering common patterns

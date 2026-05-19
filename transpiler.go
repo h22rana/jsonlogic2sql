@@ -26,9 +26,8 @@ type Dialect = dialect.Dialect
 
 // TranspilerConfig holds configuration options for the transpiler.
 type TranspilerConfig struct {
-	Dialect               Dialect // Required: target SQL dialect
-	Schema                *Schema // Required: schema for field validation and type checking
-	NullSafeFieldEquality bool    // Optional: match JSONLogic null equality for field-to-field equality
+	Dialect Dialect // Required: target SQL dialect
+	Schema  *Schema // Required: schema for field validation and type checking
 }
 
 // Transpiler provides the main API for converting JSON Logic to SQL predicate
@@ -51,16 +50,6 @@ func (t *Transpiler) SetSchema(schema *Schema) error {
 	}
 	// All operators automatically see the new schema through the shared config
 	return nil
-}
-
-// SetNullSafeFieldEquality enables or disables null-safe field-to-field equality.
-// When enabled, equality operators comparing two var operands also match rows
-// where both fields are NULL. The default is disabled.
-func (t *Transpiler) SetNullSafeFieldEquality(enabled bool) {
-	t.operatorConfig.NullSafeFieldEquality = enabled
-	if t.config != nil {
-		t.config.NullSafeFieldEquality = enabled
-	}
 }
 
 // NewTranspiler creates a new transpiler instance with the specified dialect
@@ -102,7 +91,6 @@ func NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error) {
 	}
 
 	opConfig := operators.NewOperatorConfig(config.Dialect, config.Schema)
-	opConfig.NullSafeFieldEquality = config.NullSafeFieldEquality
 	t := &Transpiler{
 		parser:          parser.NewParser(opConfig),
 		operatorConfig:  opConfig,

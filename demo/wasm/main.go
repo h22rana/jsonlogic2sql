@@ -81,23 +81,6 @@ func setSchema(_ js.Value, args []js.Value) interface{} {
 	return map[string]interface{}{"ok": true}
 }
 
-// setNullSafeFieldEquality(id: number, enabled: boolean) => {ok: true} | {error: string}
-func setNullSafeFieldEquality(_ js.Value, args []js.Value) interface{} {
-	if len(args) < 2 {
-		return map[string]interface{}{"error": "id and enabled arguments required"}
-	}
-	id := args[0].Int()
-	enabled := args[1].Bool()
-
-	t, ok := transpilers[id]
-	if !ok {
-		return map[string]interface{}{"error": "transpiler not found"}
-	}
-
-	t.SetNullSafeFieldEquality(enabled)
-	return map[string]interface{}{"ok": true}
-}
-
 // transpileValue(id: number, jsonLogic: string) => {sql: string} | {error: string}
 func transpileValue(_ js.Value, args []js.Value) interface{} {
 	if len(args) < 2 {
@@ -354,7 +337,6 @@ func main() {
 	jsObj := map[string]interface{}{
 		"newTranspiler":                        js.FuncOf(newTranspiler),
 		"setSchema":                            js.FuncOf(setSchema),
-		"setNullSafeFieldEquality":             js.FuncOf(setNullSafeFieldEquality),
 		"transpileValue":                       js.FuncOf(transpileValue),
 		"transpileCondition":                   js.FuncOf(transpileCondition),
 		"transpileParameterizedValue":          js.FuncOf(transpileParameterizedValue),
