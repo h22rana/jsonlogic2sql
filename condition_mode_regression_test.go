@@ -1479,7 +1479,9 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeNumber},
 		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "haystack", Type: FieldTypeString},
 		{Name: "name", Type: FieldTypeString},
+		{Name: "needle", Type: FieldTypeString},
 	})
 
 	stringContainmentSQL := func(d Dialect, haystack, needle string) string {
@@ -1491,6 +1493,16 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 		default:
 			return fmt.Sprintf("STRPOS(%s, %s) > 0", haystack, needle)
 		}
+	}
+	runtimeNeedleStringContainmentSQL := func(d Dialect, haystack, needle string) string {
+		return fmt.Sprintf(
+			"((%s = '' AND (%s IS NOT NULL AND %s != '')) OR (%s != '' AND %s))",
+			needle,
+			haystack,
+			haystack,
+			needle,
+			stringContainmentSQL(d, haystack, needle),
+		)
 	}
 	stringCastSQL := func(d Dialect, expr string) string {
 		switch d {
@@ -1525,7 +1537,7 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 				return stringContainmentSQL(d, "'12345'", jsonStringCastSQL(d, "amount"))
 			},
 			wantParam: func(d Dialect) string {
-				return stringContainmentSQL(d, testPlaceholder(d, 1), jsonStringCastSQL(d, "amount"))
+				return runtimeNeedleStringContainmentSQL(d, testPlaceholder(d, 1), jsonStringCastSQL(d, "amount"))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "12345"}},
 		},
@@ -1536,7 +1548,7 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 				return stringContainmentSQL(d, "'true'", boolStringSQL("flag"))
 			},
 			wantParam: func(d Dialect) string {
-				return stringContainmentSQL(d, testPlaceholder(d, 1), boolStringSQL("flag"))
+				return runtimeNeedleStringContainmentSQL(d, testPlaceholder(d, 1), boolStringSQL("flag"))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "true"}},
 		},
@@ -1547,9 +1559,20 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 				return stringContainmentSQL(d, "'null'", "COALESCE(name, 'null')")
 			},
 			wantParam: func(d Dialect) string {
-				return stringContainmentSQL(d, testPlaceholder(d, 1), "COALESCE(name, 'null')")
+				return runtimeNeedleStringContainmentSQL(d, testPlaceholder(d, 1), "COALESCE(name, 'null')")
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "null"}},
+		},
+		{
+			name:  "runtime string field needle requires non-empty haystack when needle is empty",
+			logic: `{"in":[{"var":"needle"},{"var":"haystack"}]}`,
+			wantSQL: func(d Dialect) string {
+				return runtimeNeedleStringContainmentSQL(d, "haystack", "COALESCE(needle, 'null')")
+			},
+			wantParam: func(d Dialect) string {
+				return runtimeNeedleStringContainmentSQL(d, "haystack", "COALESCE(needle, 'null')")
+			},
+			wantParams: []QueryParam{},
 		},
 		{
 			name:  "literal number needle stringifies for typed string expression",

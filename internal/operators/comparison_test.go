@@ -12,6 +12,26 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
 
+func testRuntimeStringContainmentSQL(d dialect.Dialect, haystack, needle string) string {
+	var containment string
+	switch d {
+	case dialect.DialectPostgreSQL:
+		containment = fmt.Sprintf("POSITION(%s IN %s) > 0", needle, haystack)
+	case dialect.DialectClickHouse:
+		containment = fmt.Sprintf("position(%s, %s) > 0", haystack, needle)
+	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectDuckDB:
+		containment = fmt.Sprintf("STRPOS(%s, %s) > 0", haystack, needle)
+	}
+	return fmt.Sprintf(
+		"((%s = '' AND (%s IS NOT NULL AND %s != '')) OR (%s != '' AND %s))",
+		needle,
+		haystack,
+		haystack,
+		needle,
+		containment,
+	)
+}
+
 func TestComparisonOperator_ToSQL(t *testing.T) {
 	op := NewComparisonOperator(testFieldOnlyConfig())
 
@@ -2505,22 +2525,34 @@ func TestComparisonOperator_handleIn_SchemaRequired_StringExpressionHeuristic(t 
 		expectedError bool
 	}{
 		{
-			name:        "bigquery nested string expression uses containment",
-			d:           dialect.DialectBigQuery,
-			leftArg:     leftStringExpr,
-			expectedSQL: "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')) > 0",
+			name:    "bigquery nested string expression uses containment",
+			d:       dialect.DialectBigQuery,
+			leftArg: leftStringExpr,
+			expectedSQL: testRuntimeStringContainmentSQL(
+				dialect.DialectBigQuery,
+				"profile.name",
+				"CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')",
+			),
 		},
 		{
-			name:        "postgres nested string expression uses containment",
-			d:           dialect.DialectPostgreSQL,
-			leftArg:     leftStringExpr,
-			expectedSQL: "POSITION(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x') IN profile.name) > 0",
+			name:    "postgres nested string expression uses containment",
+			d:       dialect.DialectPostgreSQL,
+			leftArg: leftStringExpr,
+			expectedSQL: testRuntimeStringContainmentSQL(
+				dialect.DialectPostgreSQL,
+				"profile.name",
+				"CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')",
+			),
 		},
 		{
-			name:        "clickhouse nested string expression uses containment",
-			d:           dialect.DialectClickHouse,
-			leftArg:     leftStringExpr,
-			expectedSQL: "position(profile.name, CONCAT(COALESCE(substring(profile.first, 1, 2), ''), '-x')) > 0",
+			name:    "clickhouse nested string expression uses containment",
+			d:       dialect.DialectClickHouse,
+			leftArg: leftStringExpr,
+			expectedSQL: testRuntimeStringContainmentSQL(
+				dialect.DialectClickHouse,
+				"profile.name",
+				"CONCAT(COALESCE(substring(profile.first, 1, 2), ''), '-x')",
+			),
 		},
 		{
 			name:        "bigquery numeric expression still uses membership fallback",
@@ -3187,7 +3219,11 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
-		want := "STRPOS(@p1, COALESCE(CAST(amount AS STRING), 'null')) > 0"
+		want := testRuntimeStringContainmentSQL(
+			dialect.DialectBigQuery,
+			"@p1",
+			"COALESCE(CAST(amount AS STRING), 'null')",
+		)
 		if got != want {
 			t.Errorf("handleInParam() = %q, want %q", got, want)
 		}
@@ -3200,7 +3236,11 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
-		want := "STRPOS(@p1, CASE WHEN flag IS TRUE THEN 'true' WHEN flag IS FALSE THEN 'false' ELSE 'null' END) > 0"
+		want := testRuntimeStringContainmentSQL(
+			dialect.DialectBigQuery,
+			"@p1",
+			"CASE WHEN flag IS TRUE THEN 'true' WHEN flag IS FALSE THEN 'false' ELSE 'null' END",
+		)
 		if got != want {
 			t.Errorf("handleInParam() = %q, want %q", got, want)
 		}
@@ -3283,7 +3323,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
-		want := "STRPOS(col, @p1) > 0"
+		want := testRuntimeStringContainmentSQL(dialect.DialectBigQuery, "col", "@p1")
 		if got != want {
 			t.Errorf("handleInParam() = %q, want %q", got, want)
 		}
@@ -3359,7 +3399,11 @@ func TestComparisonOperator_handleInParam_SchemaRequired_StringExpressionHeurist
 			d:       dialect.DialectBigQuery,
 			style:   params.PlaceholderNamed,
 			leftArg: leftStringExpr,
-			wantSQL: "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
+			wantSQL: testRuntimeStringContainmentSQL(
+				dialect.DialectBigQuery,
+				"profile.name",
+				"CONCAT(COALESCE(SUBSTR(profile.first, (@p1 + 1), @p2), ''), @p3)",
+			),
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -3371,7 +3415,11 @@ func TestComparisonOperator_handleInParam_SchemaRequired_StringExpressionHeurist
 			d:       dialect.DialectPostgreSQL,
 			style:   params.PlaceholderPositional,
 			leftArg: leftStringExpr,
-			wantSQL: "POSITION(CONCAT(COALESCE(SUBSTR(profile.first, ($1 + 1), $2), ''), $3) IN profile.name) > 0",
+			wantSQL: testRuntimeStringContainmentSQL(
+				dialect.DialectPostgreSQL,
+				"profile.name",
+				"CONCAT(COALESCE(SUBSTR(profile.first, ($1 + 1), $2), ''), $3)",
+			),
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -3383,7 +3431,11 @@ func TestComparisonOperator_handleInParam_SchemaRequired_StringExpressionHeurist
 			d:       dialect.DialectClickHouse,
 			style:   params.PlaceholderNamed,
 			leftArg: leftStringExpr,
-			wantSQL: "position(profile.name, CONCAT(COALESCE(substring(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
+			wantSQL: testRuntimeStringContainmentSQL(
+				dialect.DialectClickHouse,
+				"profile.name",
+				"CONCAT(COALESCE(substring(profile.first, (@p1 + 1), @p2), ''), @p3)",
+			),
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},

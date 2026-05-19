@@ -491,31 +491,51 @@ func TestTranspiler_InStringExpressionContainment_SchemaRequired(t *testing.T) {
 			name:      "bigquery",
 			dialect:   DialectBigQuery,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')) > 0",
+			wantSQL: testRuntimeStringContainmentSQL(
+				DialectBigQuery,
+				"profile.name",
+				"COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')",
+			),
 		},
 		{
 			name:      "spanner",
 			dialect:   DialectSpanner,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')) > 0",
+			wantSQL: testRuntimeStringContainmentSQL(
+				DialectSpanner,
+				"profile.name",
+				"COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')",
+			),
 		},
 		{
 			name:      "postgresql",
 			dialect:   DialectPostgreSQL,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "POSITION(COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null') IN profile.name) > 0",
+			wantSQL: testRuntimeStringContainmentSQL(
+				DialectPostgreSQL,
+				"profile.name",
+				"COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')",
+			),
 		},
 		{
 			name:      "duckdb",
 			dialect:   DialectDuckDB,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')) > 0",
+			wantSQL: testRuntimeStringContainmentSQL(
+				DialectDuckDB,
+				"profile.name",
+				"COALESCE(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x'), 'null')",
+			),
 		},
 		{
 			name:      "clickhouse",
 			dialect:   DialectClickHouse,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "position(profile.name, COALESCE(CONCAT(COALESCE(substring(profile.first, 1, 2), ''), '-x'), 'null')) > 0",
+			wantSQL: testRuntimeStringContainmentSQL(
+				DialectClickHouse,
+				"profile.name",
+				"COALESCE(CONCAT(COALESCE(substring(profile.first, 1, 2), ''), '-x'), 'null')",
+			),
 		},
 	}
 

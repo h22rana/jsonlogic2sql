@@ -1,6 +1,11 @@
 package jsonlogic2sql
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
+)
 
 func mustNewSchema(fields []FieldSchema) *Schema {
 	schema, err := NewSchema(fields)
@@ -21,6 +26,29 @@ func mustTestTranspiler(tb testing.TB, d Dialect) *Transpiler {
 
 func emptyTestSchema() *Schema {
 	return mustNewSchema(nil)
+}
+
+func testStringContainmentSQL(d Dialect, haystack, needle string) string {
+	switch d {
+	case DialectPostgreSQL:
+		return fmt.Sprintf("POSITION(%s IN %s) > 0", needle, haystack)
+	case DialectClickHouse:
+		return fmt.Sprintf("position(%s, %s) > 0", haystack, needle)
+	case dialect.DialectUnspecified, DialectBigQuery, DialectSpanner, DialectDuckDB:
+		return fmt.Sprintf("STRPOS(%s, %s) > 0", haystack, needle)
+	}
+	return fmt.Sprintf("STRPOS(%s, %s) > 0", haystack, needle)
+}
+
+func testRuntimeStringContainmentSQL(d Dialect, haystack, needle string) string {
+	return fmt.Sprintf(
+		"((%s = '' AND (%s IS NOT NULL AND %s != '')) OR (%s != '' AND %s))",
+		needle,
+		haystack,
+		haystack,
+		needle,
+		testStringContainmentSQL(d, haystack, needle),
+	)
 }
 
 func defaultTestSchema() *Schema {
