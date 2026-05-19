@@ -317,11 +317,18 @@ func (a *ArrayOperator) schemaExpressionType(fieldName string) ExpressionType {
 	}
 }
 
-func (a *ArrayOperator) resolveScopedFieldName(fieldName string) (string, error) {
-	return a.resolveFieldInScopes(a.currentSchemaScopes(), fieldName)
+func (a *ArrayOperator) validateScopedFieldName(fieldName string) error {
+	if a.schema() != nil && fieldName != "" && len(a.currentSchemaScopes()) == 0 {
+		return fmt.Errorf("field '%s' cannot be validated because the array element schema is unknown", fieldName)
+	}
+	_, err := a.resolveFieldInScopes(a.currentSchemaScopes(), fieldName)
+	return err
 }
 
 func (a *ArrayOperator) resolveScopedFieldNames(fieldName string) []string {
+	if a.schema() != nil && fieldName != "" && len(a.currentSchemaScopes()) == 0 {
+		return nil
+	}
 	resolved, err := a.resolveFieldNamesInScopes(a.currentSchemaScopes(), fieldName)
 	if err != nil {
 		return nil
@@ -706,8 +713,8 @@ func (a *ArrayOperator) validateArrayOperand(value interface{}) error {
 		return nil
 	}
 
-	fieldNames := a.arraySourceFieldNamesFromValue(value)
-	if len(fieldNames) == 0 {
+	fieldNames, empty, ok := a.arraySourceSchemaScopeInfo(value)
+	if !ok || empty || len(fieldNames) == 0 {
 		return nil // Can't determine field name, skip validation
 	}
 
@@ -1387,7 +1394,7 @@ func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) (string, b
 		if fieldSuffix == "" {
 			return "", false
 		}
-		if _, err := a.resolveScopedFieldName(fieldSuffix); err != nil {
+		if err := a.validateScopedFieldName(fieldSuffix); err != nil {
 			return "", false
 		}
 		return fieldSuffix, true
@@ -2025,7 +2032,7 @@ func (a *ArrayOperator) mapElementScopeVar(varName string) (string, bool, error)
 	if varName == "" {
 		return a.elemAlias(), true, nil
 	}
-	if _, err := a.resolveScopedFieldName(varName); err != nil {
+	if err := a.validateScopedFieldName(varName); err != nil {
 		return "", true, err
 	}
 	quoted, err := a.quoteArrayScopePath(a.elemAlias(), varName)
@@ -2048,7 +2055,7 @@ func (a *ArrayOperator) mapReduceScopeVar(varName string) (string, bool, error) 
 			return "", true, fmt.Errorf("unsupported reduce-scope variable %q; use %q, %q.<field>, or %q",
 				varName, CurrentVar, CurrentVar, AccumulatorVar)
 		}
-		if _, err := a.resolveScopedFieldName(suffix); err != nil {
+		if err := a.validateScopedFieldName(suffix); err != nil {
 			return "", true, err
 		}
 		quoted, err := a.quoteArrayScopePath(a.elemAlias(), suffix)

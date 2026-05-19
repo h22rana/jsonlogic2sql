@@ -9,9 +9,11 @@ import (
 func nestedScopeAuditSchema() *Schema {
 	accountElementFields := nestedScopeAuditAccountElementFields()
 	return mustNewSchema([]FieldSchema{
+		{Name: "status", Type: FieldTypeString},
 		{Name: "useBackup", Type: FieldTypeBoolean},
 		{Name: "useMetrics", Type: FieldTypeBoolean},
 		{Name: "useAlt", Type: FieldTypeBoolean},
+		{Name: "useProfile", Type: FieldTypeBoolean},
 		{
 			Name: "customer",
 			Type: FieldTypeObject,
@@ -25,6 +27,13 @@ func nestedScopeAuditSchema() *Schema {
 						{Name: "tier", Type: FieldTypeEnum, AllowedValues: []string{"gold", "silver"}},
 					},
 				},
+			},
+		},
+		{
+			Name: "profile",
+			Type: FieldTypeObject,
+			Fields: []FieldSchema{
+				{Name: "status", Type: FieldTypeString},
 			},
 		},
 		{
@@ -106,6 +115,7 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 		valueRoot  bool
 		schemaOnly bool
 		want       []string
+		wantNot    []string
 		paramLen   int
 	}{
 		{
@@ -221,6 +231,7 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			valueRoot:  true,
 			schemaOnly: true,
 			want:       []string{"accounts", "elem.status"},
+			wantNot:    []string{"metricAccounts"},
 		},
 		{
 			name:       "map over underflowed falsy if source chooses reachable schema",
@@ -228,6 +239,7 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			valueRoot:  true,
 			schemaOnly: true,
 			want:       []string{"metricAccounts", "elem.status"},
+			wantNot:    []string{"UNNEST(accounts)", "arrayMap(elem -> elem.status, accounts)"},
 		},
 	}
 
@@ -264,6 +276,7 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 								t.Fatalf("inline transpilation error = %v", inlineErr)
 							}
 							assertSQLContainsAll(t, sql, tc.want)
+							assertSQLContainsNone(t, sql, tc.wantNot)
 							if len(params) != 0 {
 								t.Fatalf("inline params = %#v, want none", params)
 							}
@@ -273,6 +286,7 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 								t.Fatalf("parameterized transpilation error = %v", paramErr)
 							}
 							assertSQLContainsAll(t, paramSQL, tc.want)
+							assertSQLContainsNone(t, paramSQL, tc.wantNot)
 							if len(params) != tc.paramLen {
 								t.Fatalf("params = %#v, want len %d", params, tc.paramLen)
 							}
@@ -357,6 +371,12 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaAwareCases_AllDialects(t *tes
 			valueRoot: true,
 			wantError: "field 'profile.tier' is not defined in schema scope 'lightAccounts'",
 		},
+		{
+			name:      "dynamic array source rejects object branch even when scoped field exists",
+			logic:     `{"map":[{"if":[{"var":"useProfile"},{"var":"accounts"},{"var":"profile"}]},{"var":"status"}]}`,
+			valueRoot: true,
+			wantError: "array operation on non-array field 'profile' (type: object)",
+		},
 	}
 
 	for _, d := range allDialects() {
@@ -382,6 +402,140 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaAwareCases_AllDialects(t *tes
 						t.Fatalf("parameterized error = %v, want containing %q (SQL %q params %#v)",
 							err, tc.wantError, sql, params)
 					}
+				})
+			}
+		})
+	}
+}
+
+func TestNestedSchemaScopeRejectsDynamicNonArraySourcesForAllArrayOperators_AllDialects(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		logic     string
+		valueRoot bool
+	}{
+		{
+			name:      "map",
+			logic:     `{"map":[{"if":[{"var":"useProfile"},{"var":"accounts"},{"var":"profile"}]},{"var":"status"}]}`,
+			valueRoot: true,
+		},
+		{
+			name:      "filter",
+			logic:     `{"filter":[{"if":[{"var":"useProfile"},{"var":"accounts"},{"var":"profile"}]},true]}`,
+			valueRoot: true,
+		},
+		{
+			name:  "all",
+			logic: `{"all":[{"if":[{"var":"useProfile"},{"var":"accounts"},{"var":"profile"}]},true]}`,
+		},
+		{
+			name:  "some",
+			logic: `{"some":[{"if":[{"var":"useProfile"},{"var":"accounts"},{"var":"profile"}]},true]}`,
+		},
+		{
+			name:  "none",
+			logic: `{"none":[{"if":[{"var":"useProfile"},{"var":"accounts"},{"var":"profile"}]},true]}`,
+		},
+		{
+			name:      "reduce",
+			logic:     `{"reduce":[{"if":[{"var":"useProfile"},{"var":"accounts"},{"var":"profile"}]},{"var":"accumulator"},0]}`,
+			valueRoot: true,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  nestedScopeAuditSchema(),
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					_, _, err := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, false)
+					assertDynamicNonArraySourceError(t, err)
+
+					sql, params, err := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, true)
+					if err == nil {
+						t.Fatalf("parameterized transpilation unexpectedly succeeded: SQL %q params %#v", sql, params)
+					}
+					assertDynamicNonArraySourceError(t, err)
+				})
+			}
+		})
+	}
+}
+
+func TestNestedSchemaScopeRejectsUnknownElementSchemaForScopedFields_AllDialects(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		logic     string
+		valueRoot bool
+	}{
+		{
+			name:      "map",
+			logic:     `{"map":[{"map":[{"var":"accounts"},{"var":"status"}]},{"var":"status"}]}`,
+			valueRoot: true,
+		},
+		{
+			name:      "filter",
+			logic:     `{"filter":[{"map":[{"var":"accounts"},{"var":"status"}]},{"var":"status"}]}`,
+			valueRoot: true,
+		},
+		{
+			name:  "all",
+			logic: `{"all":[{"map":[{"var":"accounts"},{"var":"status"}]},{"var":"status"}]}`,
+		},
+		{
+			name:  "some",
+			logic: `{"some":[{"map":[{"var":"accounts"},{"var":"status"}]},{"var":"status"}]}`,
+		},
+		{
+			name:  "none",
+			logic: `{"none":[{"map":[{"var":"accounts"},{"var":"status"}]},{"var":"status"}]}`,
+		},
+		{
+			name:      "reduce",
+			logic:     `{"reduce":[{"map":[{"var":"accounts"},{"var":"status"}]},{"var":"current.status"},0]}`,
+			valueRoot: true,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  nestedScopeAuditSchema(),
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					_, _, err := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, false)
+					assertUnknownElementSchemaError(t, err)
+
+					sql, params, err := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, true)
+					if err == nil {
+						t.Fatalf("parameterized transpilation unexpectedly succeeded: SQL %q params %#v", sql, params)
+					}
+					assertUnknownElementSchemaError(t, err)
 				})
 			}
 		})
@@ -468,5 +622,30 @@ func assertSQLContainsAll(t *testing.T, sql string, fragments []string) {
 		if !strings.Contains(sql, fragment) {
 			t.Fatalf("SQL = %q, want to contain %q", sql, fragment)
 		}
+	}
+}
+
+func assertSQLContainsNone(t *testing.T, sql string, fragments []string) {
+	t.Helper()
+	for _, fragment := range fragments {
+		if strings.Contains(sql, fragment) {
+			t.Fatalf("SQL = %q, should not contain %q", sql, fragment)
+		}
+	}
+}
+
+func assertDynamicNonArraySourceError(t *testing.T, err error) {
+	t.Helper()
+	const want = "array operation on non-array field 'profile' (type: object)"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want containing %q", err, want)
+	}
+}
+
+func assertUnknownElementSchemaError(t *testing.T, err error) {
+	t.Helper()
+	const want = "cannot be validated because the array element schema is unknown"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want containing %q", err, want)
 	}
 }
