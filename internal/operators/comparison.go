@@ -68,22 +68,51 @@ func (c *ComparisonOperator) arrayMembershipSQL(valueSQL, arraySQL string) strin
 		d = c.config.GetDialect()
 	}
 
-	condition := nullSafeArrayMemberEqualitySQL(arrayMembershipElementAlias, valueSQL)
+	memberAlias, tableAlias := arrayMembershipAliases(valueSQL, arraySQL)
+	condition := nullSafeArrayMemberEqualitySQL(memberAlias, valueSQL)
 	switch d {
 	case dialect.DialectClickHouse:
-		return fmt.Sprintf("arrayExists(%s -> %s, %s)", arrayMembershipElementAlias, condition, arraySQL)
+		return fmt.Sprintf("arrayExists(%s -> %s, %s)", memberAlias, condition, arraySQL)
 	case dialect.DialectPostgreSQL, dialect.DialectDuckDB:
 		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s(%s) WHERE %s)",
-			arraySQL, arrayMembershipTableAlias, arrayMembershipElementAlias, condition)
+			arraySQL, tableAlias, memberAlias, condition)
 	case dialect.DialectUnspecified,
 		dialect.DialectBigQuery,
 		dialect.DialectSpanner:
 		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)",
-			arraySQL, arrayMembershipElementAlias, condition)
+			arraySQL, memberAlias, condition)
 	}
 	// Fallback for any future dialects
 	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)",
-		arraySQL, arrayMembershipElementAlias, condition)
+		arraySQL, memberAlias, condition)
+}
+
+func arrayMembershipAliases(valueSQL, arraySQL string) (string, string) {
+	fragments := []string{valueSQL, arraySQL}
+	memberAlias := uniqueInternalAlias(arrayMembershipElementAlias, fragments...)
+	tableAlias := uniqueInternalAlias(arrayMembershipTableAlias, append(fragments, memberAlias)...)
+	return memberAlias, tableAlias
+}
+
+func uniqueInternalAlias(base string, fragments ...string) string {
+	for suffix := 0; ; suffix++ {
+		alias := base
+		if suffix > 0 {
+			alias = fmt.Sprintf("%s_%d", base, suffix)
+		}
+		if !aliasAppearsInSQL(alias, fragments...) {
+			return alias
+		}
+	}
+}
+
+func aliasAppearsInSQL(alias string, fragments ...string) bool {
+	for _, fragment := range fragments {
+		if strings.Contains(fragment, alias) {
+			return true
+		}
+	}
+	return false
 }
 
 func nullSafeArrayMemberEqualitySQL(memberSQL, valueSQL string) string {

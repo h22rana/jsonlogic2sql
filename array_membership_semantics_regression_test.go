@@ -66,6 +66,109 @@ func TestInArrayMembership_NullSafeRuntimeArray_AllDialectsAndModes(t *testing.T
 	}
 }
 
+func TestInArrayMembership_InternalAliasAvoidsUserFieldCollision(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		schema      *Schema
+		logic       string
+		valueSQL    string
+		arraySQL    string
+		tableAlias  string
+		memberAlias string
+	}{
+		{
+			name: "needle field matches base internal alias",
+			schema: mustNewSchema([]FieldSchema{
+				{Name: "__j2s_member", Type: FieldTypeString},
+				{Name: "tags", Type: FieldTypeArray},
+			}),
+			logic:       `{"in":[{"var":"__j2s_member"},{"var":"tags"}]}`,
+			valueSQL:    "__j2s_member",
+			arraySQL:    "tags",
+			tableAlias:  "__j2s_members",
+			memberAlias: "__j2s_member_1",
+		},
+		{
+			name: "array field matches base internal alias",
+			schema: mustNewSchema([]FieldSchema{
+				{Name: "needle", Type: FieldTypeString},
+				{Name: "__j2s_member", Type: FieldTypeArray},
+			}),
+			logic:       `{"in":[{"var":"needle"},{"var":"__j2s_member"}]}`,
+			valueSQL:    "needle",
+			arraySQL:    "__j2s_member",
+			tableAlias:  "__j2s_members",
+			memberAlias: "__j2s_member_1",
+		},
+		{
+			name: "needle field also matches first suffixed alias",
+			schema: mustNewSchema([]FieldSchema{
+				{Name: "__j2s_member_1", Type: FieldTypeString},
+				{Name: "tags", Type: FieldTypeArray},
+			}),
+			logic:       `{"in":[{"var":"__j2s_member_1"},{"var":"tags"}]}`,
+			valueSQL:    "__j2s_member_1",
+			arraySQL:    "tags",
+			tableAlias:  "__j2s_members",
+			memberAlias: "__j2s_member_2",
+		},
+		{
+			name: "needle field matches internal table alias",
+			schema: mustNewSchema([]FieldSchema{
+				{Name: "__j2s_members", Type: FieldTypeString},
+				{Name: "tags", Type: FieldTypeArray},
+			}),
+			logic:       `{"in":[{"var":"__j2s_members"},{"var":"tags"}]}`,
+			valueSQL:    "__j2s_members",
+			arraySQL:    "tags",
+			tableAlias:  "__j2s_members_1",
+			memberAlias: "__j2s_member_1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, d := range allDialects() {
+				t.Run(d.String(), func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  tt.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+
+					want := testArrayMembershipSQLWithAliases(d, tt.tableAlias, tt.memberAlias, tt.valueSQL, tt.arraySQL)
+					got, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, want)
+					}
+
+					gotParam, params, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParam != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestInLiteralArrayMembership_StrictAndNullSafe(t *testing.T) {
 	t.Parallel()
 

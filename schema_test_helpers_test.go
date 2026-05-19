@@ -53,20 +53,31 @@ func testRuntimeStringContainmentSQL(d Dialect, haystack, needle string) string 
 }
 
 func testNullSafeArrayMembershipSQL(d Dialect, valueSQL, arraySQL string) string {
-	condition := testNullSafeArrayMemberEqualitySQL("__j2s_member", valueSQL)
+	return testArrayMembershipSQLWithAlias(d, "__j2s_member", valueSQL, arraySQL)
+}
+
+func testArrayMembershipSQLWithAlias(d Dialect, memberAlias, valueSQL, arraySQL string) string {
+	return testArrayMembershipSQLWithAliases(d, "__j2s_members", memberAlias, valueSQL, arraySQL)
+}
+
+func testArrayMembershipSQLWithAliases(d Dialect, tableAlias, memberAlias, valueSQL, arraySQL string) string {
+	condition := testNullSafeArrayMemberEqualitySQL(memberAlias, valueSQL)
 	switch d {
 	case DialectClickHouse:
-		return fmt.Sprintf("arrayExists(__j2s_member -> %s, %s)", condition, arraySQL)
+		return fmt.Sprintf("arrayExists(%s -> %s, %s)", memberAlias, condition, arraySQL)
 	case DialectPostgreSQL, DialectDuckDB:
 		return fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_members(__j2s_member) WHERE %s)",
+			"EXISTS (SELECT 1 FROM UNNEST(%s) AS %s(%s) WHERE %s)",
 			arraySQL,
+			tableAlias,
+			memberAlias,
 			condition,
 		)
 	}
 	return fmt.Sprintf(
-		"EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_member WHERE %s)",
+		"EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)",
 		arraySQL,
+		memberAlias,
 		condition,
 	)
 }

@@ -351,6 +351,8 @@ predicate; ClickHouse uses `arrayExists(...)`.
 DuckDB uses explicit column aliases in these `UNNEST` scopes, for example
 `UNNEST(tags) AS elem(elem)`, so the lambda variable resolves to the array
 element rather than DuckDB's default `unnest` column.
+The internal membership aliases use a `__j2s_` prefix and are automatically
+suffixed when needed so schema fields with the same names are not shadowed.
 
 When the right-hand side is a known non-container value such as a number,
 boolean, null, or an empty array literal, `in` folds to `FALSE` because
