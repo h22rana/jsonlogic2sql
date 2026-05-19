@@ -200,6 +200,30 @@ func TestValidatePlaceholderRefsNamed(t *testing.T) {
 			params:    []QueryParam{{Name: "p1", Value: 1}, {Name: "p2", Value: 2}},
 			expectErr: false,
 		},
+		{
+			name:      "quoted placeholder is ignored",
+			sql:       "WHERE note = '@p1' AND y = @p2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-string"}, {Name: "p2", Value: "referenced"}},
+			expectErr: true,
+		},
+		{
+			name:      "escaped quote string placeholder is ignored",
+			sql:       "WHERE note = 'it''s @p1' AND y = @p2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-string"}, {Name: "p2", Value: "referenced"}},
+			expectErr: true,
+		},
+		{
+			name:      "line comment placeholder is ignored",
+			sql:       "WHERE -- @p1\n y = @p2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-comment"}, {Name: "p2", Value: "referenced"}},
+			expectErr: true,
+		},
+		{
+			name:      "block comment placeholder is ignored",
+			sql:       "WHERE /* @p1 */ y = @p2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-comment"}, {Name: "p2", Value: "referenced"}},
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -249,6 +273,24 @@ func TestValidatePlaceholderRefsPositional(t *testing.T) {
 			params:    []QueryParam{{Name: "p1", Value: 1}, {Name: "p2", Value: 2}},
 			expectErr: false,
 		},
+		{
+			name:      "quoted placeholder is ignored",
+			sql:       "WHERE x = '$1' AND y = $2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-string"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
+		{
+			name:      "line comment placeholder is ignored",
+			sql:       "WHERE -- $1\n x = $2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-comment"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
+		{
+			name:      "block comment placeholder is ignored",
+			sql:       "WHERE /* $1 */ x = $2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-comment"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -258,43 +300,6 @@ func TestValidatePlaceholderRefsPositional(t *testing.T) {
 				t.Errorf("ValidatePlaceholderRefs() error = %v, wantErr %v", err, tt.expectErr)
 			}
 		})
-	}
-}
-
-// KNOWN_LIMITATION: ValidatePlaceholderRefs can treat placeholder-like text
-// inside SQL string literals as a real reference.
-// TODO: Future tokenizer upgrade to skip quoted strings and SQL comments.
-func TestValidatePlaceholderRefsFalsePositives(t *testing.T) {
-	// A custom operator could emit SQL with @p1 inside a string literal.
-	// The validator would incorrectly consider @p1 as referenced.
-	sql := "WHERE x = '@p1' AND y = @p2"
-	params := []QueryParam{
-		{Name: "p1", Value: "not-actually-referenced"},
-		{Name: "p2", Value: "referenced"},
-	}
-
-	err := ValidatePlaceholderRefs(sql, params, PlaceholderNamed)
-	// The validator finds '@p1' inside the string literal and considers p1 as referenced.
-	// This is a known false negative - no error, even though @p1 is inside quotes.
-	if err != nil {
-		t.Errorf("KNOWN_LIMITATION: expected no error (false negative), got: %v", err)
-	}
-}
-
-// KNOWN_LIMITATION: ValidatePlaceholderRefs can treat placeholder-like text in
-// SQL comments as a real reference.
-// TODO: Future tokenizer upgrade to skip SQL comments.
-func TestValidatePlaceholderRefsCommentFalsePositive(t *testing.T) {
-	sql := "WHERE /* $1 */ x = $2"
-	params := []QueryParam{
-		{Name: "p1", Value: "inside-comment"},
-		{Name: "p2", Value: "actual"},
-	}
-
-	err := ValidatePlaceholderRefs(sql, params, PlaceholderPositional)
-	// The validator finds $1 inside the comment and considers p1 as referenced.
-	if err != nil {
-		t.Errorf("KNOWN_LIMITATION: expected no error (false negative), got: %v", err)
 	}
 }
 

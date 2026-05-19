@@ -126,16 +126,11 @@ func (pc *ParamCollector) ValueForPlaceholder(placeholder string) (interface{}, 
 	return nil, false
 }
 
-// ValidatePlaceholderRefs is a best-effort safety guard that scans the final
-// SQL for each collected placeholder using style-specific boundary patterns.
+// ValidatePlaceholderRefs is a safety guard that scans the final SQL for each
+// collected placeholder using style-specific boundary patterns outside quoted
+// string literals and SQL comments.
 // It returns E350 ErrUnreferencedPlaceholder if any placeholder is not found,
 // indicating a custom operator may have dropped an argument.
-//
-// This is NOT a strict SQL token parser. It may produce false positives if a
-// custom operator emits SQL containing placeholder-like text inside string
-// literals (e.g., '@p1') or SQL comments (e.g., -- @p1, /* $1 */).
-// In normal usage this does not occur because the parameterized pipeline
-// replaces all user-originated literals with placeholders.
 func ValidatePlaceholderRefs(sql string, params []QueryParam, style PlaceholderStyle) error {
 	for i, p := range params {
 		placeholder := formatPlaceholder(i+1, p.Name, style)
@@ -149,23 +144,66 @@ func ValidatePlaceholderRefs(sql string, params []QueryParam, style PlaceholderS
 }
 
 func containsPlaceholderRef(sql, placeholder string, style PlaceholderStyle) bool {
-	if style == PlaceholderQuestion {
-		return strings.Contains(sql, placeholder)
-	}
-
-	searchFrom := 0
-	for {
-		idx := strings.Index(sql[searchFrom:], placeholder)
-		if idx < 0 {
-			return false
+	for i := 0; i < len(sql); i++ {
+		switch {
+		case sql[i] == '\'':
+			i = skipSQLString(sql, i)
+			continue
+		case i+1 < len(sql) && sql[i] == '-' && sql[i+1] == '-':
+			i = skipSQLLineComment(sql, i+2)
+			continue
+		case i+1 < len(sql) && sql[i] == '/' && sql[i+1] == '*':
+			i = skipSQLBlockComment(sql, i+2)
+			continue
 		}
-		start := searchFrom + idx
-		end := start + len(placeholder)
-		if hasPlaceholderBoundaries(sql, start, end, style) {
+
+		if isPlaceholderAt(sql, placeholder, i, style) {
 			return true
 		}
-		searchFrom = start + 1
 	}
+	return false
+}
+
+func skipSQLString(sql string, start int) int {
+	for i := start + 1; i < len(sql); i++ {
+		if sql[i] != '\'' {
+			continue
+		}
+		if i+1 < len(sql) && sql[i+1] == '\'' {
+			i++
+			continue
+		}
+		return i
+	}
+	return len(sql) - 1
+}
+
+func skipSQLLineComment(sql string, start int) int {
+	for i := start; i < len(sql); i++ {
+		if sql[i] == '\n' || sql[i] == '\r' {
+			return i
+		}
+	}
+	return len(sql) - 1
+}
+
+func skipSQLBlockComment(sql string, start int) int {
+	for i := start; i+1 < len(sql); i++ {
+		if sql[i] == '*' && sql[i+1] == '/' {
+			return i + 1
+		}
+	}
+	return len(sql) - 1
+}
+
+func isPlaceholderAt(sql, placeholder string, start int, style PlaceholderStyle) bool {
+	if !strings.HasPrefix(sql[start:], placeholder) {
+		return false
+	}
+	if style == PlaceholderQuestion {
+		return true
+	}
+	return hasPlaceholderBoundaries(sql, start, start+len(placeholder), style)
 }
 
 // FindQuotedPlaceholderRef scans SQL string literals and returns the first
