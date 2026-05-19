@@ -63,6 +63,13 @@ func TestStringOperator_ToSQL(t *testing.T) {
 			hasError: false,
 		},
 		{
+			name:     "concatenation with number literal and nil config",
+			operator: "cat",
+			args:     []interface{}{1},
+			expected: "CONCAT(CAST(1 AS STRING))",
+			hasError: false,
+		},
+		{
 			name:     "cat preserves comparison if branches",
 			operator: "cat",
 			args: []interface{}{
