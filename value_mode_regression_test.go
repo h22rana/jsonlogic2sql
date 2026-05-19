@@ -1502,7 +1502,6 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 		schema *Schema
 	}{
 		{name: "schema-required", schema: schema},
-		{name: "schema-required", schema: schema},
 	}
 
 	valueCases := []struct {
@@ -2586,7 +2585,6 @@ func TestTranspileValue_NotNormalizesNullablePredicatesAllDialectsSchemaModes(t 
 				name   string
 				schema *Schema
 			}{
-				{name: "schema-required", schema: schema},
 				{name: "schema-required", schema: schema},
 			} {
 				t.Run(cfg.name, func(t *testing.T) {
@@ -3751,9 +3749,8 @@ func TestTranspileValue_CatRejectsStaticArrayValuesAllDialectsSchemaModes(t *tes
 	})
 
 	tests := []struct {
-		name       string
-		logic      string
-		schemaOnly bool
+		name  string
+		logic string
 	}{
 		{
 			name:  "array literal",
@@ -3772,14 +3769,12 @@ func TestTranspileValue_CatRejectsStaticArrayValuesAllDialectsSchemaModes(t *tes
 			logic: `{"cat":[{"arrayValue":[]}]}`,
 		},
 		{
-			name:       "custom array value behind parameterized stringified or",
-			logic:      `{"cat":[{"or":[{"var":"flag"},{"arrayParam":["x"]}]}]}`,
-			schemaOnly: true,
+			name:  "custom array value behind parameterized stringified or",
+			logic: `{"cat":[{"or":[{"var":"flag"},{"arrayParam":["x"]}]}]}`,
 		},
 		{
-			name:       "schema array field",
-			logic:      `{"cat":[{"var":"items"}]}`,
-			schemaOnly: true,
+			name:  "schema array field",
+			logic: `{"cat":[{"var":"items"}]}`,
 		},
 	}
 
@@ -3818,9 +3813,6 @@ func TestTranspileValue_CatRejectsStaticArrayValuesAllDialectsSchemaModes(t *tes
 					}
 
 					for _, tt := range tests {
-						if tt.schemaOnly && mode.schema == nil {
-							continue
-						}
 						t.Run(tt.name, func(t *testing.T) {
 							if _, valueErr := tr.TranspileValue(tt.logic); !IsErrorCode(valueErr, ErrInvalidArgument) {
 								t.Fatalf("TranspileValue() error = %v, want %s", valueErr, ErrInvalidArgument)

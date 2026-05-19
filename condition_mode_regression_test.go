@@ -1311,7 +1311,6 @@ func TestTranspileCondition_ComparisonOperandsUseValueSemantics(t *testing.T) {
 				schema *Schema
 			}{
 				{name: "schema-required", schema: schema},
-				{name: "schema-required", schema: schema},
 			} {
 				t.Run(cfg.name, func(t *testing.T) {
 					tr, err := NewTranspilerWithConfig(&TranspilerConfig{

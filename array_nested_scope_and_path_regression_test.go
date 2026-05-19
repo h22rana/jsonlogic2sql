@@ -229,7 +229,6 @@ func TestScopedNestedArrayValuesUseTruthinessInArrayLambdaPredicates_AllDialects
 		schema *Schema
 	}{
 		{name: "schema-required", schema: schema},
-		{name: "schema-required", schema: schema},
 	}
 
 	cases := []struct {
@@ -397,7 +396,6 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaModes(t *tes
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-required", schema: schema},
 		{name: "schema-required", schema: schema},
 	}
 

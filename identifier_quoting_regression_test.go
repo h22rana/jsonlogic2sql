@@ -30,7 +30,6 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 		schema *Schema
 	}{
 		{name: "schema-required", schema: schema},
-		{name: "schema-required", schema: schema},
 	}
 
 	dialects := []Dialect{

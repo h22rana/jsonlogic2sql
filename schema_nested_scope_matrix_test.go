@@ -110,13 +110,12 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 	t.Parallel()
 
 	validCases := []struct {
-		name       string
-		logic      string
-		valueRoot  bool
-		schemaOnly bool
-		want       []string
-		wantNot    []string
-		paramLen   int
+		name      string
+		logic     string
+		valueRoot bool
+		want      []string
+		wantNot   []string
+		paramLen  int
 	}{
 		{
 			name:     "root object enum",
@@ -205,41 +204,36 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			want:      []string{"elem.profile.region"},
 		},
 		{
-			name:       "map over dynamic if compatible array sources preserves element schema",
-			logic:      `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"var":"profile.tier"}]}`,
-			valueRoot:  true,
-			schemaOnly: true,
-			want:       []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE backupAccounts END", "elem.profile.tier"},
+			name:      "map over dynamic if compatible array sources preserves element schema",
+			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"var":"profile.tier"}]}`,
+			valueRoot: true,
+			want:      []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE backupAccounts END", "elem.profile.tier"},
 		},
 		{
-			name:       "nested map over dynamic if compatible array sources preserves nested element schema",
-			logic:      `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"map":[{"var":"transactions"},{"var":"method.type"}]}]}`,
-			valueRoot:  true,
-			schemaOnly: true,
-			want:       []string{"elem.transactions", "elem1.method.type"},
+			name:      "nested map over dynamic if compatible array sources preserves nested element schema",
+			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"map":[{"var":"transactions"},{"var":"method.type"}]}]}`,
+			valueRoot: true,
+			want:      []string{"elem.transactions", "elem1.method.type"},
 		},
 		{
-			name:       "some over dynamic if compatible array sources validates scoped enum",
-			logic:      `{"some":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"==":[{"var":"status"},"active"]}]}`,
-			schemaOnly: true,
-			want:       []string{"elem.status ="},
-			paramLen:   1,
+			name:     "some over dynamic if compatible array sources validates scoped enum",
+			logic:    `{"some":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"==":[{"var":"status"},"active"]}]}`,
+			want:     []string{"elem.status ="},
+			paramLen: 1,
 		},
 		{
-			name:       "map over overflowed truthy if source chooses reachable schema",
-			logic:      `{"map":[{"if":[1e9999,{"var":"accounts"},{"var":"metricAccounts"}]},{"var":"status"}]}`,
-			valueRoot:  true,
-			schemaOnly: true,
-			want:       []string{"accounts", "elem.status"},
-			wantNot:    []string{"metricAccounts"},
+			name:      "map over overflowed truthy if source chooses reachable schema",
+			logic:     `{"map":[{"if":[1e9999,{"var":"accounts"},{"var":"metricAccounts"}]},{"var":"status"}]}`,
+			valueRoot: true,
+			want:      []string{"accounts", "elem.status"},
+			wantNot:   []string{"metricAccounts"},
 		},
 		{
-			name:       "map over underflowed falsy if source chooses reachable schema",
-			logic:      `{"map":[{"if":[1e-9999,{"var":"accounts"},{"var":"metricAccounts"}]},{"var":"status"}]}`,
-			valueRoot:  true,
-			schemaOnly: true,
-			want:       []string{"metricAccounts", "elem.status"},
-			wantNot:    []string{"UNNEST(accounts)", "arrayMap(elem -> elem.status, accounts)"},
+			name:      "map over underflowed falsy if source chooses reachable schema",
+			logic:     `{"map":[{"if":[1e-9999,{"var":"accounts"},{"var":"metricAccounts"}]},{"var":"status"}]}`,
+			valueRoot: true,
+			want:      []string{"metricAccounts", "elem.status"},
+			wantNot:   []string{"UNNEST(accounts)", "arrayMap(elem -> elem.status, accounts)"},
 		},
 	}
 
@@ -266,9 +260,6 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 					for _, tc := range validCases {
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
-							if tc.schemaOnly && mode.schema == nil {
-								t.Skip("case requires schema to type the dynamic source condition")
-							}
 
 							sql, params, inlineErr := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, false)
 							if inlineErr != nil {
