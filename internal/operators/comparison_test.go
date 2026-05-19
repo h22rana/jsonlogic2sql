@@ -33,19 +33,32 @@ func testRuntimeStringContainmentSQL(d dialect.Dialect, haystack, needle string)
 }
 
 func testNullSafeArrayMembershipSQL(d dialect.Dialect, valueSQL, arraySQL string) string {
+	return testNullSafeArrayMembershipSQLWithAliases(d, "__j2s_members", "__j2s_member", valueSQL, arraySQL)
+}
+
+func testNullSafeArrayMembershipSQLWithAliases(
+	d dialect.Dialect,
+	tableAlias string,
+	memberAlias string,
+	valueSQL string,
+	arraySQL string,
+) string {
 	condition := fmt.Sprintf(
-		"((__j2s_member IS NULL AND %s IS NULL) OR (__j2s_member IS NOT NULL AND %s IS NOT NULL AND __j2s_member = %s))",
+		"((%s IS NULL AND %s IS NULL) OR (%s IS NOT NULL AND %s IS NOT NULL AND %s = %s))",
+		memberAlias,
 		valueSQL,
+		memberAlias,
 		valueSQL,
+		memberAlias,
 		valueSQL,
 	)
 	if d == dialect.DialectClickHouse {
-		return fmt.Sprintf("arrayExists(__j2s_member -> %s, %s)", condition, arraySQL)
+		return fmt.Sprintf("arrayExists(%s -> %s, %s)", memberAlias, condition, arraySQL)
 	}
 	if d == dialect.DialectPostgreSQL || d == dialect.DialectDuckDB {
-		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_members(__j2s_member) WHERE %s)", arraySQL, condition)
+		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s(%s) WHERE %s)", arraySQL, tableAlias, memberAlias, condition)
 	}
-	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_member WHERE %s)", arraySQL, condition)
+	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)", arraySQL, memberAlias, condition)
 }
 
 func TestComparisonOperator_ToSQL(t *testing.T) {
@@ -1848,6 +1861,58 @@ func TestComparisonOperator_arrayMembershipSQL(t *testing.T) {
 			valueSQL: "'val'",
 			arraySQL: "arr",
 			expected: testNullSafeArrayMembershipSQL(dialect.DialectUnspecified, "'val'", "arr"),
+		},
+		{
+			name:     "BigQuery - avoids value alias collision",
+			dialect:  dialect.DialectBigQuery,
+			valueSQL: "__j2s_member",
+			arraySQL: "tags",
+			expected: testNullSafeArrayMembershipSQLWithAliases(
+				dialect.DialectBigQuery,
+				"__j2s_members",
+				"__j2s_member_1",
+				"__j2s_member",
+				"tags",
+			),
+		},
+		{
+			name:     "PostgreSQL - avoids value and table alias collisions",
+			dialect:  dialect.DialectPostgreSQL,
+			valueSQL: "__j2s_members",
+			arraySQL: "tags",
+			expected: testNullSafeArrayMembershipSQLWithAliases(
+				dialect.DialectPostgreSQL,
+				"__j2s_members_1",
+				"__j2s_member_1",
+				"__j2s_members",
+				"tags",
+			),
+		},
+		{
+			name:     "DuckDB - avoids array alias collision",
+			dialect:  dialect.DialectDuckDB,
+			valueSQL: "needle",
+			arraySQL: "__j2s_member",
+			expected: testNullSafeArrayMembershipSQLWithAliases(
+				dialect.DialectDuckDB,
+				"__j2s_members",
+				"__j2s_member_1",
+				"needle",
+				"__j2s_member",
+			),
+		},
+		{
+			name:     "ClickHouse - skips multiple collided aliases",
+			dialect:  dialect.DialectClickHouse,
+			valueSQL: "__j2s_member_1",
+			arraySQL: "tags",
+			expected: testNullSafeArrayMembershipSQLWithAliases(
+				dialect.DialectClickHouse,
+				"__j2s_members",
+				"__j2s_member_2",
+				"__j2s_member_1",
+				"tags",
+			),
 		},
 	}
 
