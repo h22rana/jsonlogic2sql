@@ -62,148 +62,138 @@ func TestRegressionMatrix_ComparisonLogicalNumeric_AllDialects(t *testing.T) {
 		},
 	}
 
-	modes := []struct {
-		name        string
-		schema      *Schema
-		schemaAware bool
-	}{
-		{name: "schema-required", schema: schema, schemaAware: true},
-	}
+	t.Run("schema-required", func(t *testing.T) {
+		t.Parallel()
 
-	for _, mode := range modes {
-		t.Run(mode.name, func(t *testing.T) {
-			t.Parallel()
+		for _, d := range dialects {
+			t.Run(d.String(), func(t *testing.T) {
+				t.Parallel()
 
-			for _, d := range dialects {
-				t.Run(d.String(), func(t *testing.T) {
-					t.Parallel()
-
-					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
-						Dialect: d,
-						Schema:  mode.schema,
-					})
-					if err != nil {
-						t.Fatalf("NewTranspilerWithConfig() error: %v", err)
-					}
-					registerMatrixCustomOps(t, tr)
-
-					for _, tc := range cases {
-						t.Run(tc.name, func(t *testing.T) {
-							var sql string
-							var err error
-							if tc.valueRoot {
-								sql, err = tr.TranspileValue(tc.logic)
-							} else {
-								sql, err = tr.TranspileCondition(tc.logic)
-							}
-							if err != nil {
-								t.Fatalf("transpile error: %v", err)
-							}
-
-							var repeat string
-							if !tc.valueRoot {
-								repeat, err = tr.TranspileCondition(tc.logic)
-							} else {
-								repeat, err = tr.TranspileValue(tc.logic)
-							}
-							if err != nil {
-								t.Fatalf("transpile repeat error: %v", err)
-							}
-
-							if sql != repeat {
-								t.Fatalf("repeat transpile mismatch: sql=%q repeat=%q", sql, repeat)
-							}
-
-							var psql string
-							var params []QueryParam
-							if tc.valueRoot {
-								psql, params, err = tr.TranspileParameterizedValue(tc.logic)
-							} else {
-								psql, params, err = tr.TranspileParameterizedCondition(tc.logic)
-							}
-							if err != nil {
-								t.Fatalf("parameterized transpile error: %v", err)
-							}
-							var pcond string
-							var cparams []QueryParam
-							if tc.valueRoot {
-								pcond, cparams, err = tr.TranspileParameterizedValue(tc.logic)
-							} else {
-								pcond, cparams, err = tr.TranspileParameterizedCondition(tc.logic)
-							}
-							if err != nil {
-								t.Fatalf("parameterized transpile repeat error: %v", err)
-							}
-							if psql != pcond {
-								t.Fatalf("param repeat transpile mismatch: psql=%q pcond=%q", psql, pcond)
-							}
-							if !reflect.DeepEqual(params, cparams) {
-								t.Fatalf("param list mismatch between repeated parameterized transpiles:\nparams=%#v\ncparams=%#v", params, cparams)
-							}
-
-							logicMap := parseJSONLogicMap(t, tc.logic)
-
-							var pFromMap string
-							var mapParams []QueryParam
-							if tc.valueRoot {
-								pFromMap, mapParams, err = tr.TranspileParameterizedValueFromMap(logicMap)
-							} else {
-								pFromMap, mapParams, err = tr.TranspileParameterizedConditionFromMap(logicMap)
-							}
-							if err != nil {
-								t.Fatalf("parameterized from map error: %v", err)
-							}
-							var pFromAny string
-							var anyParams []QueryParam
-							if tc.valueRoot {
-								pFromAny, anyParams, err = tr.TranspileParameterizedValueFromInterface(logicMap)
-							} else {
-								pFromAny, anyParams, err = tr.TranspileParameterizedConditionFromInterface(logicMap)
-							}
-							if err != nil {
-								t.Fatalf("parameterized from interface error: %v", err)
-							}
-							if pFromMap != psql || pFromAny != psql {
-								t.Fatalf("param SQL mismatch map/interface variants:\npsql=%q\nfromMap=%q\nfromAny=%q", psql, pFromMap, pFromAny)
-							}
-							if !reflect.DeepEqual(mapParams, params) || !reflect.DeepEqual(anyParams, params) {
-								t.Fatalf("param value mismatch map/interface variants:\nparams=%#v\nmap=%#v\nany=%#v", params, mapParams, anyParams)
-							}
-
-							var pcFromMap string
-							var mapCondParams []QueryParam
-							if tc.valueRoot {
-								pcFromMap, mapCondParams, err = tr.TranspileParameterizedValueFromMap(logicMap)
-							} else {
-								pcFromMap, mapCondParams, err = tr.TranspileParameterizedConditionFromMap(logicMap)
-							}
-							if err != nil {
-								t.Fatalf("parameterized repeat from map error: %v", err)
-							}
-							var pcFromAny string
-							var anyCondParams []QueryParam
-							if tc.valueRoot {
-								pcFromAny, anyCondParams, err = tr.TranspileParameterizedValueFromInterface(logicMap)
-							} else {
-								pcFromAny, anyCondParams, err = tr.TranspileParameterizedConditionFromInterface(logicMap)
-							}
-							if err != nil {
-								t.Fatalf("parameterized repeat from interface error: %v", err)
-							}
-							if pcFromMap != pcond || pcFromAny != pcond {
-								t.Fatalf("param condition mismatch map/interface variants:\npcond=%q\nfromMap=%q\nfromAny=%q", pcond, pcFromMap, pcFromAny)
-							}
-							if !reflect.DeepEqual(mapCondParams, params) || !reflect.DeepEqual(anyCondParams, params) {
-								t.Fatalf("param condition values mismatch map/interface variants:\nparams=%#v\nmap=%#v\nany=%#v", params, mapCondParams, anyCondParams)
-							}
-
-							validateComparisonLogicalNumericCase(t, tc.name, d, mode.schemaAware, sql, pcond, params)
-						})
-					}
+				tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+					Dialect: d,
+					Schema:  schema,
 				})
-			}
-		})
-	}
+				if err != nil {
+					t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+				}
+				registerMatrixCustomOps(t, tr)
+
+				for _, tc := range cases {
+					t.Run(tc.name, func(t *testing.T) {
+						var sql string
+						var err error
+						if tc.valueRoot {
+							sql, err = tr.TranspileValue(tc.logic)
+						} else {
+							sql, err = tr.TranspileCondition(tc.logic)
+						}
+						if err != nil {
+							t.Fatalf("transpile error: %v", err)
+						}
+
+						var repeat string
+						if !tc.valueRoot {
+							repeat, err = tr.TranspileCondition(tc.logic)
+						} else {
+							repeat, err = tr.TranspileValue(tc.logic)
+						}
+						if err != nil {
+							t.Fatalf("transpile repeat error: %v", err)
+						}
+
+						if sql != repeat {
+							t.Fatalf("repeat transpile mismatch: sql=%q repeat=%q", sql, repeat)
+						}
+
+						var psql string
+						var params []QueryParam
+						if tc.valueRoot {
+							psql, params, err = tr.TranspileParameterizedValue(tc.logic)
+						} else {
+							psql, params, err = tr.TranspileParameterizedCondition(tc.logic)
+						}
+						if err != nil {
+							t.Fatalf("parameterized transpile error: %v", err)
+						}
+						var pcond string
+						var cparams []QueryParam
+						if tc.valueRoot {
+							pcond, cparams, err = tr.TranspileParameterizedValue(tc.logic)
+						} else {
+							pcond, cparams, err = tr.TranspileParameterizedCondition(tc.logic)
+						}
+						if err != nil {
+							t.Fatalf("parameterized transpile repeat error: %v", err)
+						}
+						if psql != pcond {
+							t.Fatalf("param repeat transpile mismatch: psql=%q pcond=%q", psql, pcond)
+						}
+						if !reflect.DeepEqual(params, cparams) {
+							t.Fatalf("param list mismatch between repeated parameterized transpiles:\nparams=%#v\ncparams=%#v", params, cparams)
+						}
+
+						logicMap := parseJSONLogicMap(t, tc.logic)
+
+						var pFromMap string
+						var mapParams []QueryParam
+						if tc.valueRoot {
+							pFromMap, mapParams, err = tr.TranspileParameterizedValueFromMap(logicMap)
+						} else {
+							pFromMap, mapParams, err = tr.TranspileParameterizedConditionFromMap(logicMap)
+						}
+						if err != nil {
+							t.Fatalf("parameterized from map error: %v", err)
+						}
+						var pFromAny string
+						var anyParams []QueryParam
+						if tc.valueRoot {
+							pFromAny, anyParams, err = tr.TranspileParameterizedValueFromInterface(logicMap)
+						} else {
+							pFromAny, anyParams, err = tr.TranspileParameterizedConditionFromInterface(logicMap)
+						}
+						if err != nil {
+							t.Fatalf("parameterized from interface error: %v", err)
+						}
+						if pFromMap != psql || pFromAny != psql {
+							t.Fatalf("param SQL mismatch map/interface variants:\npsql=%q\nfromMap=%q\nfromAny=%q", psql, pFromMap, pFromAny)
+						}
+						if !reflect.DeepEqual(mapParams, params) || !reflect.DeepEqual(anyParams, params) {
+							t.Fatalf("param value mismatch map/interface variants:\nparams=%#v\nmap=%#v\nany=%#v", params, mapParams, anyParams)
+						}
+
+						var pcFromMap string
+						var mapCondParams []QueryParam
+						if tc.valueRoot {
+							pcFromMap, mapCondParams, err = tr.TranspileParameterizedValueFromMap(logicMap)
+						} else {
+							pcFromMap, mapCondParams, err = tr.TranspileParameterizedConditionFromMap(logicMap)
+						}
+						if err != nil {
+							t.Fatalf("parameterized repeat from map error: %v", err)
+						}
+						var pcFromAny string
+						var anyCondParams []QueryParam
+						if tc.valueRoot {
+							pcFromAny, anyCondParams, err = tr.TranspileParameterizedValueFromInterface(logicMap)
+						} else {
+							pcFromAny, anyCondParams, err = tr.TranspileParameterizedConditionFromInterface(logicMap)
+						}
+						if err != nil {
+							t.Fatalf("parameterized repeat from interface error: %v", err)
+						}
+						if pcFromMap != pcond || pcFromAny != pcond {
+							t.Fatalf("param condition mismatch map/interface variants:\npcond=%q\nfromMap=%q\nfromAny=%q", pcond, pcFromMap, pcFromAny)
+						}
+						if !reflect.DeepEqual(mapCondParams, params) || !reflect.DeepEqual(anyCondParams, params) {
+							t.Fatalf("param condition values mismatch map/interface variants:\nparams=%#v\nmap=%#v\nany=%#v", params, mapCondParams, anyCondParams)
+						}
+
+						validateComparisonLogicalNumericCase(t, tc.name, d, sql, pcond, params)
+					})
+				}
+			})
+		}
+	})
 }
 
 func registerMatrixCustomOps(t *testing.T, tr *Transpiler) {
@@ -249,7 +239,6 @@ func validateComparisonLogicalNumericCase(
 	t *testing.T,
 	name string,
 	d Dialect,
-	schemaAware bool,
 	cond string,
 	pcond string,
 	params []QueryParam,
@@ -313,17 +302,9 @@ func validateComparisonLogicalNumericCase(
 			t.Fatalf("expected 1 param for schema_string_coercion, got %d: %#v", len(params), params)
 		}
 
-		if schemaAware {
-			requireContains("profile.name = '123'")
-			if _, ok := params[0].Value.(string); !ok {
-				t.Fatalf("expected schema-required param type string, got %T (%v)", params[0].Value, params[0].Value)
-			}
-			return
-		}
-
-		requireContains("profile.name = 123")
-		if _, ok := params[0].Value.(float64); !ok {
-			t.Fatalf("expected schema-required param type float64, got %T (%v)", params[0].Value, params[0].Value)
+		requireContains("profile.name = '123'")
+		if _, ok := params[0].Value.(string); !ok {
+			t.Fatalf("expected schema-required param type string, got %T (%v)", params[0].Value, params[0].Value)
 		}
 	}
 }

@@ -288,7 +288,7 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 	}
 }
 
-func TestNestedSchemaScopeAuditRejectsInvalidSchemaAwareCases_AllDialects(t *testing.T) {
+func TestNestedSchemaScopeAuditRejectsInvalidSchemaRequiredCases_AllDialects(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {

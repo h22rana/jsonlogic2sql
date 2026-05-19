@@ -197,7 +197,7 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 	}
 }
 
-func TestArrayPredicateLambdasUseTruthinessAllDialectsSchemaModes(t *testing.T) {
+func TestArrayPredicateLambdasUseTruthinessAllDialectsSchemaRequired(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
@@ -277,7 +277,7 @@ func TestArrayPredicateLambdasUseTruthinessAllDialectsSchemaModes(t *testing.T) 
 				t.Run(tt.name, func(t *testing.T) {
 					t.Parallel()
 
-					schemaAware, err := NewTranspilerWithConfig(&TranspilerConfig{
+					typedSchemaTr, err := NewTranspilerWithConfig(&TranspilerConfig{
 						Dialect: d,
 						Schema:  schema,
 					})
@@ -288,9 +288,9 @@ func TestArrayPredicateLambdasUseTruthinessAllDialectsSchemaModes(t *testing.T) 
 					var got string
 					var gotParams []QueryParam
 					if tt.valueRoot {
-						got, err = schemaAware.TranspileValue(tt.logic)
+						got, err = typedSchemaTr.TranspileValue(tt.logic)
 					} else {
-						got, err = schemaAware.TranspileCondition(tt.logic)
+						got, err = typedSchemaTr.TranspileCondition(tt.logic)
 					}
 					if err != nil {
 						t.Fatalf("schema-required inline error = %v", err)
@@ -300,9 +300,9 @@ func TestArrayPredicateLambdasUseTruthinessAllDialectsSchemaModes(t *testing.T) 
 					}
 
 					if tt.valueRoot {
-						got, gotParams, err = schemaAware.TranspileParameterizedValue(tt.logic)
+						got, gotParams, err = typedSchemaTr.TranspileParameterizedValue(tt.logic)
 					} else {
-						got, gotParams, err = schemaAware.TranspileParameterizedCondition(tt.logic)
+						got, gotParams, err = typedSchemaTr.TranspileParameterizedCondition(tt.logic)
 					}
 					if err != nil {
 						t.Fatalf("schema-required parameterized error = %v", err)
@@ -607,7 +607,7 @@ func TestTranspile_ArrayScopeUnknownFieldsRejectedWithSchema_AllDialects(t *test
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			schemaAware, err := NewTranspilerWithConfig(&TranspilerConfig{
+			typedSchemaTr, err := NewTranspilerWithConfig(&TranspilerConfig{
 				Dialect: d,
 				Schema:  schema,
 			})
@@ -618,7 +618,7 @@ func TestTranspile_ArrayScopeUnknownFieldsRejectedWithSchema_AllDialects(t *test
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
 
-					assertUnknownScopedFieldRejected(t, schemaAware, tc.logic, tc.valueRoot)
+					assertUnknownScopedFieldRejected(t, typedSchemaTr, tc.logic, tc.valueRoot)
 				})
 			}
 		})
@@ -759,7 +759,7 @@ func assertUnknownScopedFieldRejected(t *testing.T, tr *Transpiler, logic string
 	}
 }
 
-func TestTranspile_ArrayLambdaVarSemantics_AllDialectsSchemaModes(t *testing.T) {
+func TestTranspile_ArrayLambdaVarSemantics_AllDialectsSchemaRequired(t *testing.T) {
 	modes := []struct {
 		name   string
 		schema *Schema
@@ -812,7 +812,7 @@ func TestTranspile_ArrayLambdaVarSemantics_AllDialectsSchemaModes(t *testing.T) 
 	}
 }
 
-func TestTranspile_ArrayLambdaRejectsLegacyElementAliases_AllDialectsSchemaModes(t *testing.T) {
+func TestTranspile_ArrayLambdaRejectsLegacyElementAliases_AllDialectsSchemaRequired(t *testing.T) {
 	aliases := []string{".type", "item.type", "current.type", "elem.type"}
 	elementOperators := []struct {
 		name      string

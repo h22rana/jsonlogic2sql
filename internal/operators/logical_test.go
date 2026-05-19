@@ -524,7 +524,7 @@ func (m *truthinessSchemaProvider) ValidateEnumValue(_, _ string) error {
 	return nil
 }
 
-func TestLogicalOperator_SchemaAwareTruthiness(t *testing.T) {
+func TestLogicalOperator_SchemaRequiredTruthiness(t *testing.T) {
 	schema := &truthinessSchemaProvider{
 		fields: map[string]string{
 			"is_verified":   "boolean",

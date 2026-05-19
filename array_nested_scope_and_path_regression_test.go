@@ -365,7 +365,7 @@ func assertScopedArrayValueTruthiness(t *testing.T, d Dialect, sql, kind string)
 	}
 }
 
-func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaModes(t *testing.T) {
+func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{

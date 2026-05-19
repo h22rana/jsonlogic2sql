@@ -29,10 +29,9 @@ func TestRegressionMatrix_DataAccess_AllDialects(t *testing.T) {
 	}
 
 	type dataCase struct {
-		name                 string
-		logic                string
-		expectSchemaAwareErr bool
-		expectSchemaLessErr  bool
+		name            string
+		logic           string
+		expectSchemaErr bool
 	}
 
 	cases := []dataCase{
@@ -50,102 +49,87 @@ func TestRegressionMatrix_DataAccess_AllDialects(t *testing.T) {
 			name:  "nested_custom",
 			logic: `{"and":[{"isPresent":[{"var":"profile.name"}]},{"eqGuest":[{"var":["profile.nick","guest"]}]},{"!":{"missing_some":[2,["profile.email","profile.phone","profile.city"]]}}]}`,
 		},
-		{name: "unknown_field", logic: `{"missing":"unknown.field"}`, expectSchemaAwareErr: true},
+		{name: "unknown_field", logic: `{"missing":"unknown.field"}`, expectSchemaErr: true},
 	}
 
-	modes := []struct {
-		name   string
-		schema *Schema
-		aware  bool
-	}{
-		{name: "schema-required", schema: schema, aware: true},
-	}
+	t.Run("schema-required", func(t *testing.T) {
+		t.Parallel()
 
-	for _, mode := range modes {
-		t.Run(mode.name, func(t *testing.T) {
-			t.Parallel()
+		for _, d := range dialects {
+			t.Run(d.String(), func(t *testing.T) {
+				t.Parallel()
 
-			for _, d := range dialects {
-				t.Run(d.String(), func(t *testing.T) {
-					t.Parallel()
-
-					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
-						Dialect: d,
-						Schema:  mode.schema,
-					})
-					if err != nil {
-						t.Fatalf("NewTranspilerWithConfig() error: %v", err)
-					}
-					registerDataAccessMatrixCustomOps(t, tr)
-
-					for _, tc := range cases {
-						t.Run(tc.name, func(t *testing.T) {
-							// schema-required/schema-required expected error paths
-							if mode.aware && tc.expectSchemaAwareErr {
-								assertDataAccessAllErrorPaths(t, tr, tc.logic)
-								return
-							}
-							if !mode.aware && tc.expectSchemaLessErr {
-								assertDataAccessAllErrorPaths(t, tr, tc.logic)
-								return
-							}
-
-							sql, err := tr.TranspileCondition(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileCondition() error: %v", err)
-							}
-							cond := sql
-							if strings.TrimSpace(cond) == "" || strings.HasPrefix(cond, "WHERE ") {
-								t.Fatalf("TranspileCondition() returned invalid condition SQL: %q", cond)
-							}
-
-							psql, params, err := tr.TranspileParameterizedCondition(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileParameterizedCondition() error: %v", err)
-							}
-							pcond := psql
-							if strings.TrimSpace(pcond) == "" || strings.HasPrefix(pcond, "WHERE ") {
-								t.Fatalf("TranspileParameterizedCondition() returned invalid condition SQL: %q", pcond)
-							}
-
-							logicMap := parseDataAccessLogicMap(t, tc.logic)
-							pFromMap, mapParams, err := tr.TranspileParameterizedConditionFromMap(logicMap)
-							if err != nil {
-								t.Fatalf("TranspileParameterizedConditionFromMap() error: %v", err)
-							}
-							pFromAny, anyParams, err := tr.TranspileParameterizedConditionFromInterface(logicMap)
-							if err != nil {
-								t.Fatalf("TranspileParameterizedConditionFromInterface() error: %v", err)
-							}
-							if pFromMap != psql || pFromAny != psql {
-								t.Fatalf("param SQL mismatch map/interface variants:\npsql=%q\nfromMap=%q\nfromAny=%q", psql, pFromMap, pFromAny)
-							}
-							if !reflect.DeepEqual(mapParams, params) || !reflect.DeepEqual(anyParams, params) {
-								t.Fatalf("param value mismatch map/interface variants:\nparams=%#v\nmap=%#v\nany=%#v", params, mapParams, anyParams)
-							}
-
-							pcFromMap, mapCondParams, err := tr.TranspileParameterizedConditionFromMap(logicMap)
-							if err != nil {
-								t.Fatalf("TranspileParameterizedConditionFromMap() error: %v", err)
-							}
-							pcFromAny, anyCondParams, err := tr.TranspileParameterizedConditionFromInterface(logicMap)
-							if err != nil {
-								t.Fatalf("TranspileParameterizedConditionFromInterface() error: %v", err)
-							}
-							if pcFromMap != pcond || pcFromAny != pcond {
-								t.Fatalf("param condition mismatch map/interface variants:\npcond=%q\nfromMap=%q\nfromAny=%q", pcond, pcFromMap, pcFromAny)
-							}
-							if !reflect.DeepEqual(mapCondParams, params) || !reflect.DeepEqual(anyCondParams, params) {
-								t.Fatalf("param condition values mismatch map/interface variants:\nparams=%#v\nmap=%#v\nany=%#v", params, mapCondParams, anyCondParams)
-							}
-
-							validateDataAccessCase(t, tc.name, d, mode.aware, cond, pcond, params)
-						})
-					}
+				tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+					Dialect: d,
+					Schema:  schema,
 				})
-			}
-		})
-	}
+				if err != nil {
+					t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+				}
+				registerDataAccessMatrixCustomOps(t, tr)
+
+				for _, tc := range cases {
+					t.Run(tc.name, func(t *testing.T) {
+						if tc.expectSchemaErr {
+							assertDataAccessAllErrorPaths(t, tr, tc.logic)
+							return
+						}
+
+						sql, err := tr.TranspileCondition(tc.logic)
+						if err != nil {
+							t.Fatalf("TranspileCondition() error: %v", err)
+						}
+						cond := sql
+						if strings.TrimSpace(cond) == "" || strings.HasPrefix(cond, "WHERE ") {
+							t.Fatalf("TranspileCondition() returned invalid condition SQL: %q", cond)
+						}
+
+						psql, params, err := tr.TranspileParameterizedCondition(tc.logic)
+						if err != nil {
+							t.Fatalf("TranspileParameterizedCondition() error: %v", err)
+						}
+						pcond := psql
+						if strings.TrimSpace(pcond) == "" || strings.HasPrefix(pcond, "WHERE ") {
+							t.Fatalf("TranspileParameterizedCondition() returned invalid condition SQL: %q", pcond)
+						}
+
+						logicMap := parseDataAccessLogicMap(t, tc.logic)
+						pFromMap, mapParams, err := tr.TranspileParameterizedConditionFromMap(logicMap)
+						if err != nil {
+							t.Fatalf("TranspileParameterizedConditionFromMap() error: %v", err)
+						}
+						pFromAny, anyParams, err := tr.TranspileParameterizedConditionFromInterface(logicMap)
+						if err != nil {
+							t.Fatalf("TranspileParameterizedConditionFromInterface() error: %v", err)
+						}
+						if pFromMap != psql || pFromAny != psql {
+							t.Fatalf("param SQL mismatch map/interface variants:\npsql=%q\nfromMap=%q\nfromAny=%q", psql, pFromMap, pFromAny)
+						}
+						if !reflect.DeepEqual(mapParams, params) || !reflect.DeepEqual(anyParams, params) {
+							t.Fatalf("param value mismatch map/interface variants:\nparams=%#v\nmap=%#v\nany=%#v", params, mapParams, anyParams)
+						}
+
+						pcFromMap, mapCondParams, err := tr.TranspileParameterizedConditionFromMap(logicMap)
+						if err != nil {
+							t.Fatalf("TranspileParameterizedConditionFromMap() error: %v", err)
+						}
+						pcFromAny, anyCondParams, err := tr.TranspileParameterizedConditionFromInterface(logicMap)
+						if err != nil {
+							t.Fatalf("TranspileParameterizedConditionFromInterface() error: %v", err)
+						}
+						if pcFromMap != pcond || pcFromAny != pcond {
+							t.Fatalf("param condition mismatch map/interface variants:\npcond=%q\nfromMap=%q\nfromAny=%q", pcond, pcFromMap, pcFromAny)
+						}
+						if !reflect.DeepEqual(mapCondParams, params) || !reflect.DeepEqual(anyCondParams, params) {
+							t.Fatalf("param condition values mismatch map/interface variants:\nparams=%#v\nmap=%#v\nany=%#v", params, mapCondParams, anyCondParams)
+						}
+
+						validateDataAccessCase(t, tc.name, d, cond, pcond, params)
+					})
+				}
+			})
+		}
+	})
 }
 
 func registerDataAccessMatrixCustomOps(t *testing.T, tr *Transpiler) {
@@ -181,20 +165,8 @@ func assertDataAccessAllErrorPaths(t *testing.T, tr *Transpiler, logic string) {
 	if _, err := tr.TranspileCondition(logic); err == nil {
 		t.Fatal("expected TranspileCondition() error, got nil")
 	}
-	if _, err := tr.TranspileCondition(logic); err == nil {
-		t.Fatal("expected TranspileCondition() error, got nil")
-	}
 	if _, _, err := tr.TranspileParameterizedCondition(logic); err == nil {
 		t.Fatal("expected TranspileParameterizedCondition() error, got nil")
-	}
-	if _, _, err := tr.TranspileParameterizedCondition(logic); err == nil {
-		t.Fatal("expected TranspileParameterizedCondition() error, got nil")
-	}
-	if _, _, err := tr.TranspileParameterizedConditionFromMap(logicMap); err == nil {
-		t.Fatal("expected TranspileParameterizedConditionFromMap() error, got nil")
-	}
-	if _, _, err := tr.TranspileParameterizedConditionFromInterface(logicMap); err == nil {
-		t.Fatal("expected TranspileParameterizedConditionFromInterface() error, got nil")
 	}
 	if _, _, err := tr.TranspileParameterizedConditionFromMap(logicMap); err == nil {
 		t.Fatal("expected TranspileParameterizedConditionFromMap() error, got nil")
@@ -208,7 +180,6 @@ func validateDataAccessCase(
 	t *testing.T,
 	name string,
 	d Dialect,
-	schemaAware bool,
 	cond string,
 	pcond string,
 	params []QueryParam,
@@ -297,14 +268,6 @@ func validateDataAccessCase(
 		)
 		if len(params) == 0 {
 			t.Fatalf("expected params for nested_custom")
-		}
-
-	case "unknown_field":
-		if schemaAware {
-			t.Fatalf("unknown_field should have errored in schema-required mode")
-		}
-		if cond != "unknown.field IS NULL" {
-			t.Fatalf("unexpected schema-required SQL for unknown_field: %q", cond)
 		}
 	}
 }

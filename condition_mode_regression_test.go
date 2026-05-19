@@ -372,7 +372,7 @@ func TestTranspileCondition_PredicateIfSkipsUnreachableBranches(t *testing.T) {
 	}
 }
 
-func TestTranspileCondition_CustomPredicateBooleanConstantsShortCircuitAllDialectsSchemaModes(t *testing.T) {
+func TestTranspileCondition_CustomPredicateBooleanConstantsShortCircuitAllDialectsSchemaRequired(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
@@ -949,7 +949,7 @@ func TestTranspileCondition_DefaultedVarMetadataSurvivesValueFolding(t *testing.
 	}
 }
 
-func TestTranspileCondition_MixedTypedCustomOperatorsAllDialectsSchemaModes(t *testing.T) {
+func TestTranspileCondition_MixedTypedCustomOperatorsAllDialectsSchemaRequired(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
@@ -1881,7 +1881,7 @@ func TestTranspileCondition_LiteralComparisonsEmitFoldedBooleansAllDialects(t *t
 	}
 }
 
-func TestTranspileCondition_SchemaAwareComparisonUsesFoldedValueLiterals(t *testing.T) {
+func TestTranspileCondition_SchemaRequiredComparisonUsesFoldedValueLiterals(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "code", Type: FieldTypeString},
 		{Name: "amount", Type: FieldTypeInteger},
@@ -2248,7 +2248,7 @@ func TestTranspileCondition_DoubleBangUsesValueTruthinessExplicitly(t *testing.T
 	}
 }
 
-func TestTranspileCondition_UnaryEmptyArrayTruthinessAllDialectsSchemaModes(t *testing.T) {
+func TestTranspileCondition_UnaryEmptyArrayTruthinessAllDialectsSchemaRequired(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
@@ -2321,7 +2321,7 @@ func TestTranspileCondition_UnaryEmptyArrayTruthinessAllDialectsSchemaModes(t *t
 	}
 }
 
-func TestTranspile_RejectsMalformedNestedValueOperandsAllDialectsSchemaModes(t *testing.T) {
+func TestTranspile_RejectsMalformedNestedValueOperandsAllDialectsSchemaRequired(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{

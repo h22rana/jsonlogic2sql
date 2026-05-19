@@ -32,27 +32,26 @@ func regressionParamsEqual(got, want []QueryParam) bool {
 	return reflect.DeepEqual(got, want)
 }
 
-func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
+func TestRegressionMatrix_ConditionValue_AllDialectsSchemaRequired(t *testing.T) {
 	t.Parallel()
 
 	schema := conditionValueRegressionSchema()
-	schemaRequiredModes := schemaRequiredModes(schema)
 
 	valueCases := []struct {
 		name       string
 		logic      string
-		wantSQL    func(Dialect, bool) string
-		wantParam  func(Dialect, bool) string
+		wantSQL    func(Dialect) string
+		wantParam  func(Dialect) string
 		wantParams []QueryParam
 	}{
 		{
 			name:  "if value condition uses typed truthiness",
 			logic: `{"if":[{"var":"flag"},"yes","no"]}`,
-			wantSQL: func(_ Dialect, _ bool) string {
+			wantSQL: func(_ Dialect) string {
 				condition := "flag IS TRUE"
 				return fmt.Sprintf("CASE WHEN %s THEN 'yes' ELSE 'no' END", condition)
 			},
-			wantParam: func(d Dialect, _ bool) string {
+			wantParam: func(d Dialect) string {
 				condition := "flag IS TRUE"
 				return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, testPlaceholder(d, 1), testPlaceholder(d, 2))
 			},
@@ -61,10 +60,10 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 		{
 			name:  "nested value logical under numeric operator",
 			logic: `{"+":[{"*":[{"or":[0,5]},2]},1]}`,
-			wantSQL: func(Dialect, bool) string {
+			wantSQL: func(Dialect) string {
 				return "((5 * 2) + 1)"
 			},
-			wantParam: func(d Dialect, _ bool) string {
+			wantParam: func(d Dialect) string {
 				return fmt.Sprintf("((%s * %s) + %s)", testPlaceholder(d, 1), testPlaceholder(d, 2), testPlaceholder(d, 3))
 			},
 			wantParams: []QueryParam{
@@ -76,24 +75,24 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 		{
 			name:  "array map transformation uses value logical semantics",
 			logic: `{"map":[{"var":"arr"},{"or":[0,{"var":""}]}]}`,
-			wantSQL: func(d Dialect, _ bool) string {
+			wantSQL: func(d Dialect) string {
 				return identityArrayMapSQLForDialect(d, "arr")
 			},
-			wantParam: func(d Dialect, _ bool) string {
+			wantParam: func(d Dialect) string {
 				return identityArrayMapSQLForDialect(d, "arr")
 			},
 		},
 		{
 			name:  "array literal source evaluates value expression elements",
 			logic: `{"map":[[{"var":"amount"},5],{"var":""}]}`,
-			wantSQL: func(d Dialect, _ bool) string {
+			wantSQL: func(d Dialect) string {
 				array := "[amount, 5]"
 				if d == DialectPostgreSQL {
 					array = "ARRAY[amount, 5]"
 				}
 				return identityArrayMapSQLForDialect(d, array)
 			},
-			wantParam: func(d Dialect, _ bool) string {
+			wantParam: func(d Dialect) string {
 				array := fmt.Sprintf("[amount, %s]", testPlaceholder(d, 1))
 				if d == DialectPostgreSQL {
 					array = fmt.Sprintf("ARRAY[amount, %s]", testPlaceholder(d, 1))
@@ -105,10 +104,10 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 		{
 			name:  "custom predicate stringifies in value context",
 			logic: `{"cat":[{"isPositive":[{"var":"amount"}]}]}`,
-			wantSQL: func(Dialect, bool) string {
+			wantSQL: func(Dialect) string {
 				return "CONCAT(CASE WHEN amount > 0 THEN 'true' ELSE 'false' END)"
 			},
-			wantParam: func(Dialect, bool) string {
+			wantParam: func(Dialect) string {
 				return "CONCAT(CASE WHEN amount > 0 THEN 'true' ELSE 'false' END)"
 			},
 		},
@@ -117,17 +116,17 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 	conditionCases := []struct {
 		name       string
 		logic      string
-		wantSQL    func(Dialect, bool) string
-		wantParam  func(Dialect, bool) string
+		wantSQL    func(Dialect) string
+		wantParam  func(Dialect) string
 		wantParams []QueryParam
 	}{
 		{
 			name:  "predicate if skips unreachable branch",
 			logic: `{"if":[true,{">":[{"var":"x"},1]},{">":[{"var":"missing"},1]}]}`,
-			wantSQL: func(Dialect, bool) string {
+			wantSQL: func(Dialect) string {
 				return "x > 1"
 			},
-			wantParam: func(d Dialect, _ bool) string {
+			wantParam: func(d Dialect) string {
 				return fmt.Sprintf("x > %s", testPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
@@ -135,30 +134,30 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 		{
 			name:  "decisive boolean constant short-circuits predicate",
 			logic: `{"and":[false,{">":[{"var":"missing"},1]}]}`,
-			wantSQL: func(Dialect, bool) string {
+			wantSQL: func(Dialect) string {
 				return "FALSE"
 			},
-			wantParam: func(Dialect, bool) string {
+			wantParam: func(Dialect) string {
 				return "FALSE"
 			},
 		},
 		{
 			name:  "comparison operands use value semantics",
 			logic: `{"==":[{"if":["nonempty","x","y"]},"x"]}`,
-			wantSQL: func(Dialect, bool) string {
+			wantSQL: func(Dialect) string {
 				return "TRUE"
 			},
-			wantParam: func(Dialect, bool) string {
+			wantParam: func(Dialect) string {
 				return "TRUE"
 			},
 		},
 		{
 			name:  "parenthesized not preserves nested precedence",
 			logic: `{"!":{"or":[{"==":[{"var":"a"},1]},{"and":[{"==":[{"var":"b"},2]},{"==":[{"var":"c"},3]}]}]}}`,
-			wantSQL: func(Dialect, bool) string {
+			wantSQL: func(Dialect) string {
 				return "NOT (a = 1 OR (b = 2 AND c = 3))"
 			},
-			wantParam: func(d Dialect, _ bool) string {
+			wantParam: func(d Dialect) string {
 				return fmt.Sprintf(
 					"NOT (a = %s OR (b = %s AND c = %s))",
 					testPlaceholder(d, 1),
@@ -178,70 +177,64 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaModes(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			for _, mode := range schemaRequiredModes {
-				t.Run(mode.name, func(t *testing.T) {
-					t.Parallel()
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+			if err := tr.RegisterOperatorFunc("isPositive", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				if len(args) != 1 {
+					return OperatorResult{}, fmt.Errorf("isPositive requires exactly 1 argument")
+				}
+				return PredicateSQL(fmt.Sprintf("%s > 0", args[0].SQL)), nil
+			}); err != nil {
+				t.Fatalf("RegisterOperatorFunc() error = %v", err)
+			}
 
-					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
-						Dialect: d,
-						Schema:  mode.schema,
-					})
+			for _, tc := range valueCases {
+				t.Run("value/"+tc.name, func(t *testing.T) {
+					gotSQL, err := tr.TranspileValue(tc.logic)
 					if err != nil {
-						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+						t.Fatalf("TranspileValue() error = %v", err)
 					}
-					if err := tr.RegisterOperatorFunc("isPositive", func(_ string, args []OperatorArg) (OperatorResult, error) {
-						if len(args) != 1 {
-							return OperatorResult{}, fmt.Errorf("isPositive requires exactly 1 argument")
-						}
-						return PredicateSQL(fmt.Sprintf("%s > 0", args[0].SQL)), nil
-					}); err != nil {
-						t.Fatalf("RegisterOperatorFunc() error = %v", err)
+					if want := tc.wantSQL(d); gotSQL != want {
+						t.Fatalf("TranspileValue() = %q, want %q", gotSQL, want)
 					}
 
-					for _, tc := range valueCases {
-						t.Run("value/"+tc.name, func(t *testing.T) {
-							gotSQL, err := tr.TranspileValue(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileValue() error = %v", err)
-							}
-							if want := tc.wantSQL(d, mode.schema != nil); gotSQL != want {
-								t.Fatalf("TranspileValue() = %q, want %q", gotSQL, want)
-							}
+					gotParamSQL, gotParams, err := tr.TranspileParameterizedValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tc.wantParam(d); gotParamSQL != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParamSQL, want)
+					}
+					if !regressionParamsEqual(gotParams, tc.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tc.wantParams)
+					}
+				})
+			}
 
-							gotParamSQL, gotParams, err := tr.TranspileParameterizedValue(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileParameterizedValue() error = %v", err)
-							}
-							if want := tc.wantParam(d, mode.schema != nil); gotParamSQL != want {
-								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParamSQL, want)
-							}
-							if !regressionParamsEqual(gotParams, tc.wantParams) {
-								t.Fatalf("params = %#v, want %#v", gotParams, tc.wantParams)
-							}
-						})
+			for _, tc := range conditionCases {
+				t.Run("condition/"+tc.name, func(t *testing.T) {
+					gotSQL, err := tr.TranspileCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if want := tc.wantSQL(d); gotSQL != want {
+						t.Fatalf("TranspileCondition() = %q, want %q", gotSQL, want)
 					}
 
-					for _, tc := range conditionCases {
-						t.Run("condition/"+tc.name, func(t *testing.T) {
-							gotSQL, err := tr.TranspileCondition(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileCondition() error = %v", err)
-							}
-							if want := tc.wantSQL(d, mode.schema != nil); gotSQL != want {
-								t.Fatalf("TranspileCondition() = %q, want %q", gotSQL, want)
-							}
-
-							gotParamSQL, gotParams, err := tr.TranspileParameterizedCondition(tc.logic)
-							if err != nil {
-								t.Fatalf("TranspileParameterizedCondition() error = %v", err)
-							}
-							if want := tc.wantParam(d, mode.schema != nil); gotParamSQL != want {
-								t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParamSQL, want)
-							}
-							if !regressionParamsEqual(gotParams, tc.wantParams) {
-								t.Fatalf("params = %#v, want %#v", gotParams, tc.wantParams)
-							}
-						})
+					gotParamSQL, gotParams, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := tc.wantParam(d); gotParamSQL != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParamSQL, want)
+					}
+					if !regressionParamsEqual(gotParams, tc.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tc.wantParams)
 					}
 				})
 			}

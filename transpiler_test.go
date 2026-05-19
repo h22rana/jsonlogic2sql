@@ -254,7 +254,7 @@ func TestTranspiler_NullSafeFieldEquality_ReviewRegressions(t *testing.T) {
 	}
 }
 
-func TestTranspiler_NullSafeFieldEquality_AllDialectsSchemaModesNestedConditions(t *testing.T) {
+func TestTranspiler_NullSafeFieldEquality_AllDialectsSchemaRequiredNestedConditions(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "a", Type: FieldTypeString},
 		{Name: "b", Type: FieldTypeString},

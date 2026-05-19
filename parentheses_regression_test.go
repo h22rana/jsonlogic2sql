@@ -91,7 +91,7 @@ func TestTranspileParameterized_ParenthesesNormalizationTrickyCases(t *testing.T
 	}
 }
 
-func TestTranspileValue_CatComparisonStringifiesSchemaAwareBoolean(t *testing.T) {
+func TestTranspileValue_CatComparisonStringifiesSchemaRequiredBoolean(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeNumber},
 	})
