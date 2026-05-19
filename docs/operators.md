@@ -481,8 +481,12 @@ POSITION('hello' IN 'hello world') > 0
 {"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
 ```
 ```sql
-CONCAT(firstName, ' ', lastName)
+CONCAT(COALESCE(CAST(firstName AS STRING), ''), ' ', COALESCE(CAST(lastName AS STRING), ''))
 ```
+
+`cat` follows JSONLogic stringification: `null` stringifies as an empty
+string, and nullable operands are wrapped so SQL `CONCAT` does not return
+`NULL` for the whole expression.
 
 ### Concatenate with Conditional
 
@@ -490,7 +494,7 @@ CONCAT(firstName, ' ', lastName)
 {"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}
 ```
 ```sql
-CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
+CONCAT(COALESCE(CASE WHEN gender = 'M' THEN 'Mr. ' ELSE 'Ms. ' END, ''), COALESCE(CAST(first_name AS STRING), ''), ' ', COALESCE(CAST(last_name AS STRING), ''))
 ```
 
 ### Substring with Length

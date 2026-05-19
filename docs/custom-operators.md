@@ -242,7 +242,7 @@ transpiler.RegisterOperatorFunc("toUpper", func(op string, args []jsonlogic2sql.
 
 // Custom operators nested inside cat (string concatenation)
 sql, _ := transpiler.TranspileValue(`{"cat": [{"toLower": [{"var": "firstName"}]}, " ", {"toUpper": [{"var": "lastName"}]}]}`)
-// Output: CONCAT(LOWER(firstName), ' ', UPPER(lastName))
+// Output: CONCAT(COALESCE(LOWER(firstName), ''), ' ', COALESCE(UPPER(lastName), ''))
 
 // Custom operators nested inside if (conditional)
 sql, _ = transpiler.TranspileValue(`{"if": [{"==": [{"var": "type"}, "premium"]}, {"toUpper": [{"var": "name"}]}, {"toLower": [{"var": "name"}]}]}`)

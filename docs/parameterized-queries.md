@@ -20,7 +20,7 @@ For value-producing expressions, use `TranspileParameterizedValue`:
 sql, params, err := transpiler.TranspileParameterizedValue(
     `{"cat": ["Order ", {"var": "status"}]}`,
 )
-// sql    = "CONCAT(@p1, status)"
+// sql    = "CONCAT(@p1, COALESCE(CAST(status AS STRING), ''))"
 // params = [{Name: "p1", Value: "Order "}]
 ```
 

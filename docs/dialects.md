@@ -83,6 +83,10 @@ can still fold normally.
 | Max of values | `GREATEST()` | `GREATEST()` | `GREATEST()` | `GREATEST()` | `greatest()` |
 | Min of values | `LEAST()` | `LEAST()` | `LEAST()` | `LEAST()` | `least()` |
 | Null coalesce | `COALESCE()` | `COALESCE()` | `COALESCE()` | `COALESCE()` | `coalesce()` |
+
+`cat` operands are null-safe stringified before concatenation. For example,
+nullable string operands are wrapped with `COALESCE(value, '')`, and untyped or
+numeric operands are cast with the dialect's string cast before `COALESCE`.
 | Safe divide | `SAFE_DIVIDE()` | N/A (use CASE) | N/A (use CASE) | N/A (use CASE) | `if()` expression |
 | Regex match | `REGEXP_CONTAINS()` | `REGEXP_CONTAINS()` | `~` | `regexp_matches()` | `match()` |
 

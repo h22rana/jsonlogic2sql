@@ -468,7 +468,7 @@ ARRAY_CONCAT(array1, array2)
 {"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
 ```
 ```sql
-CONCAT(firstName, ' ', lastName)
+CONCAT(COALESCE(CAST(firstName AS STRING), ''), ' ', COALESCE(CAST(lastName AS STRING), ''))
 ```
 
 ### Concatenate with Conditional (Nested If)
@@ -477,7 +477,7 @@ CONCAT(firstName, ' ', lastName)
 {"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}
 ```
 ```sql
-CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
+CONCAT(COALESCE(CASE WHEN gender = 'M' THEN 'Mr. ' ELSE 'Ms. ' END, ''), COALESCE(CAST(first_name AS STRING), ''), ' ', COALESCE(CAST(last_name AS STRING), ''))
 ```
 
 ### Substring with Length

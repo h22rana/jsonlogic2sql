@@ -67,7 +67,7 @@ const paramCond = jsonlogic2sql.transpileParameterizedCondition(t.id, '{"==": [{
 
 // Parameterized value expression
 const paramValue = jsonlogic2sql.transpileParameterizedValue(t.id, '{"cat": ["Hello, ", {"var": "name"}]}');
-// paramValue = { sql: "CONCAT(@p1, name)", params: '[{"Name":"p1","Value":"Hello, "}]' }
+// paramValue = { sql: "CONCAT(@p1, COALESCE(CAST(name AS STRING), ''))", params: '[{"Name":"p1","Value":"Hello, "}]' }
 
 // Set schema for field validation and type coercion
 const schemaResult = jsonlogic2sql.setSchema(t.id, JSON.stringify([
