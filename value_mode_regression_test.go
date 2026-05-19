@@ -2308,7 +2308,7 @@ func TestTranspileValue_IfConditionsUseTruthiness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileValue() nested string if error = %v", err)
 	}
-	want = "CONCAT(CASE WHEN flag IS TRUE THEN 'yes' ELSE 'no' END)"
+	want = "CONCAT(COALESCE(CASE WHEN flag IS TRUE THEN 'yes' ELSE 'no' END, ''))"
 	if got != want {
 		t.Fatalf("TranspileValue() nested string if = %q, want %q", got, want)
 	}
@@ -2960,6 +2960,119 @@ func TestTranspileValue_CatStringifiesBuiltInPredicate(t *testing.T) {
 			wantParams := []QueryParam{{Name: "p1", Value: float64(10)}}
 			if !reflect.DeepEqual(gotParams, wantParams) {
 				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
+	}
+}
+
+func TestTranspileValue_CatNullSafeStringificationAllDialectsSchemaModes(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "name", Type: FieldTypeString},
+		{Name: "amount", Type: FieldTypeNumber},
+	})
+
+	tests := []struct {
+		name       string
+		logic      string
+		want       func(Dialect, bool) string
+		wantParam  func(Dialect, bool) string
+		wantParams []QueryParam
+	}{
+		{
+			name:  "literal null stringifies to empty",
+			logic: `{"cat":[null,"y"]}`,
+			want: func(_ Dialect, _ bool) string {
+				return "CONCAT('', 'y')"
+			},
+			wantParam: func(d Dialect, _ bool) string {
+				return fmt.Sprintf("CONCAT('', %s)", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "y"}},
+		},
+		{
+			name:  "omitted if else stringifies to empty",
+			logic: `{"cat":[{"if":[false,"x"]},"y"]}`,
+			want: func(_ Dialect, _ bool) string {
+				return "CONCAT('', 'y')"
+			},
+			wantParam: func(d Dialect, _ bool) string {
+				return fmt.Sprintf("CONCAT('', %s)", testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "y"}},
+		},
+		{
+			name:  "nullable string field stringifies to empty",
+			logic: `{"cat":[{"var":"name"},"y"]}`,
+			want: func(d Dialect, schemaAware bool) string {
+				nameSQL := "COALESCE(name, '')"
+				if !schemaAware {
+					nameSQL = fmt.Sprintf("COALESCE(%s, '')", testStringCastSQL(d, "name"))
+				}
+				return fmt.Sprintf("CONCAT(%s, 'y')", nameSQL)
+			},
+			wantParam: func(d Dialect, schemaAware bool) string {
+				nameSQL := "COALESCE(name, '')"
+				if !schemaAware {
+					nameSQL = fmt.Sprintf("COALESCE(%s, '')", testStringCastSQL(d, "name"))
+				}
+				return fmt.Sprintf("CONCAT(%s, %s)", nameSQL, testPlaceholder(d, 1))
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "y"}},
+		},
+		{
+			name:  "nullable number field stringifies to empty",
+			logic: `{"cat":[{"var":"amount"}]}`,
+			want: func(d Dialect, _ bool) string {
+				return fmt.Sprintf("CONCAT(COALESCE(%s, ''))", testStringCastSQL(d, "amount"))
+			},
+			wantParam: func(d Dialect, _ bool) string {
+				return fmt.Sprintf("CONCAT(COALESCE(%s, ''))", testStringCastSQL(d, "amount"))
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, mode := range allSchemaModes(schema) {
+				t.Run(mode.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+						Dialect: d,
+						Schema:  mode.schema,
+					})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+					}
+					schemaAware := mode.schema != nil
+
+					for _, tt := range tests {
+						t.Run(tt.name, func(t *testing.T) {
+							got, err := tr.TranspileValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if want := tt.want(d, schemaAware); got != want {
+								t.Fatalf("TranspileValue() = %q, want %q", got, want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := tt.wantParam(d, schemaAware); gotParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+							}
+							if !reflect.DeepEqual(gotParams, tt.wantParams) {
+								t.Fatalf("params = %#v, want %#v", gotParams, tt.wantParams)
+							}
+						})
+					}
+				})
 			}
 		})
 	}
@@ -3769,7 +3882,7 @@ func TestTranspileValue_TypedCustomOperatorUsesValueContext(t *testing.T) {
 	}
 
 	logic := `{"cat":[{"safeDivideTyped":[{"var":"total"},{"var":"count"}]}]}`
-	want := "CONCAT(CASE WHEN count = 0 THEN NULL ELSE total / count END)"
+	want := "CONCAT(COALESCE(CAST(CASE WHEN count = 0 THEN NULL ELSE total / count END AS TEXT), ''))"
 
 	got, err := tr.TranspileValue(logic)
 	if err != nil {
@@ -4034,7 +4147,7 @@ func TestTranspileValue_ArrayTransformationsUseValueSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileValue() cat reduce error = %v", err)
 	}
-	if want := "CONCAT((SELECT CONCAT('', elem) FROM UNNEST(arr) AS elem))"; got != want {
+	if want := "CONCAT(COALESCE((SELECT CONCAT(COALESCE('', ''), COALESCE(CAST(elem AS STRING), '')) FROM UNNEST(arr) AS elem), ''))"; got != want {
 		t.Fatalf("TranspileValue() cat reduce = %q, want %q", got, want)
 	}
 }
@@ -4071,7 +4184,7 @@ func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *te
 	if err != nil {
 		t.Fatalf("TranspileParameterizedValue() cat reduce error = %v", err)
 	}
-	if want := "CONCAT((SELECT CONCAT(@p1, elem) FROM UNNEST(arr) AS elem))"; gotSQL != want {
+	if want := "CONCAT(COALESCE((SELECT CONCAT(COALESCE(@p1, ''), COALESCE(CAST(elem AS STRING), '')) FROM UNNEST(arr) AS elem), ''))"; gotSQL != want {
 		t.Fatalf("TranspileParameterizedValue() cat reduce SQL = %q, want %q", gotSQL, want)
 	}
 	if wantParams := []QueryParam{{Name: "p1", Value: ""}}; !reflect.DeepEqual(gotParams, wantParams) {
@@ -4313,5 +4426,18 @@ func testPlaceholder(d Dialect, index int) string {
 		return fmt.Sprintf("$%d", index)
 	default:
 		return fmt.Sprintf("@p%d", index)
+	}
+}
+
+func testStringCastSQL(d Dialect, expr string) string {
+	switch d {
+	case DialectPostgreSQL:
+		return fmt.Sprintf("CAST(%s AS TEXT)", expr)
+	case DialectDuckDB:
+		return fmt.Sprintf("CAST(%s AS VARCHAR)", expr)
+	case DialectClickHouse:
+		return fmt.Sprintf("toString(%s)", expr)
+	default:
+		return fmt.Sprintf("CAST(%s AS STRING)", expr)
 	}
 }

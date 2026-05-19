@@ -784,25 +784,25 @@ func expressionResultIsEmptyArrayLiteral(res expressionResult) bool {
 		isEmptyArrayLiteralValue(res.rawLiteral)
 }
 
-func catStringSQL(res expressionResult) string {
-	if res.Kind == operators.ExpressionKindPredicate || valueTypeOf(res) == operators.ExpressionTypeBoolean {
-		return booleanSQLStringValue(res.SQL)
+func (p *Parser) catStringSQL(res expressionResult) string {
+	if res.rawLiteralKnown && res.rawLiteral != nil {
+		switch valueTypeOf(res) {
+		case operators.ExpressionTypeNull:
+			return "''"
+		case operators.ExpressionTypeBoolean:
+			return operators.PredicateStringSQL(valueSQL(res))
+		case operators.ExpressionTypeString:
+			return operators.StripRedundantOuterParens(valueSQL(res))
+		case operators.ExpressionTypeNumber:
+			return p.config.StringCast(operators.StripRedundantOuterParens(valueSQL(res)))
+		case operators.ExpressionTypeArray, operators.ExpressionTypeUnknown:
+		}
 	}
-	return operators.StripRedundantOuterParens(valueSQL(res))
-}
-
-func booleanSQLStringValue(sql string) string {
-	switch strings.ToUpper(strings.TrimSpace(sql)) {
-	case "TRUE":
-		return "'true'"
-	case "FALSE":
-		return "'false'"
+	sql := valueSQL(res)
+	if res.Kind == operators.ExpressionKindPredicate {
+		sql = res.SQL
 	}
-	condition := operators.StripRedundantOuterParens(sql)
-	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(condition)), "CASE ") {
-		condition = fmt.Sprintf("(%s)", condition)
-	}
-	return fmt.Sprintf("CASE WHEN %s THEN 'true' ELSE 'false' END", condition)
+	return operators.ConcatStringSQL(p.config, sql, res.Kind, valueTypeOf(res))
 }
 
 func typedValueOperand(res expressionResult) operators.ProcessedValue {
@@ -1777,7 +1777,7 @@ func (p *Parser) stringifiedCatResult(res expressionResult, path string) (expres
 	if err := p.validateCatStringifiableResult(res, path); err != nil {
 		return expressionResult{}, err
 	}
-	return valueResult(catStringSQL(res), operators.ExpressionTypeString), nil
+	return valueResult(p.catStringSQL(res), operators.ExpressionTypeString), nil
 }
 
 func (p *Parser) validateCatStringifiableResult(res expressionResult, path string) error {
@@ -1831,7 +1831,7 @@ func (p *Parser) parseStringifiedIf(args []interface{}, path string) (expression
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
-	elseSQL := "NULL"
+	elseSQL := "''"
 	if hasElse {
 		elseRes, err := p.parseCatStringExpression(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1))
 		if err != nil {
@@ -1843,7 +1843,7 @@ func (p *Parser) parseStringifiedIf(args []interface{}, path string) (expression
 		elseSQL = elseRes.SQL
 	}
 	if len(parts) == 0 {
-		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
+		return literalValueResult("''", operators.ExpressionTypeString, false), nil
 	}
 	return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL),
 		operators.ExpressionTypeString), nil
@@ -3014,7 +3014,7 @@ func (p *Parser) parseStringifiedIfParam(
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
-	elseSQL := "NULL"
+	elseSQL := "''"
 	if hasElse {
 		elseRes, err := p.parseCatStringExpressionParam(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1), pc)
 		if err != nil {
@@ -3026,7 +3026,7 @@ func (p *Parser) parseStringifiedIfParam(
 		elseSQL = elseRes.SQL
 	}
 	if len(parts) == 0 {
-		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
+		return literalValueResult("''", operators.ExpressionTypeString, false), nil
 	}
 	return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL),
 		operators.ExpressionTypeString), nil

@@ -2510,19 +2510,19 @@ func TestComparisonOperator_handleIn_NoSchema_StringExpressionHeuristic(t *testi
 			name:        "bigquery nested string expression uses containment",
 			d:           dialect.DialectBigQuery,
 			leftArg:     leftStringExpr,
-			expectedSQL: "STRPOS(profile.name, CONCAT(SUBSTR(profile.first, 1, 2), '-x')) > 0",
+			expectedSQL: "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')) > 0",
 		},
 		{
 			name:        "postgres nested string expression uses containment",
 			d:           dialect.DialectPostgreSQL,
 			leftArg:     leftStringExpr,
-			expectedSQL: "POSITION(CONCAT(SUBSTR(profile.first, 1, 2), '-x') IN profile.name) > 0",
+			expectedSQL: "POSITION(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x') IN profile.name) > 0",
 		},
 		{
 			name:        "clickhouse nested string expression uses containment",
 			d:           dialect.DialectClickHouse,
 			leftArg:     leftStringExpr,
-			expectedSQL: "position(profile.name, CONCAT(substring(profile.first, 1, 2), '-x')) > 0",
+			expectedSQL: "position(profile.name, CONCAT(COALESCE(substring(profile.first, 1, 2), ''), '-x')) > 0",
 		},
 		{
 			name:        "bigquery numeric expression still uses membership fallback",
@@ -3362,7 +3362,7 @@ func TestComparisonOperator_handleInParam_NoSchema_StringExpressionHeuristic(t *
 			d:       dialect.DialectBigQuery,
 			style:   params.PlaceholderNamed,
 			leftArg: leftStringExpr,
-			wantSQL: "STRPOS(profile.name, CONCAT(SUBSTR(profile.first, (@p1 + 1), @p2), @p3)) > 0",
+			wantSQL: "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -3374,7 +3374,7 @@ func TestComparisonOperator_handleInParam_NoSchema_StringExpressionHeuristic(t *
 			d:       dialect.DialectPostgreSQL,
 			style:   params.PlaceholderPositional,
 			leftArg: leftStringExpr,
-			wantSQL: "POSITION(CONCAT(SUBSTR(profile.first, ($1 + 1), $2), $3) IN profile.name) > 0",
+			wantSQL: "POSITION(CONCAT(COALESCE(SUBSTR(profile.first, ($1 + 1), $2), ''), $3) IN profile.name) > 0",
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -3386,7 +3386,7 @@ func TestComparisonOperator_handleInParam_NoSchema_StringExpressionHeuristic(t *
 			d:       dialect.DialectClickHouse,
 			style:   params.PlaceholderNamed,
 			leftArg: leftStringExpr,
-			wantSQL: "position(profile.name, CONCAT(substring(profile.first, (@p1 + 1), @p2), @p3)) > 0",
+			wantSQL: "position(profile.name, CONCAT(COALESCE(substring(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},

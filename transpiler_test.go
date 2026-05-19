@@ -517,31 +517,31 @@ func TestTranspiler_InStringExpressionContainment_NoSchema(t *testing.T) {
 			name:      "bigquery",
 			dialect:   DialectBigQuery,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(SUBSTR(profile.first, 1, 2), '-x')) > 0",
+			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')) > 0",
 		},
 		{
 			name:      "spanner",
 			dialect:   DialectSpanner,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(SUBSTR(profile.first, 1, 2), '-x')) > 0",
+			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')) > 0",
 		},
 		{
 			name:      "postgresql",
 			dialect:   DialectPostgreSQL,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "POSITION(CONCAT(SUBSTR(profile.first, 1, 2), '-x') IN profile.name) > 0",
+			wantSQL:   "POSITION(CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x') IN profile.name) > 0",
 		},
 		{
 			name:      "duckdb",
 			dialect:   DialectDuckDB,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(SUBSTR(profile.first, 1, 2), '-x')) > 0",
+			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, 1, 2), ''), '-x')) > 0",
 		},
 		{
 			name:      "clickhouse",
 			dialect:   DialectClickHouse,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "position(profile.name, CONCAT(substring(profile.first, 1, 2), '-x')) > 0",
+			wantSQL:   "position(profile.name, CONCAT(COALESCE(substring(profile.first, 1, 2), ''), '-x')) > 0",
 		},
 	}
 
@@ -1308,7 +1308,7 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "concatenate strings",
 			input:    `{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}`,
-			expected: "CONCAT(firstName, ' ', lastName)",
+			expected: "CONCAT(COALESCE(CAST(firstName AS STRING), ''), ' ', COALESCE(CAST(lastName AS STRING), ''))",
 			hasError: false,
 		},
 		{
@@ -1534,7 +1534,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested string operations",
 			input:    `{"==": [{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}, "John Doe"]}`,
-			expected: "CONCAT(firstName, ' ', lastName) = 'John Doe'",
+			expected: "CONCAT(COALESCE(CAST(firstName AS STRING), ''), ' ', COALESCE(CAST(lastName AS STRING), '')) = 'John Doe'",
 			hasError: false,
 		},
 		{
@@ -1687,7 +1687,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "cat with nested if expression",
 			input:    `{"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}`,
-			expected: "CONCAT(CASE WHEN gender = 'M' THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)",
+			expected: "CONCAT(COALESCE(CASE WHEN gender = 'M' THEN 'Mr. ' ELSE 'Ms. ' END, ''), COALESCE(CAST(first_name AS STRING), ''), ' ', COALESCE(CAST(last_name AS STRING), ''))",
 			hasError: false,
 		},
 
@@ -1775,7 +1775,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "empty string in cat",
 			input:    `{"cat": ["", {"var": "name"}, ""]}`,
-			expected: "CONCAT('', name, '')",
+			expected: "CONCAT('', COALESCE(CAST(name AS STRING), ''), '')",
 			hasError: false,
 		},
 

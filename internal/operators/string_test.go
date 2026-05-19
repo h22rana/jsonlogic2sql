@@ -38,14 +38,14 @@ func TestStringOperator_ToSQL(t *testing.T) {
 			name:     "concatenation with var and string",
 			operator: "cat",
 			args:     []interface{}{map[string]interface{}{"var": "firstName"}, " ", "Doe"},
-			expected: "CONCAT(firstName, ' ', 'Doe')",
+			expected: "CONCAT(COALESCE(CAST(firstName AS STRING), ''), ' ', 'Doe')",
 			hasError: false,
 		},
 		{
 			name:     "concatenation with dotted var",
 			operator: "cat",
 			args:     []interface{}{map[string]interface{}{"var": "user.firstName"}, " ", map[string]interface{}{"var": "user.lastName"}},
-			expected: "CONCAT(user.firstName, ' ', user.lastName)",
+			expected: "CONCAT(COALESCE(CAST(user.firstName AS STRING), ''), ' ', COALESCE(CAST(user.lastName AS STRING), ''))",
 			hasError: false,
 		},
 		{
@@ -53,6 +53,13 @@ func TestStringOperator_ToSQL(t *testing.T) {
 			operator: "cat",
 			args:     []interface{}{"Hello"},
 			expected: "CONCAT('Hello')",
+			hasError: false,
+		},
+		{
+			name:     "concatenation with null",
+			operator: "cat",
+			args:     []interface{}{nil, "World"},
+			expected: "CONCAT('', 'World')",
 			hasError: false,
 		},
 		{
@@ -277,7 +284,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 				"-",
 				map[string]interface{}{"substr": []interface{}{map[string]interface{}{"var": "id"}, 0, 4}},
 			},
-			expected: "CONCAT(SUBSTR(name, 1, 2), '-', SUBSTR(id, 1, 4))",
+			expected: "CONCAT(COALESCE(SUBSTR(name, 1, 2), ''), '-', COALESCE(SUBSTR(id, 1, 4), ''))",
 			hasError: false,
 		},
 		// Nested cat inside cat
@@ -288,7 +295,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 				map[string]interface{}{"cat": []interface{}{"prefix-", map[string]interface{}{"var": "name"}}},
 				"-suffix",
 			},
-			expected: "CONCAT(CONCAT('prefix-', name), '-suffix')",
+			expected: "CONCAT(COALESCE(CONCAT('prefix-', COALESCE(CAST(name AS STRING), '')), ''), '-suffix')",
 			hasError: false,
 		},
 		// Nested cat inside substr
@@ -300,7 +307,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 				0,
 				10,
 			},
-			expected: "SUBSTR(CONCAT(first, last), 1, 10)",
+			expected: "SUBSTR(CONCAT(COALESCE(CAST(first AS STRING), ''), COALESCE(CAST(last AS STRING), '')), 1, 10)",
 			hasError: false,
 		},
 		// Triple nesting: substr in cat in cat
@@ -316,7 +323,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 				},
 				map[string]interface{}{"substr": []interface{}{map[string]interface{}{"var": "id"}, 0, 4}},
 			},
-			expected: "CONCAT(CONCAT(SUBSTR(code, 1, 2), '-'), SUBSTR(id, 1, 4))",
+			expected: "CONCAT(COALESCE(CONCAT(COALESCE(SUBSTR(code, 1, 2), ''), '-'), ''), COALESCE(SUBSTR(id, 1, 4), ''))",
 			hasError: false,
 		},
 		// Multiple substr in cat
@@ -328,7 +335,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 				"****",
 				map[string]interface{}{"substr": []interface{}{map[string]interface{}{"var": "card"}, -4}},
 			},
-			expected: "CONCAT(SUBSTR(card, 1, 4), '****', SUBSTR(card, -3))",
+			expected: "CONCAT(COALESCE(SUBSTR(card, 1, 4), ''), '****', COALESCE(SUBSTR(card, -3), ''))",
 			hasError: false,
 		},
 		// Max inside cat
@@ -339,7 +346,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 				"Max: ",
 				map[string]interface{}{"max": []interface{}{map[string]interface{}{"var": "amount"}, 1000}},
 			},
-			expected: "CONCAT('Max: ', GREATEST(amount, 1000))",
+			expected: "CONCAT('Max: ', COALESCE(CAST(GREATEST(amount, 1000) AS STRING), ''))",
 			hasError: false,
 		},
 		// Min inside cat
@@ -350,7 +357,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 				"Min: ",
 				map[string]interface{}{"min": []interface{}{map[string]interface{}{"var": "value"}, 0}},
 			},
-			expected: "CONCAT('Min: ', LEAST(value, 0))",
+			expected: "CONCAT('Min: ', COALESCE(CAST(LEAST(value, 0) AS STRING), ''))",
 			hasError: false,
 		},
 		// And inside if inside cat
@@ -1105,11 +1112,28 @@ func TestStringOperator_ToSQLParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ToSQLParam: %v", err)
 		}
-		wantSQL := "CONCAT(name, @p1)"
+		wantSQL := "CONCAT(COALESCE(CAST(name AS STRING), ''), @p1)"
 		if sql != wantSQL {
 			t.Errorf("SQL = %q, want %q", sql, wantSQL)
 		}
 		wantParams := []params.QueryParam{{Name: "p1", Value: "!"}}
+		if !reflect.DeepEqual(pc.Params(), wantParams) {
+			t.Errorf("Params = %#v, want %#v", pc.Params(), wantParams)
+		}
+	})
+
+	t.Run("cat with null", func(t *testing.T) {
+		op := NewStringOperator(nil)
+		pc := params.NewParamCollector(params.PlaceholderNamed)
+		sql, err := op.ToSQLParam("cat", []interface{}{nil, "world"}, pc)
+		if err != nil {
+			t.Fatalf("ToSQLParam: %v", err)
+		}
+		wantSQL := "CONCAT('', @p1)"
+		if sql != wantSQL {
+			t.Errorf("SQL = %q, want %q", sql, wantSQL)
+		}
+		wantParams := []params.QueryParam{{Name: "p1", Value: "world"}}
 		if !reflect.DeepEqual(pc.Params(), wantParams) {
 			t.Errorf("Params = %#v, want %#v", pc.Params(), wantParams)
 		}

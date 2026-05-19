@@ -261,8 +261,33 @@ func (s *StringOperator) valueToSQLForConcat(value interface{}) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	if literalSQL, ok := s.literalConcatSQL(value, sql); ok {
+		return literalSQL, nil
+	}
 	kind, typ := s.inferExpressionShape(value)
 	return s.stringifyConcatSQL(sql, kind, typ), nil
+}
+
+func (s *StringOperator) literalConcatSQL(value interface{}, sql string) (string, bool) {
+	typ, ok := primitiveExpressionType(value)
+	if !ok {
+		return "", false
+	}
+	expr := StripRedundantOuterParens(sql)
+	switch typ {
+	case ExpressionTypeNull:
+		return "''", true
+	case ExpressionTypeString:
+		return expr, true
+	case ExpressionTypeNumber:
+		return s.config.StringCast(expr), true
+	case ExpressionTypeBoolean:
+		return PredicateStringSQL(expr), true
+	case ExpressionTypeArray, ExpressionTypeUnknown:
+		return "", false
+	default:
+		return "", false
+	}
 }
 
 func ifExpressionArgs(value interface{}) ([]interface{}, bool, error) {
@@ -324,6 +349,8 @@ func (s *StringOperator) processStringifiedIfExpression(args []interface{}) (str
 			return "", fmt.Errorf("invalid if else value: %w", err)
 		}
 		result.WriteString(fmt.Sprintf(" ELSE %s", elseValue))
+	} else {
+		result.WriteString(" ELSE ''")
 	}
 
 	result.WriteString(" END")
@@ -331,24 +358,7 @@ func (s *StringOperator) processStringifiedIfExpression(args []interface{}) (str
 }
 
 func (s *StringOperator) stringifyConcatSQL(sql string, kind ExpressionKind, typ ExpressionType) string {
-	if kind == ExpressionKindPredicate || typ == ExpressionTypeBoolean {
-		return s.booleanToStringSQL(sql)
-	}
-	return StripRedundantOuterParens(sql)
-}
-
-func (s *StringOperator) booleanToStringSQL(sql string) string {
-	switch strings.ToUpper(strings.TrimSpace(sql)) {
-	case "TRUE":
-		return "'true'"
-	case "FALSE":
-		return "'false'"
-	}
-	condition := StripRedundantOuterParens(sql)
-	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(condition)), "CASE ") {
-		condition = fmt.Sprintf("(%s)", condition)
-	}
-	return fmt.Sprintf("CASE WHEN %s THEN 'true' ELSE 'false' END", condition)
+	return ConcatStringSQL(s.config, sql, kind, typ)
 }
 
 // handleSubstring converts substr operator to SQL.
@@ -777,6 +787,9 @@ func (s *StringOperator) valueToSQLForConcatParam(value interface{}, pc *params.
 	if err != nil {
 		return "", err
 	}
+	if literalSQL, ok := s.literalConcatSQL(value, sql); ok {
+		return literalSQL, nil
+	}
 	kind, typ := s.inferExpressionShape(value)
 	return s.stringifyConcatSQL(sql, kind, typ), nil
 }
@@ -830,6 +843,8 @@ func (s *StringOperator) processStringifiedIfExpressionParam(
 			return "", fmt.Errorf("invalid if else value: %w", err)
 		}
 		result.WriteString(fmt.Sprintf(" ELSE %s", elseValue))
+	} else {
+		result.WriteString(" ELSE ''")
 	}
 
 	result.WriteString(" END")

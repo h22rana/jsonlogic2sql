@@ -419,7 +419,7 @@ func TestTranspileParameterized_String(t *testing.T) {
 		{
 			name:       "cat",
 			jsonLogic:  `{"cat": [{"var": "first"}, " ", {"var": "last"}]}`,
-			wantSQL:    "CONCAT(first, @p1, last)",
+			wantSQL:    "CONCAT(COALESCE(CAST(first AS STRING), ''), @p1, COALESCE(CAST(last AS STRING), ''))",
 			wantParams: []QueryParam{{Name: "p1", Value: " "}},
 		},
 		{
@@ -525,7 +525,7 @@ func TestTranspile_StringNestedComparisonArithmeticPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileCondition() error = %v", err)
 	}
-	if wantSQL := "CONCAT((CASE WHEN x = 1 THEN 1 ELSE 0 END) + 1)"; gotSQL != wantSQL {
+	if wantSQL := "CONCAT(COALESCE(CAST((CASE WHEN x = 1 THEN 1 ELSE 0 END) + 1 AS STRING), ''))"; gotSQL != wantSQL {
 		t.Fatalf("TranspileCondition() SQL = %q, want %q", gotSQL, wantSQL)
 	}
 
@@ -533,7 +533,7 @@ func TestTranspile_StringNestedComparisonArithmeticPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
-	if wantSQL := "CONCAT((CASE WHEN x = @p1 THEN 1 ELSE 0 END) + @p2)"; gotParamSQL != wantSQL {
+	if wantSQL := "CONCAT(COALESCE(CAST((CASE WHEN x = @p1 THEN 1 ELSE 0 END) + @p2 AS STRING), ''))"; gotParamSQL != wantSQL {
 		t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", gotParamSQL, wantSQL)
 	}
 	assertParams(t, gotParams, []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(1)}})
@@ -544,7 +544,7 @@ func TestTranspile_StringNestedComparisonArithmeticPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileCondition() nested operands error = %v", err)
 	}
-	if wantSQL := "CONCAT((CASE WHEN (a + 1) = (b * 2) THEN 1 ELSE 0 END) + 1)"; gotSQL != wantSQL {
+	if wantSQL := "CONCAT(COALESCE(CAST((CASE WHEN (a + 1) = (b * 2) THEN 1 ELSE 0 END) + 1 AS STRING), ''))"; gotSQL != wantSQL {
 		t.Fatalf("TranspileCondition() nested operands SQL = %q, want %q", gotSQL, wantSQL)
 	}
 
@@ -552,7 +552,7 @@ func TestTranspile_StringNestedComparisonArithmeticPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() nested operands error = %v", err)
 	}
-	if wantSQL := "CONCAT((CASE WHEN (a + @p1) = (b * @p2) THEN 1 ELSE 0 END) + @p3)"; gotParamSQL != wantSQL {
+	if wantSQL := "CONCAT(COALESCE(CAST((CASE WHEN (a + @p1) = (b * @p2) THEN 1 ELSE 0 END) + @p3 AS STRING), ''))"; gotParamSQL != wantSQL {
 		t.Fatalf("TranspileParameterizedCondition() nested operands SQL = %q, want %q", gotParamSQL, wantSQL)
 	}
 	assertParams(t, gotParams, []QueryParam{
@@ -1152,7 +1152,7 @@ func TestTranspileParameterized_InStringExpressionContainment_NoSchema(t *testin
 			name:      "bigquery",
 			dialect:   DialectBigQuery,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(SUBSTR(profile.first, (@p1 + 1), @p2), @p3)) > 0",
+			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -1163,7 +1163,7 @@ func TestTranspileParameterized_InStringExpressionContainment_NoSchema(t *testin
 			name:      "spanner",
 			dialect:   DialectSpanner,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(SUBSTR(profile.first, (@p1 + 1), @p2), @p3)) > 0",
+			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -1174,7 +1174,7 @@ func TestTranspileParameterized_InStringExpressionContainment_NoSchema(t *testin
 			name:      "postgresql",
 			dialect:   DialectPostgreSQL,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "POSITION(CONCAT(SUBSTR(profile.first, ($1 + 1), $2), $3) IN profile.name) > 0",
+			wantSQL:   "POSITION(CONCAT(COALESCE(SUBSTR(profile.first, ($1 + 1), $2), ''), $3) IN profile.name) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -1185,7 +1185,7 @@ func TestTranspileParameterized_InStringExpressionContainment_NoSchema(t *testin
 			name:      "duckdb",
 			dialect:   DialectDuckDB,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "STRPOS(profile.name, CONCAT(SUBSTR(profile.first, ($1 + 1), $2), $3)) > 0",
+			wantSQL:   "STRPOS(profile.name, CONCAT(COALESCE(SUBSTR(profile.first, ($1 + 1), $2), ''), $3)) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},
@@ -1196,7 +1196,7 @@ func TestTranspileParameterized_InStringExpressionContainment_NoSchema(t *testin
 			name:      "clickhouse",
 			dialect:   DialectClickHouse,
 			jsonLogic: `{"in": [{"cat": [{"substr": [{"var": "profile.first"}, 0, 2]}, "-x"]}, {"var": "profile.name"}]}`,
-			wantSQL:   "position(profile.name, CONCAT(substring(profile.first, (@p1 + 1), @p2), @p3)) > 0",
+			wantSQL:   "position(profile.name, CONCAT(COALESCE(substring(profile.first, (@p1 + 1), @p2), ''), @p3)) > 0",
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: float64(2)},

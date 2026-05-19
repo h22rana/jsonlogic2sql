@@ -281,7 +281,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "LENGTH(CONCAT(first, last))"
+		expected := "LENGTH(CONCAT(COALESCE(CAST(first AS STRING), ''), COALESCE(CAST(last AS STRING), '')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -881,7 +881,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "CONCAT(LOWER(firstName), ' ', UPPER(lastName))"
+		expected := "CONCAT(COALESCE(LOWER(firstName), ''), ' ', COALESCE(UPPER(lastName), ''))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -977,7 +977,7 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "(SELECT CONCAT('', UPPER(elem)) FROM UNNEST(items) AS elem)"
+		expected := "(SELECT CONCAT(COALESCE('', ''), COALESCE(UPPER(elem), '')) FROM UNNEST(items) AS elem)"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -1108,7 +1108,7 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			if err != nil {
 				t.Errorf("[%s] cat with custom operator: unexpected error: %v", d.name, err)
 			}
-			if sql != "CONCAT('Hello ', UPPER(name))" {
+			if sql != "CONCAT('Hello ', COALESCE(UPPER(name), ''))" {
 				t.Errorf("[%s] cat with custom operator: got %s", d.name, sql)
 			}
 

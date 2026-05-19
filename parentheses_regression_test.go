@@ -32,7 +32,7 @@ func TestTranspile_ParenthesesNormalizationTrickyCases(t *testing.T) {
 			name:  "concat if keeps one grouped or condition",
 			logic: `{"cat":[{"if":[{"or":[{"==":[{"var":"type"},"A"]},{"==":[{"var":"type"},"B"]}]},"yes","no"]}]}`,
 			value: true,
-			want:  "CONCAT(CASE WHEN (type = 'A' OR type = 'B') THEN 'yes' ELSE 'no' END)",
+			want:  "CONCAT(COALESCE(CASE WHEN (type = 'A' OR type = 'B') THEN 'yes' ELSE 'no' END, ''))",
 		},
 	}
 

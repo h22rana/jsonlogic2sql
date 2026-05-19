@@ -891,7 +891,7 @@ func TestParser_parseOperator_AdditionalBranches(t *testing.T) {
 			name:     "cat with valid args",
 			operator: "cat",
 			args:     []interface{}{map[string]interface{}{"var": "first"}, " ", map[string]interface{}{"var": "last"}},
-			expected: "CONCAT(first, ' ', last)",
+			expected: "CONCAT(COALESCE(CAST(first AS STRING), ''), ' ', COALESCE(CAST(last AS STRING), ''))",
 			hasError: false,
 		},
 		{
