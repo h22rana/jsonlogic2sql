@@ -32,6 +32,19 @@ func testRuntimeStringContainmentSQL(d dialect.Dialect, haystack, needle string)
 	)
 }
 
+func testNullSafeArrayMembershipSQL(d dialect.Dialect, valueSQL, arraySQL string) string {
+	condition := fmt.Sprintf(
+		"((__j2s_member IS NULL AND %s IS NULL) OR (__j2s_member IS NOT NULL AND %s IS NOT NULL AND __j2s_member = %s))",
+		valueSQL,
+		valueSQL,
+		valueSQL,
+	)
+	if d == dialect.DialectClickHouse {
+		return fmt.Sprintf("arrayExists(__j2s_member -> %s, %s)", condition, arraySQL)
+	}
+	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_member WHERE %s)", arraySQL, condition)
+}
+
 func TestComparisonOperator_ToSQL(t *testing.T) {
 	op := NewComparisonOperator(testFieldOnlyConfig())
 
@@ -1785,60 +1798,60 @@ func TestComparisonOperator_arrayMembershipSQL(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "BigQuery - IN UNNEST",
+			name:     "BigQuery - null-safe UNNEST",
 			dialect:  dialect.DialectBigQuery,
 			valueSQL: "'test'",
 			arraySQL: "tags",
-			expected: "'test' IN UNNEST(tags)",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectBigQuery, "'test'", "tags"),
 		},
 		{
-			name:     "Spanner - IN UNNEST",
+			name:     "Spanner - null-safe UNNEST",
 			dialect:  dialect.DialectSpanner,
 			valueSQL: "'test'",
 			arraySQL: "tags",
-			expected: "'test' IN UNNEST(tags)",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectSpanner, "'test'", "tags"),
 		},
 		{
-			name:     "PostgreSQL - ANY",
+			name:     "PostgreSQL - null-safe UNNEST",
 			dialect:  dialect.DialectPostgreSQL,
 			valueSQL: "'test'",
 			arraySQL: "tags",
-			expected: "'test' = ANY(tags)",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectPostgreSQL, "'test'", "tags"),
 		},
 		{
-			name:     "DuckDB - list_contains",
+			name:     "DuckDB - null-safe UNNEST",
 			dialect:  dialect.DialectDuckDB,
 			valueSQL: "'test'",
 			arraySQL: "tags",
-			expected: "list_contains(tags, 'test')",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectDuckDB, "'test'", "tags"),
 		},
 		{
-			name:     "ClickHouse - has",
+			name:     "ClickHouse - arrayExists",
 			dialect:  dialect.DialectClickHouse,
 			valueSQL: "'test'",
 			arraySQL: "tags",
-			expected: "has(tags, 'test')",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectClickHouse, "'test'", "tags"),
 		},
 		{
-			name:     "Unspecified dialect - fallback to IN UNNEST",
+			name:     "Unspecified dialect - fallback to null-safe UNNEST",
 			dialect:  dialect.DialectUnspecified,
 			valueSQL: "42",
 			arraySQL: "numbers",
-			expected: "42 IN UNNEST(numbers)",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectUnspecified, "42", "numbers"),
 		},
 		{
-			name:     "nil config - fallback to IN UNNEST",
+			name:     "nil config - fallback to null-safe UNNEST",
 			dialect:  dialect.Dialect(0), // placeholder, will use nil config
 			valueSQL: "'val'",
 			arraySQL: "arr",
-			expected: "'val' IN UNNEST(arr)",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectUnspecified, "'val'", "arr"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var op *ComparisonOperator
-			if tt.name == "nil config - fallback to IN UNNEST" {
+			if tt.name == "nil config - fallback to null-safe UNNEST" {
 				op = NewComparisonOperator(testFieldOnlyConfig())
 			} else {
 				config := NewOperatorConfig(tt.dialect, &fieldOnlySchemaProvider{})
@@ -2362,7 +2375,7 @@ func TestComparisonOperator_handleIn_WithVarRightSide(t *testing.T) {
 			dialect:  dialect.DialectBigQuery,
 			leftArg:  "test",
 			rightArg: map[string]interface{}{"var": "tags"},
-			expected: "'test' IN UNNEST(tags)",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectBigQuery, "'test'", "tags"),
 			hasError: false,
 		},
 		{
@@ -2370,7 +2383,7 @@ func TestComparisonOperator_handleIn_WithVarRightSide(t *testing.T) {
 			dialect:  dialect.DialectPostgreSQL,
 			leftArg:  "test",
 			rightArg: map[string]interface{}{"var": "tags"},
-			expected: "'test' = ANY(tags)",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectPostgreSQL, "'test'", "tags"),
 			hasError: false,
 		},
 		{
@@ -2378,7 +2391,7 @@ func TestComparisonOperator_handleIn_WithVarRightSide(t *testing.T) {
 			dialect:  dialect.DialectDuckDB,
 			leftArg:  "test",
 			rightArg: map[string]interface{}{"var": "tags"},
-			expected: "list_contains(tags, 'test')",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectDuckDB, "'test'", "tags"),
 			hasError: false,
 		},
 		{
@@ -2386,7 +2399,7 @@ func TestComparisonOperator_handleIn_WithVarRightSide(t *testing.T) {
 			dialect:  dialect.DialectClickHouse,
 			leftArg:  "test",
 			rightArg: map[string]interface{}{"var": "tags"},
-			expected: "has(tags, 'test')",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectClickHouse, "'test'", "tags"),
 			hasError: false,
 		},
 		// String field on right side: use STRPOS
@@ -2468,7 +2481,7 @@ func TestComparisonOperator_handleIn_SchemaRequired_VarRightSide(t *testing.T) {
 			name:     "var left and var right - array membership fallback",
 			leftArg:  map[string]interface{}{"var": "item"},
 			rightArg: map[string]interface{}{"var": "collection"},
-			expected: "item IN UNNEST(collection)",
+			expected: testNullSafeArrayMembershipSQL(dialect.DialectUnspecified, "item", "collection"),
 			hasError: false,
 		},
 		{
@@ -2555,22 +2568,22 @@ func TestComparisonOperator_handleIn_SchemaRequired_StringExpressionHeuristic(t 
 			),
 		},
 		{
-			name:        "bigquery numeric expression still uses membership fallback",
+			name:        "bigquery numeric expression uses null-safe membership fallback",
 			d:           dialect.DialectBigQuery,
 			leftArg:     leftNumericExpr,
-			expectedSQL: "(1 + 2) IN UNNEST(profile.name)",
+			expectedSQL: testNullSafeArrayMembershipSQL(dialect.DialectBigQuery, "(1 + 2)", "profile.name"),
 		},
 		{
-			name:        "postgres numeric expression still uses membership fallback",
+			name:        "postgres numeric expression uses null-safe membership fallback",
 			d:           dialect.DialectPostgreSQL,
 			leftArg:     leftNumericExpr,
-			expectedSQL: "(1 + 2) = ANY(profile.name)",
+			expectedSQL: testNullSafeArrayMembershipSQL(dialect.DialectPostgreSQL, "(1 + 2)", "profile.name"),
 		},
 		{
-			name:        "clickhouse numeric expression still uses membership fallback",
+			name:        "clickhouse numeric expression uses null-safe membership fallback",
 			d:           dialect.DialectClickHouse,
 			leftArg:     leftNumericExpr,
-			expectedSQL: "has(profile.name, (1 + 2))",
+			expectedSQL: testNullSafeArrayMembershipSQL(dialect.DialectClickHouse, "(1 + 2)", "profile.name"),
 		},
 	}
 
@@ -2707,7 +2720,7 @@ func TestComparisonOperator_handleIn_WithSchemaArrayVar(t *testing.T) {
 	if err != nil {
 		t.Errorf("ToSQL() unexpected error = %v", err)
 	}
-	expected := "'test' IN UNNEST(tags)"
+	expected := testNullSafeArrayMembershipSQL(dialect.DialectBigQuery, "'test'", "tags")
 	if result != expected {
 		t.Errorf("ToSQL() = %v, want %v", result, expected)
 	}
@@ -3106,7 +3119,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
-		want := "@p1 IN UNNEST(tags)"
+		want := testNullSafeArrayMembershipSQL(dialect.DialectBigQuery, "@p1", "tags")
 		if got != want {
 			t.Errorf("handleInParam() = %q, want %q", got, want)
 		}
@@ -3342,7 +3355,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
-		want := "@p1 IN UNNEST(col)"
+		want := testNullSafeArrayMembershipSQL(dialect.DialectBigQuery, "@p1", "col")
 		if got != want {
 			t.Errorf("handleInParam() = %q, want %q", got, want)
 		}
@@ -3361,7 +3374,7 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
-		want := "LOWER(@p1) IN UNNEST(col)"
+		want := testNullSafeArrayMembershipSQL(dialect.DialectBigQuery, "LOWER(@p1)", "col")
 		if got != want {
 			t.Errorf("handleInParam() = %q, want %q", got, want)
 		}
@@ -3443,33 +3456,33 @@ func TestComparisonOperator_handleInParam_SchemaRequired_StringExpressionHeurist
 			},
 		},
 		{
-			name:    "bigquery numeric expression still uses membership fallback",
+			name:    "bigquery numeric expression uses null-safe membership fallback",
 			d:       dialect.DialectBigQuery,
 			style:   params.PlaceholderNamed,
 			leftArg: leftNumericExpr,
-			wantSQL: "(@p1 + @p2) IN UNNEST(profile.name)",
+			wantSQL: testNullSafeArrayMembershipSQL(dialect.DialectBigQuery, "(@p1 + @p2)", "profile.name"),
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(1)},
 				{Name: "p2", Value: float64(2)},
 			},
 		},
 		{
-			name:    "postgres numeric expression still uses membership fallback",
+			name:    "postgres numeric expression uses null-safe membership fallback",
 			d:       dialect.DialectPostgreSQL,
 			style:   params.PlaceholderPositional,
 			leftArg: leftNumericExpr,
-			wantSQL: "($1 + $2) = ANY(profile.name)",
+			wantSQL: testNullSafeArrayMembershipSQL(dialect.DialectPostgreSQL, "($1 + $2)", "profile.name"),
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(1)},
 				{Name: "p2", Value: float64(2)},
 			},
 		},
 		{
-			name:    "clickhouse numeric expression still uses membership fallback",
+			name:    "clickhouse numeric expression uses null-safe membership fallback",
 			d:       dialect.DialectClickHouse,
 			style:   params.PlaceholderNamed,
 			leftArg: leftNumericExpr,
-			wantSQL: "has(profile.name, (@p1 + @p2))",
+			wantSQL: testNullSafeArrayMembershipSQL(dialect.DialectClickHouse, "(@p1 + @p2)", "profile.name"),
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(1)},
 				{Name: "p2", Value: float64(2)},

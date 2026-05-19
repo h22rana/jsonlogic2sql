@@ -546,8 +546,8 @@ func TestSchemaInOperator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Transpile with array field failed: %v", err)
 	}
-	// Should use dialect-specific array membership syntax (BigQuery uses IN UNNEST)
-	expected := "'tag1' IN UNNEST(tags)"
+	// Should use null-safe array membership to preserve JSONLogic null equality.
+	expected := testNullSafeArrayMembershipSQL(DialectBigQuery, "'tag1'", "tags")
 	if result != expected {
 		t.Errorf("TranspileCondition() = %q, want %q", result, expected)
 	}

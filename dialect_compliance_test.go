@@ -229,7 +229,7 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 }
 
 // TestDialectSpecificInArrayField tests that the "in" operator with an array-typed field
-// produces dialect-specific SQL (UNNEST, ANY, list_contains, has).
+// produces null-safe JSONLogic membership SQL for each dialect.
 func TestDialectSpecificInArrayField(t *testing.T) {
 	type testCase struct {
 		name     string
@@ -247,22 +247,22 @@ func TestDialectSpecificInArrayField(t *testing.T) {
 			name:  "in with array field variable (string value)",
 			input: `{"in": ["vip", {"var": "test.tags"}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "'vip' IN UNNEST(test.tags)",
-				DialectSpanner:    "'vip' IN UNNEST(test.tags)",
-				DialectPostgreSQL: "'vip' = ANY(test.tags)",
-				DialectDuckDB:     "list_contains(test.tags, 'vip')",
-				DialectClickHouse: "has(test.tags, 'vip')",
+				DialectBigQuery:   testNullSafeArrayMembershipSQL(DialectBigQuery, "'vip'", "test.tags"),
+				DialectSpanner:    testNullSafeArrayMembershipSQL(DialectSpanner, "'vip'", "test.tags"),
+				DialectPostgreSQL: testNullSafeArrayMembershipSQL(DialectPostgreSQL, "'vip'", "test.tags"),
+				DialectDuckDB:     testNullSafeArrayMembershipSQL(DialectDuckDB, "'vip'", "test.tags"),
+				DialectClickHouse: testNullSafeArrayMembershipSQL(DialectClickHouse, "'vip'", "test.tags"),
 			},
 		},
 		{
 			name:  "in with array field variable (numeric value)",
 			input: `{"in": [42, {"var": "test.scores"}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "42 IN UNNEST(test.scores)",
-				DialectSpanner:    "42 IN UNNEST(test.scores)",
-				DialectPostgreSQL: "42 = ANY(test.scores)",
-				DialectDuckDB:     "list_contains(test.scores, 42)",
-				DialectClickHouse: "has(test.scores, 42)",
+				DialectBigQuery:   testNullSafeArrayMembershipSQL(DialectBigQuery, "42", "test.scores"),
+				DialectSpanner:    testNullSafeArrayMembershipSQL(DialectSpanner, "42", "test.scores"),
+				DialectPostgreSQL: testNullSafeArrayMembershipSQL(DialectPostgreSQL, "42", "test.scores"),
+				DialectDuckDB:     testNullSafeArrayMembershipSQL(DialectDuckDB, "42", "test.scores"),
+				DialectClickHouse: testNullSafeArrayMembershipSQL(DialectClickHouse, "42", "test.scores"),
 			},
 		},
 	}

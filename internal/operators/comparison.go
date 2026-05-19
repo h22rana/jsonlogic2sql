@@ -53,29 +53,66 @@ func (c *ComparisonOperator) schema() SchemaProvider {
 	return schemaFromConfig(c.config)
 }
 
-// arrayMembershipSQL generates dialect-specific SQL for checking if a value exists in an array column.
-// BigQuery/Spanner: value IN UNNEST(array)
-// PostgreSQL: value = ANY(array)
-// DuckDB: list_contains(array, value)
-// ClickHouse: has(array, value).
+const arrayMembershipElementAlias = "__j2s_member"
+
+// arrayMembershipSQL generates JSONLogic-strict array membership SQL.
+// JSONLogic array membership follows JavaScript indexOf semantics, so NULL
+// members must compare as equal to a NULL needle instead of relying on SQL's
+// nullable =/IN behavior.
 func (c *ComparisonOperator) arrayMembershipSQL(valueSQL, arraySQL string) string {
 	d := dialect.DialectUnspecified
 	if c.config != nil {
 		d = c.config.GetDialect()
 	}
 
+	condition := nullSafeArrayMemberEqualitySQL(arrayMembershipElementAlias, valueSQL)
 	switch d {
-	case dialect.DialectPostgreSQL:
-		return fmt.Sprintf("%s = ANY(%s)", valueSQL, arraySQL)
-	case dialect.DialectDuckDB:
-		return fmt.Sprintf("list_contains(%s, %s)", arraySQL, valueSQL)
 	case dialect.DialectClickHouse:
-		return fmt.Sprintf("has(%s, %s)", arraySQL, valueSQL)
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner:
-		return fmt.Sprintf("%s IN UNNEST(%s)", valueSQL, arraySQL)
+		return fmt.Sprintf("arrayExists(%s -> %s, %s)", arrayMembershipElementAlias, condition, arraySQL)
+	case dialect.DialectUnspecified,
+		dialect.DialectBigQuery,
+		dialect.DialectSpanner,
+		dialect.DialectPostgreSQL,
+		dialect.DialectDuckDB:
+		return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)",
+			arraySQL, arrayMembershipElementAlias, condition)
 	}
 	// Fallback for any future dialects
-	return fmt.Sprintf("%s IN UNNEST(%s)", valueSQL, arraySQL)
+	return fmt.Sprintf("EXISTS (SELECT 1 FROM UNNEST(%s) AS %s WHERE %s)",
+		arraySQL, arrayMembershipElementAlias, condition)
+}
+
+func nullSafeArrayMemberEqualitySQL(memberSQL, valueSQL string) string {
+	return fmt.Sprintf(
+		"((%s IS NULL AND %s IS NULL) OR (%s IS NOT NULL AND %s IS NOT NULL AND %s = %s))",
+		memberSQL,
+		valueSQL,
+		memberSQL,
+		valueSQL,
+		memberSQL,
+		valueSQL,
+	)
+}
+
+func arrayLiteralMembershipSQL(valueSQL string, itemSQLs []string) string {
+	nonNullItems := make([]string, 0, len(itemSQLs))
+	hasNull := false
+	for _, itemSQL := range itemSQLs {
+		if strings.EqualFold(strings.TrimSpace(itemSQL), "NULL") {
+			hasNull = true
+			continue
+		}
+		nonNullItems = append(nonNullItems, itemSQL)
+	}
+
+	switch {
+	case hasNull && len(nonNullItems) == 0:
+		return fmt.Sprintf("%s IS NULL", valueSQL)
+	case hasNull:
+		return fmt.Sprintf("(%s IS NULL OR %s IN (%s))", valueSQL, valueSQL, strings.Join(nonNullItems, ", "))
+	default:
+		return fmt.Sprintf("%s IN (%s)", valueSQL, strings.Join(nonNullItems, ", "))
+	}
 }
 
 // strposFunc returns the appropriate string position function call based on dialect.
@@ -1413,6 +1450,75 @@ func expressionEqualityKind(value interface{}) (string, bool) {
 	return "", false
 }
 
+func (c *ComparisonOperator) schemaEqualityKind(fieldName string) (string, bool) {
+	switch {
+	case c.schema().IsStringType(fieldName), c.schema().IsEnumType(fieldName):
+		return "string", true
+	case c.schema().IsNumericType(fieldName):
+		return "number", true
+	case c.schema().IsBooleanType(fieldName):
+		return "boolean", true
+	case c.schema().IsArrayType(fieldName):
+		return "array", true
+	default:
+		return "", false
+	}
+}
+
+func (c *ComparisonOperator) strictArrayMembershipLeftKind(leftOriginal interface{}) (string, bool) {
+	if fieldName := c.extractFieldNameFromValue(leftOriginal); fieldName != "" {
+		return c.schemaEqualityKind(fieldName)
+	}
+	if kind, ok := expressionEqualityKind(leftOriginal); ok {
+		return kind, true
+	}
+	leftLiteral, ok := equalityLiteralValue(leftOriginal)
+	if !ok {
+		return "", false
+	}
+	if kind := equalityLiteralKind(leftLiteral); kind != "" {
+		return kind, true
+	}
+	return "", false
+}
+
+func (c *ComparisonOperator) strictArrayMembershipItems(
+	leftOriginal interface{},
+	items []interface{},
+) []interface{} {
+	leftKind, known := c.strictArrayMembershipLeftKind(leftOriginal)
+	if !known {
+		return items
+	}
+
+	filtered := make([]interface{}, 0, len(items))
+	for _, item := range items {
+		literal, ok := equalityLiteralValue(item)
+		if !ok {
+			filtered = append(filtered, item)
+			continue
+		}
+		itemKind := equalityLiteralKind(literal)
+		if itemKind == "null" || itemKind == "" || itemKind == leftKind {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func (c *ComparisonOperator) validateEnumArrayMembershipItems(fieldName string, items []interface{}) error {
+	for _, item := range items {
+		literal, ok := equalityLiteralValue(item)
+		if !ok || equalityLiteralKind(literal) != "string" {
+			continue
+		}
+		if err := c.validateEnumValue(item, fieldName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func typedNullExpression(value interface{}) bool {
 	pv, ok := value.(ProcessedValue)
 	return ok && pv.IsSQL && pv.HasExpressionInfo &&
@@ -1960,7 +2066,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 			// Use schema to determine type if available
 			if fieldName != "" {
 				if c.schema().IsArrayType(fieldName) {
-					// Array type: use dialect-specific array membership syntax
+					// Array type: use null-safe JSONLogic element membership.
 					return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 				} else if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 					// Coerce left side literal to string if needed (e.g., 123 → '123')
@@ -2008,22 +2114,15 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 			return boolSQL(false), nil
 		}
 
-		// Validate enum values if left side is an enum field
-		if leftFieldName != "" && c.schema().IsEnumType(leftFieldName) {
-			for _, item := range arr {
-				if err := c.validateEnumValue(item, leftFieldName); err != nil {
-					return "", err
-				}
-			}
+		arr = c.strictArrayMembershipItems(leftOriginal, arr)
+		if len(arr) == 0 {
+			return boolSQL(false), nil
 		}
 
-		// Apply type coercion based on schema for array elements
-		if leftFieldName != "" {
-			coerced := make([]interface{}, len(arr))
-			copy(coerced, arr)
-			arr = coerced
-			for i, item := range arr {
-				arr[i] = c.coerceValueForComparison(item, leftFieldName)
+		// Validate enum values if left side is an enum field
+		if leftFieldName != "" && c.schema().IsEnumType(leftFieldName) {
+			if err := c.validateEnumArrayMembershipItems(leftFieldName, arr); err != nil {
+				return "", err
 			}
 		}
 
@@ -2037,7 +2136,7 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 			values = append(values, valueSQL)
 		}
 
-		return fmt.Sprintf("%s IN (%s)", leftSQL, strings.Join(values, ", ")), nil
+		return arrayLiteralMembershipSQL(leftSQL, values), nil
 	}
 
 	if str, ok := rightValue.(string); ok {
@@ -2690,20 +2789,14 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 	}
 
 	if arr, ok := rightValue.([]interface{}); ok {
-		if leftFieldName != "" && c.schema().IsEnumType(leftFieldName) {
-			for _, item := range arr {
-				if err := c.validateEnumValue(item, leftFieldName); err != nil {
-					return "", err
-				}
-			}
+		arr = c.strictArrayMembershipItems(leftOriginal, arr)
+		if len(arr) == 0 {
+			return boolSQL(false), nil
 		}
 
-		if leftFieldName != "" {
-			coerced := make([]interface{}, len(arr))
-			copy(coerced, arr)
-			arr = coerced
-			for i, item := range arr {
-				arr[i] = c.coerceValueForComparison(item, leftFieldName)
+		if leftFieldName != "" && c.schema().IsEnumType(leftFieldName) {
+			if err := c.validateEnumArrayMembershipItems(leftFieldName, arr); err != nil {
+				return "", err
 			}
 		}
 
@@ -2716,7 +2809,7 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 			values = append(values, valueSQL)
 		}
 
-		return fmt.Sprintf("%s IN (%s)", leftSQL, strings.Join(values, ", ")), nil
+		return arrayLiteralMembershipSQL(leftSQL, values), nil
 	}
 
 	return "", fmt.Errorf("in operator requires array, variable, or string as second argument")

@@ -1266,9 +1266,9 @@ func TestTranspileParameterized_InSchemaCoercion(t *testing.T) {
 			wantParams: []QueryParam{{Name: "p1", Value: "123"}},
 		},
 		{
-			name:       "string in array field uses UNNEST",
+			name:       "string in array field uses null-safe membership",
 			jsonLogic:  `{"in": ["x", {"var": "tags"}]}`,
-			wantSQL:    "@p1 IN UNNEST(tags)",
+			wantSQL:    testNullSafeArrayMembershipSQL(DialectBigQuery, "@p1", "tags"),
 			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
 		},
 	}

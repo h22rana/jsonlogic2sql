@@ -1374,16 +1374,7 @@ func TestTranspileCondition_InRightHandValueExpressionsAllDialects(t *testing.T)
 		return fmt.Sprintf("[%s, %s]", first, second)
 	}
 	arrayMembershipSQL := func(d Dialect, value, array string) string {
-		switch d {
-		case DialectPostgreSQL:
-			return fmt.Sprintf("%s = ANY(%s)", value, array)
-		case DialectDuckDB:
-			return fmt.Sprintf("list_contains(%s, %s)", array, value)
-		case DialectClickHouse:
-			return fmt.Sprintf("has(%s, %s)", array, value)
-		default:
-			return fmt.Sprintf("%s IN UNNEST(%s)", value, array)
-		}
+		return testNullSafeArrayMembershipSQL(d, value, array)
 	}
 
 	tests := []struct {

@@ -2,6 +2,7 @@ package jsonlogic2sql
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
@@ -49,6 +50,51 @@ func testRuntimeStringContainmentSQL(d Dialect, haystack, needle string) string 
 		needle,
 		testStringContainmentSQL(d, haystack, needle),
 	)
+}
+
+func testNullSafeArrayMembershipSQL(d Dialect, valueSQL, arraySQL string) string {
+	condition := testNullSafeArrayMemberEqualitySQL("__j2s_member", valueSQL)
+	if d == DialectClickHouse {
+		return fmt.Sprintf("arrayExists(__j2s_member -> %s, %s)", condition, arraySQL)
+	}
+	return fmt.Sprintf(
+		"EXISTS (SELECT 1 FROM UNNEST(%s) AS __j2s_member WHERE %s)",
+		arraySQL,
+		condition,
+	)
+}
+
+func testNullSafeArrayMemberEqualitySQL(memberSQL, valueSQL string) string {
+	return fmt.Sprintf(
+		"((%s IS NULL AND %s IS NULL) OR (%s IS NOT NULL AND %s IS NOT NULL AND %s = %s))",
+		memberSQL,
+		valueSQL,
+		memberSQL,
+		valueSQL,
+		memberSQL,
+		valueSQL,
+	)
+}
+
+func testArrayLiteralMembershipSQL(valueSQL string, itemSQLs ...string) string {
+	nonNullItems := make([]string, 0, len(itemSQLs))
+	hasNull := false
+	for _, itemSQL := range itemSQLs {
+		if strings.EqualFold(strings.TrimSpace(itemSQL), "NULL") {
+			hasNull = true
+			continue
+		}
+		nonNullItems = append(nonNullItems, itemSQL)
+	}
+
+	switch {
+	case hasNull && len(nonNullItems) == 0:
+		return fmt.Sprintf("%s IS NULL", valueSQL)
+	case hasNull:
+		return fmt.Sprintf("(%s IS NULL OR %s IN (%s))", valueSQL, valueSQL, strings.Join(nonNullItems, ", "))
+	default:
+		return fmt.Sprintf("%s IN (%s)", valueSQL, strings.Join(nonNullItems, ", "))
+	}
 }
 
 func defaultTestSchema() *Schema {

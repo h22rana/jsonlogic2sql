@@ -199,7 +199,7 @@ func TestSchemaTypeAwareBehavior(t *testing.T) {
 		{
 			name:      "in with array type field",
 			jsonLogic: `{"in": ["tag1", {"var": "tags"}]}`,
-			expected:  "'tag1' IN UNNEST(tags)",
+			expected:  testNullSafeArrayMembershipSQL(DialectBigQuery, "'tag1'", "tags"),
 		},
 		{
 			name:      "in with string type field (string containment)",
@@ -502,9 +502,9 @@ func TestInOperatorWithSchemaIntegration(t *testing.T) {
 		expected  string
 	}{
 		{
-			name:      "in with array field uses IN syntax",
+			name:      "in with array field uses null-safe membership",
 			jsonLogic: `{"in": ["admin", {"var": "user.roles"}]}`,
-			expected:  "'admin' IN UNNEST(user.roles)",
+			expected:  testNullSafeArrayMembershipSQL(DialectBigQuery, "'admin'", "user.roles"),
 		},
 		{
 			name:      "in with string field uses STRPOS",
@@ -1075,10 +1075,10 @@ func TestEnumWithComplexExpressions(t *testing.T) {
 	}
 }
 
-// TestTypeCoercionForInOperator verifies that array elements in the "in" operator are coerced
-// to match the field type. Numbers are quoted for string fields, and string numbers are
-// unquoted for numeric fields. This prevents type errors in strict-typing databases like BigQuery.
-func TestTypeCoercionForInOperator(t *testing.T) {
+// TestStrictArrayMembershipForInOperator verifies JSONLogic indexOf-style array
+// membership. Literal array membership uses strict element equality; it does
+// not apply the loose field/literal coercion used by equality operators.
+func TestStrictArrayMembershipForInOperator(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "code", Type: FieldTypeString},
 		{Name: "status", Type: FieldTypeString},
@@ -1088,7 +1088,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		{Name: "active", Type: FieldTypeBoolean},
 	})
 
-	t.Run("string field with numeric array elements should quote values", func(t *testing.T) {
+	t.Run("string field with numeric array elements folds false", func(t *testing.T) {
 		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
@@ -1096,13 +1096,13 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "code IN ('5960', '9000')"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("string field with mixed array elements should coerce numbers", func(t *testing.T) {
+	t.Run("string field with mixed array elements filters mismatched numeric values", func(t *testing.T) {
 		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
@@ -1110,13 +1110,13 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "status IN ('active', '123', 'pending')"
+		expected := "status IN ('active', 'pending')"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("numeric field with string array elements should unquote values", func(t *testing.T) {
+	t.Run("numeric field with string array elements folds false", func(t *testing.T) {
 		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
@@ -1124,7 +1124,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "amount IN (100, 200, 300)"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
@@ -1158,20 +1158,20 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		}
 	})
 
-	t.Run("string field should coerce numeric values", func(t *testing.T) {
+	t.Run("string field with numeric literal array folds false", func(t *testing.T) {
 		transpiler := mustTestTranspiler(t, DialectBigQuery)
 
 		result, err := transpiler.TranspileCondition(`{"in":[{"var":"code"},[5960,9000]]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "code IN ('5960', '9000')"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("string field with float values should quote correctly", func(t *testing.T) {
+	t.Run("string field with float literal array folds false", func(t *testing.T) {
 		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
@@ -1179,7 +1179,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "status IN ('1.5', '2.7')"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
@@ -1227,7 +1227,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		}
 	})
 
-	t.Run("coercion works across all dialects", func(t *testing.T) {
+	t.Run("strict array membership filters mismatched literals across all dialects", func(t *testing.T) {
 		dialects := []Dialect{
 			DialectBigQuery,
 			DialectSpanner,
@@ -1243,15 +1243,15 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 			if err != nil {
 				t.Fatalf("[%s] Unexpected error: %v", d, err)
 			}
-			expected := "code IN ('5960', '9000')"
+			expected := "FALSE"
 			if result != expected {
 				t.Errorf("[%s] Expected: %s\nGot: %s", d, expected, result)
 			}
 		}
 	})
 
-	// TranspileConditionFromMap tests: Go native int types bypass JSON unmarshaling (float64)
-	t.Run("TranspileConditionFromMap: string field with Go int array", func(t *testing.T) {
+	// TranspileConditionFromMap tests Go native int types that bypass JSON unmarshaling.
+	t.Run("TranspileConditionFromMap: string field with Go int array folds false", func(t *testing.T) {
 		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
@@ -1264,13 +1264,13 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "code IN ('5960', '9000')"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("TranspileConditionFromMap: string field with Go int64 array", func(t *testing.T) {
+	t.Run("TranspileConditionFromMap: string field with Go int64 array folds false", func(t *testing.T) {
 		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
@@ -1283,7 +1283,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "code IN ('5960', '9000')"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
@@ -1463,7 +1463,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		}
 	})
 
-	t.Run("TranspileConditionFromMap: integer field with Go string array", func(t *testing.T) {
+	t.Run("TranspileConditionFromMap: integer field with Go string array folds false", func(t *testing.T) {
 		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
@@ -1476,7 +1476,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "amount IN (100, 200)"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}

@@ -50,16 +50,7 @@ func assertArrayInMembershipSQL(t *testing.T, d Dialect, sql, valueSQL string) {
 	if !strings.Contains(sql, "elem.name") {
 		t.Fatalf("expected element-scoped RHS elem.name, got: %s", sql)
 	}
-	switch d {
-	case DialectPostgreSQL:
-		assertSQLFragments(t, sql, []string{valueSQL + " = ANY(elem.name)"}, []string{" = ANY(name)"})
-	case DialectDuckDB:
-		assertSQLFragments(t, sql, []string{"list_contains(elem.name, " + valueSQL + ")"}, []string{"list_contains(name,"})
-	case DialectClickHouse:
-		assertSQLFragments(t, sql, []string{"has(elem.name, " + valueSQL + ")"}, []string{"has(name,"})
-	default:
-		assertSQLFragments(t, sql, []string{valueSQL + " IN UNNEST(elem.name)"}, []string{" IN UNNEST(name)"})
-	}
+	assertSQLFragments(t, sql, []string{testNullSafeArrayMembershipSQL(d, valueSQL, "elem.name")}, []string{"UNNEST(name)", "has(name,"})
 }
 
 func firstPlaceholderForDialect(d Dialect) string {
