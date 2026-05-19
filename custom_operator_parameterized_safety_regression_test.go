@@ -49,6 +49,24 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 			logic:     `{"cat":[{"and":[{"always":["x"]},"ok"]}]}`,
 			valueMode: true,
 		},
+		{
+			name:  "comparison folds custom predicate operand",
+			logic: `{"==":[{"always":["x"]},true]}`,
+		},
+		{
+			name:  "and skips folded custom comparison",
+			logic: `{"and":[{"==":[{"always":["x"]},true]},true]}`,
+		},
+		{
+			name:      "value comparison folds custom predicate operand",
+			logic:     `{"==":[{"always":["x"]},true]}`,
+			valueMode: true,
+		},
+		{
+			name:      "value or short-circuits folded custom comparison",
+			logic:     `{"or":[{"==":[{"always":["x"]},true]},"fallback"]}`,
+			valueMode: true,
+		},
 	}
 
 	for _, d := range allDialects() {

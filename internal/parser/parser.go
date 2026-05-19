@@ -808,6 +808,7 @@ func (p *Parser) catStringSQL(res expressionResult) string {
 func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	pv := operators.TypedSQLResult(valueOperandSQL(res), res.Kind, valueTypeOf(res))
 	pv.RequiresKnownTruthiness = res.requiresKnownTruthiness
+	pv.PreserveParamRefs = res.preserveParamRefs
 	if res.fieldValue {
 		pv.IsField = true
 		pv.FieldName = res.fieldName
@@ -816,6 +817,15 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 		pv.FieldDefaultLiteral = res.fieldDefault
 	}
 	return pv
+}
+
+func processedArgsPreserveParamRefs(args []interface{}) bool {
+	for _, arg := range args {
+		if pv, ok := arg.(operators.ProcessedValue); ok && pv.PreserveParamRefs {
+			return true
+		}
+	}
+	return false
 }
 
 func literalComparisonPredicateResult(operator string, args []interface{}, sql string) (expressionResult, error) {
@@ -1212,11 +1222,13 @@ func (p *Parser) parseExpressionValue(expr interface{}, path string) (expression
 				})
 				copyProcessedFieldMetadata(&res, pv)
 				res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
+				res.preserveParamRefs = pv.PreserveParamRefs
 				return res, nil
 			}
 			res := fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName)
 			copyProcessedFieldMetadata(&res, pv)
 			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
+			res.preserveParamRefs = pv.PreserveParamRefs
 			return res, nil
 		}
 		return p.parseExpressionValue(pv.Value, path)
@@ -2379,11 +2391,13 @@ func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *pa
 				})
 				copyProcessedFieldMetadata(&res, pv)
 				res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
+				res.preserveParamRefs = pv.PreserveParamRefs
 				return res, nil
 			}
 			res := fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName)
 			copyProcessedFieldMetadata(&res, pv)
 			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
+			res.preserveParamRefs = pv.PreserveParamRefs
 			return res, nil
 		}
 		return p.parseExpressionValueParam(pv.Value, path, pc)
@@ -2490,7 +2504,11 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 		}
 		res, err := literalComparisonPredicateResult(operator, processedArgs, sql)
 		if res.truthKnown {
-			pc.Restore(checkpoint)
+			if processedArgsPreserveParamRefs(processedArgs) {
+				res.preserveParamRefs = true
+			} else {
+				pc.Restore(checkpoint)
+			}
 		}
 		return res, p.wrapOperatorError(operator, path, err)
 	case "and", "or":
