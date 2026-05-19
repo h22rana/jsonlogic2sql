@@ -396,7 +396,7 @@ func registerNullSafeFieldEqualityCustomOperators(t *testing.T, tr *Transpiler) 
 }
 
 func TestTranspiler_Transpile(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 
 	tests := []struct {
 		name     string
@@ -537,7 +537,7 @@ func TestTranspiler_InStringExpressionContainment_SchemaRequired(t *testing.T) {
 }
 
 func TestTranspiler_TranspileConditionFromMap(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 
 	tests := []struct {
 		name     string
@@ -586,7 +586,7 @@ func TestTranspiler_TranspileConditionFromMap(t *testing.T) {
 }
 
 func TestTranspiler_TranspileConditionFromInterface(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 
 	tests := []struct {
 		name     string
@@ -629,7 +629,7 @@ func TestTranspiler_TranspileConditionFromInterface(t *testing.T) {
 }
 
 func TestTranspileConditionFromMap_RejectsInvalidJSONNumberLiterals(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 
 	tests := []struct {
 		name  string
@@ -666,7 +666,7 @@ func TestTranspileConditionFromMap_RejectsInvalidJSONNumberLiterals(t *testing.T
 }
 
 func TestTranspileConditionFromInterface_RejectsInvalidJSONNumberLiterals(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 
 	logic := map[string]interface{}{
 		"==": []interface{}{
@@ -686,7 +686,7 @@ func TestTranspileConditionFromMap_SchemaEqualityRejectsInvalidJSONNumberBeforeF
 		{Name: "code", Type: FieldTypeString},
 		{Name: "amount", Type: FieldTypeInteger},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 	tr.SetSchema(schema)
 
 	tests := []struct {
@@ -742,7 +742,7 @@ func TestTranspile_SchemaEqualityValidatesEnumDefaultsForVarOperands(t *testing.
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active"}},
 		{Name: "other", Type: FieldTypeString},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 	tr.SetSchema(schema)
 
 	tests := []struct {
@@ -775,7 +775,7 @@ func TestTranspileConditionFromInterface_SchemaEqualityPreservesFloat32ForEnum(t
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"1.2"}},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 	tr.SetSchema(schema)
 	logic := map[string]interface{}{
 		"==": []interface{}{
@@ -809,7 +809,7 @@ func TestTranspileConditionFromInterface_SchemaNumberStrictEqualityFoldsNonFinit
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "score", Type: FieldTypeNumber},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 	tr.SetSchema(schema)
 
 	tests := []struct {
@@ -861,7 +861,7 @@ func TestTranspile_SchemaStringEqualityCanonicalizesNonFiniteNumbers(t *testing.
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"Infinity", "-Infinity"}},
 		{Name: "limited_status", Type: FieldTypeEnum, AllowedValues: []string{"active"}},
 	})
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 	tr.SetSchema(schema)
 
 	jsonSQL, err := tr.TranspileCondition(`{"==": [{"var": "code"}, 1e400]}`)
@@ -915,7 +915,7 @@ func TestTranspile_SchemaStringEqualityCanonicalizesNonFiniteNumbers(t *testing.
 }
 
 func TestTranspileConditionFromMap_CustomOperatorRejectsInvalidJSONNumberLiterals(t *testing.T) {
-	tr, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+	tr := mustTestTranspiler(t, DialectBigQuery)
 	_ = tr.RegisterOperatorFunc("identity", func(_ string, args []OperatorArg) (OperatorResult, error) {
 		return ValueSQL(args[0].SQL, args[0].Type), nil
 	})

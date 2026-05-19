@@ -1,11 +1,22 @@
 package jsonlogic2sql
 
+import "testing"
+
 func mustNewSchema(fields []FieldSchema) *Schema {
 	schema, err := NewSchema(fields)
 	if err != nil {
 		panic(err)
 	}
 	return schema
+}
+
+func mustTestTranspiler(tb testing.TB, d Dialect) *Transpiler {
+	tb.Helper()
+	tr, err := NewTranspiler(d, defaultTestSchema())
+	if err != nil {
+		tb.Fatalf("NewTranspiler(%s) error = %v", d, err)
+	}
+	return tr
 }
 
 func emptyTestSchema() *Schema {

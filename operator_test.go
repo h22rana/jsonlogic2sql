@@ -218,7 +218,7 @@ func TestValidateOperatorName(t *testing.T) {
 
 func TestTranspilerCustomOperators(t *testing.T) {
 	t.Run("RegisterOperatorFunc simple", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 1 {
 				return OperatorResult{}, fmt.Errorf("length requires 1 argument")
@@ -240,7 +240,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("RegisterOperatorFunc rejects nil function", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperatorFunc("bad", nil)
 		if err == nil {
 			t.Fatal("RegisterOperatorFunc() expected error, got nil")
@@ -251,7 +251,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("RegisterOperator with struct", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperator("length", &LengthOperator{})
 		if err != nil {
 			t.Fatalf("unexpected error registering operator: %v", err)
@@ -268,7 +268,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("custom operator with nested expression", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
 			return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 		})
@@ -288,7 +288,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("custom operator in comparison", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
 			return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 		})
@@ -307,7 +307,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("upper operator", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperator("upper", &UpperOperator{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -324,7 +324,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("multiple custom operators", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("length", &LengthOperator{})
 		transpiler.RegisterOperator("upper", &UpperOperator{})
 
@@ -339,7 +339,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("custom operator with multiple args", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperatorFunc("coalesce", func(op string, args []OperatorArg) (OperatorResult, error) {
 			result := "COALESCE("
 			for i, arg := range args {
@@ -366,7 +366,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("reject built-in operator override", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperatorFunc("and", func(op string, args []OperatorArg) (OperatorResult, error) {
 			return PredicateSQL("CUSTOM_AND"), nil
 		})
@@ -376,7 +376,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("HasCustomOperator", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("length", &LengthOperator{})
 
 		if !transpiler.HasCustomOperator("length") {
@@ -388,7 +388,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("UnregisterOperator", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("length", &LengthOperator{})
 
 		if !transpiler.UnregisterOperator("length") {
@@ -403,7 +403,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("ListCustomOperators", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("length", &LengthOperator{})
 		transpiler.RegisterOperator("upper", &UpperOperator{})
 
@@ -414,7 +414,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("ClearCustomOperators", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("length", &LengthOperator{})
 		transpiler.RegisterOperator("upper", &UpperOperator{})
 
@@ -425,7 +425,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("custom operator with literal argument", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperatorFunc("repeat", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
 				return OperatorResult{}, fmt.Errorf("repeat requires 2 arguments")
@@ -447,7 +447,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("custom operator with stateful handler", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperator("concat_ws", &ConcatWithSeparatorOperator{Separator: ", "})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -466,7 +466,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 
 func TestCustomOperatorEdgeCases(t *testing.T) {
 	t.Run("custom operator returning error", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperatorFunc("failing", func(op string, args []OperatorArg) (OperatorResult, error) {
 			return OperatorResult{}, fmt.Errorf("intentional failure")
 		})
@@ -478,7 +478,7 @@ func TestCustomOperatorEdgeCases(t *testing.T) {
 	})
 
 	t.Run("custom operator with no arguments", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperatorFunc("now", func(op string, args []OperatorArg) (OperatorResult, error) {
 			return ValueSQL("NOW()", ExpressionTypeUnknown), nil
 		})
@@ -494,7 +494,7 @@ func TestCustomOperatorEdgeCases(t *testing.T) {
 	})
 
 	t.Run("custom operator with single non-array argument", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperatorFunc("single", func(op string, args []OperatorArg) (OperatorResult, error) {
 			return ValueSQL(fmt.Sprintf("SINGLE(%s)", args[0].SQL), ExpressionTypeUnknown), nil
 		})
@@ -712,7 +712,7 @@ func TestOperatorRegistry_RegisterDialectAwareFunc(t *testing.T) {
 
 func TestDialectAwareOperators(t *testing.T) {
 	t.Run("RegisterDialectAwareOperatorFunc with BigQuery", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterDialectAwareOperatorFunc("now", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
 			var sql string
 			switch dialect {
@@ -740,7 +740,7 @@ func TestDialectAwareOperators(t *testing.T) {
 	})
 
 	t.Run("RegisterDialectAwareOperatorFunc with Spanner", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectSpanner, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectSpanner)
 		err := transpiler.RegisterDialectAwareOperatorFunc("array_length", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
 			var sql string
 			switch dialect {
@@ -786,7 +786,7 @@ func TestDialectAwareOperators(t *testing.T) {
 		}
 
 		// Test with BigQuery
-		bqTranspiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		bqTranspiler := mustTestTranspiler(t, DialectBigQuery)
 		bqTranspiler.RegisterDialectAwareOperatorFunc("string_contains", stringContainsOp)
 		bqSQL, err := transpileOperatorExpression(bqTranspiler, `{"string_contains": [{"var": "name"}, "test"]}`)
 		if err != nil {
@@ -797,7 +797,7 @@ func TestDialectAwareOperators(t *testing.T) {
 		}
 
 		// Test with Spanner
-		spannerTranspiler, _ := NewTranspiler(DialectSpanner, defaultTestSchema())
+		spannerTranspiler := mustTestTranspiler(t, DialectSpanner)
 		spannerTranspiler.RegisterDialectAwareOperatorFunc("string_contains", stringContainsOp)
 		spannerSQL, err := transpileOperatorExpression(spannerTranspiler, `{"string_contains": [{"var": "name"}, "test"]}`)
 		if err != nil {
@@ -809,7 +809,7 @@ func TestDialectAwareOperators(t *testing.T) {
 	})
 
 	t.Run("reject built-in operator override with dialect-aware", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery, defaultTestSchema())
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterDialectAwareOperatorFunc("and", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
 			return PredicateSQL("CUSTOM_AND"), nil
 		})
@@ -823,7 +823,7 @@ func TestDialectAwareOperators(t *testing.T) {
 func TestDeeplyNestedCustomOperators(t *testing.T) {
 	// Helper to create a transpiler with common custom operators
 	setupTranspiler := func(dialect Dialect) *Transpiler {
-		tr, _ := NewTranspiler(dialect, defaultTestSchema())
+		tr := mustTestTranspiler(t, dialect)
 		tr.RegisterOperatorFunc("toLower", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 1 {
 				return OperatorResult{}, fmt.Errorf("toLower requires 1 argument")
@@ -1083,7 +1083,7 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 
 	// Helper to create a transpiler with common custom operators
 	setupTranspiler := func(dialect Dialect) *Transpiler {
-		tr, _ := NewTranspiler(dialect, defaultTestSchema())
+		tr := mustTestTranspiler(t, dialect)
 		tr.RegisterOperatorFunc("toLower", func(op string, args []OperatorArg) (OperatorResult, error) {
 			return ValueSQL(fmt.Sprintf("LOWER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
