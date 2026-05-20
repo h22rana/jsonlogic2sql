@@ -27,15 +27,12 @@
         .section-label { color: #8b949e; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
         .section-label .badge { background: #21262d; color: #58a6ff; border-radius: 10px; padding: 1px 8px; font-size: 0.7rem; }
         .section-label .badge.on { background: #1f6feb33; color: #58a6ff; }
-        .section-label .badge.off { background: #21262d; color: #8b949e; }
+        .section-label .badge.required { background: #d2992233; color: #d29922; }
+        .section-label .badge.error { background: #f8514922; color: #f85149; }
         .status { font-size: 0.75rem; color: #8b949e; margin-top: 8px; }
         .status .hl { color: #58a6ff; }
         .loading { color: #d29922; text-align: center; padding: 40px; }
         #app { display: none; }
-        .collapsible { overflow: hidden; transition: max-height 0.2s ease; }
-        .collapsible.collapsed { max-height: 0; }
-        .toggle-btn { background: none; border: none; color: #58a6ff; cursor: pointer; font-size: 0.75rem; padding: 0; text-decoration: underline; }
-        .toggle-btn:hover { color: #79c0ff; }
         .schema-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
         .file-label { background: #21262d; color: #8b949e; border: 1px solid #30363d; border-radius: 6px; padding: 4px 10px; font-size: 0.75rem; cursor: pointer; transition: all 0.15s; }
         .file-label:hover { border-color: #58a6ff; color: #c9d1d9; }
@@ -83,15 +80,14 @@
             <!-- Schema -->
             <div class="section-label">
                 Schema
-                <span class="badge off" id="schema-badge">off</span>
-                <button class="toggle-btn" id="schema-toggle">show</button>
+                <span class="badge required" id="schema-badge">required</span>
             </div>
-            <div class="collapsible collapsed" id="schema-section">
+            <div id="schema-section">
                 <div class="schema-controls">
                     <label class="file-label" for="schema-file">Import JSON file</label>
                     <input type="file" id="schema-file" accept=".json" style="display:none;">
                     <button class="sample-btn" id="schema-sample-btn">Load sample schema</button>
-                    <button class="clear-btn" id="schema-clear-btn">Clear schema</button>
+                    <button class="clear-btn" id="schema-clear-btn">Reset sample schema</button>
                 </div>
                 <textarea id="schema-input" class="editor small" spellcheck="false" placeholder='[{"name": "field.name", "type": "string"}, ...]'></textarea>
                 <div id="schema-status" style="font-size: 0.72rem; color: #8b949e; margin-top: 4px; margin-bottom: 8px;"></div>
@@ -139,80 +135,172 @@
         let transpilerID = null;
         let currentMode = 'condition';
         let schemaJSON = null;
+        let defaultSchemaJSON = null;
 
         const allDialectsList = ['bigquery', 'spanner', 'postgresql', 'duckdb', 'clickhouse'];
         const dialectLabels = { bigquery: 'BigQuery', spanner: 'Spanner', postgresql: 'PostgreSQL', duckdb: 'DuckDB', clickhouse: 'ClickHouse' };
+        const defaultSchemaFields = [
+            { name: "amount", type: "integer" },
+            { name: "status", type: "string" },
+            { name: "failedAttempts", type: "integer" },
+            { name: "country", type: "string" },
+            { name: "deleted_at", type: "string" },
+            { name: "primary_email", type: "string" },
+            { name: "backup_email", type: "string" },
+            { name: "age", type: "integer" },
+            { name: "base", type: "number" },
+            { name: "bonus", type: "number" },
+            { name: "merchant_code", type: "string" },
+            { name: "price", type: "number" },
+            { name: "tags", type: "array" },
+            { name: "description", type: "string" },
+            {
+                name: "user", type: "object", fields: [
+                    { name: "verified", type: "boolean" },
+                    { name: "roles", type: "array" },
+                    { name: "age", type: "integer" }
+                ]
+            },
+            {
+                name: "payment_methods", type: "array", elementFields: [
+                    { name: "type", type: "enum", allowedValues: ["BALANCE", "CARD"] },
+                    { name: "amount", type: "number" },
+                    { name: "details", type: "object", fields: [{ name: "issuer", type: "string" }] }
+                ]
+            }
+        ];
+
+        function defaultSchemaText() {
+            if (window.jsonlogic2sql && typeof window.jsonlogic2sql.getDefaultSchema === 'function') {
+                return window.jsonlogic2sql.getDefaultSchema();
+            }
+            return JSON.stringify(defaultSchemaFields, null, 2);
+        }
 
         function createTranspiler() {
             const dialect = document.getElementById('dialect').value;
             if (transpilerID !== null) {
                 jsonlogic2sql.destroyTranspiler(transpilerID);
+                transpilerID = null;
             }
-            const result = jsonlogic2sql.newTranspiler(dialect);
-            if (result.error) { showError(result.error); return; }
+            if (!schemaJSON) {
+                showSchemaRequired();
+                return;
+            }
+            const result = jsonlogic2sql.newTranspiler(dialect, schemaJSON);
+            if (result.error) {
+                showSchemaError(result.error);
+                return;
+            }
             transpilerID = result.id;
-            if (schemaJSON) applySchema(schemaJSON);
+            const schemaResult = jsonlogic2sql.setSchema(transpilerID, schemaJSON);
+            if (schemaResult.error) {
+                jsonlogic2sql.destroyTranspiler(transpilerID);
+                transpilerID = null;
+                schemaJSON = null;
+                showSchemaError(schemaResult.error);
+                return;
+            }
+            updateSchemaStatus(schemaJSON);
             doTranspile();
         }
 
-        function applySchema(json) {
-            if (transpilerID === null) return;
-            const result = jsonlogic2sql.setSchema(transpilerID, json);
+        function countSchemaFields(fields) {
+            return fields.reduce((total, field) => {
+                return total + 1 + countSchemaFields(field.fields || []) + countSchemaFields(field.elementFields || []);
+            }, 0);
+        }
+
+        function updateSchemaStatus(json) {
             const statusEl = document.getElementById('schema-status');
             const badgeEl = document.getElementById('schema-badge');
             const countEl = document.getElementById('schema-field-count');
-            const countFields = (fields) => fields.reduce((total, field) => {
-                return total + 1 + countFields(field.fields || []) + countFields(field.elementFields || []);
-            }, 0);
-            if (result.error) {
-                statusEl.textContent = 'Error: ' + result.error;
-                statusEl.style.color = '#f85149';
-                badgeEl.textContent = 'error'; badgeEl.className = 'badge off';
-                countEl.textContent = 'error';
-                schemaJSON = null;
-                // Recreate transpiler to clear the previously valid schema
-                const dialect = document.getElementById('dialect').value;
-                jsonlogic2sql.destroyTranspiler(transpilerID);
-                const t = jsonlogic2sql.newTranspiler(dialect);
-                if (!t.error) {
-                    transpilerID = t.id;
-                }
-            } else {
-                schemaJSON = json;
-                try {
-                    const fields = JSON.parse(json);
-                    if (Array.isArray(fields)) {
-                        const n = countFields(fields);
-                        statusEl.textContent = n + ' field' + (n !== 1 ? 's' : '') + ' loaded';
-                        statusEl.style.color = '#7ee787';
-                        badgeEl.textContent = n + ' fields'; badgeEl.className = 'badge on';
-                        countEl.textContent = n + ' fields';
-                    } else {
-                        statusEl.textContent = 'Schema applied (0 fields)';
-                        statusEl.style.color = '#d29922';
-                        badgeEl.textContent = '0 fields'; badgeEl.className = 'badge on';
-                        countEl.textContent = '0 fields';
-                    }
-                } catch (_) {
-                    statusEl.textContent = 'Schema applied';
+            try {
+                const fields = JSON.parse(json);
+                if (Array.isArray(fields)) {
+                    const n = countSchemaFields(fields);
+                    statusEl.textContent = n + ' field' + (n !== 1 ? 's' : '') + ' loaded';
                     statusEl.style.color = '#7ee787';
-                    badgeEl.textContent = 'on'; badgeEl.className = 'badge on';
-                    countEl.textContent = 'unknown';
+                    badgeEl.textContent = n + ' fields'; badgeEl.className = 'badge on';
+                    countEl.textContent = n + ' fields';
+                } else {
+                    statusEl.textContent = 'Schema applied (0 fields)';
+                    statusEl.style.color = '#d29922';
+                    badgeEl.textContent = '0 fields'; badgeEl.className = 'badge on';
+                    countEl.textContent = '0 fields';
                 }
+            } catch (_) {
+                statusEl.textContent = 'Schema applied';
+                statusEl.style.color = '#7ee787';
+                badgeEl.textContent = 'on'; badgeEl.className = 'badge on';
+                countEl.textContent = 'unknown';
             }
         }
 
-        function clearSchema() {
-            schemaJSON = null;
-            document.getElementById('schema-input').value = '';
-            document.getElementById('schema-status').textContent = '';
-            document.getElementById('schema-badge').textContent = 'off';
-            document.getElementById('schema-badge').className = 'badge off';
-            document.getElementById('schema-field-count').textContent = 'none';
-            createTranspiler();
+        function showSchemaRequired() {
+            document.getElementById('schema-status').textContent = 'Schema is required';
+            document.getElementById('schema-status').style.color = '#f85149';
+            document.getElementById('schema-badge').textContent = 'required';
+            document.getElementById('schema-badge').className = 'badge required';
+            document.getElementById('schema-field-count').textContent = 'required';
+            showError('Schema is required before transpiling field-based JSONLogic.');
+        }
+
+        function showSchemaError(msg) {
+            const statusEl = document.getElementById('schema-status');
+            statusEl.textContent = 'Error: ' + msg;
+            statusEl.style.color = '#f85149';
+            document.getElementById('schema-badge').textContent = 'error';
+            document.getElementById('schema-badge').className = 'badge error';
+            document.getElementById('schema-field-count').textContent = 'error';
+            showError(msg);
+        }
+
+        function applySchema(json) {
+            const trimmed = json.trim();
+            if (!trimmed) {
+                schemaJSON = null;
+                if (transpilerID !== null) {
+                    jsonlogic2sql.destroyTranspiler(transpilerID);
+                    transpilerID = null;
+                }
+                showSchemaRequired();
+                return false;
+            }
+            if (transpilerID === null) {
+                schemaJSON = trimmed;
+                createTranspiler();
+                return transpilerID !== null;
+            }
+            const result = jsonlogic2sql.setSchema(transpilerID, trimmed);
+            if (result.error) {
+                schemaJSON = null;
+                jsonlogic2sql.destroyTranspiler(transpilerID);
+                transpilerID = null;
+                showSchemaError(result.error);
+                return false;
+            } else {
+                schemaJSON = trimmed;
+                updateSchemaStatus(trimmed);
+                return true;
+            }
+        }
+
+        function resetSchema() {
+            schemaJSON = defaultSchemaJSON || defaultSchemaText();
+            document.getElementById('schema-input').value = schemaJSON;
+            if (transpilerID === null) {
+                createTranspiler();
+            } else {
+                if (applySchema(schemaJSON)) doTranspile();
+            }
         }
 
         function doTranspile() {
+            if (!schemaJSON) {
+                showSchemaRequired();
+                return;
+            }
             const input = document.getElementById('input').value.trim();
             if (!input) {
                 document.getElementById('output').textContent = '';
@@ -274,17 +362,22 @@
             paramsSection.classList.add('hidden');
             const start = performance.now();
             for (const d of allDialectsList) {
-                const t = jsonlogic2sql.newTranspiler(d);
-                if (t.error) continue;
-                if (schemaJSON) jsonlogic2sql.setSchema(t.id, schemaJSON);
+                const t = jsonlogic2sql.newTranspiler(d, schemaJSON);
+                if (!t.error) {
+                    const schemaResult = jsonlogic2sql.setSchema(t.id, schemaJSON);
+                    if (schemaResult.error) {
+                        jsonlogic2sql.destroyTranspiler(t.id);
+                        t.error = schemaResult.error;
+                    }
+                }
                 let fn;
                 if (isParam) {
                     fn = currentMode === 'condition' ? 'transpileParameterizedCondition' : 'transpileParameterizedValue';
                 } else {
                     fn = currentMode === 'condition' ? 'transpileCondition' : 'transpileValue';
                 }
-                const result = jsonlogic2sql[fn](t.id, input);
-                jsonlogic2sql.destroyTranspiler(t.id);
+                const result = t.error ? t : jsonlogic2sql[fn](t.id, input);
+                if (!t.error) jsonlogic2sql.destroyTranspiler(t.id);
                 const row = document.createElement('div'); row.className = 'dialect-output';
                 const tag = document.createElement('span');
                 tag.className = 'dialect-tag';
@@ -364,54 +457,39 @@
                 doTranspile();
             });
         });
-        document.getElementById('schema-toggle').addEventListener('click', () => {
-            const section = document.getElementById('schema-section');
-            const btn = document.getElementById('schema-toggle');
-            section.classList.toggle('collapsed');
-            btn.textContent = section.classList.contains('collapsed') ? 'show' : 'hide';
-        });
         document.getElementById('schema-file').addEventListener('change', (e) => {
             const file = e.target.files[0]; if (!file) return;
             const reader = new FileReader();
             reader.onload = (ev) => {
                 document.getElementById('schema-input').value = ev.target.result;
-                applySchema(ev.target.result); doTranspile();
+                if (applySchema(ev.target.result)) doTranspile();
             };
             reader.readAsText(file);
         });
         document.getElementById('schema-input').addEventListener('input', () => {
             const text = document.getElementById('schema-input').value.trim();
-            if (!text) { clearSchema(); return; }
-            applySchema(text); doTranspile();
+            if (!text) { applySchema(''); return; }
+            if (applySchema(text)) doTranspile();
         });
         document.getElementById('schema-sample-btn').addEventListener('click', () => {
-            const sample = JSON.stringify([
-                { name: "amount", type: "integer" }, { name: "status", type: "string" },
-                {
-                    name: "user", type: "object", fields: [
-                        { name: "verified", type: "boolean" },
-                        { name: "roles", type: "array" },
-                        { name: "age", type: "integer" }
-                    ]
-                },
-                {
-                    name: "payment_methods", type: "array", elementFields: [
-                        { name: "type", type: "enum", allowedValues: ["BALANCE", "CARD"] },
-                        { name: "amount", type: "number" },
-                        { name: "details", type: "object", fields: [{ name: "issuer", type: "string" }] }
-                    ]
-                },
-                { name: "country", type: "string" },
-                { name: "merchant_code", type: "string" }, { name: "price", type: "number" },
-                { name: "tags", type: "array" }, { name: "description", type: "string" }
-            ], null, 2);
+            const sample = defaultSchemaJSON || defaultSchemaText();
             document.getElementById('schema-input').value = sample;
-            applySchema(sample); doTranspile();
+            if (applySchema(sample)) doTranspile();
         });
-        document.getElementById('schema-clear-btn').addEventListener('click', clearSchema);
+        document.getElementById('schema-clear-btn').addEventListener('click', resetSchema);
+
+        function startApp() {
+            defaultSchemaJSON = defaultSchemaText();
+            schemaJSON = defaultSchemaJSON;
+            document.getElementById('schema-input').value = defaultSchemaJSON;
+            loadSamples(); createTranspiler();
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('app').style.display = 'block';
+        }
 
         async function init() {
             try {
+                window.onJsonlogic2sqlReady = startApp;
                 const resp = await fetch('jsonlogic2sql.wasm');
                 const wasmBytes = await resp.arrayBuffer();
                 const result = await WebAssembly.instantiate(wasmBytes, go.importObject);
@@ -420,9 +498,6 @@
                 document.getElementById('loading').textContent = 'Failed to load WASM: ' + e.message;
                 return;
             }
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('app').style.display = 'block';
-            loadSamples(); createTranspiler();
         }
         init();
     </script>

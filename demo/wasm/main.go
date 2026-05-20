@@ -4,6 +4,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"syscall/js"
 
 	jsonlogic2sql "github.com/h22rana/jsonlogic2sql"
@@ -13,8 +15,52 @@ import (
 var transpilers = map[int]*jsonlogic2sql.Transpiler{}
 var nextID = 1
 
-func emptySchema() (*jsonlogic2sql.Schema, error) {
-	return jsonlogic2sql.NewSchema(nil)
+var defaultDemoSchemaFields = []jsonlogic2sql.FieldSchema{
+	{Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
+	{Name: "status", Type: jsonlogic2sql.FieldTypeString},
+	{Name: "failedAttempts", Type: jsonlogic2sql.FieldTypeInteger},
+	{Name: "country", Type: jsonlogic2sql.FieldTypeString},
+	{Name: "deleted_at", Type: jsonlogic2sql.FieldTypeString},
+	{Name: "primary_email", Type: jsonlogic2sql.FieldTypeString},
+	{Name: "backup_email", Type: jsonlogic2sql.FieldTypeString},
+	{Name: "age", Type: jsonlogic2sql.FieldTypeInteger},
+	{Name: "base", Type: jsonlogic2sql.FieldTypeNumber},
+	{Name: "bonus", Type: jsonlogic2sql.FieldTypeNumber},
+	{Name: "merchant_code", Type: jsonlogic2sql.FieldTypeString},
+	{Name: "price", Type: jsonlogic2sql.FieldTypeNumber},
+	{Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
+	{Name: "description", Type: jsonlogic2sql.FieldTypeString},
+	{
+		Name: "user",
+		Type: jsonlogic2sql.FieldTypeObject,
+		Fields: []jsonlogic2sql.FieldSchema{
+			{Name: "verified", Type: jsonlogic2sql.FieldTypeBoolean},
+			{Name: "roles", Type: jsonlogic2sql.FieldTypeArray},
+			{Name: "age", Type: jsonlogic2sql.FieldTypeInteger},
+		},
+	},
+	{
+		Name: "payment_methods",
+		Type: jsonlogic2sql.FieldTypeArray,
+		ElementFields: []jsonlogic2sql.FieldSchema{
+			{Name: "type", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"BALANCE", "CARD"}},
+			{Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+			{
+				Name: "details",
+				Type: jsonlogic2sql.FieldTypeObject,
+				Fields: []jsonlogic2sql.FieldSchema{
+					{Name: "issuer", Type: jsonlogic2sql.FieldTypeString},
+				},
+			},
+		},
+	},
+}
+
+func schemaFromJSONString(schemaJSON string) (*jsonlogic2sql.Schema, error) {
+	if strings.TrimSpace(schemaJSON) == "" {
+		return nil, fmt.Errorf("schemaJSON argument required")
+	}
+	return jsonlogic2sql.NewSchemaFromJSON([]byte(schemaJSON))
 }
 
 func dialetFromString(s string) (jsonlogic2sql.Dialect, bool) {
@@ -34,19 +80,20 @@ func dialetFromString(s string) (jsonlogic2sql.Dialect, bool) {
 	}
 }
 
-// newTranspiler(dialect: string) => {id: number} | {error: string}
+// newTranspiler(dialect: string, schemaJSON: string) => {id: number} | {error: string}
 func newTranspiler(_ js.Value, args []js.Value) interface{} {
-	if len(args) < 1 {
-		return map[string]interface{}{"error": "dialect argument required"}
+	if len(args) < 2 {
+		return map[string]interface{}{"error": "dialect and schemaJSON arguments required"}
 	}
 	dialectStr := args[0].String()
+	schemaJSON := args[1].String()
 	dialect, ok := dialetFromString(dialectStr)
 	if !ok {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
-	schema, err := emptySchema()
+	schema, err := schemaFromJSONString(schemaJSON)
 	if err != nil {
-		return map[string]interface{}{"error": err.Error()}
+		return map[string]interface{}{"error": "invalid schema: " + err.Error()}
 	}
 	t, err := jsonlogic2sql.NewTranspiler(dialect, schema)
 	if err != nil {
@@ -71,7 +118,7 @@ func setSchema(_ js.Value, args []js.Value) interface{} {
 		return map[string]interface{}{"error": "transpiler not found"}
 	}
 
-	schema, err := jsonlogic2sql.NewSchemaFromJSON([]byte(schemaJSON))
+	schema, err := schemaFromJSONString(schemaJSON)
 	if err != nil {
 		return map[string]interface{}{"error": "invalid schema: " + err.Error()}
 	}
@@ -181,22 +228,23 @@ func transpileParameterizedCondition(_ js.Value, args []js.Value) interface{} {
 	return map[string]interface{}{"sql": sql, "params": string(paramsJSON)}
 }
 
-// quickTranspileParameterizedValue(dialect: string, jsonLogic: string) => {sql: string, params: string} | {error: string}
+// quickTranspileParameterizedValue(dialect: string, schemaJSON: string, jsonLogic: string) => {sql: string, params: string} | {error: string}
 func quickTranspileParameterizedValue(_ js.Value, args []js.Value) interface{} {
-	if len(args) < 2 {
-		return map[string]interface{}{"error": "dialect and jsonLogic arguments required"}
+	if len(args) < 3 {
+		return map[string]interface{}{"error": "dialect, schemaJSON, and jsonLogic arguments required"}
 	}
 	dialectStr := args[0].String()
-	jsonLogic := args[1].String()
+	schemaJSON := args[1].String()
+	jsonLogic := args[2].String()
 
 	dialect, ok := dialetFromString(dialectStr)
 	if !ok {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	schema, err := emptySchema()
+	schema, err := schemaFromJSONString(schemaJSON)
 	if err != nil {
-		return map[string]interface{}{"error": err.Error()}
+		return map[string]interface{}{"error": "invalid schema: " + err.Error()}
 	}
 
 	sql, params, err := jsonlogic2sql.TranspileParameterizedValue(dialect, schema, jsonLogic)
@@ -210,22 +258,23 @@ func quickTranspileParameterizedValue(_ js.Value, args []js.Value) interface{} {
 	return map[string]interface{}{"sql": sql, "params": string(paramsJSON)}
 }
 
-// quickTranspileParameterizedCondition(dialect: string, jsonLogic: string) => {sql: string, params: string} | {error: string}
+// quickTranspileParameterizedCondition(dialect: string, schemaJSON: string, jsonLogic: string) => {sql: string, params: string} | {error: string}
 func quickTranspileParameterizedCondition(_ js.Value, args []js.Value) interface{} {
-	if len(args) < 2 {
-		return map[string]interface{}{"error": "dialect and jsonLogic arguments required"}
+	if len(args) < 3 {
+		return map[string]interface{}{"error": "dialect, schemaJSON, and jsonLogic arguments required"}
 	}
 	dialectStr := args[0].String()
-	jsonLogic := args[1].String()
+	schemaJSON := args[1].String()
+	jsonLogic := args[2].String()
 
 	dialect, ok := dialetFromString(dialectStr)
 	if !ok {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	schema, err := emptySchema()
+	schema, err := schemaFromJSONString(schemaJSON)
 	if err != nil {
-		return map[string]interface{}{"error": err.Error()}
+		return map[string]interface{}{"error": "invalid schema: " + err.Error()}
 	}
 
 	sql, params, err := jsonlogic2sql.TranspileParameterizedCondition(dialect, schema, jsonLogic)
@@ -239,22 +288,23 @@ func quickTranspileParameterizedCondition(_ js.Value, args []js.Value) interface
 	return map[string]interface{}{"sql": sql, "params": string(paramsJSON)}
 }
 
-// quickTranspileValue(dialect: string, jsonLogic: string) => {sql: string} | {error: string}
+// quickTranspileValue(dialect: string, schemaJSON: string, jsonLogic: string) => {sql: string} | {error: string}
 func quickTranspileValue(_ js.Value, args []js.Value) interface{} {
-	if len(args) < 2 {
-		return map[string]interface{}{"error": "dialect and jsonLogic arguments required"}
+	if len(args) < 3 {
+		return map[string]interface{}{"error": "dialect, schemaJSON, and jsonLogic arguments required"}
 	}
 	dialectStr := args[0].String()
-	jsonLogic := args[1].String()
+	schemaJSON := args[1].String()
+	jsonLogic := args[2].String()
 
 	dialect, ok := dialetFromString(dialectStr)
 	if !ok {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	schema, err := emptySchema()
+	schema, err := schemaFromJSONString(schemaJSON)
 	if err != nil {
-		return map[string]interface{}{"error": err.Error()}
+		return map[string]interface{}{"error": "invalid schema: " + err.Error()}
 	}
 
 	sql, err := jsonlogic2sql.TranspileValue(dialect, schema, jsonLogic)
@@ -264,22 +314,23 @@ func quickTranspileValue(_ js.Value, args []js.Value) interface{} {
 	return map[string]interface{}{"sql": sql}
 }
 
-// quickTranspileCondition(dialect: string, jsonLogic: string) => {sql: string} | {error: string}
+// quickTranspileCondition(dialect: string, schemaJSON: string, jsonLogic: string) => {sql: string} | {error: string}
 func quickTranspileCondition(_ js.Value, args []js.Value) interface{} {
-	if len(args) < 2 {
-		return map[string]interface{}{"error": "dialect and jsonLogic arguments required"}
+	if len(args) < 3 {
+		return map[string]interface{}{"error": "dialect, schemaJSON, and jsonLogic arguments required"}
 	}
 	dialectStr := args[0].String()
-	jsonLogic := args[1].String()
+	schemaJSON := args[1].String()
+	jsonLogic := args[2].String()
 
 	dialect, ok := dialetFromString(dialectStr)
 	if !ok {
 		return map[string]interface{}{"error": "unsupported dialect: " + dialectStr}
 	}
 
-	schema, err := emptySchema()
+	schema, err := schemaFromJSONString(schemaJSON)
 	if err != nil {
-		return map[string]interface{}{"error": err.Error()}
+		return map[string]interface{}{"error": "invalid schema: " + err.Error()}
 	}
 
 	sql, err := jsonlogic2sql.TranspileCondition(dialect, schema, jsonLogic)
@@ -330,6 +381,15 @@ func getSamples(_ js.Value, _ []js.Value) interface{} {
 	return string(data)
 }
 
+// getDefaultSchema() => JSON string of the schema used by built-in samples.
+func getDefaultSchema(_ js.Value, _ []js.Value) interface{} {
+	data, err := json.MarshalIndent(defaultDemoSchemaFields, "", "  ")
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
 func main() {
 	c := make(chan struct{})
 
@@ -348,6 +408,7 @@ func main() {
 		"destroyTranspiler":                    js.FuncOf(destroyTranspiler),
 		"getDialects":                          js.FuncOf(getDialects),
 		"getSamples":                           js.FuncOf(getSamples),
+		"getDefaultSchema":                     js.FuncOf(getDefaultSchema),
 	}
 
 	js.Global().Set("jsonlogic2sql", js.ValueOf(jsObj))
