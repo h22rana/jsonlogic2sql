@@ -286,14 +286,11 @@
             }
         }
 
-        function resetSchema() {
-            schemaJSON = defaultSchemaJSON || defaultSchemaText();
-            document.getElementById('schema-input').value = schemaJSON;
-            if (transpilerID === null) {
-                createTranspiler();
-            } else {
-                if (applySchema(schemaJSON)) doTranspile();
-            }
+        function restoreSampleSchema() {
+            defaultSchemaJSON = defaultSchemaText();
+            schemaJSON = defaultSchemaJSON;
+            document.getElementById('schema-input').value = defaultSchemaJSON;
+            createTranspiler();
         }
 
         function doTranspile() {
@@ -472,11 +469,9 @@
             if (applySchema(text)) doTranspile();
         });
         document.getElementById('schema-sample-btn').addEventListener('click', () => {
-            const sample = defaultSchemaJSON || defaultSchemaText();
-            document.getElementById('schema-input').value = sample;
-            if (applySchema(sample)) doTranspile();
+            restoreSampleSchema();
         });
-        document.getElementById('schema-clear-btn').addEventListener('click', resetSchema);
+        document.getElementById('schema-clear-btn').addEventListener('click', restoreSampleSchema);
 
         function startApp() {
             defaultSchemaJSON = defaultSchemaText();
