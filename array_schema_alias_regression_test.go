@@ -710,6 +710,128 @@ func TestTranspile_ArrayElementFieldsAreScopedOnly_AllDialects(t *testing.T) {
 	}
 }
 
+func TestTranspile_ArrayNestedElementFieldsRequireNestedScope_AllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{
+			Name: "items",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{
+					Name: "values",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Name: "tag", Type: FieldTypeString},
+						{Name: "score", Type: FieldTypeNumber},
+					},
+				},
+				{
+					Name: "details",
+					Type: FieldTypeObject,
+					Fields: []FieldSchema{
+						{Name: "issuer", Type: FieldTypeString},
+						{
+							Name: "events",
+							Type: FieldTypeArray,
+							ElementFields: []FieldSchema{
+								{Name: "code", Type: FieldTypeEnum, AllowedValues: []string{"AUTH", "CAPTURE"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	invalid := []string{
+		`{"map":[{"var":"items"},{"var":"values.tag"}]}`,
+		`{"map":[{"var":"items"},{"var":"details.events.code"}]}`,
+	}
+	valid := []struct {
+		name  string
+		logic string
+		want  []string
+	}{
+		{
+			name:  "direct object descendant in parent scope",
+			logic: `{"map":[{"var":"items"},{"var":"details.issuer"}]}`,
+			want:  []string{"elem.details.issuer"},
+		},
+		{
+			name:  "nested array element field after nested lambda",
+			logic: `{"map":[{"var":"items"},{"map":[{"var":"values"},{"var":"tag"}]}]}`,
+			want:  []string{"elem.values", "elem1.tag"},
+		},
+		{
+			name:  "nested object array enum after nested lambda",
+			logic: `{"map":[{"var":"items"},{"filter":[{"var":"details.events"},{"==":[{"var":"code"},"AUTH"]}]}]}`,
+			want:  []string{"elem.details.events", "elem1.code"},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: schema})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+
+			for _, logic := range invalid {
+				t.Run("reject/"+logic, func(t *testing.T) {
+					t.Parallel()
+					assertArrayNestedElementFieldRejected(t, tr, logic)
+				})
+			}
+			for _, tc := range valid {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					assertArrayElementScopedSQLContainsAll(t, tr, tc.logic, tc.want)
+				})
+			}
+		})
+	}
+}
+
+func assertArrayNestedElementFieldRejected(t *testing.T, tr *Transpiler, logic string) {
+	t.Helper()
+
+	if sql, err := tr.TranspileValue(logic); err == nil || !strings.Contains(err.Error(), "is not defined in schema scope") {
+		t.Fatalf("TranspileValue() SQL = %q, error = %v, want scoped schema error", sql, err)
+	}
+	if sql, params, err := tr.TranspileParameterizedValue(logic); err == nil ||
+		!strings.Contains(err.Error(), "is not defined in schema scope") {
+		t.Fatalf("TranspileParameterizedValue() SQL = %q params = %#v, error = %v, want scoped schema error",
+			sql, params, err)
+	}
+}
+
+func assertArrayElementScopedSQLContainsAll(t *testing.T, tr *Transpiler, logic string, wants []string) {
+	t.Helper()
+
+	inlineSQL, err := tr.TranspileValue(logic)
+	if err != nil {
+		t.Fatalf("TranspileValue() error = %v", err)
+	}
+	for _, want := range wants {
+		if !strings.Contains(inlineSQL, want) {
+			t.Fatalf("TranspileValue() SQL = %q, want to contain %q", inlineSQL, want)
+		}
+	}
+
+	paramSQL, _, err := tr.TranspileParameterizedValue(logic)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedValue() error = %v", err)
+	}
+	for _, want := range wants {
+		if !strings.Contains(paramSQL, want) {
+			t.Fatalf("TranspileParameterizedValue() SQL = %q, want to contain %q", paramSQL, want)
+		}
+	}
+}
+
 func assertArrayElementScopedSQLContains(t *testing.T, tr *Transpiler, logic, want string) {
 	t.Helper()
 

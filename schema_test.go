@@ -96,7 +96,14 @@ func TestNestedSchemaObjectAndArrayEnumValidation(t *testing.T) {
 					"name": "details",
 					"type": "object",
 					"fields": [
-						{"name": "issuer", "type": "string"}
+						{"name": "issuer", "type": "string"},
+						{
+							"name": "events",
+							"type": "array",
+							"elementFields": [
+								{"name": "code", "type": "enum", "allowedValues": ["AUTH", "CAPTURE"]}
+							]
+						}
 					]
 				}
 			]
@@ -117,6 +124,8 @@ func TestNestedSchemaObjectAndArrayEnumValidation(t *testing.T) {
 		"payments.amount",
 		"payments.details",
 		"payments.details.issuer",
+		"payments.details.events",
+		"payments.details.events.code",
 	} {
 		if !schema.HasField(fieldName) {
 			t.Fatalf("schema should expose flattened field %q", fieldName)
@@ -140,6 +149,15 @@ func TestNestedSchemaObjectAndArrayEnumValidation(t *testing.T) {
 	}
 	if got, err := schema.ResolveScopedField("payments", "details.issuer"); err != nil || got != "payments.details.issuer" {
 		t.Fatalf("ResolveScopedField(payments, details.issuer) = %q, %v; want payments.details.issuer, nil", got, err)
+	}
+	if got, err := schema.ResolveScopedField("payments", "details.events"); err != nil || got != "payments.details.events" {
+		t.Fatalf("ResolveScopedField(payments, details.events) = %q, %v; want payments.details.events, nil", got, err)
+	}
+	if _, err := schema.ResolveScopedField("payments", "details.events.code"); err == nil {
+		t.Fatal("ResolveScopedField() should reject nested array element fields from the parent array scope")
+	}
+	if got, err := schema.ResolveScopedField("payments.details.events", "code"); err != nil || got != "payments.details.events.code" {
+		t.Fatalf("ResolveScopedField(payments.details.events, code) = %q, %v; want payments.details.events.code, nil", got, err)
 	}
 	if _, err := schema.ResolveScopedField("payments", "unknown"); err == nil {
 		t.Fatal("ResolveScopedField() should reject unknown array element fields")

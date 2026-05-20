@@ -36,8 +36,9 @@ type FieldSchema struct {
 
 // Schema represents the collection of field schemas.
 type Schema struct {
-	fields     map[string]FieldSchema // All schema paths, including array element fields, for O(1) lookup.
-	rootFields map[string]struct{}    // Paths that can be referenced directly from the root SQL row.
+	fields       map[string]FieldSchema       // All schema paths, including array element fields, for O(1) lookup.
+	rootFields   map[string]struct{}          // Paths that can be referenced directly from the root SQL row.
+	scopedFields map[string]map[string]string // Per-array scope: relative element field path -> flattened schema path.
 }
 
 // NewSchema validates field definitions and creates a new schema.
@@ -48,8 +49,9 @@ func NewSchema(fields []FieldSchema) (*Schema, error) {
 		return nil, err
 	}
 	s := &Schema{
-		fields:     make(map[string]FieldSchema),
-		rootFields: make(map[string]struct{}),
+		fields:       make(map[string]FieldSchema),
+		rootFields:   make(map[string]struct{}),
+		scopedFields: make(map[string]map[string]string),
 	}
 	for _, field := range fields {
 		s.addField("", field, true)
@@ -65,12 +67,41 @@ func (s *Schema) addField(prefix string, field FieldSchema, rootAccessible bool)
 	if rootAccessible {
 		s.rootFields[fieldName] = struct{}{}
 	}
+	if field.Type == FieldTypeArray {
+		s.addArrayScope(fieldName, field.ElementFields)
+	}
 
 	for _, child := range field.Fields {
 		s.addField(fieldName, child, rootAccessible)
 	}
 	for _, child := range field.ElementFields {
 		s.addField(fieldName, child, false)
+	}
+}
+
+func (s *Schema) addArrayScope(scopePath string, elementFields []FieldSchema) {
+	if _, exists := s.scopedFields[scopePath]; !exists {
+		s.scopedFields[scopePath] = make(map[string]string)
+	}
+	for _, field := range elementFields {
+		s.addArrayScopeAccessibleField(scopePath, "", field)
+	}
+}
+
+func (s *Schema) addArrayScopeAccessibleField(scopePath, relativePrefix string, field FieldSchema) {
+	relativeName := joinSchemaPath(relativePrefix, field.Name)
+	fullName := joinSchemaPath(scopePath, relativeName)
+	s.scopedFields[scopePath][relativeName] = fullName
+
+	switch field.Type {
+	case FieldTypeObject:
+		for _, child := range field.Fields {
+			s.addArrayScopeAccessibleField(scopePath, relativeName, child)
+		}
+	case FieldTypeArray:
+		s.addArrayScope(fullName, field.ElementFields)
+	case FieldTypeString, FieldTypeInteger, FieldTypeNumber, FieldTypeBoolean, FieldTypeEnum:
+		return
 	}
 }
 
@@ -250,9 +281,10 @@ func (s *Schema) ResolveScopedField(scopePath, fieldName string) (string, error)
 		}
 		return fieldName, nil
 	}
-	scopedName := joinSchemaPath(scopePath, fieldName)
-	if s.HasField(scopedName) {
-		return scopedName, nil
+	if fields, ok := s.scopedFields[scopePath]; ok {
+		if scopedName, exists := fields[fieldName]; exists {
+			return scopedName, nil
+		}
 	}
 	return "", fmt.Errorf("field '%s' is not defined in schema scope '%s'", fieldName, scopePath)
 }

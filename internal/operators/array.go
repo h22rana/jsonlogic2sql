@@ -360,9 +360,8 @@ func (a *ArrayOperator) hasScopedField(fieldName string) bool {
 	if len(scopes) == 0 {
 		return false
 	}
-	schema := a.schema()
 	for _, scope := range scopes {
-		if schema.HasField(scope + "." + fieldName) {
+		if _, err := a.resolveFieldInScope(scope, fieldName); err == nil {
 			return true
 		}
 	}

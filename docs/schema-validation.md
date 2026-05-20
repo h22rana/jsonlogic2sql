@@ -126,7 +126,18 @@ such as `profile..status`.
         "name": "details",
         "type": "object",
         "fields": [
-          { "name": "issuer", "type": "string" }
+          { "name": "issuer", "type": "string" },
+          {
+            "name": "events",
+            "type": "array",
+            "elementFields": [
+              {
+                "name": "code",
+                "type": "enum",
+                "allowedValues": ["AUTH", "CAPTURE"]
+              }
+            ]
+          }
         ]
       }
     ]
@@ -135,8 +146,9 @@ such as `profile..status`.
 ```
 
 Those entries define these schema paths: `profile.country`,
-`profile.status`, `payment_methods.type`, `payment_methods.amount`, and
-`payment_methods.details.issuer`.
+`profile.status`, `payment_methods.type`, `payment_methods.amount`,
+`payment_methods.details.issuer`, `payment_methods.details.events`, and
+`payment_methods.details.events.code`.
 
 ```json
 {"some":[{"var":"payment_methods"},{"==":[{"var":"type"},"BALANCE"]}]}
@@ -145,6 +157,26 @@ Those entries define these schema paths: `profile.country`,
 In a lambda, `{"var":"type"}` resolves against the current array element and
 is validated as `payment_methods.type`, then emitted as `elem.type`.
 Unknown scoped fields are rejected in schema-required mode.
+
+Array element fields stay scoped to their own array. From the
+`payment_methods` element scope, `{"var":"details.issuer"}` is valid because
+`details` is an object field on the current element, but
+`{"var":"details.events.code"}` is rejected because `code` belongs to each
+element of the nested `details.events` array. Enter the nested array first:
+
+```json
+{
+  "some": [
+    { "var": "payment_methods" },
+    {
+      "some": [
+        { "var": "details.events" },
+        { "==": [{ "var": "code" }, "AUTH"] }
+      ]
+    }
+  ]
+}
+```
 
 ## Supported Field Types
 
