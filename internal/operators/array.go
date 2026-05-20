@@ -44,6 +44,8 @@ type ArrayOperator struct {
 	valueSemantics     bool
 	accumulatorType    ExpressionType
 	hasAccumulatorType bool
+	elementType        ExpressionType
+	hasElementType     bool
 }
 
 type typedValueSQL struct {
@@ -97,6 +99,8 @@ func (a *ArrayOperator) withChildScope() *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		elementType:        a.elementType,
+		hasElementType:     a.hasElementType,
 	}
 	childAlias := child.elemAlias()
 	child.visibleElems = append(child.visibleElems, childAlias)
@@ -125,6 +129,8 @@ func (a *ArrayOperator) withPath(path string) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		elementType:        a.elementType,
+		hasElementType:     a.hasElementType,
 	}
 	return child
 }
@@ -147,6 +153,8 @@ func (a *ArrayOperator) withValueScope(enabled bool) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		elementType:        a.elementType,
+		hasElementType:     a.hasElementType,
 	}
 	return child
 }
@@ -169,6 +177,8 @@ func (a *ArrayOperator) withValueSemantics(enabled bool) *ArrayOperator {
 		valueSemantics:     enabled,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		elementType:        a.elementType,
+		hasElementType:     a.hasElementType,
 	}
 	return child
 }
@@ -191,8 +201,19 @@ func (a *ArrayOperator) withAccumulatorType(typ ExpressionType) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    typ,
 		hasAccumulatorType: true,
+		elementType:        a.elementType,
+		hasElementType:     a.hasElementType,
 	}
 	return child
+}
+
+func (a *ArrayOperator) withSourceElementType(arrayValue typedValueSQL, sourceScopes []string) *ArrayOperator {
+	if len(sourceScopes) > 0 || arrayValue.elemType == ExpressionTypeUnknown {
+		return a
+	}
+	a.elementType = arrayValue.elemType
+	a.hasElementType = true
+	return a
 }
 
 func (a *ArrayOperator) withLambdaScope(scope arrayLambdaScope) *ArrayOperator {
@@ -213,6 +234,8 @@ func (a *ArrayOperator) withLambdaScope(scope arrayLambdaScope) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		elementType:        a.elementType,
+		hasElementType:     a.hasElementType,
 	}
 	return child
 }
@@ -240,6 +263,8 @@ func (a *ArrayOperator) withSchemaScopes(scopes []string) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		elementType:        a.elementType,
+		hasElementType:     a.hasElementType,
 	}
 	if len(child.visibleScopes) > 0 {
 		child.visibleScopes[len(child.visibleScopes)-1] = scope
@@ -437,6 +462,11 @@ func sameStringSet(left, right []string) bool {
 func (a *ArrayOperator) scopedSQLFieldResult(sql, fieldName string) ProcessedValue {
 	result := SQLFieldResult(sql)
 	if fieldName == "" {
+		if a.hasElementType && a.elementType != ExpressionTypeUnknown {
+			result.HasExpressionInfo = true
+			result.Kind = ExpressionKindValue
+			result.Type = a.elementType
+		}
 		return result
 	}
 	result.FieldName = fieldName
@@ -1282,7 +1312,10 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
-	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withSchemaScopes(sourceScopes).withValueSemantics(true)
+	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).
+		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
+		withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
@@ -1332,6 +1365,7 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
@@ -1396,7 +1430,9 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	alias := a.elemAlias()
 
 	// Check for common reduction patterns and optimize
-	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).withSchemaScopes(sourceScopes)
+	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).
+		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
 		// Build the element reference: "elem" or "elem.field" if field suffix exists
 		elemRef, quoteErr := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
@@ -1615,6 +1651,7 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
@@ -1668,6 +1705,7 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
@@ -1718,6 +1756,7 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
@@ -2832,7 +2871,10 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
-	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).withSchemaScopes(sourceScopes).withValueSemantics(true)
+	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).
+		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
+		withValueSemantics(true)
 	transformation, err := valueScoped.valueExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, false, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid map transformation argument: %w", err)
@@ -2871,6 +2913,7 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid filter condition argument: %w", err)
@@ -2915,7 +2958,9 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	reducerExpr := args[arrayExpressionArgIndex]
 	alias := a.elemAlias()
 
-	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).withSchemaScopes(sourceScopes)
+	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).
+		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
 		elemRef, quoteErr := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
 		if quoteErr != nil {
@@ -2988,6 +3033,7 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
@@ -3027,6 +3073,7 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
@@ -3065,6 +3112,7 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
 		withSchemaScopes(sourceScopes).
+		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)

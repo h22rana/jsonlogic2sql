@@ -201,6 +201,252 @@ func assertNotContains(t *testing.T, sql, fragment string) {
 	}
 }
 
+func TestLiteralScalarArrayLambdaTruthiness_AllDialectsAndModes(t *testing.T) {
+	t.Parallel()
+
+	literalArray := func(d Dialect, elems ...string) string {
+		if d == DialectPostgreSQL {
+			return fmt.Sprintf("ARRAY[%s]", strings.Join(elems, ", "))
+		}
+		return fmt.Sprintf("[%s]", strings.Join(elems, ", "))
+	}
+	unnest := func(d Dialect, array string) string {
+		if d == DialectDuckDB {
+			return fmt.Sprintf("UNNEST(%s) AS elem(elem)", array)
+		}
+		return fmt.Sprintf("UNNEST(%s) AS elem", array)
+	}
+	arrayLength := func(d Dialect, array string) string {
+		switch d {
+		case DialectPostgreSQL:
+			return fmt.Sprintf("CARDINALITY(%s)", array)
+		case DialectDuckDB, DialectClickHouse:
+			return fmt.Sprintf("length(%s)", array)
+		default:
+			return fmt.Sprintf("ARRAY_LENGTH(%s)", array)
+		}
+	}
+	paramArray := func(d Dialect, count int) string {
+		elems := make([]string, count)
+		for i := range elems {
+			elems[i] = testPlaceholder(d, i+1)
+		}
+		return literalArray(d, elems...)
+	}
+	valuePredicate := func(predicate string) string {
+		switch {
+		case strings.HasPrefix(predicate, "(") && strings.HasSuffix(predicate, ")"):
+			return strings.TrimSuffix(strings.TrimPrefix(predicate, "("), ")")
+		default:
+			return predicate
+		}
+	}
+
+	type lambdaCase struct {
+		name           string
+		logic          string
+		valueOnly      bool
+		wantInline     func(Dialect) string
+		wantParam      func(Dialect) string
+		wantParamCount int
+	}
+
+	cases := []lambdaCase{
+		{
+			name:           "filter numeric current element truthiness",
+			logic:          `{"filter":[[1,2,0],{"var":""}]}`,
+			valueOnly:      true,
+			wantParamCount: 3,
+			wantInline: func(d Dialect) string {
+				array := literalArray(d, "1", "2", "0")
+				condition := "(elem IS NOT NULL AND elem != 0)"
+				if d == DialectClickHouse {
+					return fmt.Sprintf("arrayFilter(elem -> %s, %s)", condition, array)
+				}
+				return fmt.Sprintf("ARRAY(SELECT elem FROM %s WHERE %s)", unnest(d, array), condition)
+			},
+			wantParam: func(d Dialect) string {
+				array := paramArray(d, 3)
+				condition := "(elem IS NOT NULL AND elem != 0)"
+				if d == DialectClickHouse {
+					return fmt.Sprintf("arrayFilter(elem -> %s, %s)", condition, array)
+				}
+				return fmt.Sprintf("ARRAY(SELECT elem FROM %s WHERE %s)", unnest(d, array), condition)
+			},
+		},
+		{
+			name:           "some boolean current element truthiness",
+			logic:          `{"some":[[true,false],{"var":""}]}`,
+			wantParamCount: 0,
+			wantInline: func(d Dialect) string {
+				array := literalArray(d, "TRUE", "FALSE")
+				if d == DialectClickHouse {
+					return fmt.Sprintf("arrayExists(elem -> elem IS TRUE, %s)", array)
+				}
+				return fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE elem IS TRUE)", unnest(d, array))
+			},
+			wantParam: func(d Dialect) string {
+				array := literalArray(d, "TRUE", "FALSE")
+				if d == DialectClickHouse {
+					return fmt.Sprintf("arrayExists(elem -> elem IS TRUE, %s)", array)
+				}
+				return fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE elem IS TRUE)", unnest(d, array))
+			},
+		},
+		{
+			name:           "all string current element truthiness",
+			logic:          `{"all":[["x",""],{"var":""}]}`,
+			wantParamCount: 2,
+			wantInline: func(d Dialect) string {
+				array := literalArray(d, "'x'", "''")
+				condition := "(elem IS NOT NULL AND elem != '')"
+				if d == DialectClickHouse {
+					return fmt.Sprintf("(%s > 0 AND arrayAll(elem -> %s, %s))", arrayLength(d, array), condition, array)
+				}
+				return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM %s WHERE NOT (%s)))", arrayLength(d, array), unnest(d, array), condition)
+			},
+			wantParam: func(d Dialect) string {
+				array := paramArray(d, 2)
+				condition := "(elem IS NOT NULL AND elem != '')"
+				if d == DialectClickHouse {
+					return fmt.Sprintf("(%s > 0 AND arrayAll(elem -> %s, %s))", arrayLength(d, array), condition, array)
+				}
+				return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM %s WHERE NOT (%s)))", arrayLength(d, array), unnest(d, array), condition)
+			},
+		},
+		{
+			name:           "none null current element truthiness",
+			logic:          `{"none":[[null],{"var":""}]}`,
+			wantParamCount: 0,
+			wantInline: func(d Dialect) string {
+				array := literalArray(d, "NULL")
+				if d == DialectClickHouse {
+					return fmt.Sprintf("NOT arrayExists(elem -> FALSE, %s)", array)
+				}
+				return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE FALSE)", unnest(d, array))
+			},
+			wantParam: func(d Dialect) string {
+				array := literalArray(d, "NULL")
+				if d == DialectClickHouse {
+					return fmt.Sprintf("NOT arrayExists(elem -> FALSE, %s)", array)
+				}
+				return fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE FALSE)", unnest(d, array))
+			},
+		},
+		{
+			name:           "map value logical numeric current element truthiness",
+			logic:          `{"map":[[1,0],{"or":[{"var":""},5]}]}`,
+			valueOnly:      true,
+			wantParamCount: 3,
+			wantInline: func(d Dialect) string {
+				array := literalArray(d, "1", "0")
+				transformation := "CASE WHEN (elem IS NOT NULL AND elem != 0) THEN elem ELSE 5 END"
+				if d == DialectClickHouse {
+					return fmt.Sprintf("arrayMap(elem -> %s, %s)", transformation, array)
+				}
+				return fmt.Sprintf("ARRAY(SELECT %s FROM %s)", transformation, unnest(d, array))
+			},
+			wantParam: func(d Dialect) string {
+				array := literalArray(d, testPlaceholder(d, 1), testPlaceholder(d, 2))
+				transformation := fmt.Sprintf("CASE WHEN (elem IS NOT NULL AND elem != 0) THEN elem ELSE %s END", testPlaceholder(d, 3))
+				if d == DialectClickHouse {
+					return fmt.Sprintf("arrayMap(elem -> %s, %s)", transformation, array)
+				}
+				return fmt.Sprintf("ARRAY(SELECT %s FROM %s)", transformation, unnest(d, array))
+			},
+		},
+	}
+
+	schemas := []struct {
+		name   string
+		schema *Schema
+	}{
+		{name: "empty-schema", schema: emptyTestSchema()},
+		{name: "default-schema", schema: defaultTestSchema()},
+	}
+
+	for _, schemaCase := range schemas {
+		t.Run(schemaCase.name, func(t *testing.T) {
+			t.Parallel()
+			for _, d := range allDialects() {
+				t.Run(d.String(), func(t *testing.T) {
+					t.Parallel()
+					tr, err := NewTranspiler(d, schemaCase.schema)
+					if err != nil {
+						t.Fatalf("NewTranspiler() error = %v", err)
+					}
+
+					for _, tc := range cases {
+						t.Run(tc.name, func(t *testing.T) {
+							t.Parallel()
+
+							if tc.valueOnly {
+								got, err := tr.TranspileValue(tc.logic)
+								if err != nil {
+									t.Fatalf("TranspileValue() error = %v", err)
+								}
+								if want := tc.wantInline(d); got != want {
+									t.Fatalf("TranspileValue() = %q, want %q", got, want)
+								}
+
+								gotParam, gotParams, err := tr.TranspileParameterizedValue(tc.logic)
+								if err != nil {
+									t.Fatalf("TranspileParameterizedValue() error = %v", err)
+								}
+								if want := tc.wantParam(d); gotParam != want {
+									t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
+								}
+								if len(gotParams) != tc.wantParamCount {
+									t.Fatalf("TranspileParameterizedValue() params = %#v, want %d params", gotParams, tc.wantParamCount)
+								}
+								return
+							}
+
+							got, err := tr.TranspileCondition(tc.logic)
+							if err != nil {
+								t.Fatalf("TranspileCondition() error = %v", err)
+							}
+							if want := tc.wantInline(d); got != want {
+								t.Fatalf("TranspileCondition() = %q, want %q", got, want)
+							}
+
+							gotParam, gotParams, err := tr.TranspileParameterizedCondition(tc.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+							}
+							if want := tc.wantParam(d); gotParam != want {
+								t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, want)
+							}
+							if len(gotParams) != tc.wantParamCount {
+								t.Fatalf("TranspileParameterizedCondition() params = %#v, want %d params", gotParams, tc.wantParamCount)
+							}
+
+							gotValue, err := tr.TranspileValue(tc.logic)
+							if err != nil {
+								t.Fatalf("TranspileValue() error = %v", err)
+							}
+							if want := "CASE WHEN " + valuePredicate(tc.wantInline(d)) + " THEN TRUE ELSE FALSE END"; gotValue != want {
+								t.Fatalf("TranspileValue() = %q, want %q", gotValue, want)
+							}
+
+							gotValueParam, gotValueParams, err := tr.TranspileParameterizedValue(tc.logic)
+							if err != nil {
+								t.Fatalf("TranspileParameterizedValue() error = %v", err)
+							}
+							if want := "CASE WHEN " + valuePredicate(tc.wantParam(d)) + " THEN TRUE ELSE FALSE END"; gotValueParam != want {
+								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotValueParam, want)
+							}
+							if len(gotValueParams) != tc.wantParamCount {
+								t.Fatalf("TranspileParameterizedValue() params = %#v, want %d params", gotValueParams, tc.wantParamCount)
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 	type matrixCase struct {
 		name      string
