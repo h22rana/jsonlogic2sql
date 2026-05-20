@@ -207,6 +207,24 @@ func TestValidatePlaceholderRefsNamed(t *testing.T) {
 			expectErr: true,
 		},
 		{
+			name:      "double-quoted placeholder is ignored",
+			sql:       `WHERE ident = "@p1" AND y = @p2`,
+			params:    []QueryParam{{Name: "p1", Value: "inside-identifier"}, {Name: "p2", Value: "referenced"}},
+			expectErr: true,
+		},
+		{
+			name:      "backtick-quoted placeholder is ignored",
+			sql:       "WHERE ident = `@p1` AND y = @p2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-identifier"}, {Name: "p2", Value: "referenced"}},
+			expectErr: true,
+		},
+		{
+			name:      "escaped backtick identifier placeholder is ignored",
+			sql:       "WHERE ident = `field``@p1` AND y = @p2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-identifier"}, {Name: "p2", Value: "referenced"}},
+			expectErr: true,
+		},
+		{
 			name:      "escaped quote string placeholder is ignored",
 			sql:       "WHERE note = 'it''s @p1' AND y = @p2",
 			params:    []QueryParam{{Name: "p1", Value: "inside-string"}, {Name: "p2", Value: "referenced"}},
@@ -277,6 +295,24 @@ func TestValidatePlaceholderRefsPositional(t *testing.T) {
 			name:      "quoted placeholder is ignored",
 			sql:       "WHERE x = '$1' AND y = $2",
 			params:    []QueryParam{{Name: "p1", Value: "inside-string"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
+		{
+			name:      "double-quoted placeholder is ignored",
+			sql:       `WHERE x = "$1" AND y = $2`,
+			params:    []QueryParam{{Name: "p1", Value: "inside-identifier"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
+		{
+			name:      "escaped double-quoted identifier placeholder is ignored",
+			sql:       `WHERE x = "field""$1" AND y = $2`,
+			params:    []QueryParam{{Name: "p1", Value: "inside-identifier"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
+		{
+			name:      "backtick-quoted placeholder is ignored",
+			sql:       "WHERE x = `$1` AND y = $2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-identifier"}, {Name: "p2", Value: "actual"}},
 			expectErr: true,
 		},
 		{
@@ -386,6 +422,51 @@ func TestFindQuotedPlaceholderRef(t *testing.T) {
 		}
 	})
 
+	t.Run("named placeholder inside double-quoted identifier is detected", func(t *testing.T) {
+		sql := `WHERE x = "@p1" AND y = @p2`
+		params := []QueryParam{
+			{Name: "p1", Value: "a"},
+			{Name: "p2", Value: "b"},
+		}
+		got, ok := FindQuotedPlaceholderRef(sql, params, PlaceholderNamed)
+		if !ok {
+			t.Fatal("expected double-quoted placeholder to be detected")
+		}
+		if got != "@p1" {
+			t.Fatalf("placeholder = %q, want %q", got, "@p1")
+		}
+	})
+
+	t.Run("named placeholder inside backtick-quoted identifier is detected", func(t *testing.T) {
+		sql := "WHERE x = `@p1` AND y = @p2"
+		params := []QueryParam{
+			{Name: "p1", Value: "a"},
+			{Name: "p2", Value: "b"},
+		}
+		got, ok := FindQuotedPlaceholderRef(sql, params, PlaceholderNamed)
+		if !ok {
+			t.Fatal("expected backtick-quoted placeholder to be detected")
+		}
+		if got != "@p1" {
+			t.Fatalf("placeholder = %q, want %q", got, "@p1")
+		}
+	})
+
+	t.Run("positional placeholder inside double-quoted identifier is detected", func(t *testing.T) {
+		sql := `WHERE x = "$1" AND y = $2`
+		params := []QueryParam{
+			{Name: "p1", Value: "a"},
+			{Name: "p2", Value: "b"},
+		}
+		got, ok := FindQuotedPlaceholderRef(sql, params, PlaceholderPositional)
+		if !ok {
+			t.Fatal("expected double-quoted placeholder to be detected")
+		}
+		if got != "$1" {
+			t.Fatalf("placeholder = %q, want %q", got, "$1")
+		}
+	})
+
 	t.Run("placeholder-like text as part of larger token is ignored", func(t *testing.T) {
 		sql := "WHERE email = 'name@p1.example' AND y = @p1"
 		params := []QueryParam{{Name: "p1", Value: "a"}}
@@ -400,6 +481,30 @@ func TestFindQuotedPlaceholderRef(t *testing.T) {
 		got, ok := FindQuotedPlaceholderRef(sql, params, PlaceholderNamed)
 		if !ok {
 			t.Fatal("expected quoted placeholder to be detected")
+		}
+		if got != "@p1" {
+			t.Fatalf("placeholder = %q, want %q", got, "@p1")
+		}
+	})
+
+	t.Run("escaped double quotes are handled", func(t *testing.T) {
+		sql := `WHERE ident = "field""$1" AND x = $1`
+		params := []QueryParam{{Name: "p1", Value: "a"}}
+		got, ok := FindQuotedPlaceholderRef(sql, params, PlaceholderPositional)
+		if !ok {
+			t.Fatal("expected double-quoted placeholder to be detected")
+		}
+		if got != "$1" {
+			t.Fatalf("placeholder = %q, want %q", got, "$1")
+		}
+	})
+
+	t.Run("escaped backticks are handled", func(t *testing.T) {
+		sql := "WHERE ident = `field``@p1` AND x = @p1"
+		params := []QueryParam{{Name: "p1", Value: "a"}}
+		got, ok := FindQuotedPlaceholderRef(sql, params, PlaceholderNamed)
+		if !ok {
+			t.Fatal("expected backtick-quoted placeholder to be detected")
 		}
 		if got != "@p1" {
 			t.Fatalf("placeholder = %q, want %q", got, "@p1")

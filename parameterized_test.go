@@ -1361,15 +1361,16 @@ func TestTranspileParameterized_CustomOperatorPlaceholderAsExpressionAllowed(t *
 
 func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t *testing.T) {
 	tests := []struct {
-		name        string
-		dialect     Dialect
-		placeholder string
+		name            string
+		dialect         Dialect
+		placeholder     string
+		identifierQuote string
 	}{
-		{name: "bigquery", dialect: DialectBigQuery, placeholder: "@p1"},
-		{name: "spanner", dialect: DialectSpanner, placeholder: "@p1"},
-		{name: "clickhouse", dialect: DialectClickHouse, placeholder: "@p1"},
-		{name: "postgresql", dialect: DialectPostgreSQL, placeholder: "$1"},
-		{name: "duckdb", dialect: DialectDuckDB, placeholder: "$1"},
+		{name: "bigquery", dialect: DialectBigQuery, placeholder: "@p1", identifierQuote: "`"},
+		{name: "spanner", dialect: DialectSpanner, placeholder: "@p1", identifierQuote: "`"},
+		{name: "clickhouse", dialect: DialectClickHouse, placeholder: "@p1", identifierQuote: "`"},
+		{name: "postgresql", dialect: DialectPostgreSQL, placeholder: "$1", identifierQuote: `"`},
+		{name: "duckdb", dialect: DialectDuckDB, placeholder: "$1", identifierQuote: `"`},
 	}
 
 	for _, tt := range tests {
@@ -1384,6 +1385,9 @@ func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t
 			})
 			_ = tp.RegisterOperatorFunc("quote", func(_ string, args []OperatorArg) (OperatorResult, error) {
 				return ValueSQL(fmt.Sprintf("'%s'", args[0].SQL), args[0].Type), nil
+			})
+			_ = tp.RegisterOperatorFunc("quoted_ident", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				return ValueSQL(fmt.Sprintf("%s%s%s", tt.identifierQuote, args[0].SQL, tt.identifierQuote), args[0].Type), nil
 			})
 			_ = tp.RegisterOperatorFunc("comment", func(_ string, args []OperatorArg) (OperatorResult, error) {
 				return ValueSQL(fmt.Sprintf("/* %s */ 1", args[0].SQL), ExpressionTypeNumber), nil
@@ -1406,6 +1410,22 @@ func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t
 				t.Fatal("expected error for quoted placeholder in custom operator SQL")
 			}
 			tpErr, ok := AsTranspileError(err)
+			if !ok {
+				t.Fatalf("expected TranspileError, got %T (%v)", err, err)
+			}
+			if tpErr.Code != ErrCustomOperatorFailed {
+				t.Fatalf("error code = %q, want %q", tpErr.Code, ErrCustomOperatorFailed)
+			}
+			if !strings.Contains(tpErr.Message, tt.placeholder) {
+				t.Fatalf("error message = %q, want to contain placeholder %q", tpErr.Message, tt.placeholder)
+			}
+
+			// Invalid: placeholder hidden inside a quoted identifier is not a real bind reference.
+			_, _, err = tp.TranspileParameterizedValue(`{"quoted_ident": ["hello"]}`)
+			if err == nil {
+				t.Fatal("expected error for quoted-identifier placeholder in custom operator SQL")
+			}
+			tpErr, ok = AsTranspileError(err)
 			if !ok {
 				t.Fatalf("expected TranspileError, got %T (%v)", err, err)
 			}

@@ -128,7 +128,7 @@ func (pc *ParamCollector) ValueForPlaceholder(placeholder string) (interface{}, 
 
 // ValidatePlaceholderRefs is a safety guard that scans the final SQL for each
 // collected placeholder using style-specific boundary patterns outside quoted
-// string literals and SQL comments.
+// SQL regions and SQL comments.
 // It returns E350 ErrUnreferencedPlaceholder if any placeholder is not found,
 // indicating a custom operator may have dropped an argument.
 func ValidatePlaceholderRefs(sql string, params []QueryParam, style PlaceholderStyle) error {
@@ -153,8 +153,8 @@ func ContainsParamRef(sql string, index int, param QueryParam, style Placeholder
 func containsPlaceholderRef(sql, placeholder string, style PlaceholderStyle) bool {
 	for i := 0; i < len(sql); i++ {
 		switch {
-		case sql[i] == '\'':
-			i = skipSQLString(sql, i)
+		case sql[i] == '\'' || sql[i] == '"' || sql[i] == '`':
+			i = skipSQLQuotedRegion(sql, i, sql[i])
 			continue
 		case i+1 < len(sql) && sql[i] == '-' && sql[i+1] == '-':
 			i = skipSQLLineComment(sql, i+2)
@@ -176,12 +176,12 @@ func containsPlaceholderRef(sql, placeholder string, style PlaceholderStyle) boo
 	return false
 }
 
-func skipSQLString(sql string, start int) int {
+func skipSQLQuotedRegion(sql string, start int, quote byte) int {
 	for i := start + 1; i < len(sql); i++ {
-		if sql[i] != '\'' {
+		if sql[i] != quote {
 			continue
 		}
-		if i+1 < len(sql) && sql[i+1] == '\'' {
+		if i+1 < len(sql) && sql[i+1] == quote {
 			i++
 			continue
 		}
@@ -261,11 +261,11 @@ func isPlaceholderAt(sql, placeholder string, start int, style PlaceholderStyle)
 	return hasPlaceholderBoundaries(sql, start, start+len(placeholder), style)
 }
 
-// FindQuotedPlaceholderRef scans SQL string literals and returns the first
-// placeholder token found inside a quoted string, if any.
+// FindQuotedPlaceholderRef scans non-bindable quoted SQL regions and returns
+// the first placeholder token found inside one, if any.
 //
 // This helps catch custom operators that accidentally quote placeholders
-// (e.g. "'@p1'"), which breaks bind semantics.
+// (e.g. "'@p1'" or "`@p1`"), which breaks bind semantics.
 func FindQuotedPlaceholderRef(sql string, params []QueryParam, style PlaceholderStyle) (string, bool) {
 	if len(params) == 0 || style == PlaceholderQuestion {
 		return "", false
@@ -276,11 +276,8 @@ func FindQuotedPlaceholderRef(sql string, params []QueryParam, style Placeholder
 		placeholders = append(placeholders, formatPlaceholder(i+1, p.Name, style))
 	}
 
-	inString := false
-	stringStart := 0
-
 	for i := 0; i < len(sql); i++ {
-		if !inString && sql[i] == '$' {
+		if sql[i] == '$' {
 			contentStart, contentEnd, end, ok := sqlDollarQuotedLiteral(sql, i)
 			if !ok {
 				continue
@@ -291,31 +288,34 @@ func FindQuotedPlaceholderRef(sql string, params []QueryParam, style Placeholder
 			i = end
 			continue
 		}
-		if sql[i] != '\'' {
+		if sql[i] != '\'' && sql[i] != '"' && sql[i] != '`' {
 			continue
 		}
 
-		if !inString {
-			inString = true
-			stringStart = i + 1
-			continue
-		}
-
-		// SQL escaped quote inside string literal.
-		if i+1 < len(sql) && sql[i+1] == '\'' {
-			i++
-			continue
-		}
-
-		// Closing quote found.
-		literal := sql[stringStart:i]
+		contentStart, contentEnd, end := sqlQuotedRegion(sql, i, sql[i])
+		literal := sql[contentStart:contentEnd]
 		if ph, ok := findPlaceholderInLiteral(literal, placeholders, style); ok {
 			return ph, true
 		}
-		inString = false
+		i = end
 	}
 
 	return "", false
+}
+
+func sqlQuotedRegion(sql string, start int, quote byte) (int, int, int) {
+	contentStart := start + 1
+	for i := contentStart; i < len(sql); i++ {
+		if sql[i] != quote {
+			continue
+		}
+		if i+1 < len(sql) && sql[i+1] == quote {
+			i++
+			continue
+		}
+		return contentStart, i, i
+	}
+	return contentStart, len(sql), len(sql) - 1
 }
 
 func findPlaceholderInLiteral(literal string, placeholders []string, style PlaceholderStyle) (string, bool) {

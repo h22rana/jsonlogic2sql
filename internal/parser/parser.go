@@ -2478,7 +2478,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 			}
 			if ph, bad := params.FindQuotedPlaceholderRef(res.SQL, pc.Params(), pc.Style()); bad {
 				return expressionResult{}, tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
-					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted string literal", ph))
+					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}
 			if res.Kind != operators.ExpressionKindPredicate {
 				return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, "predicate", kindName(res.Kind))
@@ -2567,7 +2567,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 			}
 			if ph, bad := params.FindQuotedPlaceholderRef(res.SQL, pc.Params(), pc.Style()); bad {
 				return expressionResult{}, tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
-					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted string literal", ph))
+					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}
 			return customOperatorResult(res, customResultPreservesDroppedParamRefs(res.SQL, pc, paramCount)), nil
 		}
@@ -3153,7 +3153,7 @@ func (p *Parser) parseOperatorParam(operator string, args interface{}, path stri
 			}
 			if ph, bad := params.FindQuotedPlaceholderRef(res.SQL, pc.Params(), pc.Style()); bad {
 				return "", tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
-					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted string literal", ph))
+					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}
 			return res.SQL, nil
 		}

@@ -170,7 +170,7 @@ func TestParameterizedCustomOperatorRejectsPostgreSQLDollarQuotedPlaceholders(t 
 		t.Fatalf("TranspileParameterizedValue() SQL = %q params %#v error = %v, want %s",
 			sql, gotParams, err, ErrCustomOperatorFailed)
 	}
-	if !strings.Contains(err.Error(), "placeholder $1 appears inside a quoted string literal") {
+	if !strings.Contains(err.Error(), "placeholder $1 appears inside a quoted SQL region") {
 		t.Fatalf("error = %v, want dollar-quoted placeholder message", err)
 	}
 }
