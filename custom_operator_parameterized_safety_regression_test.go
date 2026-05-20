@@ -104,3 +104,73 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 		})
 	}
 }
+
+func TestParameterizedCustomValueFoldedComparisonRollsBackParserDroppedParams(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"===":[{"idstr":["x"]},1]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: defaultTestSchema()})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+			if regErr := tr.RegisterOperatorFunc("idstr", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				return ValueSQL(args[0].SQL, ExpressionTypeString), nil
+			}); regErr != nil {
+				t.Fatalf("RegisterOperatorFunc(idstr) error: %v", regErr)
+			}
+
+			gotCondition, conditionParams, err := tr.TranspileParameterizedCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			if gotCondition != "FALSE" {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want FALSE", gotCondition)
+			}
+			if len(conditionParams) != 0 {
+				t.Fatalf("condition params = %#v, want none", conditionParams)
+			}
+
+			gotValue, valueParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if gotValue != "FALSE" {
+				t.Fatalf("TranspileParameterizedValue() = %q, want FALSE", gotValue)
+			}
+			if len(valueParams) != 0 {
+				t.Fatalf("value params = %#v, want none", valueParams)
+			}
+		})
+	}
+}
+
+func TestParameterizedCustomOperatorRejectsPostgreSQLDollarQuotedPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+		Dialect: DialectPostgreSQL,
+		Schema:  defaultTestSchema(),
+	})
+	if err != nil {
+		t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+	}
+	if regErr := tr.RegisterOperatorFunc("dollarquote", func(_ string, args []OperatorArg) (OperatorResult, error) {
+		return ValueSQL("$tag$ "+args[0].SQL+" $tag$", ExpressionTypeString), nil
+	}); regErr != nil {
+		t.Fatalf("RegisterOperatorFunc(dollarquote) error: %v", regErr)
+	}
+
+	sql, gotParams, err := tr.TranspileParameterizedValue(`{"dollarquote":["x"]}`)
+	if !IsErrorCode(err, ErrCustomOperatorFailed) {
+		t.Fatalf("TranspileParameterizedValue() SQL = %q params %#v error = %v, want %s",
+			sql, gotParams, err, ErrCustomOperatorFailed)
+	}
+	if !strings.Contains(err.Error(), "placeholder $1 appears inside a quoted string literal") {
+		t.Fatalf("error = %v, want dollar-quoted placeholder message", err)
+	}
+}

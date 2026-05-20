@@ -93,10 +93,10 @@ type ProcessedValue struct {
 	// RequiresKnownTruthiness forces callers to reject truthiness checks when
 	// Type is unknown instead of emitting mixed-type fallback SQL.
 	RequiresKnownTruthiness bool
-	// PreserveParamRefs marks SQL that came from a parameterized custom
-	// operator whose arguments allocated bind placeholders. Parser folds must
-	// not roll those placeholders back, otherwise dropped custom-operator
-	// arguments can bypass placeholder validation.
+	// PreserveParamRefs marks SQL from a parameterized custom operator that did
+	// not reference every placeholder allocated for its arguments. Parser folds
+	// must keep those params so placeholder validation still reports dropped
+	// custom-operator arguments.
 	PreserveParamRefs bool
 }
 

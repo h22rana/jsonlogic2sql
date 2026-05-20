@@ -828,6 +828,16 @@ func processedArgsPreserveParamRefs(args []interface{}) bool {
 	return false
 }
 
+func customResultPreservesDroppedParamRefs(sql string, pc *params.ParamCollector, paramCount int) bool {
+	collected := pc.Params()
+	for i := paramCount; i < len(collected); i++ {
+		if !params.ContainsParamRef(sql, i+1, collected[i], pc.Style()) {
+			return true
+		}
+	}
+	return false
+}
+
 func literalComparisonPredicateResult(operator string, args []interface{}, sql string) (expressionResult, error) {
 	truthy, known, err := operators.FoldLiteralComparison(operator, args)
 	if err != nil {
@@ -2473,7 +2483,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 			if res.Kind != operators.ExpressionKindPredicate {
 				return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, "predicate", kindName(res.Kind))
 			}
-			return customOperatorResult(res, len(pc.Params()) > paramCount), nil
+			return customOperatorResult(res, customResultPreservesDroppedParamRefs(res.SQL, pc, paramCount)), nil
 		}
 	}
 
@@ -2559,7 +2569,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 				return expressionResult{}, tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
 					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted string literal", ph))
 			}
-			return customOperatorResult(res, len(pc.Params()) > paramCount), nil
+			return customOperatorResult(res, customResultPreservesDroppedParamRefs(res.SQL, pc, paramCount)), nil
 		}
 	}
 

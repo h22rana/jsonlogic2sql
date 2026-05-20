@@ -291,6 +291,18 @@ func TestValidatePlaceholderRefsPositional(t *testing.T) {
 			params:    []QueryParam{{Name: "p1", Value: "inside-comment"}, {Name: "p2", Value: "actual"}},
 			expectErr: true,
 		},
+		{
+			name:      "dollar-quoted placeholder is ignored",
+			sql:       "WHERE x = $tag$ $1 $tag$ AND y = $2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-dollar-quote"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
+		{
+			name:      "empty-tag dollar-quoted placeholder is ignored",
+			sql:       "WHERE x = $$ $1 $$ AND y = $2",
+			params:    []QueryParam{{Name: "p1", Value: "inside-dollar-quote"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -402,6 +414,36 @@ func TestFindQuotedPlaceholderRef(t *testing.T) {
 		}
 		if got, ok := FindQuotedPlaceholderRef(sql, params, PlaceholderNamed); ok {
 			t.Fatalf("unexpected placeholder match %q", got)
+		}
+	})
+
+	t.Run("positional placeholder inside dollar-quoted literal is detected", func(t *testing.T) {
+		sql := "WHERE x = $tag$ $1 $tag$ AND y = $2"
+		params := []QueryParam{
+			{Name: "p1", Value: "a"},
+			{Name: "p2", Value: "b"},
+		}
+		got, ok := FindQuotedPlaceholderRef(sql, params, PlaceholderPositional)
+		if !ok {
+			t.Fatal("expected dollar-quoted placeholder to be detected")
+		}
+		if got != "$1" {
+			t.Fatalf("placeholder = %q, want %q", got, "$1")
+		}
+	})
+
+	t.Run("positional placeholder inside empty-tag dollar-quoted literal is detected", func(t *testing.T) {
+		sql := "WHERE x = $$ $1 $$ AND y = $2"
+		params := []QueryParam{
+			{Name: "p1", Value: "a"},
+			{Name: "p2", Value: "b"},
+		}
+		got, ok := FindQuotedPlaceholderRef(sql, params, PlaceholderPositional)
+		if !ok {
+			t.Fatal("expected empty-tag dollar-quoted placeholder to be detected")
+		}
+		if got != "$1" {
+			t.Fatalf("placeholder = %q, want %q", got, "$1")
 		}
 	})
 }

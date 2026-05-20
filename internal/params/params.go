@@ -143,6 +143,13 @@ func ValidatePlaceholderRefs(sql string, params []QueryParam, style PlaceholderS
 	return nil
 }
 
+// ContainsParamRef reports whether SQL references the indexed bind parameter
+// outside quoted strings and comments. Index is one-based, matching generated
+// positional placeholders such as $1.
+func ContainsParamRef(sql string, index int, param QueryParam, style PlaceholderStyle) bool {
+	return containsPlaceholderRef(sql, formatPlaceholder(index, param.Name, style), style)
+}
+
 func containsPlaceholderRef(sql, placeholder string, style PlaceholderStyle) bool {
 	for i := 0; i < len(sql); i++ {
 		switch {
@@ -155,6 +162,11 @@ func containsPlaceholderRef(sql, placeholder string, style PlaceholderStyle) boo
 		case i+1 < len(sql) && sql[i] == '/' && sql[i+1] == '*':
 			i = skipSQLBlockComment(sql, i+2)
 			continue
+		case sql[i] == '$':
+			if _, _, end, ok := sqlDollarQuotedLiteral(sql, i); ok {
+				i = end
+				continue
+			}
 		}
 
 		if isPlaceholderAt(sql, placeholder, i, style) {
@@ -196,6 +208,49 @@ func skipSQLBlockComment(sql string, start int) int {
 	return len(sql) - 1
 }
 
+func sqlDollarQuotedLiteral(sql string, start int) (int, int, int, bool) {
+	delimiter, ok := dollarQuoteDelimiterAt(sql, start)
+	if !ok {
+		return 0, 0, 0, false
+	}
+	contentStart := start + len(delimiter)
+	closingOffset := strings.Index(sql[contentStart:], delimiter)
+	if closingOffset < 0 {
+		return contentStart, len(sql), len(sql) - 1, true
+	}
+	contentEnd := contentStart + closingOffset
+	return contentStart, contentEnd, contentEnd + len(delimiter) - 1, true
+}
+
+func dollarQuoteDelimiterAt(sql string, start int) (string, bool) {
+	if start >= len(sql) || sql[start] != '$' || start+1 >= len(sql) {
+		return "", false
+	}
+	if sql[start+1] == '$' {
+		return "$$", true
+	}
+	if !isDollarQuoteTagFirstChar(sql[start+1]) {
+		return "", false
+	}
+	for i := start + 2; i < len(sql); i++ {
+		if sql[i] == '$' {
+			return sql[start : i+1], true
+		}
+		if !isDollarQuoteTagChar(sql[i]) {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+func isDollarQuoteTagFirstChar(ch byte) bool {
+	return ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+func isDollarQuoteTagChar(ch byte) bool {
+	return isDollarQuoteTagFirstChar(ch) || (ch >= '0' && ch <= '9')
+}
+
 func isPlaceholderAt(sql, placeholder string, start int, style PlaceholderStyle) bool {
 	if !strings.HasPrefix(sql[start:], placeholder) {
 		return false
@@ -225,6 +280,17 @@ func FindQuotedPlaceholderRef(sql string, params []QueryParam, style Placeholder
 	stringStart := 0
 
 	for i := 0; i < len(sql); i++ {
+		if !inString && sql[i] == '$' {
+			contentStart, contentEnd, end, ok := sqlDollarQuotedLiteral(sql, i)
+			if !ok {
+				continue
+			}
+			if ph, ok := findPlaceholderInLiteral(sql[contentStart:contentEnd], placeholders, style); ok {
+				return ph, true
+			}
+			i = end
+			continue
+		}
 		if sql[i] != '\'' {
 			continue
 		}
