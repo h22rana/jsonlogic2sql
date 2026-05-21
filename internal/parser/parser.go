@@ -2476,7 +2476,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
 			}
-			if ph, bad := params.FindQuotedPlaceholderRef(res.SQL, pc.Params(), pc.Style()); bad {
+			if ph, bad := params.FindQuotedPlaceholderRefAfter(res.SQL, pc.Params(), pc.Style(), paramCount); bad {
 				return expressionResult{}, tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
 					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}
@@ -2565,7 +2565,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
 			}
-			if ph, bad := params.FindQuotedPlaceholderRef(res.SQL, pc.Params(), pc.Style()); bad {
+			if ph, bad := params.FindQuotedPlaceholderRefAfter(res.SQL, pc.Params(), pc.Style(), paramCount); bad {
 				return expressionResult{}, tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
 					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}
@@ -3141,6 +3141,7 @@ func (p *Parser) parseStringifiedLogicalFromParam(
 func (p *Parser) parseOperatorParam(operator string, args interface{}, path string, pc *params.ParamCollector) (string, error) {
 	if p.customOpLookup != nil {
 		if handler, ok := p.customOpLookup(operator); ok {
+			paramCount := len(pc.Params())
 			processedArgs, err := p.processCustomOperatorArgsParam(args, path, pc)
 			if err != nil {
 				return "", tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
@@ -3151,7 +3152,7 @@ func (p *Parser) parseOperatorParam(operator string, args interface{}, path stri
 				return "", tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
 			}
-			if ph, bad := params.FindQuotedPlaceholderRef(res.SQL, pc.Params(), pc.Style()); bad {
+			if ph, bad := params.FindQuotedPlaceholderRefAfter(res.SQL, pc.Params(), pc.Style(), paramCount); bad {
 				return "", tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
 					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}

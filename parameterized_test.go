@@ -1389,6 +1389,13 @@ func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t
 			_ = tp.RegisterOperatorFunc("quoted_ident", func(_ string, args []OperatorArg) (OperatorResult, error) {
 				return ValueSQL(fmt.Sprintf("%s%s%s", tt.identifierQuote, args[0].SQL, tt.identifierQuote), args[0].Type), nil
 			})
+			_ = tp.RegisterOperatorFunc("literal_prior_placeholder", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return ValueSQL(fmt.Sprintf("'%s'", tt.placeholder), ExpressionTypeString), nil
+			})
+			_ = tp.RegisterOperatorFunc("predicate_prior_placeholder", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				quoted := fmt.Sprintf("'%s'", tt.placeholder)
+				return PredicateSQL(fmt.Sprintf("(%s = %s OR TRUE)", quoted, quoted)), nil
+			})
 			_ = tp.RegisterOperatorFunc("comment", func(_ string, args []OperatorArg) (OperatorResult, error) {
 				return ValueSQL(fmt.Sprintf("/* %s */ 1", args[0].SQL), ExpressionTypeNumber), nil
 			})
@@ -1419,6 +1426,28 @@ func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t
 			if !strings.Contains(tpErr.Message, tt.placeholder) {
 				t.Fatalf("error message = %q, want to contain placeholder %q", tpErr.Message, tt.placeholder)
 			}
+
+			// Valid: a later no-arg custom operator may return SQL text that happens
+			// to mention an earlier placeholder inside a quoted literal.
+			sql, params, err = tp.TranspileParameterizedValue(`{"cat": ["hello", {"literal_prior_placeholder": []}]}`)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue(literal_prior_placeholder) error = %v", err)
+			}
+			if !strings.Contains(sql, tt.placeholder) || !strings.Contains(sql, fmt.Sprintf("'%s'", tt.placeholder)) {
+				t.Fatalf("literal_prior_placeholder SQL = %q, want quoted and unquoted %s", sql, tt.placeholder)
+			}
+			assertParams(t, params, []QueryParam{{Name: "p1", Value: "hello"}})
+
+			sql, params, err = tp.TranspileParameterizedCondition(
+				`{"and": [{">": [{"var": "amount"}, 0]}, {"predicate_prior_placeholder": []}]}`,
+			)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition(predicate_prior_placeholder) error = %v", err)
+			}
+			if !strings.Contains(sql, tt.placeholder) || !strings.Contains(sql, fmt.Sprintf("'%s'", tt.placeholder)) {
+				t.Fatalf("predicate_prior_placeholder SQL = %q, want quoted and unquoted %s", sql, tt.placeholder)
+			}
+			assertParams(t, params, []QueryParam{{Name: "p1", Value: float64(0)}})
 
 			// Invalid: placeholder hidden inside a quoted identifier is not a real bind reference.
 			_, _, err = tp.TranspileParameterizedValue(`{"quoted_ident": ["hello"]}`)

@@ -551,4 +551,50 @@ func TestFindQuotedPlaceholderRef(t *testing.T) {
 			t.Fatalf("placeholder = %q, want %q", got, "$1")
 		}
 	})
+
+	t.Run("scoped check ignores earlier named placeholder text", func(t *testing.T) {
+		sql := "WHERE x = '@p1' AND y = @p1"
+		params := []QueryParam{{Name: "p1", Value: "a"}}
+		if got, ok := FindQuotedPlaceholderRefAfter(sql, params, PlaceholderNamed, 1); ok {
+			t.Fatalf("unexpected earlier placeholder match %q", got)
+		}
+	})
+
+	t.Run("scoped check detects later named placeholder text", func(t *testing.T) {
+		sql := "WHERE x = '@p2' AND y = @p1"
+		params := []QueryParam{
+			{Name: "p1", Value: "a"},
+			{Name: "p2", Value: "b"},
+		}
+		got, ok := FindQuotedPlaceholderRefAfter(sql, params, PlaceholderNamed, 1)
+		if !ok {
+			t.Fatal("expected later named placeholder to be detected")
+		}
+		if got != "@p2" {
+			t.Fatalf("placeholder = %q, want %q", got, "@p2")
+		}
+	})
+
+	t.Run("scoped check ignores earlier positional placeholder text", func(t *testing.T) {
+		sql := "WHERE x = '$1' AND y = $1"
+		params := []QueryParam{{Name: "p1", Value: "a"}}
+		if got, ok := FindQuotedPlaceholderRefAfter(sql, params, PlaceholderPositional, 1); ok {
+			t.Fatalf("unexpected earlier placeholder match %q", got)
+		}
+	})
+
+	t.Run("scoped check detects later positional placeholder text", func(t *testing.T) {
+		sql := "WHERE x = '$2' AND y = $1"
+		params := []QueryParam{
+			{Name: "p1", Value: "a"},
+			{Name: "p2", Value: "b"},
+		}
+		got, ok := FindQuotedPlaceholderRefAfter(sql, params, PlaceholderPositional, 1)
+		if !ok {
+			t.Fatal("expected later positional placeholder to be detected")
+		}
+		if got != "$2" {
+			t.Fatalf("placeholder = %q, want %q", got, "$2")
+		}
+	})
 }

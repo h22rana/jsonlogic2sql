@@ -267,12 +267,27 @@ func isPlaceholderAt(sql, placeholder string, start int, style PlaceholderStyle)
 // This helps catch custom operators that accidentally quote placeholders
 // (e.g. "'@p1'" or "`@p1`"), which breaks bind semantics.
 func FindQuotedPlaceholderRef(sql string, params []QueryParam, style PlaceholderStyle) (string, bool) {
-	if len(params) == 0 || style == PlaceholderQuestion {
+	return FindQuotedPlaceholderRefAfter(sql, params, style, 0)
+}
+
+// FindQuotedPlaceholderRefAfter is like FindQuotedPlaceholderRef, but ignores
+// placeholders allocated before previousCount. Use it when validating a custom
+// operator result so unrelated params from earlier operands do not make quoted
+// literal text look like a dropped bind parameter.
+func FindQuotedPlaceholderRefAfter(sql string, params []QueryParam, style PlaceholderStyle, previousCount int) (string, bool) {
+	if previousCount < 0 {
+		previousCount = 0
+	}
+	if previousCount > len(params) {
+		previousCount = len(params)
+	}
+	if previousCount == len(params) || style == PlaceholderQuestion {
 		return "", false
 	}
 
-	placeholders := make([]string, 0, len(params))
-	for i, p := range params {
+	placeholders := make([]string, 0, len(params)-previousCount)
+	for i := previousCount; i < len(params); i++ {
+		p := params[i]
 		placeholders = append(placeholders, formatPlaceholder(i+1, p.Name, style))
 	}
 
