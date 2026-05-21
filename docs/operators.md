@@ -410,7 +410,7 @@ ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
 ```
 
-Portable SQL dialects support reduce forms that can be represented as a SQL aggregate, including `accumulator + current`, `accumulator + <current-derived numeric expression>`, `min(accumulator,current...)`, and `max(accumulator,current...)`. Arbitrary reducers such as string concatenation, accumulator truthiness, or non-associative arithmetic require ClickHouse, where they are emitted with `arrayFold`. Other dialects return an explicit unsupported-expression error instead of generating a non-folding scalar subquery.
+Portable SQL dialects support reduce forms that can be represented as a SQL aggregate, including `accumulator + current`, `accumulator + <current-derived numeric expression>`, `min(accumulator,current...)`, and `max(accumulator,current...)`. Arbitrary reducers such as string concatenation, accumulator truthiness, or non-associative arithmetic require a dialect with native list folding: DuckDB emits `list_reduce(...)` for scalar reducer bodies and ClickHouse emits `arrayFold(...)`. DuckDB rejects reducer bodies that contain nested array operators lowering to subqueries, because DuckDB lambdas do not support subqueries. BigQuery, Spanner, and PostgreSQL return an explicit unsupported-expression error instead of generating a non-folding scalar subquery.
 
 ### Nested Array Scope
 
