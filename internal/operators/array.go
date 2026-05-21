@@ -21,7 +21,10 @@ const (
 	arrayLambdaScopeReduce
 )
 
-var errUnsupportedGeneralReduce = errors.New("general reduce expressions are only supported for ClickHouse arrayFold; standard SQL dialects support reduce only for accumulator/current SUM, MIN, and MAX patterns")
+var (
+	errUnsupportedGeneralReduce        = errors.New("general reduce expressions are only supported for DuckDB list_reduce and ClickHouse arrayFold; BigQuery, Spanner, and PostgreSQL support reduce only for accumulator/current SUM, MIN, and MAX patterns")
+	errUnsupportedDuckDBReduceSubquery = errors.New("DuckDB list_reduce does not support subqueries inside lambda reducers")
+)
 
 // ArrayOperator handles array operations like map, filter, reduce, all, some, none, merge.
 type ArrayOperator struct {
@@ -1418,8 +1421,9 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 // - Addition: initial + COALESCE((SELECT SUM(elem) FROM UNNEST(array) AS elem), 0).
 // - Min/max: LEAST/GREATEST initial combined with MIN/MAX over UNNEST(array).
 // ClickHouse uses arrayReduce for aggregate patterns and arrayFold for
-// arbitrary reducer expressions. Standard SQL dialects reject arbitrary
-// reducer expressions that cannot be lowered to SUM, MIN, or MAX.
+// arbitrary reducer expressions. DuckDB uses list_reduce for arbitrary
+// reducers. Other standard SQL dialects reject arbitrary reducer expressions
+// that cannot be lowered to SUM, MIN, or MAX.
 func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	if len(args) != reduceOperatorArgCount {
 		return "", fmt.Errorf("reduce requires exactly 3 arguments")
@@ -1513,7 +1517,7 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 
 generalReduce:
 	accumulatorSQL := AccumulatorVar
-	if a.getDialect() == dialect.DialectClickHouse {
+	if a.getDialect() == dialect.DialectClickHouse || a.getDialect() == dialect.DialectDuckDB {
 		accumulatorSQL = "acc"
 	}
 	valueScoped := reduceScoped.withValueSemantics(true).withAccumulatorType(initialValue.typ).withAccumulatorSQL(accumulatorSQL)
@@ -1521,11 +1525,7 @@ generalReduce:
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
-	if a.getDialect() != dialect.DialectClickHouse {
-		return "", errUnsupportedGeneralReduce
-	}
-
-	return fmt.Sprintf("arrayFold((acc, %s) -> %s, %s, %s)", alias, reducerWithElem, array, initial), nil
+	return a.renderGeneralReduceSQL(alias, array, reducerWithElem, initial, initialValue.typ)
 }
 
 // aggregatePattern represents a detected aggregate pattern with optional field suffix.
@@ -3232,7 +3232,7 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 
 generalReduceParam:
 	accumulatorSQL := AccumulatorVar
-	if a.getDialect() == dialect.DialectClickHouse {
+	if a.getDialect() == dialect.DialectClickHouse || a.getDialect() == dialect.DialectDuckDB {
 		accumulatorSQL = "acc"
 	}
 	valueScoped := reduceScoped.withValueSemantics(true).withAccumulatorType(initialValue.typ).withAccumulatorSQL(accumulatorSQL)
@@ -3240,11 +3240,7 @@ generalReduceParam:
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
-	if a.getDialect() != dialect.DialectClickHouse {
-		return "", errUnsupportedGeneralReduce
-	}
-
-	return fmt.Sprintf("arrayFold((acc, %s) -> %s, %s, %s)", alias, reducerWithElem, array, initial), nil
+	return a.renderGeneralReduceSQL(alias, array, reducerWithElem, initial, initialValue.typ)
 }
 
 // handleAllParam is the parameterized variant of handleAll. Keep in sync.

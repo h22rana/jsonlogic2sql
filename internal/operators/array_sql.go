@@ -102,3 +102,107 @@ func (a *ArrayOperator) renderMergeSQL(arrays []string) (string, error) {
 		return "", fmt.Errorf("merge: unsupported dialect %s", d)
 	}
 }
+
+func (a *ArrayOperator) renderGeneralReduceSQL(alias, array, reducer, initial string, initialType ExpressionType) (string, error) {
+	switch a.getDialect() {
+	case dialect.DialectClickHouse:
+		initial = clickHouseArrayFoldInitialSQL(initial, initialType)
+		return fmt.Sprintf("arrayFold((acc, %s) -> %s, %s, %s)", alias, reducer, array, initial), nil
+	case dialect.DialectDuckDB:
+		if containsSQLKeywordOutsideQuotedRegions(reducer, "SELECT") {
+			return "", errUnsupportedDuckDBReduceSubquery
+		}
+		return fmt.Sprintf("list_reduce(%s, lambda acc, %s : %s, %s)", array, alias, reducer, initial), nil
+	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL:
+		return "", errUnsupportedGeneralReduce
+	}
+	return "", errUnsupportedGeneralReduce
+}
+
+func clickHouseArrayFoldInitialSQL(initial string, initialType ExpressionType) string {
+	if initialType == ExpressionTypeNumber {
+		return fmt.Sprintf("toFloat64(%s)", initial)
+	}
+	return initial
+}
+
+func containsSQLKeywordOutsideQuotedRegions(sql, keyword string) bool {
+	keyword = strings.ToUpper(keyword)
+	for i := 0; i < len(sql); i++ {
+		switch sql[i] {
+		case '\'':
+			i = skipSQLQuotedRegion(sql, i, '\'')
+			continue
+		case '"':
+			i = skipSQLQuotedRegion(sql, i, '"')
+			continue
+		case '`':
+			i = skipSQLQuotedRegion(sql, i, '`')
+			continue
+		case '-':
+			if i+1 < len(sql) && sql[i+1] == '-' {
+				i = skipSQLLineComment(sql, i)
+				continue
+			}
+		case '/':
+			if i+1 < len(sql) && sql[i+1] == '*' {
+				i = skipSQLBlockComment(sql, i)
+				continue
+			}
+		}
+		if sqlKeywordAt(sql, keyword, i) {
+			return true
+		}
+	}
+	return false
+}
+
+func sqlKeywordAt(sql, keyword string, i int) bool {
+	if i+len(keyword) > len(sql) || strings.ToUpper(sql[i:i+len(keyword)]) != keyword {
+		return false
+	}
+	return sqlKeywordBoundary(sql, i-1) && sqlKeywordBoundary(sql, i+len(keyword))
+}
+
+func sqlKeywordBoundary(sql string, i int) bool {
+	if i < 0 || i >= len(sql) {
+		return true
+	}
+	ch := sql[i]
+	return (ch < 'a' || ch > 'z') &&
+		(ch < 'A' || ch > 'Z') &&
+		(ch < '0' || ch > '9') &&
+		ch != '_'
+}
+
+func skipSQLQuotedRegion(sql string, start int, quote byte) int {
+	for i := start + 1; i < len(sql); i++ {
+		if sql[i] != quote {
+			continue
+		}
+		if quote == '\'' && i+1 < len(sql) && sql[i+1] == '\'' {
+			i++
+			continue
+		}
+		return i
+	}
+	return len(sql) - 1
+}
+
+func skipSQLLineComment(sql string, start int) int {
+	for i := start + 2; i < len(sql); i++ {
+		if sql[i] == '\n' || sql[i] == '\r' {
+			return i
+		}
+	}
+	return len(sql) - 1
+}
+
+func skipSQLBlockComment(sql string, start int) int {
+	for i := start + 2; i+1 < len(sql); i++ {
+		if sql[i] == '*' && sql[i+1] == '/' {
+			return i + 1
+		}
+	}
+	return len(sql) - 1
+}

@@ -564,7 +564,18 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
 							sql, inlineErr := tr.TranspileValue(tc.logic)
-							if d != DialectClickHouse && tc.standardUnsupported {
+							if d == DialectDuckDB && tc.standardUnsupported {
+								if inlineErr == nil || !strings.Contains(inlineErr.Error(), "DuckDB list_reduce does not support subqueries") {
+									t.Fatalf("TranspileValue() = %q, error = %v, want DuckDB lambda subquery rejection", sql, inlineErr)
+								}
+								paramSQL, params, paramErr := tr.TranspileParameterizedValue(tc.logic)
+								if paramErr == nil || !strings.Contains(paramErr.Error(), "DuckDB list_reduce does not support subqueries") {
+									t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want DuckDB lambda subquery rejection",
+										paramSQL, params, paramErr)
+								}
+								return
+							}
+							if !testSupportsGeneralReduce(d) && tc.standardUnsupported {
 								if inlineErr == nil || !strings.Contains(inlineErr.Error(), "general reduce expressions are only supported") {
 									t.Fatalf("TranspileValue() = %q, error = %v, want unsupported general reduce", sql, inlineErr)
 								}

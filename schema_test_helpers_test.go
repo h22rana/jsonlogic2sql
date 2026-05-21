@@ -29,6 +29,10 @@ func emptyTestSchema() *Schema {
 	return mustNewSchema(nil)
 }
 
+func testSupportsGeneralReduce(d Dialect) bool {
+	return d == DialectDuckDB || d == DialectClickHouse
+}
+
 func testStringContainmentSQL(d Dialect, haystack, needle string) string {
 	switch d {
 	case DialectPostgreSQL:

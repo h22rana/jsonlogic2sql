@@ -371,11 +371,11 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					hasError: false,
 				},
 				{
-					name:     "reduce with general pattern (multiplication unsupported in standard SQL)",
+					name:     "reduce with general pattern (multiplication)",
 					operator: "reduce",
 					args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 1},
-					expected: "",
-					hasError: true,
+					expected: "list_reduce(numbers, lambda acc, elem : (acc * elem), 1)",
+					hasError: d.dialect != dialect.DialectDuckDB,
 				},
 				{
 					name:     "reduce with non-zero initial value",
@@ -474,6 +474,44 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 						t.Errorf("[%s] Expected %s, got %s", d.name, expected, result)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestArrayOperator_DuckDBGeneralReduceRejectsLambdaSubquery(t *testing.T) {
+	config := NewOperatorConfig(dialect.DialectDuckDB, &arrayTestSchemaProvider{})
+	op := NewArrayOperator(config)
+
+	_, err := op.ToSQL("reduce", []any{
+		map[string]any{"var": "items"},
+		map[string]any{"map": []any{map[string]any{"var": "current.values"}, map[string]any{"var": ""}}},
+		[]any{},
+	})
+	if err == nil || err.Error() != errUnsupportedDuckDBReduceSubquery.Error() {
+		t.Fatalf("ToSQL() error = %v, want %v", err, errUnsupportedDuckDBReduceSubquery)
+	}
+}
+
+func TestContainsSQLKeywordOutsideQuotedRegions(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want bool
+	}{
+		{name: "plain select", sql: "ARRAY(SELECT elem FROM UNNEST(items) AS elem)", want: true},
+		{name: "single quoted select", sql: "'SELECT'", want: false},
+		{name: "escaped single quoted select", sql: "'it''s SELECT'", want: false},
+		{name: "double quoted select", sql: `"SELECT"`, want: false},
+		{name: "backtick quoted select", sql: "`SELECT`", want: false},
+		{name: "line comment select", sql: "-- SELECT\nacc + elem", want: false},
+		{name: "block comment select", sql: "/* SELECT */ acc + elem", want: false},
+		{name: "identifier boundary", sql: "selected_value + elem", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := containsSQLKeywordOutsideQuotedRegions(tt.sql, "SELECT"); got != tt.want {
+				t.Fatalf("containsSQLKeywordOutsideQuotedRegions(%q) = %v, want %v", tt.sql, got, tt.want)
 			}
 		})
 	}
@@ -1045,7 +1083,7 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 			name:     "reduce with general pattern keeps running accumulator in ClickHouse",
 			operator: "reduce",
 			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"-": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 100},
-			expected: "arrayFold((acc, elem) -> (acc - elem), numbers, 100)",
+			expected: "arrayFold((acc, elem) -> (acc - elem), numbers, toFloat64(100))",
 			hasError: false,
 		},
 		// All - uses arrayAll

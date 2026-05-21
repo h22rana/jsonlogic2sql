@@ -669,10 +669,10 @@ func TestTranspile_ArrayElementFieldsAreScopedOnly_AllDialects(t *testing.T) {
 			}
 
 			for _, tc := range []struct {
-				name           string
-				logic          string
-				want           string
-				clickHouseOnly bool
+				name          string
+				logic         string
+				want          string
+				generalReduce bool
 			}{
 				{
 					name:  "map base elem-prefixed field",
@@ -690,10 +690,10 @@ func TestTranspile_ArrayElementFieldsAreScopedOnly_AllDialects(t *testing.T) {
 					want:  "elem.elem2.x",
 				},
 				{
-					name:           "reduce current numbered elem-prefixed field",
-					logic:          `{"reduce":[{"var":"accounts"},{"cat":[{"var":"accumulator"},{"var":"current.elem2.x"}]},""]}`,
-					want:           "elem.elem2.x",
-					clickHouseOnly: true,
+					name:          "reduce current numbered elem-prefixed field",
+					logic:         `{"reduce":[{"var":"accounts"},{"cat":[{"var":"accumulator"},{"var":"current.elem2.x"}]},""]}`,
+					want:          "elem.elem2.x",
+					generalReduce: true,
 				},
 				{
 					name:  "map multi-digit elem-prefixed field",
@@ -704,7 +704,7 @@ func TestTranspile_ArrayElementFieldsAreScopedOnly_AllDialects(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
 
-					if tc.clickHouseOnly && d != DialectClickHouse {
+					if tc.generalReduce && !testSupportsGeneralReduce(d) {
 						if sql, err := tr.TranspileValue(tc.logic); err == nil || !strings.Contains(err.Error(), "general reduce expressions are only supported") {
 							t.Fatalf("TranspileValue() = %q, error = %v, want unsupported general reduce", sql, err)
 						}
@@ -931,7 +931,7 @@ func TestTranspile_ArrayLambdaVarSemantics_AllDialectsSchemaRequired(t *testing.
 					}
 
 					reduceCurrentType := `{"reduce":[{"var":"numbers"},{"cat":[{"var":"accumulator"},{"var":"current.type"}]},""]}`
-					if d == DialectClickHouse {
+					if testSupportsGeneralReduce(d) {
 						allowedReduceSQL, err := tr.TranspileValue(reduceCurrentType)
 						if err != nil {
 							t.Fatalf("reduce current.type transpilation error: %v", err)

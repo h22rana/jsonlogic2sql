@@ -99,11 +99,12 @@ func assertNoWholeWordToken(t *testing.T, sql, token string) {
 
 func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 	type matrixCase struct {
-		name           string
-		logic          string
-		wantParam      int
-		clickHouseOnly bool
-		validate       func(t *testing.T, d Dialect, out apiOutput)
+		name                string
+		logic               string
+		wantParam           int
+		clickHouseOnly      bool
+		duckDBGeneralReduce bool
+		validate            func(t *testing.T, d Dialect, out apiOutput)
 	}
 
 	cases := []matrixCase{
@@ -220,17 +221,21 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 			},
 		},
 		{
-			name:           "nested reduce with direct accumulator/current vars",
-			logic:          `{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"plus":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`,
-			wantParam:      0,
-			clickHouseOnly: true,
+			name:                "nested reduce with direct accumulator/current vars",
+			logic:               `{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"plus":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`,
+			wantParam:           0,
+			clickHouseOnly:      true,
+			duckDBGeneralReduce: true,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
 				assertContains(t, inline, "elem.base")
-				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayMap(elem -> arrayFold((acc, elem1) -> (acc + elem1), elem.values, elem.base), bag.records)")
-				} else {
+				switch d {
+				case DialectClickHouse:
+					assertContains(t, inline, "arrayMap(elem -> arrayFold((acc, elem1) -> (acc + elem1), elem.values, toFloat64(elem.base)), bag.records)")
+				case DialectDuckDB:
+					assertContains(t, inline, "list_reduce(elem.values, lambda acc, elem1 : (acc + elem1), elem.base)")
+				default:
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
 					assertContains(t, inline, "(elem.base + elem1)")
 				}
@@ -254,10 +259,11 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 			},
 		},
 		{
-			name:           "reduce direct accumulator/current vars",
-			logic:          `{"reduce":[{"var":"bag.numbers"},{"plus":[{"var":"accumulator"},{"var":"current"}]},0]}`,
-			wantParam:      1,
-			clickHouseOnly: true,
+			name:                "reduce direct accumulator/current vars",
+			logic:               `{"reduce":[{"var":"bag.numbers"},{"plus":[{"var":"accumulator"},{"var":"current"}]},0]}`,
+			wantParam:           1,
+			clickHouseOnly:      true,
+			duckDBGeneralReduce: true,
 			validate: func(t *testing.T, _ Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
@@ -301,20 +307,25 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 			},
 		},
 		{
-			name:           "deep nested custom reducer with scoped fields",
-			logic:          `{"and":[{"some":[{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"plus":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]},{">=":[{"var":""},0]}]},{">=":[{"var":"metrics.amount"},100]}]}`,
-			wantParam:      2,
-			clickHouseOnly: true,
+			name:                "deep nested custom reducer with scoped fields",
+			logic:               `{"and":[{"some":[{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"plus":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]},{">=":[{"var":""},0]}]},{">=":[{"var":"metrics.amount"},100]}]}`,
+			wantParam:           2,
+			clickHouseOnly:      true,
+			duckDBGeneralReduce: true,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
 				assertContains(t, inline, "metrics.amount >= 100")
 				assertNoWholeWordToken(t, inline, "current")
 				assertNoWholeWordToken(t, inline, "accumulator")
-				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayMap(elem -> arrayFold((acc, elem1) -> (acc + elem1), elem.values, elem.base), bag.records)")
+				switch d {
+				case DialectClickHouse:
+					assertContains(t, inline, "arrayMap(elem -> arrayFold((acc, elem1) -> (acc + elem1), elem.values, toFloat64(elem.base)), bag.records)")
 					assertContains(t, inline, "arrayExists(elem -> elem >= 0")
-				} else {
+				case DialectDuckDB:
+					assertContains(t, inline, "list_reduce(elem.values, lambda acc, elem1 : (acc + elem1), elem.base)")
+					assertContains(t, inline, "EXISTS (SELECT 1 FROM UNNEST")
+				default:
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
 					assertContains(t, inline, "(elem.base + elem1)")
 				}
@@ -352,7 +363,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 
 					for _, c := range cases {
 						t.Run(c.name, func(t *testing.T) {
-							if c.clickHouseOnly && d != DialectClickHouse {
+							if c.clickHouseOnly && d != DialectClickHouse && (!c.duckDBGeneralReduce || d != DialectDuckDB) {
 								assertAllAPIVariantsErrorContains(t, tr, c.logic, "general reduce expressions are only supported")
 								return
 							}

@@ -1989,7 +1989,8 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				{
 					name:     "reduce with multiplication pattern",
 					input:    `{"reduce": [{"var": "numbers"}, {"*": [{"var": "accumulator"}, {"var": "current"}]}, 1]}`,
-					hasError: true,
+					expected: "list_reduce(numbers, lambda acc, elem : (acc * elem), 1)",
+					hasError: d.dialect != DialectDuckDB,
 				},
 
 				// All operator tests - dialect-specific array length function
