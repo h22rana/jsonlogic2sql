@@ -207,8 +207,10 @@ Function type for simple custom operator implementations.
 type OperatorFunc func(operator string, args []OperatorArg) (OperatorResult, error)
 ```
 
-Use `ValueSQL(sql, type)` for value-producing custom operators and
-`PredicateSQL(sql)` for boolean predicate custom operators.
+Use `ValueSQL(sql, type)` for scalar value-producing custom operators,
+`ArrayValueSQL(sql, elementType)` for array-producing custom operators with a
+known scalar element type, and `PredicateSQL(sql)` for boolean predicate custom
+operators.
 Raw string-returning legacy custom operator functions are not accepted; the
 result kind must be explicit so condition and value contexts can be validated.
 
@@ -230,11 +232,16 @@ Typed SQL result returned by custom operators.
 
 ```go
 type OperatorResult struct {
-    SQL  string
-    Kind ExpressionKind
-    Type ExpressionType
+    SQL               string
+    Kind              ExpressionKind
+    Type              ExpressionType
+    EmptyArrayLiteral bool
+    ArrayElementType  ExpressionType
 }
 ```
+
+`ArrayElementType` is only meaningful when `Type` is `ExpressionTypeArray`;
+`ExpressionTypeUnknown` means the array element type is not statically known.
 
 ### ExpressionKind
 

@@ -345,7 +345,7 @@ func resultFromOperator(res operators.OperatorResult) expressionResult {
 		return predicateResult(res.SQL)
 	}
 	result := expressionResult{OperatorResult: res}
-	if res.ArrayElementTypeKnown {
+	if res.ArrayElementType != operators.ExpressionTypeUnknown {
 		result.arrayElementTypeKnown = true
 		result.arrayElementType = res.ArrayElementType
 	}
@@ -410,7 +410,6 @@ func withArrayElementType(res expressionResult, elemType operators.ExpressionTyp
 	}
 	res.arrayElementTypeKnown = true
 	res.arrayElementType = elemType
-	res.OperatorResult.ArrayElementTypeKnown = true
 	res.OperatorResult.ArrayElementType = elemType
 	return res
 }
@@ -838,7 +837,6 @@ func valueOperatorResult(res expressionResult) operators.OperatorResult {
 		opResult.EmptyArrayLiteral = true
 	}
 	if res.arrayElementTypeKnown {
-		opResult.ArrayElementTypeKnown = true
 		opResult.ArrayElementType = res.arrayElementType
 	}
 	return opResult
@@ -877,7 +875,6 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	pv.RequiresKnownTruthiness = res.requiresKnownTruthiness
 	pv.PreserveParamRefs = res.preserveParamRefs
 	if res.arrayElementTypeKnown {
-		pv.ArrayElementTypeKnown = true
 		pv.ArrayElementType = res.arrayElementType
 	}
 	if res.fieldValue {
@@ -896,8 +893,7 @@ func operatorResultFromProcessedValue(pv operators.ProcessedValue) operators.Ope
 		Kind: pv.Kind,
 		Type: pv.Type,
 	}
-	if pv.ArrayElementTypeKnown {
-		res.ArrayElementTypeKnown = true
+	if pv.ArrayElementType != operators.ExpressionTypeUnknown {
 		res.ArrayElementType = pv.ArrayElementType
 	}
 	return res

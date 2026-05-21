@@ -43,12 +43,14 @@ func (a OperatorArg) String() string {
 // OperatorResult is the typed SQL representation returned by custom operators
 // and parser expression callbacks.
 type OperatorResult struct {
-	SQL                   string
-	Kind                  ExpressionKind
-	Type                  ExpressionType
-	EmptyArrayLiteral     bool
-	ArrayElementTypeKnown bool
-	ArrayElementType      ExpressionType
+	SQL               string
+	Kind              ExpressionKind
+	Type              ExpressionType
+	EmptyArrayLiteral bool
+	// ArrayElementType optionally carries the scalar element type when Type is
+	// ExpressionTypeArray. ExpressionTypeUnknown means the element type is not
+	// statically known.
+	ArrayElementType ExpressionType
 }
 
 // PredicateSQL creates a custom-operator result that can be used in predicate
@@ -60,6 +62,15 @@ func PredicateSQL(sql string) OperatorResult {
 // ValueSQL creates a custom-operator result for value-expression contexts.
 func ValueSQL(sql string, typ ExpressionType) OperatorResult {
 	return OperatorResult{SQL: sql, Kind: ExpressionKindValue, Type: typ}
+}
+
+// ArrayValueSQL creates a value-expression result for array SQL and preserves
+// the scalar element type when it is statically known. Use ExpressionTypeUnknown
+// when the element type cannot be determined.
+func ArrayValueSQL(sql string, elemType ExpressionType) OperatorResult {
+	res := ValueSQL(sql, ExpressionTypeArray)
+	res.ArrayElementType = elemType
+	return res
 }
 
 // ProcessedValue represents a value that has been processed during transpilation.
@@ -100,10 +111,8 @@ type ProcessedValue struct {
 	// must keep those params so placeholder validation still reports dropped
 	// custom-operator arguments.
 	PreserveParamRefs bool
-	// ArrayElementTypeKnown carries the scalar element type for array-valued SQL
-	// expressions produced by the parser.
-	ArrayElementTypeKnown bool
-	// ArrayElementType is meaningful when ArrayElementTypeKnown is true.
+	// ArrayElementType optionally carries the scalar element type for
+	// array-valued SQL expressions. ExpressionTypeUnknown means unknown.
 	ArrayElementType ExpressionType
 }
 

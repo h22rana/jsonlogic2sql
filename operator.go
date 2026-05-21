@@ -55,6 +55,13 @@ func ValueSQL(sql string, typ ExpressionType) OperatorResult {
 	return operators.ValueSQL(sql, typ)
 }
 
+// ArrayValueSQL returns a value-expression result for array SQL with optional
+// scalar element-type metadata. Pass ExpressionTypeUnknown when the element
+// type is not statically known.
+func ArrayValueSQL(sql string, elemType ExpressionType) OperatorResult {
+	return operators.ArrayValueSQL(sql, elemType)
+}
+
 // OperatorFunc is a function type for custom operator implementations.
 // It receives the operator name and its arguments, and returns the SQL representation.
 //

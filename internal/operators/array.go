@@ -2352,11 +2352,10 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		if pv.IsSQL {
 			if pv.HasExpressionInfo {
 				return typedSQLFromOperatorResult(OperatorResult{
-					SQL:                   pv.Value,
-					Kind:                  pv.Kind,
-					Type:                  pv.Type,
-					ArrayElementTypeKnown: pv.ArrayElementTypeKnown,
-					ArrayElementType:      pv.ArrayElementType,
+					SQL:              pv.Value,
+					Kind:             pv.Kind,
+					Type:             pv.Type,
+					ArrayElementType: pv.ArrayElementType,
 				}), nil
 			}
 			return typedValueSQL{sql: pv.Value, typ: ExpressionTypeUnknown}, nil
@@ -3652,11 +3651,10 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		if pv.IsSQL {
 			if pv.HasExpressionInfo {
 				return typedSQLFromOperatorResult(OperatorResult{
-					SQL:                   pv.Value,
-					Kind:                  pv.Kind,
-					Type:                  pv.Type,
-					ArrayElementTypeKnown: pv.ArrayElementTypeKnown,
-					ArrayElementType:      pv.ArrayElementType,
+					SQL:              pv.Value,
+					Kind:             pv.Kind,
+					Type:             pv.Type,
+					ArrayElementType: pv.ArrayElementType,
 				}), nil
 			}
 			return typedValueSQL{sql: pv.Value, typ: ExpressionTypeUnknown}, nil
@@ -3740,7 +3738,7 @@ func typedSQLFromOperatorResult(res OperatorResult) typedValueSQL {
 		typ:               typ,
 		emptyArrayLiteral: res.EmptyArrayLiteral,
 	}
-	if typ == ExpressionTypeArray && res.ArrayElementTypeKnown {
+	if typ == ExpressionTypeArray && res.ArrayElementType != ExpressionTypeUnknown {
 		out.elemType = res.ArrayElementType
 	}
 	return out

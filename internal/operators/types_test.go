@@ -82,6 +82,22 @@ func TestTypedSQLResult(t *testing.T) {
 	}
 }
 
+func TestArrayValueSQL(t *testing.T) {
+	result := ArrayValueSQL("ARRAY[1, 2]", ExpressionTypeNumber)
+	if result.SQL != "ARRAY[1, 2]" {
+		t.Errorf("ArrayValueSQL().SQL = %q, want %q", result.SQL, "ARRAY[1, 2]")
+	}
+	if result.Kind != ExpressionKindValue {
+		t.Errorf("ArrayValueSQL().Kind = %v, want %v", result.Kind, ExpressionKindValue)
+	}
+	if result.Type != ExpressionTypeArray {
+		t.Errorf("ArrayValueSQL().Type = %v, want %v", result.Type, ExpressionTypeArray)
+	}
+	if result.ArrayElementType != ExpressionTypeNumber {
+		t.Errorf("ArrayValueSQL().ArrayElementType = %v, want %v", result.ArrayElementType, ExpressionTypeNumber)
+	}
+}
+
 func TestLiteralResult(t *testing.T) {
 	tests := []struct {
 		name    string
