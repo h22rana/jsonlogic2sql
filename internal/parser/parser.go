@@ -344,7 +344,12 @@ func resultFromOperator(res operators.OperatorResult) expressionResult {
 	if res.Kind == operators.ExpressionKindPredicate {
 		return predicateResult(res.SQL)
 	}
-	return expressionResult{OperatorResult: res}
+	result := expressionResult{OperatorResult: res}
+	if res.ArrayElementTypeKnown {
+		result.arrayElementTypeKnown = true
+		result.arrayElementType = res.ArrayElementType
+	}
+	return result
 }
 
 func customOperatorResult(res operators.OperatorResult, preserveParamRefs bool) expressionResult {
@@ -405,6 +410,8 @@ func withArrayElementType(res expressionResult, elemType operators.ExpressionTyp
 	}
 	res.arrayElementTypeKnown = true
 	res.arrayElementType = elemType
+	res.OperatorResult.ArrayElementTypeKnown = true
+	res.OperatorResult.ArrayElementType = elemType
 	return res
 }
 
@@ -830,6 +837,10 @@ func valueOperatorResult(res expressionResult) operators.OperatorResult {
 	if expressionResultIsEmptyArrayLiteral(res) {
 		opResult.EmptyArrayLiteral = true
 	}
+	if res.arrayElementTypeKnown {
+		opResult.ArrayElementTypeKnown = true
+		opResult.ArrayElementType = res.arrayElementType
+	}
 	return opResult
 }
 
@@ -865,6 +876,10 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	pv := operators.TypedSQLResult(valueOperandSQL(res), res.Kind, valueTypeOf(res))
 	pv.RequiresKnownTruthiness = res.requiresKnownTruthiness
 	pv.PreserveParamRefs = res.preserveParamRefs
+	if res.arrayElementTypeKnown {
+		pv.ArrayElementTypeKnown = true
+		pv.ArrayElementType = res.arrayElementType
+	}
 	if res.fieldValue {
 		pv.IsField = true
 		pv.FieldName = res.fieldName
@@ -873,6 +888,19 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 		pv.FieldDefaultLiteral = res.fieldDefault
 	}
 	return pv
+}
+
+func operatorResultFromProcessedValue(pv operators.ProcessedValue) operators.OperatorResult {
+	res := operators.OperatorResult{
+		SQL:  pv.Value,
+		Kind: pv.Kind,
+		Type: pv.Type,
+	}
+	if pv.ArrayElementTypeKnown {
+		res.ArrayElementTypeKnown = true
+		res.ArrayElementType = pv.ArrayElementType
+	}
+	return res
 }
 
 func processedArgsPreserveParamRefs(args []interface{}) bool {
@@ -1367,11 +1395,7 @@ func (p *Parser) parseExpressionValue(expr interface{}, path string) (expression
 	if pv, ok := expr.(operators.ProcessedValue); ok {
 		if pv.IsSQL {
 			if pv.HasExpressionInfo {
-				res := resultFromOperator(operators.OperatorResult{
-					SQL:  pv.Value,
-					Kind: pv.Kind,
-					Type: pv.Type,
-				})
+				res := resultFromOperator(operatorResultFromProcessedValue(pv))
 				copyProcessedFieldMetadata(&res, pv)
 				res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 				res.preserveParamRefs = pv.PreserveParamRefs
@@ -1536,11 +1560,8 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
 		if pv, ok := varProcessedExpression(args); ok {
-			res := resultFromOperator(operators.OperatorResult{
-				SQL:  sql,
-				Kind: pv.Kind,
-				Type: pv.Type,
-			})
+			pv.Value = sql
+			res := resultFromOperator(operatorResultFromProcessedValue(pv))
 			copyProcessedFieldMetadata(&res, pv)
 			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 			return withVarDefaultMetadata(res, args), nil
@@ -2560,11 +2581,7 @@ func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *pa
 	if pv, ok := expr.(operators.ProcessedValue); ok {
 		if pv.IsSQL {
 			if pv.HasExpressionInfo {
-				res := resultFromOperator(operators.OperatorResult{
-					SQL:  pv.Value,
-					Kind: pv.Kind,
-					Type: pv.Type,
-				})
+				res := resultFromOperator(operatorResultFromProcessedValue(pv))
 				copyProcessedFieldMetadata(&res, pv)
 				res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 				res.preserveParamRefs = pv.PreserveParamRefs
@@ -2749,11 +2766,8 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
 		if pv, ok := varProcessedExpression(args); ok {
-			res := resultFromOperator(operators.OperatorResult{
-				SQL:  sql,
-				Kind: pv.Kind,
-				Type: pv.Type,
-			})
+			pv.Value = sql
+			res := resultFromOperator(operatorResultFromProcessedValue(pv))
 			copyProcessedFieldMetadata(&res, pv)
 			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 			return withVarDefaultMetadata(res, args), nil

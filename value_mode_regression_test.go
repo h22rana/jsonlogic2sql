@@ -608,6 +608,18 @@ func TestTranspileValue_MergeCastsScalarsToArraysAllDialects(t *testing.T) {
 				t.Fatalf("TranspileParameterizedValue(incompatible merge) SQL = %q params %#v error = %v, want incompatible element type error",
 					sql, params, err)
 			}
+
+			dynamicIncompatibleMerge := `{"merge":[{"if":[true,[1],[2]]},"x"]}`
+			if sql, err := tr.TranspileValue(dynamicIncompatibleMerge); err == nil ||
+				!strings.Contains(err.Error(), "incompatible element types") {
+				t.Fatalf("TranspileValue(dynamic incompatible merge) SQL = %q error = %v, want incompatible element type error",
+					sql, err)
+			}
+			if sql, params, err := tr.TranspileParameterizedValue(dynamicIncompatibleMerge); err == nil ||
+				!strings.Contains(err.Error(), "incompatible element types") {
+				t.Fatalf("TranspileParameterizedValue(dynamic incompatible merge) SQL = %q params %#v error = %v, want incompatible element type error",
+					sql, params, err)
+			}
 		})
 	}
 }
@@ -4578,6 +4590,57 @@ func TestTranspileValue_IfAllowsArrayBranchesWithCompatibleElementTypesAllDialec
 						t.Fatalf("TranspileParameterizedValue() error = %v", err)
 					} else if !strings.Contains(paramSQL, "CASE WHEN") {
 						t.Fatalf("TranspileParameterizedValue() SQL = %q, want CASE expression", paramSQL)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_ArrayExpressionSourcesPreserveElementTypesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "filter source from dynamic if",
+			logic: `{"filter":[{"if":[{"var":"flag"},[1,2,0],[3]]},{"var":""}]}`,
+		},
+		{
+			name:  "some source from value logical",
+			logic: `{"some":[{"or":[false,[0,1]]},{"var":""}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if !strings.Contains(got, "elem IS NOT NULL") || !strings.Contains(got, "elem != 0") {
+						t.Fatalf("TranspileValue() = %q, want numeric element truthiness", got)
+					}
+
+					gotParam, _, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if !strings.Contains(gotParam, "elem IS NOT NULL") || !strings.Contains(gotParam, "elem != 0") {
+						t.Fatalf("TranspileParameterizedValue() = %q, want numeric element truthiness", gotParam)
 					}
 				})
 			}

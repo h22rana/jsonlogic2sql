@@ -43,10 +43,12 @@ func (a OperatorArg) String() string {
 // OperatorResult is the typed SQL representation returned by custom operators
 // and parser expression callbacks.
 type OperatorResult struct {
-	SQL               string
-	Kind              ExpressionKind
-	Type              ExpressionType
-	EmptyArrayLiteral bool
+	SQL                   string
+	Kind                  ExpressionKind
+	Type                  ExpressionType
+	EmptyArrayLiteral     bool
+	ArrayElementTypeKnown bool
+	ArrayElementType      ExpressionType
 }
 
 // PredicateSQL creates a custom-operator result that can be used in predicate
@@ -98,6 +100,11 @@ type ProcessedValue struct {
 	// must keep those params so placeholder validation still reports dropped
 	// custom-operator arguments.
 	PreserveParamRefs bool
+	// ArrayElementTypeKnown carries the scalar element type for array-valued SQL
+	// expressions produced by the parser.
+	ArrayElementTypeKnown bool
+	// ArrayElementType is meaningful when ArrayElementTypeKnown is true.
+	ArrayElementType ExpressionType
 }
 
 // SQLResult creates a ProcessedValue marked as SQL.
