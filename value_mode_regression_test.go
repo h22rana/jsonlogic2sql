@@ -4116,9 +4116,9 @@ func TestTranspileValue_LiteralComparisonsEmitFoldedBooleanValuesAllDialects(t *
 			want:  "TRUE",
 		},
 		{
-			name:  "literal in empty string haystack is false",
+			name:  "empty string needle matches empty string haystack",
 			logic: `{"in":["",""]}`,
-			want:  "FALSE",
+			want:  "TRUE",
 		},
 		{
 			name:  "empty string needle matches non-empty string haystack",
@@ -4131,9 +4131,9 @@ func TestTranspileValue_LiteralComparisonsEmitFoldedBooleanValuesAllDialects(t *
 			want:  "TRUE",
 		},
 		{
-			name:  "empty array needle is false against empty string haystack",
+			name:  "empty array needle matches empty string haystack",
 			logic: `{"in":[[],""]}`,
-			want:  "FALSE",
+			want:  "TRUE",
 		},
 		{
 			name:  "empty array needle matches non-empty string haystack",

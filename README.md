@@ -148,6 +148,8 @@ func main() {
 
 > **`in` Operator Inference:** The schema determines whether `in` means string containment or array membership for field operands. Declare field types for deterministic behavior, especially with complex expressions.
 
+> **String Containment:** JSONLogic string `in` follows JavaScript `indexOf`, so an empty string needle matches any non-null string haystack, including an empty string haystack.
+
 ## Interactive REPL
 
 ```bash

@@ -94,8 +94,10 @@ can still fold normally.
 | Regex match | `REGEXP_CONTAINS()` | `REGEXP_CONTAINS()` | `~` | `regexp_matches()` | `match()` |
 
 String containment coerces nullable needles with JavaScript-style
-stringification (`NULL` becomes `'null'`). `cat` uses JSONLogic's join-style
-stringification instead, so nullable operands are wrapped with
+stringification (`NULL` becomes `'null'`) and treats empty needles as a match
+for any non-null haystack, matching JavaScript `indexOf`. `cat` uses
+JSONLogic's join-style stringification instead, so nullable operands are
+wrapped with
 `COALESCE(value, '')`, and untyped or numeric operands are cast with the
 dialect's string cast before `COALESCE`.
 

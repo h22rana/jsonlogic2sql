@@ -23,9 +23,8 @@ func testRuntimeStringContainmentSQL(d dialect.Dialect, haystack, needle string)
 		containment = fmt.Sprintf("STRPOS(%s, %s) > 0", haystack, needle)
 	}
 	return fmt.Sprintf(
-		"((%s = '' AND (%s IS NOT NULL AND %s != '')) OR (%s != '' AND %s))",
+		"((%s = '' AND (%s IS NOT NULL)) OR (%s != '' AND %s))",
 		needle,
-		haystack,
 		haystack,
 		needle,
 		containment,
@@ -1116,8 +1115,9 @@ func TestFoldLiteralComparison_ArrayMembershipUsesStrictEquality(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "empty string haystack is false",
+			name: "empty string needle matches empty string haystack",
 			args: []interface{}{"", ""},
+			want: true,
 		},
 		{
 			name: "empty string needle matches non-empty haystack",
@@ -1130,8 +1130,9 @@ func TestFoldLiteralComparison_ArrayMembershipUsesStrictEquality(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "empty array needle is false with empty string haystack",
+			name: "empty array needle matches empty string haystack",
 			args: []interface{}{[]interface{}{}, ""},
+			want: true,
 		},
 		{
 			name: "empty array needle matches non-empty string haystack",
@@ -3344,13 +3345,13 @@ func TestComparisonOperator_handleInParam(t *testing.T) {
 		})
 	})
 
-	t.Run("empty string needle checks haystack is non-empty without params", func(t *testing.T) {
+	t.Run("empty string needle checks haystack is non-null without params", func(t *testing.T) {
 		pc := params.NewParamCollector(params.PlaceholderNamed)
 		got, err := op.handleInParam("", map[string]interface{}{"var": "description"}, pc)
 		if err != nil {
 			t.Fatalf("handleInParam() error = %v", err)
 		}
-		want := "(description IS NOT NULL AND description != '')"
+		want := "(description IS NOT NULL)"
 		if got != want {
 			t.Errorf("handleInParam() = %q, want %q", got, want)
 		}

@@ -507,7 +507,8 @@ POSITION('hello' IN 'hello world') > 0
 For string containment, non-string needles are coerced with JavaScript-style
 stringification before searching. For example, nullable field needles become
 `COALESCE(value, 'null')`, while boolean needles become `'true'`, `'false'`,
-or `'null'`.
+or `'null'`. Empty string needles follow JavaScript `indexOf` semantics and
+match any non-null string haystack, including `""`.
 
 ### Concatenate Strings
 

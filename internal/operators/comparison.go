@@ -486,9 +486,6 @@ func hasOverflowedJSONNumberLiteral(values ...interface{}) bool {
 
 func foldLiteralInComparison(leftArg, rightArg interface{}) (bool, bool, error) {
 	if right, ok := rightArg.(string); ok {
-		if right == "" {
-			return false, true, nil
-		}
 		leftString, ok, err := jsonLogicInStringNeedleLiteral(leftArg)
 		if !ok || err != nil {
 			return false, ok, err

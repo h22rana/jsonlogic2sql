@@ -47,9 +47,8 @@ func testStringContainmentSQL(d Dialect, haystack, needle string) string {
 
 func testRuntimeStringContainmentSQL(d Dialect, haystack, needle string) string {
 	return fmt.Sprintf(
-		"((%s = '' AND (%s IS NOT NULL AND %s != '')) OR (%s != '' AND %s))",
+		"((%s = '' AND (%s IS NOT NULL)) OR (%s != '' AND %s))",
 		needle,
-		haystack,
 		haystack,
 		needle,
 		testStringContainmentSQL(d, haystack, needle),

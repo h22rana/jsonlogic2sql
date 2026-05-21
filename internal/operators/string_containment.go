@@ -17,19 +17,19 @@ func (c *ComparisonOperator) stringContainmentSQL(
 			return "", err
 		}
 		if literal == "" {
-			return nonEmptyStringSQL(haystackSQL), nil
+			return nonNullStringSQL(haystackSQL), nil
 		}
 		return fmt.Sprintf("%s > 0", c.strposFunc(haystackSQL, needleSQL)), nil
 	}
 	if isSQLStringLiteral(needleSQL) {
 		if strings.TrimSpace(needleSQL) == "''" {
-			return nonEmptyStringSQL(haystackSQL), nil
+			return nonNullStringSQL(haystackSQL), nil
 		}
 		return fmt.Sprintf("%s > 0", c.strposFunc(haystackSQL, needleSQL)), nil
 	}
 	if isSQLStringLiteral(haystackSQL) {
 		if strings.TrimSpace(haystackSQL) == "''" {
-			return boolSQL(false), nil
+			return fmt.Sprintf("(%s = '')", needleSQL), nil
 		}
 		return fmt.Sprintf("%s > 0", c.strposFunc(haystackSQL, needleSQL)), nil
 	}
@@ -46,7 +46,7 @@ func (c *ComparisonOperator) stringContainmentSQLParamAuto(
 			return "", err
 		}
 		if literal == "" {
-			return nonEmptyStringSQL(haystackSQL), nil
+			return nonNullStringSQL(haystackSQL), nil
 		}
 		needleSQL, needleErr := c.stringContainmentNeedleSQLParamAuto(needleOriginal, pc)
 		if needleErr != nil {
@@ -60,28 +60,28 @@ func (c *ComparisonOperator) stringContainmentSQLParamAuto(
 	}
 	if isSQLStringLiteral(needleSQL) {
 		if strings.TrimSpace(needleSQL) == "''" {
-			return nonEmptyStringSQL(haystackSQL), nil
+			return nonNullStringSQL(haystackSQL), nil
 		}
 		return fmt.Sprintf("%s > 0", c.strposFunc(haystackSQL, needleSQL)), nil
 	}
 	if isSQLStringLiteral(haystackSQL) {
 		if strings.TrimSpace(haystackSQL) == "''" {
-			return boolSQL(false), nil
+			return fmt.Sprintf("(%s = '')", needleSQL), nil
 		}
 		return fmt.Sprintf("%s > 0", c.strposFunc(haystackSQL, needleSQL)), nil
 	}
 	return c.runtimeStringContainmentSQL(haystackSQL, needleSQL), nil
 }
 
-func nonEmptyStringSQL(sql string) string {
-	return fmt.Sprintf("(%s IS NOT NULL AND %s != '')", sql, sql)
+func nonNullStringSQL(sql string) string {
+	return fmt.Sprintf("(%s IS NOT NULL)", sql)
 }
 
 func (c *ComparisonOperator) runtimeStringContainmentSQL(haystackSQL, needleSQL string) string {
 	return fmt.Sprintf(
 		"((%s = '' AND %s) OR (%s != '' AND %s > 0))",
 		needleSQL,
-		nonEmptyStringSQL(haystackSQL),
+		nonNullStringSQL(haystackSQL),
 		needleSQL,
 		c.strposFunc(haystackSQL, needleSQL),
 	)

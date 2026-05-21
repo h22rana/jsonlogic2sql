@@ -1490,9 +1490,8 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 	}
 	runtimeNeedleStringContainmentSQL := func(d Dialect, haystack, needle string) string {
 		return fmt.Sprintf(
-			"((%s = '' AND (%s IS NOT NULL AND %s != '')) OR (%s != '' AND %s))",
+			"((%s = '' AND (%s IS NOT NULL)) OR (%s != '' AND %s))",
 			needle,
-			haystack,
 			haystack,
 			needle,
 			stringContainmentSQL(d, haystack, needle),
@@ -1558,7 +1557,7 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 			wantParams: []QueryParam{{Name: "p1", Value: "null"}},
 		},
 		{
-			name:  "runtime string field needle requires non-empty haystack when needle is empty",
+			name:  "runtime string field needle matches any non-null haystack when needle is empty",
 			logic: `{"in":[{"var":"needle"},{"var":"haystack"}]}`,
 			wantSQL: func(d Dialect) string {
 				return runtimeNeedleStringContainmentSQL(d, "haystack", "COALESCE(needle, 'null')")
@@ -1583,13 +1582,13 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 			},
 		},
 		{
-			name:  "empty string needle requires non-empty string field",
+			name:  "empty string needle requires non-null string field",
 			logic: `{"in":["",{"var":"name"}]}`,
 			wantSQL: func(Dialect) string {
-				return "(name IS NOT NULL AND name != '')"
+				return "(name IS NOT NULL)"
 			},
 			wantParam: func(Dialect) string {
-				return "(name IS NOT NULL AND name != '')"
+				return "(name IS NOT NULL)"
 			},
 			wantParams: []QueryParam{},
 		},
@@ -1597,10 +1596,10 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 			name:  "empty array needle stringifies to empty string",
 			logic: `{"in":[[],{"var":"name"}]}`,
 			wantSQL: func(Dialect) string {
-				return "(name IS NOT NULL AND name != '')"
+				return "(name IS NOT NULL)"
 			},
 			wantParam: func(Dialect) string {
-				return "(name IS NOT NULL AND name != '')"
+				return "(name IS NOT NULL)"
 			},
 			wantParams: []QueryParam{},
 		},
@@ -1660,8 +1659,8 @@ func TestTranspileParameterizedCondition_InUnknownRHSStringContainmentDoesNotLea
 			return fmt.Sprintf("STRPOS(%s, %s) > 0", haystack, needle)
 		}
 	}
-	nonEmptyStringSQL := func(sql string) string {
-		return fmt.Sprintf("(%s IS NOT NULL AND %s != '')", sql, sql)
+	nonNullStringSQL := func(sql string) string {
+		return fmt.Sprintf("(%s IS NOT NULL)", sql)
 	}
 
 	tests := []struct {
@@ -1692,11 +1691,11 @@ func TestTranspileParameterizedCondition_InUnknownRHSStringContainmentDoesNotLea
 			name:  "empty literal needle with unknown typed if rhs",
 			logic: `{"in":["",{"if":[{">":[{"var":"a"},0]},{"var":"s"},{"var":"t"}]}]}`,
 			wantSQL: func(Dialect) string {
-				return nonEmptyStringSQL("CASE WHEN a > 0 THEN s ELSE t END")
+				return nonNullStringSQL("CASE WHEN a > 0 THEN s ELSE t END")
 			},
 			wantParam: func(d Dialect) string {
 				rhs := fmt.Sprintf("CASE WHEN a > %s THEN s ELSE t END", testPlaceholder(d, 1))
-				return nonEmptyStringSQL(rhs)
+				return nonNullStringSQL(rhs)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: float64(0)}},
 		},
@@ -1817,9 +1816,9 @@ func TestTranspileCondition_LiteralComparisonsEmitFoldedBooleansAllDialects(t *t
 			want:  "TRUE",
 		},
 		{
-			name:  "literal in empty string haystack is false",
+			name:  "empty string needle matches empty string haystack",
 			logic: `{"in":["",""]}`,
-			want:  "FALSE",
+			want:  "TRUE",
 		},
 		{
 			name:  "empty string needle matches non-empty string haystack",
@@ -1832,9 +1831,9 @@ func TestTranspileCondition_LiteralComparisonsEmitFoldedBooleansAllDialects(t *t
 			want:  "TRUE",
 		},
 		{
-			name:  "empty array needle is false against empty string haystack",
+			name:  "empty array needle matches empty string haystack",
 			logic: `{"in":[[],""]}`,
-			want:  "FALSE",
+			want:  "TRUE",
 		},
 		{
 			name:  "empty array needle matches non-empty string haystack",
