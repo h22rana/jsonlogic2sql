@@ -86,7 +86,7 @@ can still fold normally.
 | Substring | `SUBSTR()` | `SUBSTR()` | `SUBSTR()` | `SUBSTR()` | `substring()` |
 | Array map | `UNNEST` subquery | `UNNEST` subquery | `UNNEST` subquery | `UNNEST` subquery | `arrayMap()` |
 | Array filter | `UNNEST` subquery | `UNNEST` subquery | `UNNEST` subquery | `UNNEST` subquery | `arrayFilter()` |
-| Array reduce | `SUM/MIN/MAX` | `SUM/MIN/MAX` | `SUM/MIN/MAX` | `SUM/MIN/MAX` | `arrayReduce()` |
+| Array reduce | `SUM/MIN/MAX` aggregate patterns | `SUM/MIN/MAX` aggregate patterns | `SUM/MIN/MAX` aggregate patterns | `SUM/MIN/MAX` aggregate patterns | `arrayReduce()` for aggregate patterns; `arrayFold()` for arbitrary reducers |
 | Array concat | `ARRAY_CONCAT()` | `ARRAY_CONCAT()` | `\|\|` | `ARRAY_CONCAT()` | `arrayConcat()` |
 | Max of values | `GREATEST()` | `GREATEST()` | `GREATEST()` | `GREATEST()` | `greatest()` |
 | Min of values | `LEAST()` | `LEAST()` | `LEAST()` | `LEAST()` | `least()` |

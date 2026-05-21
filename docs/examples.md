@@ -423,6 +423,8 @@ ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
 ```
 
+Standard SQL dialects support reduce expressions that can be lowered to `SUM`, `MIN`, or `MAX`. Arbitrary reducers are ClickHouse-only and use `arrayFold`.
+
 ### All Elements Satisfy Condition
 
 ```json
