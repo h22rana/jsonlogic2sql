@@ -1298,6 +1298,33 @@ func TestTranspileValue_ReduceAccumulatorTruthinessRejectsUnknownInitialTypeAllD
 	}
 }
 
+func TestOrderingComparisonRejectsArrayValuedExpressionsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "numbers", Type: FieldTypeArray},
+	})
+	logic := `{">":[{"map":[{"var":"numbers"},{"*":[{"var":""},2]}]},10]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			if got, err := tr.TranspileCondition(logic); err == nil || !strings.Contains(err.Error(), "array-valued expression") {
+				t.Fatalf("TranspileCondition() = %q, error = %v, want array-valued expression error", got, err)
+			}
+			if got, params, err := tr.TranspileParameterizedCondition(logic); err == nil || !strings.Contains(err.Error(), "array-valued expression") {
+				t.Fatalf("TranspileParameterizedCondition() = %q params %#v, error = %v, want array-valued expression error", got, params, err)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_ReduceAccumulatorTruthinessUsesTypedCustomInitialAllDialects(t *testing.T) {
 	t.Parallel()
 

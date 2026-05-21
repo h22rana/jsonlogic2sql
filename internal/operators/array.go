@@ -1416,8 +1416,10 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 //
 // For common patterns, this generates optimized SQL:
 // - Addition: initial + COALESCE((SELECT SUM(elem) FROM UNNEST(array) AS elem), 0).
-// - General: (SELECT reducer FROM UNNEST(array) AS elem).
-// For ClickHouse: Uses arrayReduce function for aggregates.
+// - Min/max: LEAST/GREATEST initial combined with MIN/MAX over UNNEST(array).
+// ClickHouse uses arrayReduce for aggregate patterns and arrayFold for
+// arbitrary reducer expressions. Standard SQL dialects reject arbitrary
+// reducer expressions that cannot be lowered to SUM, MIN, or MAX.
 func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	if len(args) != reduceOperatorArgCount {
 		return "", fmt.Errorf("reduce requires exactly 3 arguments")

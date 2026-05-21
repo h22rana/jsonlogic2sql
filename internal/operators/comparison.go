@@ -175,22 +175,27 @@ func (c *ComparisonOperator) strposFunc(haystack, needle string) string {
 // Rejects array, object, and boolean types.
 func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator string) error {
 	fieldName := c.extractFieldNameFromValue(value)
-	if fieldName == "" {
-		return nil // Can't determine field name, skip validation
+	if fieldName != "" {
+		fieldType := c.schema().GetFieldType(fieldName)
+		if fieldType == "" {
+			return nil // Field not in schema, skip validation (existence checked by DataOperator)
+		}
+
+		// Allow numeric and string types for ordering comparisons
+		if c.schema().IsNumericType(fieldName) || c.schema().IsStringType(fieldName) {
+			return nil
+		}
+
+		// Disallow array, object, boolean for ordering comparisons
+		return fmt.Errorf("ordering comparison '%s' on incompatible field '%s' (type: %s)", operator, fieldName, fieldType)
 	}
 
-	fieldType := c.schema().GetFieldType(fieldName)
-	if fieldType == "" {
-		return nil // Field not in schema, skip validation (existence checked by DataOperator)
+	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.HasExpressionInfo &&
+		pv.Kind == ExpressionKindValue && pv.Type == ExpressionTypeArray {
+		return fmt.Errorf("ordering comparison '%s' on array-valued expression is not supported", operator)
 	}
 
-	// Allow numeric and string types for ordering comparisons
-	if c.schema().IsNumericType(fieldName) || c.schema().IsStringType(fieldName) {
-		return nil
-	}
-
-	// Disallow array, object, boolean for ordering comparisons
-	return fmt.Errorf("ordering comparison '%s' on incompatible field '%s' (type: %s)", operator, fieldName, fieldType)
+	return nil
 }
 
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.

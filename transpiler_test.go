@@ -1444,8 +1444,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested map in comparison",
 			input:    `{">": [{"map": [{"var": "numbers"}, {"*": [{"var": ""}, 2]}]}, 10]}`,
-			expected: "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem) > 10",
-			hasError: false,
+			hasError: true,
 		},
 		{
 			name:     "nested comparison in numeric",
@@ -2029,7 +2028,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				{
 					name:     "map in comparison",
 					input:    `{">": [{"map": [{"var": "numbers"}, {"*": [{"var": ""}, 2]}]}, 10]}`,
-					expected: "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem) > 10",
+					hasError: true,
 				},
 				{
 					name:     "filter in and condition",
