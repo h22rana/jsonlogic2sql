@@ -603,6 +603,39 @@ func inferArrayLiteralElementType(elements []interface{}) ExpressionType {
 	return common
 }
 
+func updateArrayLiteralElementType(common, elemType ExpressionType, index int) (ExpressionType, error) {
+	if elemType == ExpressionTypeUnknown || elemType == ExpressionTypeNull {
+		return common, nil
+	}
+	if common == ExpressionTypeUnknown {
+		return elemType, nil
+	}
+	if common != elemType {
+		return common, fmt.Errorf("array literal elements must have compatible SQL types: element %d has type %s, previous non-null elements have type %s",
+			index, expressionTypeName(elemType), expressionTypeName(common))
+	}
+	return common, nil
+}
+
+func expressionTypeName(typ ExpressionType) string {
+	switch typ {
+	case ExpressionTypeNull:
+		return "null"
+	case ExpressionTypeBoolean:
+		return "boolean"
+	case ExpressionTypeString:
+		return "string"
+	case ExpressionTypeNumber:
+		return "number"
+	case ExpressionTypeArray:
+		return "array"
+	case ExpressionTypeUnknown:
+		return "unknown"
+	default:
+		return "unknown"
+	}
+}
+
 func (a *ArrayOperator) accumulatorSQLResult() ProcessedValue {
 	sql := AccumulatorVar
 	if a != nil && a.accumulatorSQL != "" {
@@ -1544,8 +1577,11 @@ func (p *aggregatePattern) requiresArrayMap() bool {
 
 func (a *ArrayOperator) aggregateElementSQL(alias string, pattern *aggregatePattern) (string, error) {
 	if pattern.hasTermExpr {
-		sql, err := a.withValueSemantics(true).expressionToSQLWithContextAndPath(
-			pattern.termExpr, true, a.argPath(arrayExpressionArgIndex))
+		result, err := a.aggregateTermResult(pattern.termExpr, a.argPath(arrayExpressionArgIndex))
+		if err != nil {
+			return "", err
+		}
+		sql, err := a.aggregateNumericTermSQL(result)
 		if err != nil {
 			return "", err
 		}
@@ -1597,8 +1633,11 @@ func (a *ArrayOperator) aggregateElementSQLParam(
 	pc *params.ParamCollector,
 ) (string, error) {
 	if pattern.hasTermExpr {
-		sql, err := a.withValueSemantics(true).expressionToSQLParamWithContextAndPath(
-			pattern.termExpr, pc, true, a.argPath(arrayExpressionArgIndex))
+		result, err := a.aggregateTermResultParam(pattern.termExpr, pc, a.argPath(arrayExpressionArgIndex))
+		if err != nil {
+			return "", err
+		}
+		sql, err := a.aggregateNumericTermSQL(result)
 		if err != nil {
 			return "", err
 		}
@@ -1608,6 +1647,67 @@ func (a *ArrayOperator) aggregateElementSQLParam(
 		return sql, nil
 	}
 	return a.aggregateElementRefParam(alias, pattern, pc)
+}
+
+func (a *ArrayOperator) aggregateTermResult(expr interface{}, path string) (OperatorResult, error) {
+	if isAggregatePredicateTerm(expr) {
+		sql, err := a.predicateExpressionToSQLWithContextAndPath(expr, path)
+		if err != nil {
+			return OperatorResult{}, err
+		}
+		return PredicateSQL(sql), nil
+	}
+	return a.withValueSemantics(true).valueExpressionResultWithContextAndPath(expr, true, path)
+}
+
+func (a *ArrayOperator) aggregateTermResultParam(expr interface{}, pc *params.ParamCollector, path string) (OperatorResult, error) {
+	if isAggregatePredicateTerm(expr) {
+		rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, false, path)
+		if err != nil {
+			return OperatorResult{}, err
+		}
+		res, err := a.config.ParsePredicateExpressionParam(rewritten, path, pc)
+		if err != nil {
+			return OperatorResult{}, err
+		}
+		return PredicateSQL(res.SQL), nil
+	}
+	return a.withValueSemantics(true).valueExpressionResultParamWithContextAndPath(expr, pc, true, path)
+}
+
+func isAggregatePredicateTerm(expr interface{}) bool {
+	operator, _, ok := arrayOperatorArgs(expr)
+	if !ok {
+		return false
+	}
+	switch operator {
+	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", OpAll, OpSome, OpNone:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *ArrayOperator) aggregateNumericTermSQL(result OperatorResult) (string, error) {
+	if result.Kind == ExpressionKindPredicate {
+		return PredicateNumberSQL(result.SQL), nil
+	}
+	switch result.Type {
+	case ExpressionTypeNull:
+		return predicateNumberFalse, nil
+	case ExpressionTypeBoolean:
+		return BooleanValueNumberSQL(result.SQL), nil
+	case ExpressionTypeNumber:
+		return result.SQL, nil
+	case ExpressionTypeString, ExpressionTypeUnknown:
+		return a.numericOp.ToSQL(OpAdd, []interface{}{
+			TypedSQLResult(result.SQL, result.Kind, result.Type),
+		})
+	case ExpressionTypeArray:
+		return "", fmt.Errorf("numeric aggregate term cannot be array-valued")
+	default:
+		return "", fmt.Errorf("numeric aggregate term has unsupported type %s", expressionTypeName(result.Type))
+	}
 }
 
 func renderReduceAggregateResult(function, initial, aggregateSQL string, clickhouse bool, sourceArray string) string {
@@ -2253,12 +2353,17 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 	// Handle arrays
 	if arr, ok := value.([]interface{}); ok {
 		elements := make([]string, len(arr))
+		commonType := ExpressionTypeUnknown
 		for i, elem := range arr {
-			elementSQL, err := a.valueExpressionToSQLWithContextAndPath(elem, false, tperrors.BuildArrayPath(path, i))
+			element, err := a.valueToTypedSQLAtPath(elem, tperrors.BuildArrayPath(path, i))
 			if err != nil {
 				return typedValueSQL{}, fmt.Errorf("invalid array element %d: %w", i, err)
 			}
-			elements[i] = elementSQL
+			commonType, err = updateArrayLiteralElementType(commonType, element.typ, i)
+			if err != nil {
+				return typedValueSQL{}, err
+			}
+			elements[i] = element.sql
 		}
 		sql, err := a.arrayLiteral(elements)
 		if err != nil {
@@ -3549,12 +3654,17 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 
 	if arr, ok := value.([]interface{}); ok {
 		elements := make([]string, len(arr))
+		commonType := ExpressionTypeUnknown
 		for i, elem := range arr {
-			elementSQL, err := a.valueExpressionToSQLParamWithContextAndPath(elem, pc, false, tperrors.BuildArrayPath(path, i))
+			element, err := a.valueToTypedSQLParamAtPath(elem, pc, tperrors.BuildArrayPath(path, i))
 			if err != nil {
 				return typedValueSQL{}, fmt.Errorf("invalid array element %d: %w", i, err)
 			}
-			elements[i] = elementSQL
+			commonType, err = updateArrayLiteralElementType(commonType, element.typ, i)
+			if err != nil {
+				return typedValueSQL{}, err
+			}
+			elements[i] = element.sql
 		}
 		sql, err := a.arrayLiteral(elements)
 		if err != nil {

@@ -591,10 +591,15 @@ func (p *Parser) literalToSQLParam(value interface{}, pc *params.ParamCollector)
 
 func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, error) {
 	parts := make([]string, len(arr))
+	commonType := operators.ExpressionTypeUnknown
 	for i, elem := range arr {
 		res, err := p.parseExpressionValue(elem, tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return "", fmt.Errorf("invalid array element %d: %w", i, err)
+		}
+		commonType, err = updateArrayLiteralElementType(commonType, valueTypeOf(res), i)
+		if err != nil {
+			return "", err
 		}
 		parts[i] = valueSQL(res)
 	}
@@ -603,14 +608,33 @@ func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, erro
 
 func (p *Parser) arrayLiteralToSQLParam(arr []interface{}, path string, pc *params.ParamCollector) (string, error) {
 	parts := make([]string, len(arr))
+	commonType := operators.ExpressionTypeUnknown
 	for i, elem := range arr {
 		res, err := p.parseExpressionValueParam(elem, tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return "", fmt.Errorf("invalid array element %d: %w", i, err)
 		}
+		commonType, err = updateArrayLiteralElementType(commonType, valueTypeOf(res), i)
+		if err != nil {
+			return "", err
+		}
 		parts[i] = valueSQL(res)
 	}
 	return p.config.ArrayLiteral(parts)
+}
+
+func updateArrayLiteralElementType(common, elemType operators.ExpressionType, index int) (operators.ExpressionType, error) {
+	if elemType == operators.ExpressionTypeUnknown || elemType == operators.ExpressionTypeNull {
+		return common, nil
+	}
+	if common == operators.ExpressionTypeUnknown {
+		return elemType, nil
+	}
+	if common != elemType {
+		return common, fmt.Errorf("array literal elements must have compatible SQL types: element %d has type %s, previous non-null elements have type %s",
+			index, typeName(elemType), typeName(common))
+	}
+	return common, nil
 }
 
 func literalTypeAndTruth(value interface{}) (operators.ExpressionType, bool, bool) {

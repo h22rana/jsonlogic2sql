@@ -963,6 +963,48 @@ func TestTranspileValue_ReduceTruthinessUsesInferredTypeAllDialectsSchemaRequire
 	}
 }
 
+func TestTranspileValue_ReduceAggregateCoercesPredicateTermsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"reduce":[{"var":"items"},{"+":[{"var":"accumulator"},{">":[{"var":"current.price"},0]}]},0]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if !strings.Contains(got, "THEN 1 ELSE 0") {
+				t.Fatalf("TranspileValue() did not coerce predicate aggregate term to numeric SQL: %s", got)
+			}
+			if strings.Contains(got, "THEN TRUE ELSE FALSE") {
+				t.Fatalf("TranspileValue() kept boolean predicate value inside aggregate term: %s", got)
+			}
+
+			gotParam, params, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if !strings.Contains(gotParam, "THEN 1 ELSE 0") {
+				t.Fatalf("TranspileParameterizedValue() did not coerce predicate aggregate term to numeric SQL: %s", gotParam)
+			}
+			if strings.Contains(gotParam, "THEN TRUE ELSE FALSE") {
+				t.Fatalf("TranspileParameterizedValue() kept boolean predicate value inside aggregate term: %s", gotParam)
+			}
+			if len(params) != 2 {
+				t.Fatalf("params = %#v, want initial and predicate threshold params", params)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_ReduceMinMaxAggregateIncludesInitialAllDialects(t *testing.T) {
 	t.Parallel()
 
@@ -4231,28 +4273,28 @@ func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 		},
 		{
 			name:  "root array evaluates value expression elements",
-			logic: `[{"var":"amount"},1,{"==":[{"var":"status"},"ok"]}]`,
+			logic: `[{"var":"amount"},1,{"+":[{"var":"amount"},2]}]`,
 			wantSQL: func(d Dialect) string {
 				if d == DialectPostgreSQL {
-					return "ARRAY[amount, 1, CASE WHEN status = 'ok' THEN TRUE ELSE FALSE END]"
+					return "ARRAY[amount, 1, (amount + 2)]"
 				}
-				return "[amount, 1, CASE WHEN status = 'ok' THEN TRUE ELSE FALSE END]"
+				return "[amount, 1, (amount + 2)]"
 			},
 			wantParam: func(d Dialect) string {
 				if d == DialectPostgreSQL {
 					return fmt.Sprintf(
-						"ARRAY[amount, %s, CASE WHEN status = %s THEN TRUE ELSE FALSE END]",
+						"ARRAY[amount, %s, (amount + %s)]",
 						testPlaceholder(d, 1),
 						testPlaceholder(d, 2),
 					)
 				}
 				return fmt.Sprintf(
-					"[amount, %s, CASE WHEN status = %s THEN TRUE ELSE FALSE END]",
+					"[amount, %s, (amount + %s)]",
 					testPlaceholder(d, 1),
 					testPlaceholder(d, 2),
 				)
 			},
-			params: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: "ok"}},
+			params: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: float64(2)}},
 		},
 		{
 			name:  "map source array literal",
@@ -4314,6 +4356,53 @@ func TestTranspileValue_ArrayLiteralsUseDialectSyntax(t *testing.T) {
 					}
 					if !reflect.DeepEqual(gotParams, tt.params) {
 						t.Fatalf("params = %#v, want %#v", gotParams, tt.params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_ArrayLiteralsRejectKnownMixedElementTypesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "root literal mixes number and string",
+			logic: `[1,"x"]`,
+		},
+		{
+			name:  "root literal mixes numeric field and predicate expression",
+			logic: `[{"var":"amount"},{"==":[{"var":"status"},"ok"]}]`,
+		},
+		{
+			name:  "map source literal mixes number and string",
+			logic: `{"map":[[1,"x"],{"var":""}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					_, err := tr.TranspileValue(tt.logic)
+					if err == nil || !strings.Contains(err.Error(), "array literal elements must have compatible SQL types") {
+						t.Fatalf("TranspileValue() error = %v, want array element type error", err)
+					}
+
+					_, _, err = tr.TranspileParameterizedValue(tt.logic)
+					if err == nil || !strings.Contains(err.Error(), "array literal elements must have compatible SQL types") {
+						t.Fatalf("TranspileParameterizedValue() error = %v, want array element type error", err)
 					}
 				})
 			}
