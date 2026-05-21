@@ -99,10 +99,11 @@ func assertNoWholeWordToken(t *testing.T, sql, token string) {
 
 func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 	type matrixCase struct {
-		name      string
-		logic     string
-		wantParam int
-		validate  func(t *testing.T, d Dialect, out apiOutput)
+		name           string
+		logic          string
+		wantParam      int
+		clickHouseOnly bool
+		validate       func(t *testing.T, d Dialect, out apiOutput)
 	}
 
 	cases := []matrixCase{
@@ -219,15 +220,16 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 			},
 		},
 		{
-			name:      "nested reduce with direct accumulator/current vars",
-			logic:     `{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"plus":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`,
-			wantParam: 0,
+			name:           "nested reduce with direct accumulator/current vars",
+			logic:          `{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"plus":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`,
+			wantParam:      0,
+			clickHouseOnly: true,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
 				assertContains(t, inline, "elem.base")
 				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayMap(elem -> arrayFold((acc, elem1) -> (elem.base + elem1), elem.values, elem.base), bag.records)")
+					assertContains(t, inline, "arrayMap(elem -> arrayFold((acc, elem1) -> (acc + elem1), elem.values, elem.base), bag.records)")
 				} else {
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
 					assertContains(t, inline, "(elem.base + elem1)")
@@ -252,9 +254,10 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 			},
 		},
 		{
-			name:      "reduce direct accumulator/current vars",
-			logic:     `{"reduce":[{"var":"bag.numbers"},{"plus":[{"var":"accumulator"},{"var":"current"}]},0]}`,
-			wantParam: 1,
+			name:           "reduce direct accumulator/current vars",
+			logic:          `{"reduce":[{"var":"bag.numbers"},{"plus":[{"var":"accumulator"},{"var":"current"}]},0]}`,
+			wantParam:      1,
+			clickHouseOnly: true,
 			validate: func(t *testing.T, _ Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
@@ -264,9 +267,10 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 			},
 		},
 		{
-			name:      "reduce raw current SQL preserved",
-			logic:     `{"reduce":[{"var":"bag.numbers"},{"+":[{"var":"accumulator"},{"emit_current":[]}]},0]}`,
-			wantParam: 1,
+			name:           "reduce raw current SQL preserved",
+			logic:          `{"reduce":[{"var":"bag.numbers"},{"+":[{"var":"accumulator"},{"emit_current":[]}]},0]}`,
+			wantParam:      1,
+			clickHouseOnly: true,
 			validate: func(t *testing.T, _ Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
@@ -297,9 +301,10 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 			},
 		},
 		{
-			name:      "deep nested custom reducer with scoped fields",
-			logic:     `{"and":[{"some":[{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"plus":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]},{">=":[{"var":""},0]}]},{">=":[{"var":"metrics.amount"},100]}]}`,
-			wantParam: 2,
+			name:           "deep nested custom reducer with scoped fields",
+			logic:          `{"and":[{"some":[{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"plus":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]},{">=":[{"var":""},0]}]},{">=":[{"var":"metrics.amount"},100]}]}`,
+			wantParam:      2,
+			clickHouseOnly: true,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
@@ -307,7 +312,7 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 				assertNoWholeWordToken(t, inline, "current")
 				assertNoWholeWordToken(t, inline, "accumulator")
 				if d == DialectClickHouse {
-					assertContains(t, inline, "arrayMap(elem -> arrayFold((acc, elem1) -> (elem.base + elem1), elem.values, elem.base), bag.records)")
+					assertContains(t, inline, "arrayMap(elem -> arrayFold((acc, elem1) -> (acc + elem1), elem.values, elem.base), bag.records)")
 					assertContains(t, inline, "arrayExists(elem -> elem >= 0")
 				} else {
 					assertContains(t, inline, "UNNEST(elem.values) AS elem1")
@@ -347,6 +352,10 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 
 					for _, c := range cases {
 						t.Run(c.name, func(t *testing.T) {
+							if c.clickHouseOnly && d != DialectClickHouse {
+								assertAllAPIVariantsErrorContains(t, tr, c.logic, "general reduce expressions are only supported")
+								return
+							}
 							out := runAllAPIVariants(t, tr, c.logic)
 							if len(out.params) != c.wantParam {
 								t.Fatalf("param count mismatch: got=%d want=%d sql=%s", len(out.params), c.wantParam, out.paramSQL)

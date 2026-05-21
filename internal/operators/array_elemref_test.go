@@ -253,11 +253,9 @@ func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
 // TestArrayOperator_ReduceAccumulatorEdgeCases tests reduce-specific edge cases
 // including initial value preservation and nested reduces.
 func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
-	op := NewArrayOperator(config)
-
 	tests := []struct {
 		name     string
+		dialect  dialect.Dialect
 		operator string
 		args     []any
 		contains string
@@ -265,6 +263,7 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 	}{
 		{
 			name:     "standalone reduce initial current.amount preserved",
+			dialect:  dialect.DialectClickHouse,
 			operator: "reduce",
 			args: []any{
 				map[string]any{"var": "numbers"},
@@ -276,6 +275,7 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 		},
 		{
 			name:     "nested reduce initial rewritten by outer map",
+			dialect:  dialect.DialectBigQuery,
 			operator: "map",
 			args: []any{
 				map[string]any{"var": "groups"},
@@ -291,6 +291,7 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 		},
 		{
 			name:     "reduce initial with dollar sign preserved",
+			dialect:  dialect.DialectBigQuery,
 			operator: "reduce",
 			args: []any{
 				map[string]any{"var": "amounts"},
@@ -303,6 +304,8 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			config := NewOperatorConfig(tt.dialect, &fieldOnlySchemaProvider{})
+			op := NewArrayOperator(config)
 			result, err := op.ToSQL(tt.operator, tt.args)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)

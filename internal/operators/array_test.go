@@ -110,11 +110,11 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 			hasError: false,
 		},
 		{
-			name:     "reduce with var array (general pattern)",
+			name:     "reduce with var array (general pattern unsupported in standard SQL)",
 			operator: "reduce",
 			args:     []interface{}{map[string]interface{}{"var": "numbers"}, map[string]interface{}{"*": []interface{}{map[string]interface{}{"var": "accumulator"}, map[string]interface{}{"var": "current"}}}, 1},
-			expected: "(SELECT (1 * elem) FROM UNNEST(numbers) AS elem)",
-			hasError: false,
+			expected: "",
+			hasError: true,
 		},
 		{
 			name:     "reduce with wrong argument count",
@@ -371,11 +371,11 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 					hasError: false,
 				},
 				{
-					name:     "reduce with general pattern (multiplication)",
+					name:     "reduce with general pattern (multiplication unsupported in standard SQL)",
 					operator: "reduce",
 					args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 1},
-					expected: "(SELECT (1 * elem) FROM UNNEST(numbers) AS elem)",
-					hasError: false,
+					expected: "",
+					hasError: true,
 				},
 				{
 					name:     "reduce with non-zero initial value",
@@ -853,26 +853,26 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 			hasError: false,
 		},
 		{
-			name:     "reduce with subtraction (general pattern)",
+			name:     "reduce with subtraction (general pattern unsupported in standard SQL)",
 			operator: "reduce",
 			args: []any{
 				map[string]any{"var": "numbers"},
 				map[string]any{"-": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
 				100,
 			},
-			expected: "(SELECT (100 - elem) FROM UNNEST(numbers) AS elem)",
-			hasError: false,
+			expected: "",
+			hasError: true,
 		},
 		{
-			name:     "reduce with division (general pattern)",
+			name:     "reduce with division (general pattern unsupported in standard SQL)",
 			operator: "reduce",
 			args: []any{
 				map[string]any{"var": "numbers"},
 				map[string]any{"/": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
 				1000,
 			},
-			expected: "(SELECT (1000 / elem) FROM UNNEST(numbers) AS elem)",
-			hasError: false,
+			expected: "",
+			hasError: true,
 		},
 
 		// All/Some/None with complex conditions
@@ -1039,6 +1039,13 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 			operator: "reduce",
 			args:     []any{map[string]any{"var": "transactions"}, map[string]any{"min": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.amount"}}}, 9999999},
 			expected: "CASE WHEN length(transactions) > 0 THEN least(9999999, coalesce(arrayReduce('min', arrayMap(x -> x.amount, transactions)), 9999999)) ELSE 9999999 END",
+			hasError: false,
+		},
+		{
+			name:     "reduce with general pattern keeps running accumulator in ClickHouse",
+			operator: "reduce",
+			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"-": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}}, 100},
+			expected: "arrayFold((acc, elem) -> (acc - elem), numbers, 100)",
 			hasError: false,
 		},
 		// All - uses arrayAll

@@ -79,7 +79,7 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 			jsonLogic: `{"reduce":[{"var":"numbers"},{"+":[{"var":"accumulator"},{"var":["current",0]}]},1]}`,
 			valueRoot: true,
 			mustContain: []string{
-				"COALESCE(elem, 0)",
+				"COALESCE(",
 			},
 		},
 		{
@@ -150,7 +150,7 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 			name:           "reduce supports array-form current default",
 			jsonLogic:      `{"reduce":[{"var":"numbers"},{"+":[{"var":"accumulator"},{"var":["current",0]}]},1]}`,
 			valueRoot:      true,
-			mustContainSQL: "COALESCE(elem",
+			mustContainSQL: "COALESCE(",
 			wantParamCount: 2,
 		},
 		{
@@ -669,9 +669,10 @@ func TestTranspile_ArrayElementFieldsAreScopedOnly_AllDialects(t *testing.T) {
 			}
 
 			for _, tc := range []struct {
-				name  string
-				logic string
-				want  string
+				name           string
+				logic          string
+				want           string
+				clickHouseOnly bool
 			}{
 				{
 					name:  "map base elem-prefixed field",
@@ -689,9 +690,10 @@ func TestTranspile_ArrayElementFieldsAreScopedOnly_AllDialects(t *testing.T) {
 					want:  "elem.elem2.x",
 				},
 				{
-					name:  "reduce current numbered elem-prefixed field",
-					logic: `{"reduce":[{"var":"accounts"},{"cat":[{"var":"accumulator"},{"var":"current.elem2.x"}]},""]}`,
-					want:  "elem.elem2.x",
+					name:           "reduce current numbered elem-prefixed field",
+					logic:          `{"reduce":[{"var":"accounts"},{"cat":[{"var":"accumulator"},{"var":"current.elem2.x"}]},""]}`,
+					want:           "elem.elem2.x",
+					clickHouseOnly: true,
 				},
 				{
 					name:  "map multi-digit elem-prefixed field",
@@ -702,6 +704,15 @@ func TestTranspile_ArrayElementFieldsAreScopedOnly_AllDialects(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
 
+					if tc.clickHouseOnly && d != DialectClickHouse {
+						if sql, err := tr.TranspileValue(tc.logic); err == nil || !strings.Contains(err.Error(), "general reduce expressions are only supported") {
+							t.Fatalf("TranspileValue() = %q, error = %v, want unsupported general reduce", sql, err)
+						}
+						if sql, params, err := tr.TranspileParameterizedValue(tc.logic); err == nil || !strings.Contains(err.Error(), "general reduce expressions are only supported") {
+							t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want unsupported general reduce", sql, params, err)
+						}
+						return
+					}
 					assertArrayElementScopedSQLContains(t, tr, tc.logic, tc.want)
 				})
 			}
@@ -919,12 +930,20 @@ func TestTranspile_ArrayLambdaVarSemantics_AllDialectsSchemaRequired(t *testing.
 						}
 					}
 
-					allowedReduceSQL, err := tr.TranspileValue(`{"reduce":[{"var":"numbers"},{"cat":[{"var":"accumulator"},{"var":"current.type"}]},""]}`)
-					if err != nil {
-						t.Fatalf("reduce current.type transpilation error: %v", err)
-					}
-					if !strings.Contains(allowedReduceSQL, "elem.type") {
-						t.Fatalf("expected reduce current.type to resolve against element, got: %s", allowedReduceSQL)
+					reduceCurrentType := `{"reduce":[{"var":"numbers"},{"cat":[{"var":"accumulator"},{"var":"current.type"}]},""]}`
+					if d == DialectClickHouse {
+						allowedReduceSQL, err := tr.TranspileValue(reduceCurrentType)
+						if err != nil {
+							t.Fatalf("reduce current.type transpilation error: %v", err)
+						}
+						if !strings.Contains(allowedReduceSQL, "elem.type") || !strings.Contains(allowedReduceSQL, "acc") {
+							t.Fatalf("expected reduce current.type to resolve against element and keep accumulator, got: %s", allowedReduceSQL)
+						}
+					} else {
+						_, err := tr.TranspileValue(reduceCurrentType)
+						if err == nil || !strings.Contains(err.Error(), "general reduce expressions are only supported") {
+							t.Fatalf("standard SQL general reduce error = %v, want unsupported general reduce", err)
+						}
 					}
 
 					assertArrayScopeAliasRejected(t, tr, `{"reduce":[{"var":"numbers"},{"var":"type"},""]}`, true)

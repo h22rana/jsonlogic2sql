@@ -1390,7 +1390,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested reduce in comparison",
 			input:    `{">": [{"reduce": [{"filter": [{"var": "cars"}, {"==": [{"var": "vendor"}, "Toyota"]}]}, {"+": [1, {"var": "accumulator"}]}, 0]}, 2]}`,
-			expected: "(SELECT (1 + 0) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(cars) AS elem WHERE elem.vendor = 'Toyota')) AS elem) > 2",
+			expected: "0 + COALESCE((SELECT SUM(1) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(cars) AS elem WHERE elem.vendor = 'Toyota')) AS elem), 0) > 2",
 			hasError: false,
 		},
 		{
@@ -1408,7 +1408,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "complex nested expression",
 			input:    `{"and": [{"==": [{"var": "color2"}, "orange"]}, {"==": [{"var": "slider"}, 35]}, {"some": [{"var": "results"}, {"and": [{"==": [{"var": "product"}, "abc"]}, {">": [{"var": "score"}, 8]}]}]}, {">": [{"reduce": [{"filter": [{"var": "cars"}, {"and": [{"==": [{"var": "vendor"}, "Toyota"]}, {">=": [{"var": "year"}, 2010]}]}]}, {"+": [1, {"var": "accumulator"}]}, 0]}, 2]}]}`,
-			expected: "(color2 = 'orange' AND slider = 35 AND EXISTS (SELECT 1 FROM UNNEST(results) AS elem WHERE (elem.product = 'abc' AND elem.score > 8)) AND (SELECT (1 + 0) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(cars) AS elem WHERE (elem.vendor = 'Toyota' AND elem.year >= 2010))) AS elem) > 2)",
+			expected: "(color2 = 'orange' AND slider = 35 AND EXISTS (SELECT 1 FROM UNNEST(results) AS elem WHERE (elem.product = 'abc' AND elem.score > 8)) AND 0 + COALESCE((SELECT SUM(1) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(cars) AS elem WHERE (elem.vendor = 'Toyota' AND elem.year >= 2010))) AS elem), 0) > 2)",
 			hasError: false,
 		},
 		{
@@ -1420,7 +1420,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested arithmetic in reduce",
 			input:    `{"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current"}, 2]}]}, 0]}`,
-			expected: "(SELECT (0 + (elem * 2)) FROM UNNEST(numbers) AS elem)",
+			expected: "0 + COALESCE((SELECT SUM((elem * 2)) FROM UNNEST(numbers) AS elem), 0)",
 			hasError: false,
 		},
 		{
@@ -1438,7 +1438,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "deeply nested reduce filter",
 			input:    `{"reduce": [{"filter": [{"var": "data"}, {"and": [{"some": [{"var": "tags"}, {"==": [{"var": ""}, "important"]}]}, {">": [{"var": "value"}, 0]}]}]}, {"+": [{"var": "accumulator"}, {"reduce": [{"var": "current.subitems"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}]}, 0]}`,
-			expected: "(SELECT (0 + 0 + COALESCE((SELECT SUM(elem1) FROM UNNEST(elem.subitems) AS elem1), 0)) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE (EXISTS (SELECT 1 FROM UNNEST(elem.tags) AS elem1 WHERE elem1 = 'important') AND elem.value > 0))) AS elem)",
+			expected: "0 + COALESCE((SELECT SUM(0 + COALESCE((SELECT SUM(elem1) FROM UNNEST(elem.subitems) AS elem1), 0)) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE (EXISTS (SELECT 1 FROM UNNEST(elem.tags) AS elem1 WHERE elem1 = 'important') AND elem.value > 0))) AS elem), 0)",
 			hasError: false,
 		},
 		{
@@ -1474,7 +1474,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested reduce with complex expression",
 			input:    `{"reduce": [{"var": "items"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current.price"}, {"if": [{">": [{"var": "current.discount"}, 0]}, {"-": [1, {"var": "current.discount"}]}, 1]}]}]}, 0]}`,
-			expected: "(SELECT (0 + (elem.price * CASE WHEN elem.discount > 0 THEN (1 - elem.discount) ELSE 1 END)) FROM UNNEST(items) AS elem)",
+			expected: "0 + COALESCE((SELECT SUM((elem.price * CASE WHEN elem.discount > 0 THEN (1 - elem.discount) ELSE 1 END)) FROM UNNEST(items) AS elem), 0)",
 			hasError: false,
 		},
 		{
@@ -1504,7 +1504,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "very deeply nested",
 			input:    `{"and": [{"some": [{"filter": [{"var": "data"}, {">": [{"var": "value"}, 0]}]}, {"all": [{"var": "items"}, {">=": [{"var": "score"}, 50]}]}]}, {">": [{"reduce": [{"var": "totals"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current"}, {"if": [{">": [{"var": "current"}, 100]}, 2, 1]}]}]}, 0]}, 1000]}]}`,
-			expected: "(EXISTS (SELECT 1 FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE elem.value > 0)) AS elem WHERE (ARRAY_LENGTH(elem.items) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(elem.items) AS elem1 WHERE NOT (elem1.score >= 50)))) AND (SELECT (0 + (elem * CASE WHEN elem > 100 THEN 2 ELSE 1 END)) FROM UNNEST(totals) AS elem) > 1000)",
+			expected: "(EXISTS (SELECT 1 FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(data) AS elem WHERE elem.value > 0)) AS elem WHERE (ARRAY_LENGTH(elem.items) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(elem.items) AS elem1 WHERE NOT (elem1.score >= 50)))) AND 0 + COALESCE((SELECT SUM((elem * CASE WHEN elem > 100 THEN 2 ELSE 1 END)) FROM UNNEST(totals) AS elem), 0) > 1000)",
 			hasError: false,
 		},
 		{
@@ -1919,6 +1919,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				name     string
 				input    string
 				expected string
+				hasError bool
 			}{
 				// Map operator tests
 				{
@@ -1989,7 +1990,7 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				{
 					name:     "reduce with multiplication pattern",
 					input:    `{"reduce": [{"var": "numbers"}, {"*": [{"var": "accumulator"}, {"var": "current"}]}, 1]}`,
-					expected: "(SELECT (1 * elem) FROM UNNEST(numbers) AS elem)",
+					hasError: true,
 				},
 
 				// All operator tests - dialect-specific array length function
@@ -2040,6 +2041,12 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
 					result, err := transpileTestExpression(tr, tt.input)
+					if tt.hasError {
+						if err == nil {
+							t.Errorf("[%s] TranspileCondition() expected error, got SQL = %v", d.name, result)
+						}
+						return
+					}
 					if err != nil {
 						t.Errorf("[%s] TranspileCondition() unexpected error = %v", d.name, err)
 						return

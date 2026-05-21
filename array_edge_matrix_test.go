@@ -170,6 +170,39 @@ func runAllAPIVariants(t *testing.T, tr *Transpiler, logic string) apiOutput {
 	}
 }
 
+func assertAllAPIVariantsErrorContains(t *testing.T, tr *Transpiler, logic, want string) {
+	t.Helper()
+
+	errs := make([]error, 0, 4)
+	if sql, err := tr.TranspileCondition(logic); err == nil {
+		t.Fatalf("TranspileCondition() succeeded with %q, want error containing %q", sql, want)
+	} else {
+		errs = append(errs, err)
+	}
+	if sql, err := tr.TranspileValue(logic); err == nil {
+		t.Fatalf("TranspileValue() succeeded with %q, want error containing %q", sql, want)
+	} else {
+		errs = append(errs, err)
+	}
+	if sql, params, err := tr.TranspileParameterizedCondition(logic); err == nil {
+		t.Fatalf("TranspileParameterizedCondition() succeeded with %q params=%v, want error containing %q", sql, params, want)
+	} else {
+		errs = append(errs, err)
+	}
+	if sql, params, err := tr.TranspileParameterizedValue(logic); err == nil {
+		t.Fatalf("TranspileParameterizedValue() succeeded with %q params=%v, want error containing %q", sql, params, want)
+	} else {
+		errs = append(errs, err)
+	}
+
+	for _, err := range errs {
+		if strings.Contains(err.Error(), want) {
+			return
+		}
+	}
+	t.Fatalf("no API variant error contained %q; errors=%v", want, errs)
+}
+
 func assertPlaceholderStyle(t *testing.T, d Dialect, sql string, paramCount int) {
 	t.Helper()
 	if paramCount == 0 {
@@ -512,7 +545,11 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
-				assertContains(t, inline, "COALESCE(elem, 0)")
+				if d == DialectClickHouse {
+					assertContains(t, inline, "COALESCE(x, 0)")
+				} else {
+					assertContains(t, inline, "COALESCE(elem, 0)")
+				}
 			},
 		},
 		{

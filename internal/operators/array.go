@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -14,8 +13,6 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
 
-var accumulatorPattern = regexp.MustCompile(`(^|[^\w.])` + regexp.QuoteMeta(AccumulatorVar) + `\b`)
-
 type arrayLambdaScope int
 
 const (
@@ -23,6 +20,8 @@ const (
 	arrayLambdaScopeElement
 	arrayLambdaScopeReduce
 )
+
+var errUnsupportedGeneralReduce = errors.New("general reduce expressions are only supported for ClickHouse arrayFold; standard SQL dialects support reduce only for accumulator/current SUM, MIN, and MAX patterns")
 
 // ArrayOperator handles array operations like map, filter, reduce, all, some, none, merge.
 type ArrayOperator struct {
@@ -44,6 +43,7 @@ type ArrayOperator struct {
 	valueSemantics     bool
 	accumulatorType    ExpressionType
 	hasAccumulatorType bool
+	accumulatorSQL     string
 	elementType        ExpressionType
 	hasElementType     bool
 }
@@ -99,6 +99,7 @@ func (a *ArrayOperator) withChildScope() *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
 		hasElementType:     a.hasElementType,
 	}
@@ -129,6 +130,7 @@ func (a *ArrayOperator) withPath(path string) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
 		hasElementType:     a.hasElementType,
 	}
@@ -153,6 +155,7 @@ func (a *ArrayOperator) withValueScope(enabled bool) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
 		hasElementType:     a.hasElementType,
 	}
@@ -177,6 +180,7 @@ func (a *ArrayOperator) withValueSemantics(enabled bool) *ArrayOperator {
 		valueSemantics:     enabled,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
 		hasElementType:     a.hasElementType,
 	}
@@ -201,6 +205,32 @@ func (a *ArrayOperator) withAccumulatorType(typ ExpressionType) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    typ,
 		hasAccumulatorType: true,
+		accumulatorSQL:     a.accumulatorSQL,
+		elementType:        a.elementType,
+		hasElementType:     a.hasElementType,
+	}
+	return child
+}
+
+func (a *ArrayOperator) withAccumulatorSQL(sql string) *ArrayOperator {
+	child := &ArrayOperator{
+		config:             a.config,
+		dataOp:             a.dataOp,
+		comparisonOp:       a.comparisonOp,
+		logicalOp:          a.logicalOp,
+		numericOp:          a.numericOp,
+		scopeDepth:         a.scopeDepth,
+		visibleElems:       append([]string{}, a.visibleElems...),
+		visibleScopes:      append([]string{}, a.visibleScopes...),
+		exprPath:           a.exprPath,
+		valueScope:         a.valueScope,
+		lambdaScope:        a.lambdaScope,
+		schemaScope:        a.schemaScope,
+		schemaScopes:       append([]string{}, a.schemaScopes...),
+		valueSemantics:     a.valueSemantics,
+		accumulatorType:    a.accumulatorType,
+		hasAccumulatorType: a.hasAccumulatorType,
+		accumulatorSQL:     sql,
 		elementType:        a.elementType,
 		hasElementType:     a.hasElementType,
 	}
@@ -234,6 +264,7 @@ func (a *ArrayOperator) withLambdaScope(scope arrayLambdaScope) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
 		hasElementType:     a.hasElementType,
 	}
@@ -263,6 +294,7 @@ func (a *ArrayOperator) withSchemaScopes(scopes []string) *ArrayOperator {
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
+		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
 		hasElementType:     a.hasElementType,
 	}
@@ -569,10 +601,14 @@ func inferArrayLiteralElementType(elements []interface{}) ExpressionType {
 }
 
 func (a *ArrayOperator) accumulatorSQLResult() ProcessedValue {
-	if a != nil && a.hasAccumulatorType && a.accumulatorType != ExpressionTypeUnknown {
-		return TypedSQLResult(AccumulatorVar, ExpressionKindValue, a.accumulatorType)
+	sql := AccumulatorVar
+	if a != nil && a.accumulatorSQL != "" {
+		sql = a.accumulatorSQL
 	}
-	result := TypedSQLResult(AccumulatorVar, ExpressionKindValue, ExpressionTypeUnknown)
+	if a != nil && a.hasAccumulatorType && a.accumulatorType != ExpressionTypeUnknown {
+		return TypedSQLResult(sql, ExpressionKindValue, a.accumulatorType)
+	}
+	result := TypedSQLResult(sql, ExpressionKindValue, ExpressionTypeUnknown)
 	result.RequiresKnownTruthiness = true
 	return result
 }
@@ -1433,64 +1469,143 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 		withSchemaScopes(sourceScopes).
 		withSourceElementType(arrayValue, sourceScopes)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
-		// Build the element reference: "elem" or "elem.field" if field suffix exists
-		elemRef, quoteErr := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
-		if quoteErr != nil {
-			return "", quoteErr
-		}
-
 		// Generate optimized aggregate SQL based on dialect
 		switch a.getDialect() {
 		case dialect.DialectClickHouse:
 			// ClickHouse: For field access, we need arrayMap first to extract the field
 			aggregateInput := array
-			if pattern.fieldSuffix != "" {
-				mappedRef, quoteErr := a.quoteArrayScopePath("x", pattern.fieldSuffix)
+			if pattern.requiresArrayMap() {
+				mapAlias := alias
+				if !pattern.hasTermExpr {
+					mapAlias = "x"
+				}
+				mappedRef, quoteErr := reduceScoped.aggregateElementSQL(mapAlias, pattern)
 				if quoteErr != nil {
+					if errors.Is(quoteErr, errUnsupportedGeneralReduce) {
+						goto generalReduce
+					}
 					return "", quoteErr
 				}
-				aggregateInput = fmt.Sprintf("arrayMap(x -> %s, %s)", mappedRef, array)
+				aggregateInput = fmt.Sprintf("arrayMap(%s -> %s, %s)", mapAlias, mappedRef, array)
 			}
 			aggregateSQL := fmt.Sprintf("arrayReduce('%s', %s)", strings.ToLower(pattern.function), aggregateInput)
 			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, true, array), nil
 		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
 			// Standard SQL: aggregate the array once and combine it with the
 			// initial accumulator according to the reducer operator.
+			elemRef, quoteErr := reduceScoped.aggregateElementSQL(alias, pattern)
+			if quoteErr != nil {
+				return "", quoteErr
+			}
 			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 		}
 		// Fallback for any future dialects
+		elemRef, quoteErr := reduceScoped.aggregateElementSQL(alias, pattern)
+		if quoteErr != nil {
+			return "", quoteErr
+		}
 		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 		return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 	}
 
-	// General case: parse the reducer in official reduce scope, then
-	// substitute accumulator with the initial value. The order matters:
-	// accumulator substitution must happen LAST so initial values containing
-	// the word "accumulator" are treated as SQL literals.
-	valueScoped := reduceScoped.withValueSemantics(true).withAccumulatorType(initialValue.typ)
+generalReduce:
+	accumulatorSQL := AccumulatorVar
+	if a.getDialect() == dialect.DialectClickHouse {
+		accumulatorSQL = "acc"
+	}
+	valueScoped := reduceScoped.withValueSemantics(true).withAccumulatorType(initialValue.typ).withAccumulatorSQL(accumulatorSQL)
 	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(reducerExpr, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
-	reducerWithElem = replaceWithLiteral(accumulatorPattern, reducerWithElem, initial)
-
-	// Generate SQL based on dialect
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		// ClickHouse uses arrayFold for general reduction (ClickHouse 22.8+)
-		return fmt.Sprintf("arrayFold((acc, %s) -> %s, %s, %s)", alias, reducerWithElem, array, initial), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		// Standard SQL using a subquery
-		return fmt.Sprintf("(SELECT %s FROM %s)", reducerWithElem, a.unnestSourceSQL(array, alias)), nil
+	if a.getDialect() != dialect.DialectClickHouse {
+		return "", errUnsupportedGeneralReduce
 	}
-	return fmt.Sprintf("(SELECT %s FROM %s)", reducerWithElem, a.unnestSourceSQL(array, alias)), nil
+
+	return fmt.Sprintf("arrayFold((acc, %s) -> %s, %s, %s)", alias, reducerWithElem, array, initial), nil
 }
 
 // aggregatePattern represents a detected aggregate pattern with optional field suffix.
 type aggregatePattern struct {
-	function    string // SQL aggregate function name (SUM, MIN, MAX)
-	fieldSuffix string // Optional field suffix (e.g., "price" for "current.price")
+	function     string // SQL aggregate function name (SUM, MIN, MAX)
+	fieldSuffix  string // Optional field suffix (e.g., "price" for "current.price")
+	defaultValue interface{}
+	hasDefault   bool
+	termExpr     interface{}
+	hasTermExpr  bool
+}
+
+func (p *aggregatePattern) requiresArrayMap() bool {
+	return p.fieldSuffix != "" || p.hasDefault || p.hasTermExpr
+}
+
+func (a *ArrayOperator) aggregateElementSQL(alias string, pattern *aggregatePattern) (string, error) {
+	if pattern.hasTermExpr {
+		sql, err := a.withValueSemantics(true).expressionToSQLWithContextAndPath(
+			pattern.termExpr, true, a.argPath(arrayExpressionArgIndex))
+		if err != nil {
+			return "", err
+		}
+		if containsWholeIdentifier(sql, CurrentVar) || containsWholeIdentifier(sql, AccumulatorVar) {
+			return "", errUnsupportedGeneralReduce
+		}
+		return sql, nil
+	}
+	return a.aggregateElementRef(alias, pattern)
+}
+
+func (a *ArrayOperator) aggregateElementRef(alias string, pattern *aggregatePattern) (string, error) {
+	elemRef, err := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
+	if err != nil {
+		return "", err
+	}
+	if !pattern.hasDefault {
+		return elemRef, nil
+	}
+	defaultSQL, err := a.dataOp.valueToSQL(pattern.defaultValue)
+	if err != nil {
+		return "", fmt.Errorf("invalid current default value: %w", err)
+	}
+	return fmt.Sprintf("COALESCE(%s, %s)", elemRef, defaultSQL), nil
+}
+
+func (a *ArrayOperator) aggregateElementRefParam(
+	alias string,
+	pattern *aggregatePattern,
+	pc *params.ParamCollector,
+) (string, error) {
+	elemRef, err := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
+	if err != nil {
+		return "", err
+	}
+	if !pattern.hasDefault {
+		return elemRef, nil
+	}
+	defaultSQL, err := a.dataOp.valueToSQLParam(pattern.defaultValue, pc)
+	if err != nil {
+		return "", fmt.Errorf("invalid current default value: %w", err)
+	}
+	return fmt.Sprintf("COALESCE(%s, %s)", elemRef, defaultSQL), nil
+}
+
+func (a *ArrayOperator) aggregateElementSQLParam(
+	alias string,
+	pattern *aggregatePattern,
+	pc *params.ParamCollector,
+) (string, error) {
+	if pattern.hasTermExpr {
+		sql, err := a.withValueSemantics(true).expressionToSQLParamWithContextAndPath(
+			pattern.termExpr, pc, true, a.argPath(arrayExpressionArgIndex))
+		if err != nil {
+			return "", err
+		}
+		if containsWholeIdentifier(sql, CurrentVar) || containsWholeIdentifier(sql, AccumulatorVar) {
+			return "", errUnsupportedGeneralReduce
+		}
+		return sql, nil
+	}
+	return a.aggregateElementRefParam(alias, pattern, pc)
 }
 
 func renderReduceAggregateResult(function, initial, aggregateSQL string, clickhouse bool, sourceArray string) string {
@@ -1532,81 +1647,213 @@ func (a *ArrayOperator) detectAggregatePattern(expr interface{}) *aggregatePatte
 	// Check for addition pattern: {"+": [{"var": "accumulator"}, {"var": "current"}]}
 	// or {"+": [{"var": "accumulator"}, {"var": "current.price"}]}
 	if args, hasPlus := exprMap[OpAdd]; hasPlus {
-		if fieldSuffix, ok := a.isAccumulatorCurrentPattern(args); ok {
-			return &aggregatePattern{function: AggregateSUM, fieldSuffix: fieldSuffix}
+		if pattern, ok := a.isAccumulatorCurrentPattern(args); ok {
+			pattern.function = AggregateSUM
+			return pattern
+		}
+		if termExpr, ok := accumulatorIndependentTerm(args); ok {
+			return &aggregatePattern{function: AggregateSUM, termExpr: termExpr, hasTermExpr: true}
 		}
 	}
 
 	// Check for min pattern: {"min": [{"var": "accumulator"}, {"var": "current"}]}
 	// or {"min": [{"var": "accumulator"}, {"var": "current.price"}]}
 	if args, hasMin := exprMap[OpMin]; hasMin {
-		if fieldSuffix, ok := a.isAccumulatorCurrentPattern(args); ok {
-			return &aggregatePattern{function: AggregateMIN, fieldSuffix: fieldSuffix}
+		if pattern, ok := a.isAccumulatorCurrentPattern(args); ok {
+			pattern.function = AggregateMIN
+			return pattern
+		}
+		if termExpr, ok := accumulatorIndependentTerm(args); ok {
+			return &aggregatePattern{function: AggregateMIN, termExpr: termExpr, hasTermExpr: true}
 		}
 	}
 
 	// Check for max pattern: {"max": [{"var": "accumulator"}, {"var": "current"}]}
 	// or {"max": [{"var": "accumulator"}, {"var": "current.price"}]}
 	if args, hasMax := exprMap[OpMax]; hasMax {
-		if fieldSuffix, ok := a.isAccumulatorCurrentPattern(args); ok {
-			return &aggregatePattern{function: AggregateMAX, fieldSuffix: fieldSuffix}
+		if pattern, ok := a.isAccumulatorCurrentPattern(args); ok {
+			pattern.function = AggregateMAX
+			return pattern
+		}
+		if termExpr, ok := accumulatorIndependentTerm(args); ok {
+			return &aggregatePattern{function: AggregateMAX, termExpr: termExpr, hasTermExpr: true}
 		}
 	}
 
 	return nil
 }
 
-// isAccumulatorCurrentPattern checks if args match [{"var": "accumulator"}, {"var": "current"}]
-// or [{"var": "accumulator"}, {"var": "current.field"}].
-// Returns (fieldSuffix, true) if pattern matches, ("", false) otherwise.
-// fieldSuffix is empty for plain "current", or contains the field path (e.g., "price" for "current.price").
-func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) (string, bool) {
+func accumulatorIndependentTerm(args interface{}) (interface{}, bool) {
 	argsArr, ok := args.([]interface{})
 	if !ok || len(argsArr) != 2 {
-		return "", false
+		return nil, false
+	}
+	if isBareAccumulatorVar(argsArr[0]) && !referencesReduceAccumulator(argsArr[1]) {
+		return argsArr[1], true
+	}
+	if isBareAccumulatorVar(argsArr[1]) && !referencesReduceAccumulator(argsArr[0]) {
+		return argsArr[0], true
+	}
+	return nil, false
+}
+
+func isBareAccumulatorVar(expr interface{}) bool {
+	exprMap, ok := expr.(map[string]interface{})
+	if !ok || len(exprMap) != 1 {
+		return false
+	}
+	varExpr, ok := exprMap[OpVar]
+	if !ok {
+		return false
+	}
+	varName, ok := varExpr.(string)
+	return ok && varName == AccumulatorVar
+}
+
+func referencesReduceAccumulator(expr interface{}) bool {
+	switch v := expr.(type) {
+	case map[string]interface{}:
+		for op, raw := range v {
+			if op == OpVar {
+				return varExprReferencesAccumulator(raw)
+			}
+			if op == OpReduce {
+				args, ok := raw.([]interface{})
+				if !ok {
+					return referencesReduceAccumulator(raw)
+				}
+				if len(args) > arraySourceArgIndex && referencesReduceAccumulator(args[arraySourceArgIndex]) {
+					return true
+				}
+				if len(args) > arrayReduceInitialArgIndex && referencesReduceAccumulator(args[arrayReduceInitialArgIndex]) {
+					return true
+				}
+				continue
+			}
+			if referencesReduceAccumulator(raw) {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, item := range v {
+			if referencesReduceAccumulator(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func varExprReferencesAccumulator(varExpr interface{}) bool {
+	switch v := varExpr.(type) {
+	case string:
+		return v == AccumulatorVar
+	case []interface{}:
+		if len(v) == 0 {
+			return false
+		}
+		first, ok := v[0].(string)
+		return ok && first == AccumulatorVar
+	default:
+		return false
+	}
+}
+
+func containsWholeIdentifier(sql, ident string) bool {
+	if ident == "" {
+		return false
+	}
+	for idx := strings.Index(sql, ident); idx >= 0; {
+		start := idx
+		end := idx + len(ident)
+		if (start == 0 || !isSQLIdentifierByte(sql[start-1])) &&
+			(end == len(sql) || !isSQLIdentifierByte(sql[end])) {
+			return true
+		}
+		next := strings.Index(sql[end:], ident)
+		if next < 0 {
+			return false
+		}
+		idx = end + next
+	}
+	return false
+}
+
+func isSQLIdentifierByte(ch byte) bool {
+	return ch == '_' || (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+// isAccumulatorCurrentPattern checks if args match accumulator with current/current.field.
+// It also accepts JSONLogic's defaulted var form, for example
+// {"var":["current.price", 0]}, by aggregating COALESCE(elem.price, 0).
+func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) (*aggregatePattern, bool) {
+	argsArr, ok := args.([]interface{})
+	if !ok || len(argsArr) != 2 {
+		return nil, false
 	}
 
 	// Check first arg is {"var": "accumulator"}
 	arg0Map, ok := argsArr[0].(map[string]interface{})
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	if varName, hasVar := arg0Map[OpVar]; !hasVar || varName != AccumulatorVar {
-		return "", false
+		return nil, false
 	}
 
 	// Check second arg is {"var": "current"} or {"var": "current.field"}
 	arg1Map, ok := argsArr[1].(map[string]interface{})
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	varName, hasVar := arg1Map[OpVar]
 	if !hasVar {
-		return "", false
+		return nil, false
 	}
 
-	varNameStr, ok := varName.(string)
-	if !ok {
-		return "", false
+	var defaultValue interface{}
+	var varNameStr string
+	hasDefault := false
+	switch v := varName.(type) {
+	case string:
+		varNameStr = v
+	case []interface{}:
+		if err := validateVarArrayMaxEntries(v); err != nil || len(v) == 0 {
+			return nil, false
+		}
+		first, ok := v[0].(string)
+		if !ok {
+			return nil, false
+		}
+		varNameStr = first
+		if len(v) > 1 {
+			defaultValue = v[1]
+			hasDefault = true
+		}
+	default:
+		return nil, false
 	}
+
+	pattern := &aggregatePattern{defaultValue: defaultValue, hasDefault: hasDefault}
 
 	// Check if it's exactly "current" or starts with "current."
 	if varNameStr == CurrentVar {
-		return "", true // Plain current, no field suffix
+		return pattern, true // Plain current, no field suffix
 	}
 	if strings.HasPrefix(varNameStr, CurrentVar+".") {
 		// Extract field suffix (e.g., "price" from "current.price")
 		fieldSuffix := strings.TrimPrefix(varNameStr, CurrentVar+".")
 		if fieldSuffix == "" {
-			return "", false
+			return nil, false
 		}
 		if err := a.validateScopedFieldName(fieldSuffix); err != nil {
-			return "", false
+			return nil, false
 		}
-		return fieldSuffix, true
+		pattern.fieldSuffix = fieldSuffix
+		return pattern, true
 	}
 
-	return "", false
+	return nil, false
 }
 
 // handleAll converts all operator to SQL.
@@ -2189,21 +2436,6 @@ func (a *ArrayOperator) expressionToSQLWithContextAndPath(expr interface{}, allo
 	return "", fmt.Errorf("invalid expression type: %T", expr)
 }
 
-// replaceWithLiteral replaces regex matches while preserving the captured prefix
-// and treating the replacement as a literal string (no $-expansion).
-func replaceWithLiteral(re *regexp.Regexp, s, replacement string) string {
-	return re.ReplaceAllStringFunc(s, func(match string) string {
-		// The match includes the captured prefix character (or empty at start-of-string).
-		// Find where the keyword starts by checking the prefix.
-		loc := re.FindStringSubmatchIndex(match)
-		if loc == nil {
-			return match
-		}
-		prefix := match[loc[2]:loc[3]]
-		return prefix + replacement
-	})
-}
-
 func (a *ArrayOperator) quoteArrayScopePath(alias, suffix string) (string, error) {
 	if suffix == "" {
 		return alias, nil
@@ -2535,7 +2767,7 @@ func (a *ArrayOperator) rewriteAccumulatorVar(varExpr interface{}) (ProcessedVal
 	if err != nil {
 		return ProcessedValue{}, true, fmt.Errorf("invalid default value: %w", err)
 	}
-	return a.accumulatorSQLResultWithSQL(fmt.Sprintf("COALESCE(%s, %s)", AccumulatorVar, defaultSQL)), true, nil
+	return a.accumulatorSQLResultWithSQL(fmt.Sprintf("COALESCE(%s, %s)", a.accumulatorSQLResult().Value, defaultSQL)), true, nil
 }
 
 func (a *ArrayOperator) rewriteAccumulatorVarParam(varExpr interface{}) (interface{}, bool, error) {
@@ -2961,45 +3193,56 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 		withSchemaScopes(sourceScopes).
 		withSourceElementType(arrayValue, sourceScopes)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
-		elemRef, quoteErr := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
-		if quoteErr != nil {
-			return "", quoteErr
-		}
-
 		switch a.getDialect() {
 		case dialect.DialectClickHouse:
 			aggregateInput := array
-			if pattern.fieldSuffix != "" {
-				mappedRef, quoteErr := a.quoteArrayScopePath("x", pattern.fieldSuffix)
+			if pattern.requiresArrayMap() {
+				mapAlias := alias
+				if !pattern.hasTermExpr {
+					mapAlias = "x"
+				}
+				mappedRef, quoteErr := reduceScoped.aggregateElementSQLParam(mapAlias, pattern, pc)
 				if quoteErr != nil {
+					if errors.Is(quoteErr, errUnsupportedGeneralReduce) {
+						goto generalReduceParam
+					}
 					return "", quoteErr
 				}
-				aggregateInput = fmt.Sprintf("arrayMap(x -> %s, %s)", mappedRef, array)
+				aggregateInput = fmt.Sprintf("arrayMap(%s -> %s, %s)", mapAlias, mappedRef, array)
 			}
 			aggregateSQL := fmt.Sprintf("arrayReduce('%s', %s)", strings.ToLower(pattern.function), aggregateInput)
 			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, true, array), nil
 		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
+			elemRef, quoteErr := reduceScoped.aggregateElementSQLParam(alias, pattern, pc)
+			if quoteErr != nil {
+				return "", quoteErr
+			}
 			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
+		}
+		elemRef, quoteErr := reduceScoped.aggregateElementSQLParam(alias, pattern, pc)
+		if quoteErr != nil {
+			return "", quoteErr
 		}
 		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 		return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
 	}
 
-	valueScoped := reduceScoped.withValueSemantics(true).withAccumulatorType(initialValue.typ)
+generalReduceParam:
+	accumulatorSQL := AccumulatorVar
+	if a.getDialect() == dialect.DialectClickHouse {
+		accumulatorSQL = "acc"
+	}
+	valueScoped := reduceScoped.withValueSemantics(true).withAccumulatorType(initialValue.typ).withAccumulatorSQL(accumulatorSQL)
 	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(reducerExpr, pc, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
 	}
-	reducerWithElem = replaceWithLiteral(accumulatorPattern, reducerWithElem, initial)
-
-	switch a.getDialect() {
-	case dialect.DialectClickHouse:
-		return fmt.Sprintf("arrayFold((acc, %s) -> %s, %s, %s)", alias, reducerWithElem, array, initial), nil
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		return fmt.Sprintf("(SELECT %s FROM %s)", reducerWithElem, a.unnestSourceSQL(array, alias)), nil
+	if a.getDialect() != dialect.DialectClickHouse {
+		return "", errUnsupportedGeneralReduce
 	}
-	return fmt.Sprintf("(SELECT %s FROM %s)", reducerWithElem, a.unnestSourceSQL(array, alias)), nil
+
+	return fmt.Sprintf("arrayFold((acc, %s) -> %s, %s, %s)", alias, reducerWithElem, array, initial), nil
 }
 
 // handleAllParam is the parameterized variant of handleAll. Keep in sync.

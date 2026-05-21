@@ -400,16 +400,18 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 	}
 
 	cases := []struct {
-		name      string
-		logic     string
-		want      []string
-		notWant   []string
-		clickWant []string
-		clickDeny []string
+		name                string
+		logic               string
+		want                []string
+		notWant             []string
+		clickWant           []string
+		clickDeny           []string
+		standardUnsupported bool
 	}{
 		{
-			name:  "map source current field and transform bare field",
-			logic: `{"reduce":[{"var":"groups"},{"map":[{"var":"current.values"},{"merge":[{"var":"tags"},{"var":"tags"}]}]},[]]}`,
+			name:                "map source current field and transform bare field",
+			logic:               `{"reduce":[{"var":"groups"},{"map":[{"var":"current.values"},{"merge":[{"var":"tags"},{"var":"tags"}]}]},[]]}`,
+			standardUnsupported: true,
 			want: []string{
 				"UNNEST(elem.values) AS elem1",
 				"elem1.tags",
@@ -427,8 +429,9 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 			},
 		},
 		{
-			name:  "filter source current field and predicate bare field",
-			logic: `{"reduce":[{"var":"groups"},{"filter":[{"var":"current.values"},{">":[{"var":"score"},0]}]},[]]}`,
+			name:                "filter source current field and predicate bare field",
+			logic:               `{"reduce":[{"var":"groups"},{"filter":[{"var":"current.values"},{">":[{"var":"score"},0]}]},[]]}`,
+			standardUnsupported: true,
 			want: []string{
 				"UNNEST(elem.values) AS elem1",
 				"elem1.score >",
@@ -445,8 +448,9 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 			},
 		},
 		{
-			name:  "some source current field and predicate bare field",
-			logic: `{"reduce":[{"var":"groups"},{"some":[{"var":"current.values"},{">":[{"var":"score"},0]}]},false]}`,
+			name:                "some source current field and predicate bare field",
+			logic:               `{"reduce":[{"var":"groups"},{"some":[{"var":"current.values"},{">":[{"var":"score"},0]}]},false]}`,
+			standardUnsupported: true,
 			want: []string{
 				"UNNEST(elem.values) AS elem1",
 				"elem1.score >",
@@ -463,8 +467,9 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 			},
 		},
 		{
-			name:  "all source current field and predicate bare field",
-			logic: `{"reduce":[{"var":"groups"},{"all":[{"var":"current.values"},{">":[{"var":"score"},0]}]},false]}`,
+			name:                "all source current field and predicate bare field",
+			logic:               `{"reduce":[{"var":"groups"},{"all":[{"var":"current.values"},{">":[{"var":"score"},0]}]},false]}`,
+			standardUnsupported: true,
 			want: []string{
 				"UNNEST(elem.values) AS elem1",
 				"elem1.score >",
@@ -481,8 +486,9 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 			},
 		},
 		{
-			name:  "none source current field and predicate bare field",
-			logic: `{"reduce":[{"var":"groups"},{"none":[{"var":"current.values"},{">":[{"var":"score"},0]}]},false]}`,
+			name:                "none source current field and predicate bare field",
+			logic:               `{"reduce":[{"var":"groups"},{"none":[{"var":"current.values"},{">":[{"var":"score"},0]}]},false]}`,
+			standardUnsupported: true,
 			want: []string{
 				"UNNEST(elem.values) AS elem1",
 				"elem1.score >",
@@ -517,8 +523,9 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 			},
 		},
 		{
-			name:  "three-level map filter keeps elem elem1 elem2 distinct",
-			logic: `{"reduce":[{"var":"groups"},{"map":[{"var":"current.values"},{"filter":[{"var":"tags"},{">":[{"var":"score"},0]}]}]},[]]}`,
+			name:                "three-level map filter keeps elem elem1 elem2 distinct",
+			logic:               `{"reduce":[{"var":"groups"},{"map":[{"var":"current.values"},{"filter":[{"var":"tags"},{">":[{"var":"score"},0]}]}]},[]]}`,
+			standardUnsupported: true,
 			want: []string{
 				"UNNEST(elem.values) AS elem1",
 				"UNNEST(elem1.tags) AS elem2",
@@ -557,6 +564,17 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
 							sql, inlineErr := tr.TranspileValue(tc.logic)
+							if d != DialectClickHouse && tc.standardUnsupported {
+								if inlineErr == nil || !strings.Contains(inlineErr.Error(), "general reduce expressions are only supported") {
+									t.Fatalf("TranspileValue() = %q, error = %v, want unsupported general reduce", sql, inlineErr)
+								}
+								paramSQL, params, paramErr := tr.TranspileParameterizedValue(tc.logic)
+								if paramErr == nil || !strings.Contains(paramErr.Error(), "general reduce expressions are only supported") {
+									t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want unsupported general reduce",
+										paramSQL, params, paramErr)
+								}
+								return
+							}
 							if inlineErr != nil {
 								t.Fatalf("TranspileValue() error: %v", inlineErr)
 							}
@@ -576,12 +594,13 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 }
 
 func assertReduceNestedArrayAliases(t *testing.T, d Dialect, sql string, tc struct {
-	name      string
-	logic     string
-	want      []string
-	notWant   []string
-	clickWant []string
-	clickDeny []string
+	name                string
+	logic               string
+	want                []string
+	notWant             []string
+	clickWant           []string
+	clickDeny           []string
+	standardUnsupported bool
 },
 ) {
 	t.Helper()

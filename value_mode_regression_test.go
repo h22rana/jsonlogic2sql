@@ -1059,6 +1059,17 @@ func TestTranspileValue_ReduceStringTruthinessUsesInferredTypeAllDialectsSchemaR
 					}
 
 					got, err := tr.TranspileValue(logic)
+					if d != DialectClickHouse {
+						if err == nil || !strings.Contains(err.Error(), "general reduce expressions are only supported") {
+							t.Fatalf("TranspileValue() = %q, error = %v, want unsupported general reduce", got, err)
+						}
+						gotParam, gotParams, paramErr := tr.TranspileParameterizedValue(logic)
+						if paramErr == nil || !strings.Contains(paramErr.Error(), "general reduce expressions are only supported") {
+							t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want unsupported general reduce",
+								gotParam, gotParams, paramErr)
+						}
+						return
+					}
 					if err != nil {
 						t.Fatalf("TranspileValue() error = %v", err)
 					}
@@ -1121,8 +1132,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 			},
 			wantInitial: "0",
 			wantParamReducer: func(d Dialect) string {
-				initial := testPlaceholder(d, 1)
-				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != 0) THEN %s ELSE elem END", initial, initial, initial)
+				return "CASE WHEN (acc IS NOT NULL AND acc != 0) THEN acc ELSE elem END"
 			},
 			wantParamInitial: func(d Dialect) string { return testPlaceholder(d, 1) },
 			wantParams:       []QueryParam{{Name: "p1", Value: float64(0)}},
@@ -1137,8 +1147,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 			},
 			wantInitial: "0",
 			wantParamReducer: func(d Dialect) string {
-				initial := testPlaceholder(d, 1)
-				acc := fmt.Sprintf("COALESCE(%s, %s)", initial, testPlaceholder(d, 2))
+				acc := fmt.Sprintf("COALESCE(acc, %s)", testPlaceholder(d, 2))
 				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != 0) THEN %s ELSE elem END", acc, acc, acc)
 			},
 			wantParamInitial: func(d Dialect) string { return testPlaceholder(d, 1) },
@@ -1156,8 +1165,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 			},
 			wantInitial: "''",
 			wantParamReducer: func(d Dialect) string {
-				initial := testPlaceholder(d, 1)
-				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != '') THEN %s ELSE elem END", initial, initial, initial)
+				return "CASE WHEN (acc IS NOT NULL AND acc != '') THEN acc ELSE elem END"
 			},
 			wantParamInitial: func(d Dialect) string { return testPlaceholder(d, 1) },
 			wantParams:       []QueryParam{{Name: "p1", Value: ""}},
@@ -1171,7 +1179,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 			},
 			wantInitial: "FALSE",
 			wantParamReducer: func(Dialect) string {
-				return "CASE WHEN FALSE IS TRUE THEN FALSE ELSE elem END"
+				return "CASE WHEN acc IS TRUE THEN acc ELSE elem END"
 			},
 			wantParamInitial: func(Dialect) string { return "FALSE" },
 			forbidden:        []string{"!= FALSE", "!= 0", "!= ''"},
@@ -1197,10 +1205,21 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 					for _, tt := range tests {
 						t.Run(tt.name, func(t *testing.T) {
 							got, err := tr.TranspileValue(tt.logic)
+							if d != DialectClickHouse {
+								if err == nil || !strings.Contains(err.Error(), "general reduce expressions are only supported") {
+									t.Fatalf("TranspileValue() = %q, error = %v, want unsupported general reduce", got, err)
+								}
+								gotParam, gotParams, paramErr := tr.TranspileParameterizedValue(tt.logic)
+								if paramErr == nil || !strings.Contains(paramErr.Error(), "general reduce expressions are only supported") {
+									t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want unsupported general reduce",
+										gotParam, gotParams, paramErr)
+								}
+								return
+							}
 							if err != nil {
 								t.Fatalf("TranspileValue() error = %v", err)
 							}
-							want := renderReduce(d, tt.wantReducer(tt.wantInitial), tt.wantInitial)
+							want := renderReduce(d, tt.wantReducer("acc"), tt.wantInitial)
 							if got != want {
 								t.Fatalf("TranspileValue() = %q, want %q", got, want)
 							}
@@ -1310,10 +1329,21 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesTypedCustomInitialAllDial
 			}
 
 			got, err := tr.TranspileValue(logic)
+			if d != DialectClickHouse {
+				if err == nil || !strings.Contains(err.Error(), "general reduce expressions are only supported") {
+					t.Fatalf("TranspileValue() = %q, error = %v, want unsupported general reduce", got, err)
+				}
+				gotParam, gotParams, paramErr := tr.TranspileParameterizedValue(logic)
+				if paramErr == nil || !strings.Contains(paramErr.Error(), "general reduce expressions are only supported") {
+					t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want unsupported general reduce",
+						gotParam, gotParams, paramErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("TranspileValue() error = %v", err)
 			}
-			wantReducer := "CASE WHEN (0 IS NOT NULL AND 0 != 0) THEN 0 ELSE 1 END"
+			wantReducer := "CASE WHEN (acc IS NOT NULL AND acc != 0) THEN acc ELSE 1 END"
 			if want := renderReduce(d, wantReducer); got != want {
 				t.Fatalf("TranspileValue() = %q, want %q", got, want)
 			}
@@ -1323,7 +1353,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesTypedCustomInitialAllDial
 				t.Fatalf("TranspileParameterizedValue() error = %v", err)
 			}
 			placeholder := testPlaceholder(d, 1)
-			wantParamReducer := fmt.Sprintf("CASE WHEN (0 IS NOT NULL AND 0 != 0) THEN 0 ELSE %s END", placeholder)
+			wantParamReducer := fmt.Sprintf("CASE WHEN (acc IS NOT NULL AND acc != 0) THEN acc ELSE %s END", placeholder)
 			if want := renderReduce(d, wantParamReducer); gotParam != want {
 				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
 			}
@@ -1356,7 +1386,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesSchemaInitialTypeAllDiale
 				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
 			}
 
-			reducer := "CASE WHEN (seed IS NOT NULL AND seed != 0) THEN seed ELSE elem END"
+			reducer := "CASE WHEN (acc IS NOT NULL AND acc != 0) THEN acc ELSE elem END"
 			want := fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer)
 			if d == DialectClickHouse {
 				want = fmt.Sprintf("arrayFold((acc, elem) -> %s, arr, seed)", reducer)
@@ -1365,6 +1395,17 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesSchemaInitialTypeAllDiale
 			}
 
 			got, err := tr.TranspileValue(logic)
+			if d != DialectClickHouse {
+				if err == nil || !strings.Contains(err.Error(), "general reduce expressions are only supported") {
+					t.Fatalf("TranspileValue() = %q, error = %v, want unsupported general reduce", got, err)
+				}
+				gotParam, gotParams, paramErr := tr.TranspileParameterizedValue(logic)
+				if paramErr == nil || !strings.Contains(paramErr.Error(), "general reduce expressions are only supported") {
+					t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want unsupported general reduce",
+						gotParam, gotParams, paramErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("TranspileValue() error = %v", err)
 			}
@@ -4624,12 +4665,20 @@ func TestTranspileValue_ArrayTransformationsUseValueSemantics(t *testing.T) {
 		t.Fatalf("TranspileValue() nested map = %q, want %q", got, want)
 	}
 
-	got, err = tr.TranspileValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`)
-	if err != nil {
-		t.Fatalf("TranspileValue() cat reduce error = %v", err)
+	if got, err = tr.TranspileValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`); err == nil {
+		t.Fatalf("TranspileValue() cat reduce should be unsupported in BigQuery, got %q", got)
 	}
-	if want := "CONCAT(COALESCE((SELECT CONCAT(COALESCE('', ''), COALESCE(CAST(elem AS STRING), '')) FROM UNNEST(arr) AS elem), ''))"; got != want {
-		t.Fatalf("TranspileValue() cat reduce = %q, want %q", got, want)
+
+	clickHouse, err := NewTranspiler(DialectClickHouse, defaultTestSchema())
+	if err != nil {
+		t.Fatalf("NewTranspiler(ClickHouse) error = %v", err)
+	}
+	got, err = clickHouse.TranspileValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileValue() ClickHouse cat reduce error = %v", err)
+	}
+	if want := "CONCAT(COALESCE(arrayFold((acc, elem) -> CONCAT(COALESCE(acc, ''), COALESCE(toString(elem), '')), arr, ''), ''))"; got != want {
+		t.Fatalf("TranspileValue() ClickHouse cat reduce = %q, want %q", got, want)
 	}
 }
 
@@ -4661,15 +4710,23 @@ func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *te
 		t.Fatalf("TranspileParameterizedValue() nested map params = %#v, want %#v", gotParams, wantParams)
 	}
 
-	gotSQL, gotParams, err = tr.TranspileParameterizedValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`)
-	if err != nil {
-		t.Fatalf("TranspileParameterizedValue() cat reduce error = %v", err)
+	if gotSQL, gotParams, err = tr.TranspileParameterizedValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`); err == nil {
+		t.Fatalf("TranspileParameterizedValue() cat reduce should be unsupported in BigQuery, got SQL %q params %#v", gotSQL, gotParams)
 	}
-	if want := "CONCAT(COALESCE((SELECT CONCAT(COALESCE(@p1, ''), COALESCE(CAST(elem AS STRING), '')) FROM UNNEST(arr) AS elem), ''))"; gotSQL != want {
-		t.Fatalf("TranspileParameterizedValue() cat reduce SQL = %q, want %q", gotSQL, want)
+
+	clickHouse, err := NewTranspiler(DialectClickHouse, defaultTestSchema())
+	if err != nil {
+		t.Fatalf("NewTranspiler(ClickHouse) error = %v", err)
+	}
+	gotSQL, gotParams, err = clickHouse.TranspileParameterizedValue(`{"cat":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]}]}`)
+	if err != nil {
+		t.Fatalf("TranspileParameterizedValue() ClickHouse cat reduce error = %v", err)
+	}
+	if want := "CONCAT(COALESCE(arrayFold((acc, elem) -> CONCAT(COALESCE(acc, ''), COALESCE(toString(elem), '')), arr, @p1), ''))"; gotSQL != want {
+		t.Fatalf("TranspileParameterizedValue() ClickHouse cat reduce SQL = %q, want %q", gotSQL, want)
 	}
 	if wantParams := []QueryParam{{Name: "p1", Value: ""}}; !reflect.DeepEqual(gotParams, wantParams) {
-		t.Fatalf("TranspileParameterizedValue() cat reduce params = %#v, want %#v", gotParams, wantParams)
+		t.Fatalf("TranspileParameterizedValue() ClickHouse cat reduce params = %#v, want %#v", gotParams, wantParams)
 	}
 }
 

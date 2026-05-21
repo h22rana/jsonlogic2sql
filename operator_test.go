@@ -973,11 +973,16 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside reduce array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
+		if sql, err := tr.TranspileValue(`{"reduce": [{"var": "items"}, {"cat": [{"var": "accumulator"}, {"toUpper": [{"var": "current"}]}]}, ""]}`); err == nil {
+			t.Fatalf("BigQuery general string reduce should be unsupported, got SQL: %s", sql)
+		}
+
+		tr = setupTranspiler(DialectClickHouse)
 		sql, err := tr.TranspileValue(`{"reduce": [{"var": "items"}, {"cat": [{"var": "accumulator"}, {"toUpper": [{"var": "current"}]}]}, ""]}`)
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("ClickHouse reduce error: %v", err)
 		}
-		expected := "(SELECT CONCAT(COALESCE('', ''), COALESCE(UPPER(elem), '')) FROM UNNEST(items) AS elem)"
+		expected := "arrayFold((acc, elem) -> CONCAT(COALESCE(acc, ''), COALESCE(UPPER(elem), '')), items, '')"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
