@@ -3,6 +3,7 @@ package jsonlogic2sql
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -1652,7 +1653,63 @@ func TestTranspileCondition_InDefaultedVarKeepsDefaultCompatibleLiteralsAllDiale
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "age", Type: FieldTypeInteger},
 	})
-	logic := `{"in":[{"var":["age","missing"]},["missing"]]}`
+	tests := []struct {
+		name        string
+		logic       string
+		wantSQL     string
+		wantParam   func(Dialect) string
+		wantParams  []QueryParam
+		notContains string
+	}{
+		{
+			name:    "default-only match stays type safe",
+			logic:   `{"in":[{"var":["age","missing"]},["missing"]]}`,
+			wantSQL: "(age IS NULL AND 'missing' IN ('missing'))",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("(age IS NULL AND %s IN (%s))", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			},
+			wantParams:  []QueryParam{{Name: "p1", Value: "missing"}, {Name: "p2", Value: "missing"}},
+			notContains: "COALESCE(age",
+		},
+		{
+			name:    "field and default matches split by null branch",
+			logic:   `{"in":[{"var":["age","missing"]},[18,"missing"]]}`,
+			wantSQL: "((age IS NOT NULL AND age IN (18)) OR (age IS NULL AND 'missing' IN ('missing')))",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf(
+					"((age IS NOT NULL AND age IN (%s)) OR (age IS NULL AND %s IN (%s)))",
+					testPlaceholder(d, 1),
+					testPlaceholder(d, 2),
+					testPlaceholder(d, 3),
+				)
+			},
+			wantParams:  []QueryParam{{Name: "p1", Value: float64(18)}, {Name: "p2", Value: "missing"}, {Name: "p3", Value: "missing"}},
+			notContains: "COALESCE(age",
+		},
+		{
+			name:    "same-type default also participates in null branch",
+			logic:   `{"in":[{"var":["age",0]},[0,18]]}`,
+			wantSQL: "((age IS NOT NULL AND age IN (0, 18)) OR (age IS NULL AND 0 IN (0, 18)))",
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf(
+					"((age IS NOT NULL AND age IN (%s, %s)) OR (age IS NULL AND %s IN (%s, %s)))",
+					testPlaceholder(d, 1),
+					testPlaceholder(d, 2),
+					testPlaceholder(d, 3),
+					testPlaceholder(d, 4),
+					testPlaceholder(d, 5),
+				)
+			},
+			wantParams: []QueryParam{
+				{Name: "p1", Value: float64(0)},
+				{Name: "p2", Value: float64(18)},
+				{Name: "p3", Value: float64(0)},
+				{Name: "p4", Value: float64(0)},
+				{Name: "p5", Value: float64(18)},
+			},
+			notContains: "COALESCE(age",
+		},
+	}
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
@@ -1662,35 +1719,37 @@ func TestTranspileCondition_InDefaultedVarKeepsDefaultCompatibleLiteralsAllDiale
 			if err != nil {
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
-			sql, err := tr.TranspileCondition(logic)
-			if err != nil {
-				t.Fatalf("TranspileCondition() error = %v", err)
-			}
-			if sql == "FALSE" {
-				t.Fatalf("TranspileCondition() = FALSE, want default-compatible membership SQL")
-			}
-			if want := "COALESCE(age, 'missing') IN ('missing')"; sql != want {
-				t.Fatalf("TranspileCondition() = %q, want %q", sql, want)
-			}
 
-			paramSQL, params, err := tr.TranspileParameterizedCondition(logic)
-			if err != nil {
-				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
-			}
-			wantParamSQL := fmt.Sprintf(
-				"COALESCE(age, %s) IN (%s)",
-				testPlaceholder(d, 1),
-				testPlaceholder(d, 2),
-			)
-			if paramSQL != wantParamSQL {
-				t.Fatalf("TranspileParameterizedCondition() = %q, want %q", paramSQL, wantParamSQL)
-			}
-			wantParams := []QueryParam{
-				{Name: "p1", Value: "missing"},
-				{Name: "p2", Value: "missing"},
-			}
-			if !reflect.DeepEqual(params, wantParams) {
-				t.Fatalf("params = %#v, want %#v", params, wantParams)
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					sql, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if sql == "FALSE" {
+						t.Fatalf("TranspileCondition() = FALSE, want default-compatible membership SQL")
+					}
+					if sql != tt.wantSQL {
+						t.Fatalf("TranspileCondition() = %q, want %q", sql, tt.wantSQL)
+					}
+					if strings.Contains(sql, tt.notContains) {
+						t.Fatalf("TranspileCondition() = %q, should not mix field/default types through %q", sql, tt.notContains)
+					}
+
+					paramSQL, params, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if wantParamSQL := tt.wantParam(d); paramSQL != wantParamSQL {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", paramSQL, wantParamSQL)
+					}
+					if strings.Contains(paramSQL, tt.notContains) {
+						t.Fatalf("TranspileParameterizedCondition() = %q, should not mix field/default types through %q", paramSQL, tt.notContains)
+					}
+					if !reflect.DeepEqual(params, tt.wantParams) {
+						t.Fatalf("params = %#v, want %#v", params, tt.wantParams)
+					}
+				})
 			}
 		})
 	}

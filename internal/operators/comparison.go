@@ -541,6 +541,17 @@ func nonContainerInHaystackLiteral(value interface{}) (bool, error) {
 	}
 }
 
+func combineOrPredicates(predicates []string) string {
+	switch len(predicates) {
+	case 0:
+		return boolSQL(false)
+	case 1:
+		return predicates[0]
+	default:
+		return fmt.Sprintf("(%s)", strings.Join(predicates, " OR "))
+	}
+}
+
 func boolSQL(value bool) string {
 	if value {
 		return "TRUE"
@@ -1556,6 +1567,180 @@ func (c *ComparisonOperator) strictArrayMembershipItems(
 	return filtered
 }
 
+func (c *ComparisonOperator) defaultedFieldArrayLiteralMembershipSQL(
+	leftOriginal interface{},
+	items []interface{},
+) (string, bool, error) {
+	field, ok := c.defaultedFieldArrayMembershipOperand(leftOriginal)
+	if !ok {
+		return "", false, nil
+	}
+	fieldSQL, err := c.fieldSQLForDefaultedArrayMembership(leftOriginal, field)
+	if err != nil {
+		return "", true, err
+	}
+	fieldItems, defaultItems, ok := c.partitionDefaultedFieldArrayMembershipItems(field, items)
+	if !ok {
+		return "", false, nil
+	}
+
+	predicates := make([]string, 0, 2)
+	if len(fieldItems) > 0 {
+		fieldItemSQLs, err := c.arrayMembershipItemSQLs(fieldItems, nil)
+		if err != nil {
+			return "", true, err
+		}
+		predicates = append(predicates, fmt.Sprintf("(%s IS NOT NULL AND %s)", fieldSQL, arrayLiteralMembershipSQL(fieldSQL, fieldItemSQLs)))
+	}
+	if len(defaultItems) > 0 {
+		defaultSQL, err := c.dataOp.valueToSQL(field.defaultLiteral)
+		if err != nil {
+			return "", true, fmt.Errorf("invalid default value: %w", err)
+		}
+		defaultItemSQLs, err := c.arrayMembershipItemSQLs(defaultItems, nil)
+		if err != nil {
+			return "", true, err
+		}
+		predicates = append(predicates, fmt.Sprintf("(%s IS NULL AND %s)", fieldSQL, arrayLiteralMembershipSQL(defaultSQL, defaultItemSQLs)))
+	}
+	return combineOrPredicates(predicates), true, nil
+}
+
+func (c *ComparisonOperator) defaultedFieldArrayLiteralMembershipSQLParam(
+	leftOriginal interface{},
+	items []interface{},
+	pc *params.ParamCollector,
+) (string, bool, error) {
+	field, ok := c.defaultedFieldArrayMembershipOperand(leftOriginal)
+	if !ok {
+		return "", false, nil
+	}
+	fieldSQL, err := c.fieldSQLForDefaultedArrayMembership(leftOriginal, field)
+	if err != nil {
+		return "", true, err
+	}
+	fieldItems, defaultItems, ok := c.partitionDefaultedFieldArrayMembershipItems(field, items)
+	if !ok {
+		return "", false, nil
+	}
+
+	predicates := make([]string, 0, 2)
+	if len(fieldItems) > 0 {
+		fieldItemSQLs, err := c.arrayMembershipItemSQLs(fieldItems, pc)
+		if err != nil {
+			return "", true, err
+		}
+		predicates = append(predicates, fmt.Sprintf("(%s IS NOT NULL AND %s)", fieldSQL, arrayLiteralMembershipSQL(fieldSQL, fieldItemSQLs)))
+	}
+	if len(defaultItems) > 0 {
+		defaultSQL, err := c.dataOp.valueToSQLParam(field.defaultLiteral, pc)
+		if err != nil {
+			return "", true, fmt.Errorf("invalid default value: %w", err)
+		}
+		defaultItemSQLs, err := c.arrayMembershipItemSQLs(defaultItems, pc)
+		if err != nil {
+			return "", true, err
+		}
+		predicates = append(predicates, fmt.Sprintf("(%s IS NULL AND %s)", fieldSQL, arrayLiteralMembershipSQL(defaultSQL, defaultItemSQLs)))
+	}
+	return combineOrPredicates(predicates), true, nil
+}
+
+func (c *ComparisonOperator) defaultedFieldArrayMembershipOperand(leftOriginal interface{}) (equalityFieldOperand, bool) {
+	field, ok := c.extractEqualityFieldOperand(leftOriginal)
+	if !ok || !field.hasDefault || !field.defaultLiteralKnown || field.fieldName == "" {
+		return equalityFieldOperand{}, false
+	}
+	if _, ok := c.schemaEqualityKind(field.fieldName); !ok {
+		return equalityFieldOperand{}, false
+	}
+	if equalityLiteralKind(field.defaultLiteral) == "" {
+		return equalityFieldOperand{}, false
+	}
+	return field, true
+}
+
+func (c *ComparisonOperator) fieldSQLForDefaultedArrayMembership(leftOriginal interface{}, field equalityFieldOperand) (string, error) {
+	if pv, ok := leftOriginal.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+		return pv.Value, nil
+	}
+	if varExpr, ok := leftOriginal.(map[string]interface{}); ok {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
+			switch v := varName.(type) {
+			case []interface{}:
+				if len(v) == 0 {
+					return "", fmt.Errorf("var operator array cannot be empty")
+				}
+				if pv, ok := v[0].(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+					return pv.Value, nil
+				}
+				if name, ok := v[0].(string); ok {
+					return c.dataOp.ToSQL(OpVar, []interface{}{name})
+				}
+			case ProcessedValue:
+				if v.IsSQL && v.IsField {
+					return v.Value, nil
+				}
+			}
+		}
+	}
+	return c.dataOp.ToSQL(OpVar, []interface{}{field.fieldName})
+}
+
+func (c *ComparisonOperator) partitionDefaultedFieldArrayMembershipItems(
+	field equalityFieldOperand,
+	items []interface{},
+) ([]interface{}, []interface{}, bool) {
+	fieldKind, ok := c.schemaEqualityKind(field.fieldName)
+	if !ok {
+		return nil, nil, false
+	}
+	defaultKind := equalityLiteralKind(field.defaultLiteral)
+	if defaultKind == "" {
+		return nil, nil, false
+	}
+
+	fieldItems := make([]interface{}, 0, len(items))
+	defaultItems := make([]interface{}, 0, len(items))
+	for _, item := range items {
+		literal, ok := equalityLiteralValue(item)
+		if !ok {
+			return nil, nil, false
+		}
+		itemKind := equalityLiteralKind(literal)
+		if itemKind == fieldKind {
+			fieldItems = append(fieldItems, item)
+		}
+		if itemKind == defaultKind {
+			defaultItems = append(defaultItems, item)
+		}
+		if itemKind == "" {
+			return nil, nil, false
+		}
+	}
+	return fieldItems, defaultItems, true
+}
+
+func (c *ComparisonOperator) arrayMembershipItemSQLs(items []interface{}, pc *params.ParamCollector) ([]string, error) {
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		var (
+			valueSQL string
+			err      error
+		)
+		if pc == nil {
+			valueSQL, err = c.dataOp.valueToSQL(item)
+		} else {
+			valueSQL, err = c.dataOp.valueToSQLParam(item, pc)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("invalid array element: %w", err)
+		}
+		values = append(values, valueSQL)
+	}
+	return values, nil
+}
+
 func (c *ComparisonOperator) validateEnumArrayMembershipItems(fieldName string, items []interface{}) error {
 	for _, item := range items {
 		literal, ok := equalityLiteralValue(item)
@@ -2163,6 +2348,9 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 		if c.isKnownArrayOperand(leftOriginal) {
 			return boolSQL(false), nil
 		}
+		if sql, handled, err := c.defaultedFieldArrayLiteralMembershipSQL(leftOriginal, arr); handled || err != nil {
+			return sql, err
+		}
 
 		arr = c.strictArrayMembershipItems(leftOriginal, arr)
 		if len(arr) == 0 {
@@ -2176,14 +2364,9 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 			}
 		}
 
-		// Convert array elements to SQL values
-		var values []string
-		for _, item := range arr {
-			valueSQL, err := c.dataOp.valueToSQL(item)
-			if err != nil {
-				return "", fmt.Errorf("invalid array element: %w", err)
-			}
-			values = append(values, valueSQL)
+		values, err := c.arrayMembershipItemSQLs(arr, nil)
+		if err != nil {
+			return "", err
 		}
 
 		return arrayLiteralMembershipSQL(leftSQL, values), nil
@@ -2821,6 +3004,9 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 		if c.isKnownArrayOperand(leftOriginal) {
 			return boolSQL(false), nil
 		}
+		if sql, handled, err := c.defaultedFieldArrayLiteralMembershipSQLParam(leftOriginal, arr, pc); handled || err != nil {
+			return sql, err
+		}
 	}
 	if nonContainer, err := nonContainerInHaystackLiteral(rightValue); err != nil {
 		return "", fmt.Errorf("invalid non-container in IN operator: %w", err)
@@ -2850,13 +3036,9 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 			}
 		}
 
-		var values []string
-		for _, item := range arr {
-			valueSQL, err := c.dataOp.valueToSQLParam(item, pc)
-			if err != nil {
-				return "", fmt.Errorf("invalid array element: %w", err)
-			}
-			values = append(values, valueSQL)
+		values, err := c.arrayMembershipItemSQLs(arr, pc)
+		if err != nil {
+			return "", err
 		}
 
 		return arrayLiteralMembershipSQL(leftSQL, values), nil
