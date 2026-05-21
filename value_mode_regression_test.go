@@ -4462,6 +4462,129 @@ func TestTranspileValue_ArrayLiteralsRejectKnownMixedElementTypesAllDialects(t *
 	}
 }
 
+func TestTranspileValue_IfRejectsArrayBranchesWithIncompatibleElementTypesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "literal number array versus string array",
+			logic: `{"if":[{"var":"flag"},[1],["a"]]}`,
+		},
+		{
+			name:  "expression number array versus string array",
+			logic: `{"if":[{"var":"flag"},[{"var":"amount"}],["a"]]}`,
+		},
+		{
+			name:  "multi-branch later array mismatch",
+			logic: `{"if":[{"var":"flag"},[1],{"var":"active"},[true],["a"]]}`,
+		},
+		{
+			name:  "nested if preserves array element metadata",
+			logic: `{"if":[{"var":"active"},{"if":[{"var":"flag"},[1],[2]]},["a"]]}`,
+		},
+		{
+			name:  "value logical preserves nested array element metadata",
+			logic: `{"or":[{"if":[{"var":"flag"},[],[1]]},["a"]]}`,
+		},
+		{
+			name:  "null branch does not erase array element metadata",
+			logic: `{"if":[{"var":"active"},null,{"var":"flag"},[1],["a"]]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+
+					if sql, err := tr.TranspileValue(tt.logic); err == nil ||
+						!strings.Contains(err.Error(), "array value branches must have compatible element types") {
+						t.Fatalf("TranspileValue() SQL = %q error = %v, want array branch element type error", sql, err)
+					}
+
+					if sql, params, err := tr.TranspileParameterizedValue(tt.logic); err == nil ||
+						!strings.Contains(err.Error(), "array value branches must have compatible element types") {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q params = %#v error = %v, want array branch element type error",
+							sql, params, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_IfAllowsArrayBranchesWithCompatibleElementTypesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "number array branches",
+			logic: `{"if":[{"var":"flag"},[1],[2]]}`,
+		},
+		{
+			name:  "expression number array branches",
+			logic: `{"if":[{"var":"flag"},[{"var":"amount"}],[2]]}`,
+		},
+		{
+			name:  "empty branch inherits number element type",
+			logic: `{"if":[{"var":"flag"},[],[2]]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileValue(tt.logic)
+					if d == DialectPostgreSQL && strings.Contains(tt.logic, "[]") {
+						if !IsErrorCode(err, ErrInvalidArgument) {
+							t.Fatalf("TranspileValue() error = %v, want PostgreSQL empty-array type error", err)
+						}
+					} else if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					} else if !strings.Contains(sql, "CASE WHEN") {
+						t.Fatalf("TranspileValue() SQL = %q, want CASE expression", sql)
+					}
+
+					paramSQL, _, err := tr.TranspileParameterizedValue(tt.logic)
+					if d == DialectPostgreSQL && strings.Contains(tt.logic, "[]") {
+						if !IsErrorCode(err, ErrInvalidArgument) {
+							t.Fatalf("TranspileParameterizedValue() error = %v, want PostgreSQL empty-array type error", err)
+						}
+					} else if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					} else if !strings.Contains(paramSQL, "CASE WHEN") {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q, want CASE expression", paramSQL)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileParameterizedValue_ReduceAggregatePredicateBindsScopedDefaultsAllDialects(t *testing.T) {
 	t.Parallel()
 
