@@ -400,6 +400,64 @@ func TestArrayScopedDefaultedVarsPreserveSchemaEqualityMetadata(t *testing.T) {
 	}
 }
 
+func TestArrayScopedDefaultedVarInUsesRawFieldForNullBranchAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{
+			Name: "items",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "age", Type: FieldTypeInteger},
+			},
+		},
+	})
+	logic := `{"filter":[{"var":"items"},{"in":[{"var":["age","missing"]},["missing"]]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error: %v", err)
+			}
+
+			sql, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error: %v", err)
+			}
+			if !strings.Contains(sql, "(elem.age IS NULL AND 'missing' IN ('missing'))") {
+				t.Fatalf("inline SQL did not preserve raw scoped field in default branch: %s", sql)
+			}
+			if strings.Contains(sql, "COALESCE(elem.age, 'missing') IS NULL") {
+				t.Fatalf("inline SQL used COALESCE for null branch field check: %s", sql)
+			}
+
+			paramSQL, params, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error: %v", err)
+			}
+			wantParamFragment := "(elem.age IS NULL AND " + testPlaceholder(d, 1) + " IN (" + testPlaceholder(d, 2) + "))"
+			if !strings.Contains(paramSQL, wantParamFragment) {
+				t.Fatalf("parameterized SQL did not preserve raw scoped field in default branch: %s params=%#v", paramSQL, params)
+			}
+			if strings.Contains(paramSQL, "COALESCE(elem.age") {
+				t.Fatalf("parameterized SQL used COALESCE for null branch field check: %s params=%#v", paramSQL, params)
+			}
+			wantParams := []QueryParam{{Name: "p1", Value: "missing"}, {Name: "p2", Value: "missing"}}
+			if len(params) != len(wantParams) {
+				t.Fatalf("params = %#v, want %#v", params, wantParams)
+			}
+			for i := range wantParams {
+				if params[i] != wantParams[i] {
+					t.Fatalf("params = %#v, want %#v", params, wantParams)
+				}
+			}
+		})
+	}
+}
+
 func TestTranspile_ArrayNestedScopeUsesDistinctAliases(t *testing.T) {
 	tests := []struct {
 		name        string

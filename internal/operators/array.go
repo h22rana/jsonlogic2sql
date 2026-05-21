@@ -512,40 +512,6 @@ func (a *ArrayOperator) scopedSQLFieldResult(sql, fieldName string) ProcessedVal
 	return result
 }
 
-func (a *ArrayOperator) scopedSQLFieldResultFromVarExpr(sql string, varExpr interface{}) ProcessedValue {
-	result := a.scopedSQLFieldResult(sql, a.scopedFieldNameFromVarExpr(varExpr))
-	defaultValue, hasDefault, defaultKnown := scopedVarDefaultLiteral(varExpr)
-	if !hasDefault {
-		return result
-	}
-	result.FieldHasDefault = true
-	if defaultKnown {
-		result.FieldDefaultLiteral = defaultValue
-		result.FieldDefaultLiteralKnown = true
-	}
-	return result
-}
-
-func scopedVarDefaultLiteral(varExpr interface{}) (interface{}, bool, bool) {
-	arr, ok := varExpr.([]interface{})
-	if !ok || len(arr) < 2 {
-		return nil, false, false
-	}
-	defaultValue := arr[1]
-	if pv, ok := defaultValue.(ProcessedValue); ok {
-		if pv.IsSQL {
-			return nil, true, false
-		}
-		return pv.Value, true, true
-	}
-	switch defaultValue.(type) {
-	case map[string]interface{}, []interface{}:
-		return nil, true, false
-	default:
-		return defaultValue, true, true
-	}
-}
-
 func inferLiteralValueExpressionType(expr interface{}) ExpressionType {
 	if pv, ok := expr.(ProcessedValue); ok {
 		if pv.HasExpressionInfo {
@@ -2762,14 +2728,6 @@ func unsupportedArrayScopeVarError(varName string) error {
 	return fmt.Errorf("unsupported array-scope variable %q; use bare field names relative to the current element", varName)
 }
 
-func (a *ArrayOperator) scopedFieldNameFromVarExpr(varExpr interface{}) string {
-	fieldNames := a.scopedFieldNamesFromVarExpr(varExpr)
-	if len(fieldNames) == 0 {
-		return ""
-	}
-	return fieldNames[0]
-}
-
 func (a *ArrayOperator) scopedFieldNamesFromVarExpr(varExpr interface{}) []string {
 	switch v := varExpr.(type) {
 	case string:
@@ -3112,11 +3070,11 @@ func (a *ArrayOperator) rewriteScopedVarsForOperatorWithContextAndPath(expr inte
 					return rewritten, nil
 				}
 			}
-			if sql, handled, err := a.arrayScopeVarToSQL(varName); handled || err != nil {
+			if rewritten, handled, err := a.rewriteArrayScopeVar(varName); handled || err != nil {
 				if err != nil {
 					return nil, err
 				}
-				return a.scopedSQLFieldResultFromVarExpr(sql, varName), nil
+				return rewritten, nil
 			}
 			return e, nil
 		}
@@ -3967,7 +3925,7 @@ func (a *ArrayOperator) arrayScopeVarToSQLParam(varExpr interface{}, pc *params.
 	return "", false, nil
 }
 
-func (a *ArrayOperator) rewriteArrayScopeVarParam(varExpr interface{}) (interface{}, bool, error) {
+func (a *ArrayOperator) rewriteArrayScopeVar(varExpr interface{}) (interface{}, bool, error) {
 	if varName, ok := varExpr.(string); ok {
 		mapped, handled, err := a.mapArrayScopeVar(varName)
 		if err != nil {
@@ -4007,6 +3965,10 @@ func (a *ArrayOperator) rewriteArrayScopeVarParam(varExpr interface{}) (interfac
 	}
 
 	return nil, false, nil
+}
+
+func (a *ArrayOperator) rewriteArrayScopeVarParam(varExpr interface{}) (interface{}, bool, error) {
+	return a.rewriteArrayScopeVar(varExpr)
 }
 
 // arrayInternalVarToSQLParam is the parameterized variant of arrayInternalVarToSQL.

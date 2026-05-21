@@ -1755,6 +1755,56 @@ func TestTranspileCondition_InDefaultedVarKeepsDefaultCompatibleLiteralsAllDiale
 	}
 }
 
+func TestTranspileCondition_InDefaultedEnumVarValidatesAllowedValuesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active"}},
+	})
+
+	tests := []struct {
+		name      string
+		logic     string
+		wantError string
+	}{
+		{
+			name:      "invalid array member",
+			logic:     `{"in":[{"var":["status","active"]},["archived"]]}`,
+			wantError: "invalid enum value 'archived' for field 'status'",
+		},
+		{
+			name:      "invalid default",
+			logic:     `{"in":[{"var":["status","archived"]},["active"]]}`,
+			wantError: "invalid enum value 'archived' for field 'status'",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+
+					if sql, err := tr.TranspileCondition(tt.logic); err == nil || !strings.Contains(err.Error(), tt.wantError) {
+						t.Fatalf("TranspileCondition() sql = %q error = %v, want containing %q", sql, err, tt.wantError)
+					}
+					if sql, params, err := tr.TranspileParameterizedCondition(tt.logic); err == nil || !strings.Contains(err.Error(), tt.wantError) {
+						t.Fatalf("TranspileParameterizedCondition() sql = %q params = %#v error = %v, want containing %q",
+							sql, params, err, tt.wantError)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileParameterizedCondition_InUnknownRHSStringContainmentDoesNotLeakParamsAllDialects(t *testing.T) {
 	t.Parallel()
 

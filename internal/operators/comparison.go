@@ -1754,6 +1754,14 @@ func (c *ComparisonOperator) validateEnumArrayMembershipItems(fieldName string, 
 	return nil
 }
 
+func (c *ComparisonOperator) validateDefaultedEnumFieldOperand(value interface{}) error {
+	field, ok := c.extractEqualityFieldOperand(value)
+	if !ok || !field.hasDefault || !field.defaultLiteralKnown {
+		return nil
+	}
+	return c.validateEnumValue(field.defaultLiteral, field.fieldName)
+}
+
 func typedNullExpression(value interface{}) bool {
 	pv, ok := value.(ProcessedValue)
 	return ok && pv.IsSQL && pv.HasExpressionInfo &&
@@ -2348,20 +2356,20 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 		if c.isKnownArrayOperand(leftOriginal) {
 			return boolSQL(false), nil
 		}
-		if sql, handled, err := c.defaultedFieldArrayLiteralMembershipSQL(leftOriginal, arr); handled || err != nil {
-			return sql, err
-		}
-
 		arr = c.strictArrayMembershipItems(leftOriginal, arr)
 		if len(arr) == 0 {
 			return boolSQL(false), nil
 		}
-
-		// Validate enum values if left side is an enum field
 		if leftFieldName != "" && c.schema().IsEnumType(leftFieldName) {
 			if err := c.validateEnumArrayMembershipItems(leftFieldName, arr); err != nil {
 				return "", err
 			}
+		}
+		if err := c.validateDefaultedEnumFieldOperand(leftOriginal); err != nil {
+			return "", err
+		}
+		if sql, handled, err := c.defaultedFieldArrayLiteralMembershipSQL(leftOriginal, arr); handled || err != nil {
+			return sql, err
 		}
 
 		values, err := c.arrayMembershipItemSQLs(arr, nil)
@@ -3004,7 +3012,19 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 		if c.isKnownArrayOperand(leftOriginal) {
 			return boolSQL(false), nil
 		}
-		if sql, handled, err := c.defaultedFieldArrayLiteralMembershipSQLParam(leftOriginal, arr, pc); handled || err != nil {
+		filtered := c.strictArrayMembershipItems(leftOriginal, arr)
+		if len(filtered) == 0 {
+			return boolSQL(false), nil
+		}
+		if leftFieldName != "" && c.schema().IsEnumType(leftFieldName) {
+			if err := c.validateEnumArrayMembershipItems(leftFieldName, filtered); err != nil {
+				return "", err
+			}
+		}
+		if err := c.validateDefaultedEnumFieldOperand(leftOriginal); err != nil {
+			return "", err
+		}
+		if sql, handled, err := c.defaultedFieldArrayLiteralMembershipSQLParam(leftOriginal, filtered, pc); handled || err != nil {
 			return sql, err
 		}
 	}
