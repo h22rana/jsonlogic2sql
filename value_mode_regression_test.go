@@ -1005,6 +1005,58 @@ func TestTranspileValue_ReduceAggregateCoercesPredicateTermsAllDialects(t *testi
 	}
 }
 
+func TestTranspileValue_ReduceAggregateIgnoresLambdaNamesInQuotedLiteralsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "current literal",
+			logic: `{"reduce":[{"var":"items"},{"+":[{"var":"accumulator"},{"==":[{"var":"current.name"},"current"]}]},0]}`,
+		},
+		{
+			name:  "accumulator literal",
+			logic: `{"reduce":[{"var":"items"},{"+":[{"var":"accumulator"},{"==":[{"var":"current.name"},"accumulator"]}]},0]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if !strings.Contains(got, "THEN 1 ELSE 0") {
+						t.Fatalf("TranspileValue() did not keep aggregate predicate optimization: %s", got)
+					}
+
+					gotParam, params, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if !strings.Contains(gotParam, "THEN 1 ELSE 0") {
+						t.Fatalf("TranspileParameterizedValue() did not keep aggregate predicate optimization: %s", gotParam)
+					}
+					if len(params) != 2 {
+						t.Fatalf("params = %#v, want initial and comparison literal params", params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_ReduceMinMaxAggregateIncludesInitialAllDialects(t *testing.T) {
 	t.Parallel()
 

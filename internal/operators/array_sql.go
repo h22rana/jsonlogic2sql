@@ -180,7 +180,7 @@ func skipSQLQuotedRegion(sql string, start int, quote byte) int {
 		if sql[i] != quote {
 			continue
 		}
-		if quote == '\'' && i+1 < len(sql) && sql[i+1] == '\'' {
+		if i+1 < len(sql) && sql[i+1] == quote {
 			i++
 			continue
 		}

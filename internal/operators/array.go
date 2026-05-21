@@ -1872,24 +1872,96 @@ func containsWholeIdentifier(sql, ident string) bool {
 	if ident == "" {
 		return false
 	}
-	for idx := strings.Index(sql, ident); idx >= 0; {
-		start := idx
-		end := idx + len(ident)
-		if (start == 0 || !isSQLIdentifierByte(sql[start-1])) &&
-			(end == len(sql) || !isSQLIdentifierByte(sql[end])) {
+	for i := 0; i < len(sql); i++ {
+		switch sql[i] {
+		case '\'':
+			i = skipSQLQuotedRegion(sql, i, '\'')
+			continue
+		case '"':
+			i = skipSQLQuotedRegion(sql, i, '"')
+			continue
+		case '`':
+			i = skipSQLQuotedRegion(sql, i, '`')
+			continue
+		case '-':
+			if i+1 < len(sql) && sql[i+1] == '-' {
+				i = skipSQLLineComment(sql, i)
+				continue
+			}
+		case '/':
+			if i+1 < len(sql) && sql[i+1] == '*' {
+				i = skipSQLBlockComment(sql, i)
+				continue
+			}
+		case '$':
+			if end, ok := skipSQLDollarQuotedRegion(sql, i); ok {
+				i = end
+				continue
+			}
+		}
+		if wholeIdentifierAt(sql, ident, i) {
 			return true
 		}
-		next := strings.Index(sql[end:], ident)
-		if next < 0 {
-			return false
-		}
-		idx = end + next
 	}
 	return false
 }
 
+func wholeIdentifierAt(sql, ident string, start int) bool {
+	end := start + len(ident)
+	if end > len(sql) || sql[start:end] != ident {
+		return false
+	}
+	if start > 0 && sql[start-1] == '.' {
+		return false
+	}
+	return (start == 0 || !isSQLIdentifierByte(sql[start-1])) &&
+		(end == len(sql) || !isSQLIdentifierByte(sql[end]))
+}
+
 func isSQLIdentifierByte(ch byte) bool {
 	return ch == '_' || (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+func skipSQLDollarQuotedRegion(sql string, start int) (int, bool) {
+	delimiter, ok := sqlDollarQuoteDelimiterAt(sql, start)
+	if !ok {
+		return 0, false
+	}
+	contentStart := start + len(delimiter)
+	closingOffset := strings.Index(sql[contentStart:], delimiter)
+	if closingOffset < 0 {
+		return len(sql) - 1, true
+	}
+	return contentStart + closingOffset + len(delimiter) - 1, true
+}
+
+func sqlDollarQuoteDelimiterAt(sql string, start int) (string, bool) {
+	if start >= len(sql) || sql[start] != '$' || start+1 >= len(sql) {
+		return "", false
+	}
+	if sql[start+1] == '$' {
+		return "$$", true
+	}
+	if !isSQLDollarQuoteTagFirstChar(sql[start+1]) {
+		return "", false
+	}
+	for i := start + 2; i < len(sql); i++ {
+		if sql[i] == '$' {
+			return sql[start : i+1], true
+		}
+		if !isSQLDollarQuoteTagChar(sql[i]) {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+func isSQLDollarQuoteTagFirstChar(ch byte) bool {
+	return ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+func isSQLDollarQuoteTagChar(ch byte) bool {
+	return isSQLDollarQuoteTagFirstChar(ch) || (ch >= '0' && ch <= '9')
 }
 
 // isAccumulatorCurrentPattern checks if args match accumulator with current/current.field.

@@ -1315,3 +1315,35 @@ func TestArrayOperator_ToSQLParam_DialectValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestContainsWholeIdentifierSkipsQuotedRegions(t *testing.T) {
+	tests := []struct {
+		name  string
+		sql   string
+		ident string
+		want  bool
+	}{
+		{name: "bare current", sql: "current + elem.x", ident: CurrentVar, want: true},
+		{name: "current field path", sql: "current.x + 1", ident: CurrentVar, want: true},
+		{name: "bare accumulator", sql: "accumulator + elem.x", ident: AccumulatorVar, want: true},
+		{name: "single quoted current", sql: "elem.name = 'current'", ident: CurrentVar},
+		{name: "escaped single quoted current", sql: "elem.name = 'it''s current'", ident: CurrentVar},
+		{name: "double quoted current", sql: `elem.name = "current"`, ident: CurrentVar},
+		{name: "escaped double quoted current", sql: `elem.name = "x""current"`, ident: CurrentVar},
+		{name: "backtick quoted current", sql: "elem.name = `current`", ident: CurrentVar},
+		{name: "dollar quoted current", sql: "$tag$current$tag$ + elem.x", ident: CurrentVar},
+		{name: "line comment current", sql: "-- current\n elem.x", ident: CurrentVar},
+		{name: "block comment accumulator", sql: "/* accumulator */ elem.x", ident: AccumulatorVar},
+		{name: "qualified current field", sql: "elem.current + elem.x", ident: CurrentVar},
+		{name: "qualified accumulator field", sql: "elem.accumulator + elem.x", ident: AccumulatorVar},
+		{name: "substring current", sql: "current_balance + elem.x", ident: CurrentVar},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := containsWholeIdentifier(tt.sql, tt.ident); got != tt.want {
+				t.Fatalf("containsWholeIdentifier(%q, %q) = %v, want %v", tt.sql, tt.ident, got, tt.want)
+			}
+		})
+	}
+}

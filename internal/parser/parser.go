@@ -145,6 +145,9 @@ func (p *Parser) Parse(logic interface{}) (string, error) {
 	if err != nil {
 		return "", err // TranspileError already contains full context
 	}
+	if err := p.rejectUnsupportedPostgreSQLEmptyArrayResult(res); err != nil {
+		return "", err
+	}
 
 	return res.SQL, nil
 }
@@ -161,6 +164,9 @@ func (p *Parser) ParseCondition(logic interface{}) (string, error) {
 	if err != nil {
 		return "", err // TranspileError already contains full context
 	}
+	if err := p.rejectUnsupportedPostgreSQLEmptyArrayResult(res); err != nil {
+		return "", err
+	}
 
 	// Return condition without WHERE prefix
 	return res.SQL, nil
@@ -174,11 +180,18 @@ func (p *Parser) ParseValue(logic interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if p.isUnsupportedPostgreSQLEmptyArrayResult(res) {
-		return "", tperrors.New(tperrors.ErrInvalidArgument, "", "$",
-			"empty PostgreSQL array literals require an explicit element type")
+	if err := p.rejectUnsupportedPostgreSQLEmptyArrayResult(res); err != nil {
+		return "", err
 	}
 	return valueSQL(res), nil
+}
+
+func (p *Parser) rejectUnsupportedPostgreSQLEmptyArrayResult(res expressionResult) error {
+	if !p.isUnsupportedPostgreSQLEmptyArrayResult(res) {
+		return nil
+	}
+	return tperrors.New(tperrors.ErrInvalidArgument, "", "$",
+		"empty PostgreSQL array literals require an explicit element type")
 }
 
 func (p *Parser) isUnsupportedPostgreSQLEmptyArrayResult(res expressionResult) bool {
@@ -2332,6 +2345,9 @@ func (p *Parser) ParseParameterized(logic interface{}) (string, []params.QueryPa
 	if err != nil {
 		return "", nil, err
 	}
+	if err := p.rejectUnsupportedPostgreSQLEmptyArrayResult(res); err != nil {
+		return "", nil, err
+	}
 
 	if vErr := params.ValidatePlaceholderRefs(res.SQL, pc.Params(), style); vErr != nil {
 		return "", nil, vErr
@@ -2354,6 +2370,9 @@ func (p *Parser) ParseConditionParameterized(logic interface{}) (string, []param
 	if err != nil {
 		return "", nil, err
 	}
+	if err := p.rejectUnsupportedPostgreSQLEmptyArrayResult(res); err != nil {
+		return "", nil, err
+	}
 
 	if vErr := params.ValidatePlaceholderRefs(res.SQL, pc.Params(), style); vErr != nil {
 		return "", nil, vErr
@@ -2372,9 +2391,8 @@ func (p *Parser) ParseValueParameterized(logic interface{}) (string, []params.Qu
 	if err != nil {
 		return "", nil, err
 	}
-	if p.isUnsupportedPostgreSQLEmptyArrayResult(res) {
-		return "", nil, tperrors.New(tperrors.ErrInvalidArgument, "", "$",
-			"empty PostgreSQL array literals require an explicit element type")
+	if err := p.rejectUnsupportedPostgreSQLEmptyArrayResult(res); err != nil {
+		return "", nil, err
 	}
 
 	sql := valueSQL(res)

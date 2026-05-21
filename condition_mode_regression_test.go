@@ -2446,6 +2446,24 @@ func TestTranspileCondition_UnaryEmptyArrayTruthinessAllDialectsSchemaRequired(t
 	}
 }
 
+func TestTranspileCondition_PostgreSQLEmptyArraySourcesRejected(t *testing.T) {
+	t.Parallel()
+
+	tr, err := NewTranspiler(DialectPostgreSQL, defaultTestSchema())
+	if err != nil {
+		t.Fatalf("NewTranspiler() error = %v", err)
+	}
+
+	logic := `{"some":[{"if":[{"var":"flag"},{"var":"numbers"},[]]},true]}`
+	if sql, err := tr.TranspileCondition(logic); !IsErrorCode(err, ErrInvalidArgument) {
+		t.Fatalf("TranspileCondition() sql = %q error = %v, want %s", sql, err, ErrInvalidArgument)
+	}
+	if sql, params, err := tr.TranspileParameterizedCondition(logic); !IsErrorCode(err, ErrInvalidArgument) {
+		t.Fatalf("TranspileParameterizedCondition() sql = %q params = %#v error = %v, want %s",
+			sql, params, err, ErrInvalidArgument)
+	}
+}
+
 func TestTranspile_RejectsMalformedNestedValueOperandsAllDialectsSchemaRequired(t *testing.T) {
 	t.Parallel()
 
