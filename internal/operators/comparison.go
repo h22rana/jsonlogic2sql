@@ -1500,28 +1500,43 @@ func (c *ComparisonOperator) schemaEqualityKind(fieldName string) (string, bool)
 	}
 }
 
-func (c *ComparisonOperator) strictArrayMembershipLeftKind(leftOriginal interface{}) (string, bool) {
-	if fieldName := c.extractFieldNameFromValue(leftOriginal); fieldName != "" {
-		return c.schemaEqualityKind(fieldName)
+func (c *ComparisonOperator) strictArrayMembershipLeftKinds(leftOriginal interface{}) (map[string]struct{}, bool) {
+	if field, ok := c.extractEqualityFieldOperand(leftOriginal); ok {
+		fieldKind, ok := c.schemaEqualityKind(field.fieldName)
+		if !ok {
+			return nil, false
+		}
+		kinds := map[string]struct{}{fieldKind: {}}
+		if field.hasDefault {
+			if !field.defaultLiteralKnown {
+				return nil, false
+			}
+			defaultKind := equalityLiteralKind(field.defaultLiteral)
+			if defaultKind == "" {
+				return nil, false
+			}
+			kinds[defaultKind] = struct{}{}
+		}
+		return kinds, true
 	}
 	if kind, ok := expressionEqualityKind(leftOriginal); ok {
-		return kind, true
+		return map[string]struct{}{kind: {}}, true
 	}
 	leftLiteral, ok := equalityLiteralValue(leftOriginal)
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	if kind := equalityLiteralKind(leftLiteral); kind != "" {
-		return kind, true
+		return map[string]struct{}{kind: {}}, true
 	}
-	return "", false
+	return nil, false
 }
 
 func (c *ComparisonOperator) strictArrayMembershipItems(
 	leftOriginal interface{},
 	items []interface{},
 ) []interface{} {
-	leftKind, known := c.strictArrayMembershipLeftKind(leftOriginal)
+	leftKinds, known := c.strictArrayMembershipLeftKinds(leftOriginal)
 	if !known {
 		return items
 	}
@@ -1534,7 +1549,7 @@ func (c *ComparisonOperator) strictArrayMembershipItems(
 			continue
 		}
 		itemKind := equalityLiteralKind(literal)
-		if itemKind == "null" || itemKind == "" || itemKind == leftKind {
+		if _, ok := leftKinds[itemKind]; itemKind == "null" || itemKind == "" || ok {
 			filtered = append(filtered, item)
 		}
 	}

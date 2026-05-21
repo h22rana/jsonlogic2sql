@@ -1646,6 +1646,56 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 	}
 }
 
+func TestTranspileCondition_InDefaultedVarKeepsDefaultCompatibleLiteralsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "age", Type: FieldTypeInteger},
+	})
+	logic := `{"in":[{"var":["age","missing"]},["missing"]]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			sql, err := tr.TranspileCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
+			}
+			if sql == "FALSE" {
+				t.Fatalf("TranspileCondition() = FALSE, want default-compatible membership SQL")
+			}
+			if want := "COALESCE(age, 'missing') IN ('missing')"; sql != want {
+				t.Fatalf("TranspileCondition() = %q, want %q", sql, want)
+			}
+
+			paramSQL, params, err := tr.TranspileParameterizedCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			wantParamSQL := fmt.Sprintf(
+				"COALESCE(age, %s) IN (%s)",
+				testPlaceholder(d, 1),
+				testPlaceholder(d, 2),
+			)
+			if paramSQL != wantParamSQL {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want %q", paramSQL, wantParamSQL)
+			}
+			wantParams := []QueryParam{
+				{Name: "p1", Value: "missing"},
+				{Name: "p2", Value: "missing"},
+			}
+			if !reflect.DeepEqual(params, wantParams) {
+				t.Fatalf("params = %#v, want %#v", params, wantParams)
+			}
+		})
+	}
+}
+
 func TestTranspileParameterizedCondition_InUnknownRHSStringContainmentDoesNotLeakParamsAllDialects(t *testing.T) {
 	t.Parallel()
 

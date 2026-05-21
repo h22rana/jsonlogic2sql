@@ -4410,6 +4410,80 @@ func TestTranspileValue_ArrayLiteralsRejectKnownMixedElementTypesAllDialects(t *
 	}
 }
 
+func TestTranspileParameterizedValue_ReduceAggregatePredicateBindsScopedDefaultsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{
+			Name: "items",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "x", Type: FieldTypeString},
+			},
+		},
+	})
+	logic := `{"reduce":[{"var":"items"},{"+":[{"var":"accumulator"},{"==":[{"var":["current.x","fallback"]},"fallback"]}]},0]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			sql, params, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if strings.Contains(sql, "'fallback'") {
+				t.Fatalf("TranspileParameterizedValue() inlined scoped default: %s", sql)
+			}
+			assertContains(t, sql, fmt.Sprintf("COALESCE(elem.x, %s)", testPlaceholder(d, 2)))
+			assertContains(t, sql, fmt.Sprintf("= %s", testPlaceholder(d, 3)))
+			wantParams := []QueryParam{
+				{Name: "p1", Value: float64(0)},
+				{Name: "p2", Value: "fallback"},
+				{Name: "p3", Value: "fallback"},
+			}
+			if !reflect.DeepEqual(params, wantParams) {
+				t.Fatalf("params = %#v, want %#v", params, wantParams)
+			}
+		})
+	}
+}
+
+func TestTranspileValue_ArrayLiteralExpressionElementTypeDrivesLambdaTruthinessAllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"filter":[[{">":[{"var":"x"},0]},false],{"var":""}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			sql, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			assertContains(t, sql, "elem IS TRUE")
+
+			paramSQL, params, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			assertContains(t, paramSQL, "elem IS TRUE")
+			if len(params) != 1 || params[0].Value != float64(0) {
+				t.Fatalf("params = %#v, want one zero comparison parameter", params)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_CatStringifiesCustomPredicate(t *testing.T) {
 	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {

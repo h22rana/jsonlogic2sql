@@ -617,6 +617,13 @@ func updateArrayLiteralElementType(common, elemType ExpressionType, index int) (
 	return common, nil
 }
 
+func renderedArrayLiteralElementType(commonType ExpressionType, rawElements []interface{}) ExpressionType {
+	if commonType != ExpressionTypeUnknown {
+		return commonType
+	}
+	return inferArrayLiteralElementType(rawElements)
+}
+
 func expressionTypeName(typ ExpressionType) string {
 	switch typ {
 	case ExpressionTypeNull:
@@ -1662,7 +1669,7 @@ func (a *ArrayOperator) aggregateTermResult(expr interface{}, path string) (Oper
 
 func (a *ArrayOperator) aggregateTermResultParam(expr interface{}, pc *params.ParamCollector, path string) (OperatorResult, error) {
 	if isAggregatePredicateTerm(expr) {
-		rewritten, err := a.rewriteScopedVarsForOperatorWithContextAndPath(expr, false, path)
+		rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, false, path)
 		if err != nil {
 			return OperatorResult{}, err
 		}
@@ -2372,7 +2379,7 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		return typedValueSQL{
 			sql:               sql,
 			typ:               ExpressionTypeArray,
-			elemType:          inferArrayLiteralElementType(arr),
+			elemType:          renderedArrayLiteralElementType(commonType, arr),
 			emptyArrayLiteral: len(arr) == 0,
 		}, nil
 	}
@@ -3673,7 +3680,7 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		return typedValueSQL{
 			sql:               sql,
 			typ:               ExpressionTypeArray,
-			elemType:          inferArrayLiteralElementType(arr),
+			elemType:          renderedArrayLiteralElementType(commonType, arr),
 			emptyArrayLiteral: len(arr) == 0,
 		}, nil
 	}
