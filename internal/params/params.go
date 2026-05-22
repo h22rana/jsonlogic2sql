@@ -132,6 +132,18 @@ func (pc *ParamCollector) ValueForPlaceholder(placeholder string) (interface{}, 
 // It returns E350 ErrUnreferencedPlaceholder if any placeholder is not found,
 // indicating a custom operator may have dropped an argument.
 func ValidatePlaceholderRefs(sql string, params []QueryParam, style PlaceholderStyle) error {
+	if style == PlaceholderQuestion {
+		found := countQuestionPlaceholderRefs(sql)
+		for i, p := range params {
+			if i >= found {
+				return tperrors.New(tperrors.ErrUnreferencedPlaceholder, "", "",
+					fmt.Sprintf("placeholder ? (param %q) is not referenced in generated SQL; "+
+						"a custom operator may have dropped an argument", p.Name))
+			}
+		}
+		return nil
+	}
+
 	for i, p := range params {
 		placeholder := formatPlaceholder(i+1, p.Name, style)
 		if !containsPlaceholderRef(sql, placeholder, style) {
@@ -174,6 +186,31 @@ func containsPlaceholderRef(sql, placeholder string, style PlaceholderStyle) boo
 		}
 	}
 	return false
+}
+
+func countQuestionPlaceholderRefs(sql string) int {
+	count := 0
+	for i := 0; i < len(sql); i++ {
+		switch {
+		case sql[i] == '\'' || sql[i] == '"' || sql[i] == '`':
+			i = skipSQLQuotedRegion(sql, i, sql[i])
+			continue
+		case i+1 < len(sql) && sql[i] == '-' && sql[i+1] == '-':
+			i = skipSQLLineComment(sql, i+2)
+			continue
+		case i+1 < len(sql) && sql[i] == '/' && sql[i+1] == '*':
+			i = skipSQLBlockComment(sql, i+2)
+			continue
+		case sql[i] == '$':
+			if _, _, end, ok := sqlDollarQuotedLiteral(sql, i); ok {
+				i = end
+				continue
+			}
+		case sql[i] == '?':
+			count++
+		}
+	}
+	return count
 }
 
 func skipSQLQuotedRegion(sql string, start int, quote byte) int {

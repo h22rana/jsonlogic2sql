@@ -351,6 +351,73 @@ func TestValidatePlaceholderRefsPositional(t *testing.T) {
 	}
 }
 
+func TestValidatePlaceholderRefsQuestion(t *testing.T) {
+	tests := []struct {
+		name      string
+		sql       string
+		params    []QueryParam
+		expectErr bool
+	}{
+		{
+			name:      "one question placeholder per param",
+			sql:       "WHERE email = ? AND age > ?",
+			params:    []QueryParam{{Name: "p1", Value: "alice"}, {Name: "p2", Value: 30}},
+			expectErr: false,
+		},
+		{
+			name:      "quoted question is ignored",
+			sql:       "WHERE note = '?' AND email = ?",
+			params:    []QueryParam{{Name: "p1", Value: "alice"}},
+			expectErr: false,
+		},
+		{
+			name:      "line comment question is ignored",
+			sql:       "WHERE -- ?\n email = ?",
+			params:    []QueryParam{{Name: "p1", Value: "alice"}},
+			expectErr: false,
+		},
+		{
+			name:      "block comment question is ignored",
+			sql:       "WHERE /* ? */ email = ?",
+			params:    []QueryParam{{Name: "p1", Value: "alice"}},
+			expectErr: false,
+		},
+		{
+			name:      "dollar-quoted question is ignored",
+			sql:       "WHERE note = $tag$ ? $tag$ AND email = ?",
+			params:    []QueryParam{{Name: "p1", Value: "alice"}},
+			expectErr: false,
+		},
+		{
+			name:      "too few bindable question placeholders",
+			sql:       "WHERE email = ?",
+			params:    []QueryParam{{Name: "p1", Value: "alice"}, {Name: "p2", Value: 30}},
+			expectErr: true,
+		},
+		{
+			name:      "only quoted question is not bindable",
+			sql:       "WHERE note = '?'",
+			params:    []QueryParam{{Name: "p1", Value: "alice"}},
+			expectErr: true,
+		},
+		{
+			name:      "no params no error",
+			sql:       "WHERE note = '?'",
+			params:    []QueryParam{},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePlaceholderRefs(tt.sql, tt.params, PlaceholderQuestion)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("ValidatePlaceholderRefs() error = %v, wantErr %v", err, tt.expectErr)
+			}
+		})
+	}
+}
+
 func TestValueForPlaceholder(t *testing.T) {
 	t.Run("named style", func(t *testing.T) {
 		pc := NewParamCollector(PlaceholderNamed)

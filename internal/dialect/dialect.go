@@ -54,7 +54,14 @@ func (d Dialect) String() string {
 
 // IsValid returns true if the dialect is a valid, specified dialect.
 func (d Dialect) IsValid() bool {
-	return d == DialectBigQuery || d == DialectSpanner || d == DialectPostgreSQL || d == DialectDuckDB || d == DialectClickHouse
+	switch d {
+	case DialectBigQuery, DialectSpanner, DialectPostgreSQL, DialectDuckDB, DialectClickHouse:
+		return true
+	case DialectUnspecified:
+		return false
+	default:
+		return false
+	}
 }
 
 // Validate returns an error if the dialect is not valid.

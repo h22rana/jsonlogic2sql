@@ -1,7 +1,10 @@
 // Package errors provides structured error types for jsonlogic2sql transpilation.
 package errors
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ErrorCode represents a specific error condition.
 // Codes are organized by category:
@@ -89,30 +92,29 @@ type TranspileError struct {
 
 // Error implements the error interface.
 func (e *TranspileError) Error() string {
-	var s string
+	var b strings.Builder
+	b.WriteByte('[')
+	b.WriteString(string(e.Code))
+	b.WriteByte(']')
 
-	// Start with error code
-	s = fmt.Sprintf("[%s]", e.Code)
-
-	// Add path if available
 	if e.Path != "" {
-		s += fmt.Sprintf(" at %s", e.Path)
+		b.WriteString(" at ")
+		b.WriteString(e.Path)
 	}
-
-	// Add operator if available
 	if e.Operator != "" {
-		s += fmt.Sprintf(" (operator: %s)", e.Operator)
+		b.WriteString(" (operator: ")
+		b.WriteString(e.Operator)
+		b.WriteByte(')')
 	}
 
-	// Add message
-	s += ": " + e.Message
-
-	// Include cause if available
+	b.WriteString(": ")
+	b.WriteString(e.Message)
 	if e.Cause != nil {
-		s += ": " + e.Cause.Error()
+		b.WriteString(": ")
+		b.WriteString(e.Cause.Error())
 	}
 
-	return s
+	return b.String()
 }
 
 // Unwrap returns the underlying error for errors.Is/As support.
@@ -144,24 +146,16 @@ func Wrap(code ErrorCode, operator, path, message string, cause error) *Transpil
 // WithPath returns a copy of the error with the path updated.
 // This is useful for adding path context as errors bubble up.
 func (e *TranspileError) WithPath(path string) *TranspileError {
-	return &TranspileError{
-		Code:     e.Code,
-		Operator: e.Operator,
-		Path:     path,
-		Message:  e.Message,
-		Cause:    e.Cause,
-	}
+	next := *e
+	next.Path = path
+	return &next
 }
 
 // WithOperator returns a copy of the error with the operator updated.
 func (e *TranspileError) WithOperator(operator string) *TranspileError {
-	return &TranspileError{
-		Code:     e.Code,
-		Operator: operator,
-		Path:     e.Path,
-		Message:  e.Message,
-		Cause:    e.Cause,
-	}
+	next := *e
+	next.Operator = operator
+	return &next
 }
 
 // Helper constructors for common errors.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 )
 
 var validJSONNumberLiteral = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$`)
@@ -229,7 +230,6 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 			}
 			return nil
 		}
-		// Also allow array of strings
 		if varNames, ok := args.([]interface{}); ok {
 			if len(varNames) == 0 {
 				return ValidationError{
@@ -238,19 +238,8 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 					Path:     path,
 				}
 			}
-			// Validate all elements are strings
-			for i, varName := range varNames {
-				if name, ok := varName.(string); !ok || name == "" {
-					return ValidationError{
-						Operator: operator,
-						Message:  fmt.Sprintf("missing operator array element %d must be a non-empty string", i),
-						Path:     path,
-					}
-				}
-			}
-			return nil
+			return validateStringList(operator, varNames, path)
 		}
-		// Neither string nor array
 		return ValidationError{
 			Operator: operator,
 			Message:  "missing operator argument must be a string or array of strings",
@@ -281,16 +270,33 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 				Path:     path,
 			}
 		}
-		// Second argument should be an array
-		if _, ok := arr[1].([]interface{}); !ok {
+		varNames, ok := arr[1].([]interface{})
+		if !ok {
 			return ValidationError{
 				Operator: operator,
 				Message:  "missing_some operator second argument must be an array",
 				Path:     path,
 			}
 		}
+		if err := validateStringList(operator, varNames, path); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func validateStringList(operator string, values []interface{}, path string) error {
+	for i, value := range values {
+		name, ok := value.(string)
+		if !ok || name == "" {
+			return ValidationError{
+				Operator: operator,
+				Message:  fmt.Sprintf("%s operator array element %d must be a non-empty string", operator, i),
+				Path:     path,
+			}
+		}
+	}
 	return nil
 }
 
@@ -670,6 +676,7 @@ func (v *Validator) GetSupportedOperators() []string {
 	for op := range v.supportedOperators {
 		operators = append(operators, op)
 	}
+	sort.Strings(operators)
 	return operators
 }
 
