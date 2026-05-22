@@ -362,6 +362,16 @@ func canRollbackParamRefs(res expressionResult) bool {
 	return !res.preserveParamRefs
 }
 
+func preserveParamRefsIfNeeded(res expressionResult, sources ...expressionResult) expressionResult {
+	for _, source := range sources {
+		if !canRollbackParamRefs(source) {
+			res.preserveParamRefs = true
+			return res
+		}
+	}
+	return res
+}
+
 func predicateResult(sql string) expressionResult {
 	switch normalizedSQLBooleanConstant(sql) {
 	case "TRUE":
@@ -1129,6 +1139,7 @@ func (p *Parser) parseTruthinessLogicalParam(
 	}
 	checkpoint := pc.Checkpoint()
 	parts := make([]string, 0, len(args))
+	partResults := make([]expressionResult, 0, len(args))
 	for i, arg := range args {
 		operandCheckpoint := pc.Checkpoint()
 		res, condition, err := p.parseTruthinessResultParam(arg, tperrors.BuildArrayPath(path, i), pc)
@@ -1154,13 +1165,14 @@ func (p *Parser) parseTruthinessLogicalParam(
 			}
 		}
 		parts = append(parts, condition)
+		partResults = append(partResults, res)
 	}
 	if len(parts) == 0 {
 		res := booleanPredicateResult(operator == "and")
 		return res, res.SQL, nil
 	}
 	if len(parts) == 1 {
-		res := predicateResult(parts[0])
+		res := preserveParamRefsIfNeeded(predicateResult(parts[0]), partResults[0])
 		return res, res.SQL, nil
 	}
 	joiner := " AND "
@@ -1168,7 +1180,8 @@ func (p *Parser) parseTruthinessLogicalParam(
 		joiner = " OR "
 	}
 	sql := fmt.Sprintf("(%s)", strings.Join(parts, joiner))
-	return predicateResult(sql), sql, nil
+	res := preserveParamRefsIfNeeded(predicateResult(sql), partResults...)
+	return res, sql, nil
 }
 
 func (p *Parser) parseTruthinessIfParam(
@@ -2859,6 +2872,7 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 	}
 	checkpoint := pc.Checkpoint()
 	parts := make([]string, 0, len(args))
+	partResults := make([]expressionResult, 0, len(args))
 	for i, arg := range args {
 		operandCheckpoint := pc.Checkpoint()
 		res, err := p.parseExpressionPredicateParam(arg, tperrors.BuildArrayPath(path, i), pc)
@@ -2884,18 +2898,19 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 			}
 		}
 		parts = append(parts, res.SQL)
+		partResults = append(partResults, res)
 	}
 	if len(parts) == 0 {
 		return booleanPredicateResult(operator == "and"), nil
 	}
 	if len(parts) == 1 {
-		return predicateResult(parts[0]), nil
+		return preserveParamRefsIfNeeded(predicateResult(parts[0]), partResults[0]), nil
 	}
 	joiner := " AND "
 	if operator == "or" {
 		joiner = " OR "
 	}
-	return predicateResult(fmt.Sprintf("(%s)", strings.Join(parts, joiner))), nil
+	return preserveParamRefsIfNeeded(predicateResult(fmt.Sprintf("(%s)", strings.Join(parts, joiner))), partResults...), nil
 }
 
 func (p *Parser) parseNotPredicateParam(operator string, args interface{}, path string, double bool, pc *params.ParamCollector) (expressionResult, error) {
@@ -2909,15 +2924,15 @@ func (p *Parser) parseNotPredicateParam(operator string, args interface{}, path 
 	}
 	if double {
 		if res.truthKnown {
-			return booleanPredicateResult(res.truthy), nil
+			return preserveParamRefsIfNeeded(booleanPredicateResult(res.truthy), res), nil
 		}
-		return predicateResult(condition), nil
+		return preserveParamRefsIfNeeded(predicateResult(condition), res), nil
 	}
 	if res.truthKnown {
-		return booleanPredicateResult(!res.truthy), nil
+		return preserveParamRefsIfNeeded(booleanPredicateResult(!res.truthy), res), nil
 	}
 	condition = operators.StripRedundantOuterParens(condition)
-	return predicateResult(fmt.Sprintf("NOT (%s)", condition)), nil
+	return preserveParamRefsIfNeeded(predicateResult(fmt.Sprintf("NOT (%s)", condition)), res), nil
 }
 
 func (p *Parser) parseNotValueParam(
@@ -2936,13 +2951,16 @@ func (p *Parser) parseNotValueParam(
 		return expressionResult{}, err
 	}
 	if res.truthKnown {
-		return booleanValueResult(res.truthy == double), nil
+		return preserveParamRefsIfNeeded(booleanValueResult(res.truthy == double), res), nil
 	}
 	condition = operators.PredicateValueSQL(condition)
 	if double {
-		return valueResult(condition, operators.ExpressionTypeBoolean), nil
+		return preserveParamRefsIfNeeded(valueResult(condition, operators.ExpressionTypeBoolean), res), nil
 	}
-	return valueResult(operators.PredicateValueSQL(fmt.Sprintf("NOT (%s)", condition)), operators.ExpressionTypeBoolean), nil
+	return preserveParamRefsIfNeeded(
+		valueResult(operators.PredicateValueSQL(fmt.Sprintf("NOT (%s)", condition)), operators.ExpressionTypeBoolean),
+		res,
+	), nil
 }
 
 func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
@@ -3126,8 +3144,14 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 		}
 		if canRollbackParamRefs(current) {
 			pc.Restore(checkpoint)
+			return p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
 		}
-		return p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
+		var rest expressionResult
+		rest, err = p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
+		if err != nil {
+			return expressionResult{}, err
+		}
+		return preserveParamRefsIfNeeded(rest, current), nil
 	}
 	condition, err := p.truthinessSQL(current, argPath)
 	if err != nil {
@@ -3313,8 +3337,14 @@ func (p *Parser) parseStringifiedLogicalFromParam(
 		}
 		if canRollbackParamRefs(current) {
 			pc.Restore(truthCheckpoint)
+			return p.parseStringifiedLogicalFromParam(operator, args, index+1, path, pc)
 		}
-		return p.parseStringifiedLogicalFromParam(operator, args, index+1, path, pc)
+		var rest expressionResult
+		rest, err = p.parseStringifiedLogicalFromParam(operator, args, index+1, path, pc)
+		if err != nil {
+			return expressionResult{}, err
+		}
+		return preserveParamRefsIfNeeded(rest, current), nil
 	}
 	currentString, err := p.parseCatStringExpressionParam(args[index], argPath, pc)
 	if err != nil {

@@ -26,8 +26,24 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 			logic: `{"and":[{"always":["x"]},true]}`,
 		},
 		{
+			name:  "nested and preserves dropped-param marker",
+			logic: `{"and":[{"and":[{"always":["x"]},true]},true]}`,
+		},
+		{
 			name:  "or short-circuits truthy constant",
 			logic: `{"or":[{"always":["x"]},false]}`,
+		},
+		{
+			name:  "nested or preserves dropped-param marker",
+			logic: `{"or":[{"or":[{"always":["x"]},false]},false]}`,
+		},
+		{
+			name:  "double bang nested logical preserves dropped-param marker",
+			logic: `{"!!":{"and":[{"always":["x"]},true]}}`,
+		},
+		{
+			name:  "outer logical preserves nested double bang marker",
+			logic: `{"and":[{"!!":{"and":[{"always":["x"]},true]}},true]}`,
 		},
 		{
 			name:      "value double bang truthiness",
@@ -40,6 +56,16 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 			valueMode: true,
 		},
 		{
+			name:      "value nested and preserves dropped-param marker",
+			logic:     `{"and":[{"and":[{"always":["x"]},true]},true]}`,
+			valueMode: true,
+		},
+		{
+			name:      "value or preserves nested logical marker",
+			logic:     `{"or":[{"and":[{"always":["x"]},true]},"fallback"]}`,
+			valueMode: true,
+		},
+		{
 			name:      "value or short-circuits truthy constant",
 			logic:     `{"or":[{"always":["x"]},false]}`,
 			valueMode: true,
@@ -47,6 +73,11 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 		{
 			name:      "cat stringified logical skips truthy constant",
 			logic:     `{"cat":[{"and":[{"always":["x"]},"ok"]}]}`,
+			valueMode: true,
+		},
+		{
+			name:      "cat stringified nested logical preserves dropped-param marker",
+			logic:     `{"cat":[{"and":[{"and":[{"always":["x"]},true]},"ok"]}]}`,
 			valueMode: true,
 		},
 		{
