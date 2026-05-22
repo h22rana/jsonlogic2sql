@@ -143,6 +143,69 @@ func TestTranspileValue_RejectsMalformedVarOperandsAllDialectsSchemaRequired(t *
 	}
 }
 
+func TestTranspileValue_ArraySourcesRejectMultiKeyVarObjectsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	source := `{"var":"arr","bad":[]}`
+	valueCases := []string{
+		`{"map":[` + source + `,{"var":""}]}`,
+		`{"filter":[` + source + `,true]}`,
+		`{"merge":[` + source + `,[1]]}`,
+		`{"reduce":[` + source + `,{"+":[{"var":"accumulator"},{"var":"current"}]},0]}`,
+		`{"all":[` + source + `,true]}`,
+		`{"some":[` + source + `,true]}`,
+		`{"none":[` + source + `,true]}`,
+	}
+	conditionCases := []string{
+		`{"all":[` + source + `,true]}`,
+		`{"some":[` + source + `,true]}`,
+		`{"none":[` + source + `,true]}`,
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, logic := range valueCases {
+				t.Run("value "+logic, func(t *testing.T) {
+					if _, err := tr.TranspileValue(logic); !IsErrorCode(err, ErrMultipleKeys) {
+						t.Fatalf("TranspileValue() error = %v, want %s", err, ErrMultipleKeys)
+					}
+					sql, params, err := tr.TranspileParameterizedValue(logic)
+					if !IsErrorCode(err, ErrMultipleKeys) {
+						t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+							err, ErrMultipleKeys, sql, params)
+					}
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want none", params)
+					}
+				})
+			}
+
+			for _, logic := range conditionCases {
+				t.Run("condition "+logic, func(t *testing.T) {
+					if _, err := tr.TranspileCondition(logic); !IsErrorCode(err, ErrMultipleKeys) {
+						t.Fatalf("TranspileCondition() error = %v, want %s", err, ErrMultipleKeys)
+					}
+					sql, params, err := tr.TranspileParameterizedCondition(logic)
+					if !IsErrorCode(err, ErrMultipleKeys) {
+						t.Fatalf("TranspileParameterizedCondition() error = %v, want %s (SQL %q params %#v)",
+							err, ErrMultipleKeys, sql, params)
+					}
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_EmptyArrayFoldableContextsAllDialects(t *testing.T) {
 	t.Parallel()
 
@@ -4445,6 +4508,18 @@ func TestTranspileValue_ArrayLiteralsRejectKnownMixedElementTypesAllDialects(t *
 		{
 			name:  "map source literal mixes number and string",
 			logic: `{"map":[[1,"x"],{"var":""}]}`,
+		},
+		{
+			name:  "root literal mixes empty array and scalar",
+			logic: `[[],1]`,
+		},
+		{
+			name:  "root literal mixes scalar and empty array",
+			logic: `[1,[]]`,
+		},
+		{
+			name:  "map source literal mixes empty array and scalar",
+			logic: `{"map":[[[],1],{"var":""}]}`,
 		},
 	}
 

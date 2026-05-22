@@ -86,8 +86,11 @@ func typedValueElementTypes(value typedValueSQL) []ExpressionType {
 }
 
 func typedValueTypeChain(value typedValueSQL) []ExpressionType {
-	if value.emptyArrayLiteral || value.typ == ExpressionTypeUnknown {
+	if value.typ == ExpressionTypeUnknown {
 		return nil
+	}
+	if value.emptyArrayLiteral {
+		return []ExpressionType{ExpressionTypeArray}
 	}
 	if value.typ != ExpressionTypeArray {
 		return []ExpressionType{value.typ}
@@ -116,13 +119,39 @@ func updateArrayLiteralElementTypes(common []ExpressionType, value typedValueSQL
 	if len(common) == 0 {
 		return elemTypes, nil
 	}
-	if !sameExpressionTypes(common, elemTypes) {
+	merged, ok := mergeArrayLiteralElementTypes(common, elemTypes)
+	if !ok {
 		return common, fmt.Errorf("array literal elements must have compatible SQL types: element %d has type %s, previous non-null elements have type %s",
 			index,
 			arrayElementTypesName(elemTypes),
 			arrayElementTypesName(common))
 	}
-	return common, nil
+	return merged, nil
+}
+
+func mergeArrayLiteralElementTypes(common, elemTypes []ExpressionType) ([]ExpressionType, bool) {
+	if sameExpressionTypes(common, elemTypes) {
+		return common, true
+	}
+	if isArrayOnlyTypePrefix(common, elemTypes) {
+		return elemTypes, true
+	}
+	if isArrayOnlyTypePrefix(elemTypes, common) {
+		return common, true
+	}
+	return nil, false
+}
+
+func isArrayOnlyTypePrefix(short, long []ExpressionType) bool {
+	if len(short) == 0 || len(short) >= len(long) {
+		return false
+	}
+	for i, typ := range short {
+		if typ != ExpressionTypeArray || typ != long[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func firstArrayElementType(types []ExpressionType) ExpressionType {
@@ -2448,7 +2477,9 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 
 	// Handle complex expressions (operators)
 	if expr, ok := value.(map[string]interface{}); ok {
-		// Check if it's a var expression
+		if len(expr) != 1 {
+			return typedValueSQL{}, tperrors.NewMultipleKeys(path)
+		}
 		if varExpr, hasVar := expr[OpVar]; hasVar {
 			if sql, handled, err := a.arrayInternalVarToSQL(varExpr); handled || err != nil {
 				if err != nil {
@@ -3811,6 +3842,9 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 	}
 
 	if expr, ok := value.(map[string]interface{}); ok {
+		if len(expr) != 1 {
+			return typedValueSQL{}, tperrors.NewMultipleKeys(path)
+		}
 		if varExpr, hasVar := expr[OpVar]; hasVar {
 			if sql, handled, err := a.arrayInternalVarToSQLParam(varExpr, pc); handled || err != nil {
 				if err != nil {

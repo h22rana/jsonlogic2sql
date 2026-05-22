@@ -686,6 +686,9 @@ func expressionResultTypeChain(res expressionResult) []operators.ExpressionType 
 	if typ == operators.ExpressionTypeUnknown {
 		return nil
 	}
+	if expressionResultIsEmptyArrayLiteral(res) {
+		return []operators.ExpressionType{operators.ExpressionTypeArray}
+	}
 	if typ != operators.ExpressionTypeArray {
 		return []operators.ExpressionType{typ}
 	}
@@ -697,9 +700,6 @@ func expressionResultTypeChain(res expressionResult) []operators.ExpressionType 
 }
 
 func updateArrayLiteralElementTypes(common []operators.ExpressionType, res expressionResult, index int) ([]operators.ExpressionType, error) {
-	if expressionResultIsEmptyArrayLiteral(res) {
-		return common, nil
-	}
 	elemTypes := expressionResultTypeChain(res)
 	if len(elemTypes) == 0 {
 		return common, nil
@@ -716,13 +716,42 @@ func updateArrayLiteralElementTypes(common []operators.ExpressionType, res expre
 	if len(common) == 0 {
 		return elemTypes, nil
 	}
-	if !sameExpressionTypes(common, elemTypes) {
+	merged, ok := mergeArrayLiteralElementTypes(common, elemTypes)
+	if !ok {
 		return common, fmt.Errorf("array literal elements must have compatible SQL types: element %d has type %s, previous non-null elements have type %s",
 			index,
 			arrayElementTypesName(elemTypes),
 			arrayElementTypesName(common))
 	}
-	return common, nil
+	return merged, nil
+}
+
+func mergeArrayLiteralElementTypes(
+	common []operators.ExpressionType,
+	elemTypes []operators.ExpressionType,
+) ([]operators.ExpressionType, bool) {
+	if sameExpressionTypes(common, elemTypes) {
+		return common, true
+	}
+	if isArrayOnlyTypePrefix(common, elemTypes) {
+		return elemTypes, true
+	}
+	if isArrayOnlyTypePrefix(elemTypes, common) {
+		return common, true
+	}
+	return nil, false
+}
+
+func isArrayOnlyTypePrefix(short, long []operators.ExpressionType) bool {
+	if len(short) == 0 || len(short) >= len(long) {
+		return false
+	}
+	for i, typ := range short {
+		if typ != operators.ExpressionTypeArray || typ != long[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func literalTypeAndTruth(value interface{}) (operators.ExpressionType, bool, bool) {
