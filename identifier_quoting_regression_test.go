@@ -307,6 +307,85 @@ func TestIdentifierQuotingRegression_NonASCIIDigitLeadingSchemaSegment(t *testin
 	}
 }
 
+func TestIdentifierQuotingRegression_UnicodeSchemaSegments_AllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "metrics.名前.count", Type: FieldTypeInteger},
+		{
+			Name: "events",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "名前", Type: FieldTypeString},
+			},
+		},
+	})
+
+	tests := []struct {
+		dialect     Dialect
+		rootInline  string
+		rootParam   string
+		arrayInline string
+		arrayParam  string
+	}{
+		{
+			dialect:     DialectBigQuery,
+			rootInline:  "metrics.`名前`.count >= 10",
+			rootParam:   "metrics.`名前`.count >= @p1",
+			arrayInline: "ARRAY(SELECT elem.`名前` FROM UNNEST(events) AS elem)",
+			arrayParam:  "ARRAY(SELECT elem.`名前` FROM UNNEST(events) AS elem)",
+		},
+		{
+			dialect:     DialectSpanner,
+			rootInline:  "metrics.`名前`.count >= 10",
+			rootParam:   "metrics.`名前`.count >= @p1",
+			arrayInline: "ARRAY(SELECT elem.`名前` FROM UNNEST(events) AS elem)",
+			arrayParam:  "ARRAY(SELECT elem.`名前` FROM UNNEST(events) AS elem)",
+		},
+		{
+			dialect:     DialectPostgreSQL,
+			rootInline:  `metrics."名前".count >= 10`,
+			rootParam:   `metrics."名前".count >= $1`,
+			arrayInline: `ARRAY(SELECT elem."名前" FROM UNNEST(events) AS elem)`,
+			arrayParam:  `ARRAY(SELECT elem."名前" FROM UNNEST(events) AS elem)`,
+		},
+		{
+			dialect:     DialectDuckDB,
+			rootInline:  `metrics."名前".count >= 10`,
+			rootParam:   `metrics."名前".count >= $1`,
+			arrayInline: `ARRAY(SELECT elem."名前" FROM UNNEST(events) AS elem)`,
+			arrayParam:  `ARRAY(SELECT elem."名前" FROM UNNEST(events) AS elem)`,
+		},
+		{
+			dialect:     DialectClickHouse,
+			rootInline:  "metrics.`名前`.count >= 10",
+			rootParam:   "metrics.`名前`.count >= @p1",
+			arrayInline: "arrayMap(elem -> elem.`名前`, events)",
+			arrayParam:  "arrayMap(elem -> elem.`名前`, events)",
+		},
+	}
+
+	rootLogic := `{">=": [{"var": "metrics.名前.count"}, 10]}`
+	arrayLogic := `{"map":[{"var":"events"},{"var":"名前"}]}`
+
+	for _, tt := range tests {
+		t.Run(tt.dialect.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: tt.dialect,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+
+			assertIdentifierQuotingSQL(t, tr, tt.dialect, rootLogic, tt.rootInline, tt.rootParam, []QueryParam{{Name: "p1", Value: float64(10)}})
+			assertIdentifierQuotingSQL(t, tr, tt.dialect, arrayLogic, tt.arrayInline, tt.arrayParam, nil)
+		})
+	}
+}
+
 func registerIdentifierQuotingCustomOperators(t *testing.T, tr *Transpiler) {
 	t.Helper()
 

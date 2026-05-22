@@ -128,9 +128,9 @@ Schema loaded: schema.json
 
 Schema field names should be raw, unquoted identifier segments containing only
 letters, digits, and underscores. The REPL uses the same dialect-aware
-identifier quoting as the library, including numeric-leading path segments in
-array lambdas such as `{"var":"24h"}` and reduce scopes such as
-`{"var":"current.24h"}`.
+identifier quoting as the library, including numeric-leading and Unicode path
+segments in array lambdas such as `{"var":"24h"}` / `{"var":"名前"}` and reduce
+scopes such as `{"var":"current.24h"}`.
 
 ## Examples Command
 

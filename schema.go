@@ -44,7 +44,7 @@ type Schema struct {
 
 // NewSchema validates field definitions and creates a new schema.
 // Schema field names must be raw, unquoted identifier segments; the transpiler
-// handles numeric-leading segment quoting automatically.
+// handles dialect-specific segment quoting automatically.
 func NewSchema(fields []FieldSchema) (*Schema, error) {
 	if err := ValidateSchemaFields(fields); err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func (s *Schema) addArrayScopeAccessibleField(scopePath, relativePrefix string, 
 // ValidateSchemaFields validates schema field definitions without constructing
 // a Schema. Field names must be raw, unquoted identifier segments; the
 // transpiler applies SQL identifier quoting automatically based on the target
-// dialect for numeric-leading segments.
+// dialect for segments outside the portable unquoted ASCII shape.
 func ValidateSchemaFields(fields []FieldSchema) error {
 	seen := make(map[string]struct{})
 	for _, field := range fields {

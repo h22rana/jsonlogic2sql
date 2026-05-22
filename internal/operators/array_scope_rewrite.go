@@ -29,7 +29,7 @@ func (a *ArrayOperator) quoteArrayScopeIdentifier(name string) (string, error) {
 			return
 		}
 		if !isValidIdentifierSegment(seg) {
-			validateErr = fmt.Errorf("invalid identifier %q: each segment must match [a-zA-Z0-9_]+", name)
+			validateErr = fmt.Errorf("invalid identifier %q: each segment must contain only letters, digits, or underscores", name)
 			return
 		}
 		if dialect.NeedsQuoting(seg) {

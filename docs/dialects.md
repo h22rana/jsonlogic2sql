@@ -39,17 +39,17 @@ All JSON Logic operators are supported across all dialects. The library generate
 
 ## Identifier Quoting
 
-Path segments that are not valid unquoted SQL identifiers (e.g. start with a digit) are automatically quoted using the dialect-appropriate character:
+Path segments outside the portable unquoted ASCII identifier shape (for example numeric-leading or Unicode segments) are automatically quoted using the dialect-appropriate character:
 
 | Dialect | Quote Character | Example |
 |---------|----------------|---------|
-| BigQuery | Backtick (`` ` ``) | `` fixture.history.`24h`.events.total `` |
-| Spanner | Backtick (`` ` ``) | `` fixture.history.`24h`.events.total `` |
-| PostgreSQL | Double quote (`"`) | `fixture.history."24h".events.total` |
-| DuckDB | Double quote (`"`) | `fixture.history."24h".events.total` |
-| ClickHouse | Backtick (`` ` ``) | `` fixture.history.`24h`.events.total `` |
+| BigQuery | Backtick (`` ` ``) | `` fixture.history.`24h`.`名前`.total `` |
+| Spanner | Backtick (`` ` ``) | `` fixture.history.`24h`.`名前`.total `` |
+| PostgreSQL | Double quote (`"`) | `fixture.history."24h"."名前".total` |
+| DuckDB | Double quote (`"`) | `fixture.history."24h"."名前".total` |
+| ClickHouse | Backtick (`` ` ``) | `` fixture.history.`24h`.`名前`.total `` |
 
-Segments that only contain letters, digits, and underscores (and don't start with a digit) remain unquoted. The same per-segment quoting is applied inside array lambdas such as `{"var":"24h"}`, inside reduce scopes such as `{"var":"current.24h"}`, and before variable references are passed to custom operators.
+ASCII segments that only contain letters, digits, and underscores (and don't start with a digit) remain unquoted. Unicode letters and digits are accepted by schema validation, but are quoted for portable SQL output. The same per-segment quoting is applied inside array lambdas such as `{"var":"24h"}` or `{"var":"名前"}`, inside reduce scopes such as `{"var":"current.24h"}`, and before variable references are passed to custom operators.
 
 ## Dialect-Specific SQL Generation
 

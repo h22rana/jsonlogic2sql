@@ -191,9 +191,10 @@ The transpiler preserves JSON Logic variable names in the SQL output, with autom
 - Dot notation is preserved: `transaction.amount` → `transaction.amount`
 - Nested variables: `user.account.age` → `user.account.age`
 - Simple variables remain unchanged: `amount` → `amount`
-- Segments starting with a digit are quoted automatically:
+- Segments outside the portable unquoted ASCII shape are quoted automatically:
   - BigQuery/Spanner/ClickHouse: `fixture.history.24h.events.total` → `` fixture.history.`24h`.events.total ``
   - PostgreSQL/DuckDB: `fixture.history.24h.events.total` → `fixture.history."24h".events.total`
+  - Unicode: `profile.名前` → `` profile.`名前` `` on BigQuery/Spanner/ClickHouse and `profile."名前"` on PostgreSQL/DuckDB
 
 ## Next Steps
 

@@ -323,17 +323,7 @@ func forEachDottedSegment(name string, visit func(string)) {
 }
 
 func isValidIdentifierSegment(segment string) bool {
-	if segment == "" {
-		return false
-	}
-	for i := 0; i < len(segment); i++ {
-		c := segment[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
-			continue
-		}
-		return false
-	}
-	return true
+	return dialect.IsSafeIdentifierSegment(segment)
 }
 
 // getNumber extracts a number from an interface{} and returns it as float64.

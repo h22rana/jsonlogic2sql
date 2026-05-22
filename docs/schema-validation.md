@@ -43,10 +43,11 @@ func main() {
 
 **Note:** Field names must be raw, unquoted identifier segments containing only
 letters, digits, and underscores. The transpiler handles identifier quoting
-automatically based on the target dialect for numeric-leading segments such as
-`24h`. `NewSchema`, `NewSchemaFromJSON`, and `NewSchemaFromFile` return
-construction-time errors for schema field names that contain quote characters or
-SQL-control punctuation.
+automatically based on the target dialect for segments outside the portable
+unquoted ASCII shape, including numeric-leading segments such as `24h` and
+Unicode segments such as `名前`. `NewSchema`, `NewSchemaFromJSON`, and
+`NewSchemaFromFile` return construction-time errors for schema field names that
+contain quote characters or SQL-control punctuation.
 
 ## Validated Schema Construction
 
