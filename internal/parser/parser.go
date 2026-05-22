@@ -3643,13 +3643,19 @@ func (p *Parser) processValueArgParam(arg interface{}, path string, index int, p
 					return nil, err
 				}
 				if res.rawLiteralKnown {
-					pc.Restore(checkpoint)
-					return res.rawLiteral, nil
+					if canRollbackParamRefs(res) {
+						pc.Restore(checkpoint)
+						return res.rawLiteral, nil
+					}
+					return typedValueOperand(res), nil
 				}
 				if res.Kind == operators.ExpressionKindValue && valueTypeOf(res) == operators.ExpressionTypeNull {
-					pc.Restore(checkpoint)
-					var nullLiteral interface{}
-					return nullLiteral, nil
+					if canRollbackParamRefs(res) {
+						pc.Restore(checkpoint)
+						var nullLiteral interface{}
+						return nullLiteral, nil
+					}
+					return typedValueOperand(res), nil
 				}
 				return typedValueOperand(res), nil
 			}

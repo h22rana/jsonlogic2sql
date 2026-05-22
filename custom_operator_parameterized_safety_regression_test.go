@@ -180,6 +180,72 @@ func TestParameterizedCustomValueFoldedComparisonRollsBackParserDroppedParams(t 
 	}
 }
 
+func TestParameterizedCustomNullValueFoldedComparisonPreservesDroppedParamDetection(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		logic     string
+		valueMode bool
+	}{
+		{
+			name:  "condition strict null equality",
+			logic: `{"===":[{"nuller":["x"]},null]}`,
+		},
+		{
+			name:      "value strict null equality",
+			logic:     `{"===":[{"nuller":["x"]},null]}`,
+			valueMode: true,
+		},
+		{
+			name:  "condition loose null equality",
+			logic: `{"==":[{"nuller":["x"]},null]}`,
+		},
+		{
+			name:      "value loose null equality",
+			logic:     `{"==":[{"nuller":["x"]},null]}`,
+			valueMode: true,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: defaultTestSchema()})
+					if err != nil {
+						t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+					}
+					if regErr := tr.RegisterOperatorFunc("nuller", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+						return ValueSQL("NULL", ExpressionTypeNull), nil
+					}); regErr != nil {
+						t.Fatalf("RegisterOperatorFunc(nuller) error: %v", regErr)
+					}
+
+					var sql string
+					var params []QueryParam
+					if tc.valueMode {
+						sql, params, err = tr.TranspileParameterizedValue(tc.logic)
+					} else {
+						sql, params, err = tr.TranspileParameterizedCondition(tc.logic)
+					}
+					if !IsErrorCode(err, ErrUnreferencedPlaceholder) {
+						t.Fatalf("parameterized transpilation error = %v, want %s (SQL %q params %#v)",
+							err, ErrUnreferencedPlaceholder, sql, params)
+					}
+					if !strings.Contains(err.Error(), "custom operator may have dropped an argument") {
+						t.Fatalf("error missing custom-operator safety message: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestParameterizedCustomOperatorRejectsPostgreSQLDollarQuotedPlaceholders(t *testing.T) {
 	t.Parallel()
 
