@@ -88,6 +88,10 @@ type ProcessedValue struct {
 	// FieldName is the original schema field name when IsField is true and the
 	// source field is known. Array-scoped aliases may leave this empty.
 	FieldName string
+	// FieldNames carries every possible schema field represented by this SQL
+	// value. Dynamic array sources can resolve the same scoped var against more
+	// than one compatible array element schema.
+	FieldNames []string
 	// FieldHasDefault indicates the field came from a JSONLogic var with a
 	// default value, such as {"var":["age", 18]}.
 	FieldHasDefault bool
@@ -137,6 +141,18 @@ func TypedSQLResult(sql string, kind ExpressionKind, typ ExpressionType) Process
 // SQLFieldResult creates a ProcessedValue marked as a SQL field operand.
 func SQLFieldResult(sql string) ProcessedValue {
 	return ProcessedValue{Value: sql, IsSQL: true, IsField: true}
+}
+
+// SchemaFieldNames returns every schema field represented by this processed
+// value, falling back to FieldName for older single-scope values.
+func (p ProcessedValue) SchemaFieldNames() []string {
+	if len(p.FieldNames) > 0 {
+		return p.FieldNames
+	}
+	if p.FieldName != "" {
+		return []string{p.FieldName}
+	}
+	return nil
 }
 
 // LiteralResult creates a ProcessedValue marked as a literal.

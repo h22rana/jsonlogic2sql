@@ -67,6 +67,32 @@ func nestedScopeAuditSchema() *Schema {
 				{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "blocked"}},
 			},
 		},
+		{
+			Name: "parentGroupA",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{
+					Name: "children",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Name: "y", Type: FieldTypeString},
+					},
+				},
+			},
+		},
+		{
+			Name: "parentGroupB",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{
+					Name: "children",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Name: "z", Type: FieldTypeString},
+					},
+				},
+			},
+		},
 	})
 }
 
@@ -366,6 +392,12 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaRequiredCases_AllDialects(t *
 			logic:     `{"map":[{"if":[{"var":"useProfile"},{"var":"accounts"},{"var":"profile"}]},{"var":"status"}]}`,
 			valueRoot: true,
 			wantError: "array operation on non-array field 'profile' (type: object)",
+		},
+		{
+			name:      "dynamic nested array source rejects field missing from later source scope",
+			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"parentGroupA"},{"var":"parentGroupB"}]},{"map":[{"var":"children"},{"var":"y"}]}]}`,
+			valueRoot: true,
+			wantError: "field 'y' is not defined in schema scope 'parentGroupB.children'",
 		},
 	}
 

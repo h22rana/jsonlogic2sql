@@ -493,8 +493,13 @@ func sameStringSet(left, right []string) bool {
 	return true
 }
 
-func (a *ArrayOperator) scopedSQLFieldResult(sql, fieldName string) ProcessedValue {
+func (a *ArrayOperator) scopedSQLFieldResult(sql string, fieldNames ...string) ProcessedValue {
 	result := SQLFieldResult(sql)
+	fieldNames = normalizeSchemaScopes(fieldNames)
+	fieldName := ""
+	if len(fieldNames) > 0 {
+		fieldName = fieldNames[0]
+	}
 	if fieldName == "" {
 		if a.hasElementType && a.elementType != ExpressionTypeUnknown {
 			result.HasExpressionInfo = true
@@ -504,6 +509,7 @@ func (a *ArrayOperator) scopedSQLFieldResult(sql, fieldName string) ProcessedVal
 		return result
 	}
 	result.FieldName = fieldName
+	result.FieldNames = fieldNames
 	if typ := a.schemaExpressionType(fieldName); typ != ExpressionTypeUnknown {
 		result.HasExpressionInfo = true
 		result.Kind = ExpressionKindValue
@@ -1014,7 +1020,7 @@ func (a *ArrayOperator) arraySourceSchemaScopeInfo(value interface{}) ([]string,
 
 func (a *ArrayOperator) arraySourceFieldNamesFromValue(value interface{}) []string {
 	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
-		return singleSchemaScope(pv.FieldName)
+		return pv.SchemaFieldNames()
 	}
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr[OpVar]; hasVar {
@@ -2742,23 +2748,15 @@ func (a *ArrayOperator) scopedFieldNamesFromVarExpr(varExpr interface{}) []strin
 			return a.scopedFieldNamesForVar(first)
 		case ProcessedValue:
 			if first.IsSQL && first.IsField {
-				return singleSchemaScope(first.FieldName)
+				return first.SchemaFieldNames()
 			}
 		}
 	case ProcessedValue:
 		if v.IsSQL && v.IsField {
-			return singleSchemaScope(v.FieldName)
+			return v.SchemaFieldNames()
 		}
 	}
 	return nil
-}
-
-func (a *ArrayOperator) scopedFieldNameForVar(varName string) string {
-	fieldNames := a.scopedFieldNamesForVar(varName)
-	if len(fieldNames) == 0 {
-		return ""
-	}
-	return fieldNames[0]
 }
 
 func (a *ArrayOperator) scopedFieldNamesForVar(varName string) []string {
@@ -2880,7 +2878,7 @@ func (a *ArrayOperator) rewriteScopedMissingFieldName(fieldName string, allowAcc
 	if !handled {
 		return fieldName, false, nil
 	}
-	return a.scopedSQLFieldResult(mapped, a.scopedFieldNameForVar(fieldName)), true, nil
+	return a.scopedSQLFieldResult(mapped, a.scopedFieldNamesForVar(fieldName)...), true, nil
 }
 
 func (a *ArrayOperator) rewriteAccumulatorVar(varExpr interface{}) (ProcessedValue, bool, error) {
@@ -3947,7 +3945,7 @@ func (a *ArrayOperator) rewriteArrayScopeVar(varExpr interface{}) (interface{}, 
 			return nil, true, err
 		}
 		if handled {
-			return a.scopedSQLFieldResult(mapped, a.scopedFieldNameForVar(varName)), true, nil
+			return a.scopedSQLFieldResult(mapped, a.scopedFieldNamesForVar(varName)...), true, nil
 		}
 		return nil, false, nil
 	}
@@ -3971,11 +3969,11 @@ func (a *ArrayOperator) rewriteArrayScopeVar(varExpr interface{}) (interface{}, 
 			return nil, false, nil
 		}
 		if len(arr) == 1 {
-			return a.scopedSQLFieldResult(mapped, a.scopedFieldNameForVar(varName)), true, nil
+			return a.scopedSQLFieldResult(mapped, a.scopedFieldNamesForVar(varName)...), true, nil
 		}
 		newArr := make([]interface{}, len(arr))
 		copy(newArr, arr)
-		newArr[0] = a.scopedSQLFieldResult(mapped, a.scopedFieldNameForVar(varName))
+		newArr[0] = a.scopedSQLFieldResult(mapped, a.scopedFieldNamesForVar(varName)...)
 		return map[string]interface{}{OpVar: newArr}, true, nil
 	}
 

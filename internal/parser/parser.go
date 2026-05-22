@@ -329,6 +329,7 @@ type expressionResult struct {
 	truthy                  bool
 	fieldValue              bool
 	fieldName               string
+	fieldNames              []string
 	fieldHasDefault         bool
 	fieldDefault            interface{}
 	fieldDefaultKnown       bool
@@ -427,8 +428,9 @@ func withArrayElementType(res expressionResult, elemType operators.ExpressionTyp
 func fieldValueResult(sql string, typ operators.ExpressionType, fieldName ...string) expressionResult {
 	res := valueResult(sql, typ)
 	res.fieldValue = true
-	if len(fieldName) > 0 {
-		res.fieldName = fieldName[0]
+	res.fieldNames = normalizeParserSchemaScopes(fieldName)
+	if len(res.fieldNames) > 0 {
+		res.fieldName = res.fieldNames[0]
 	}
 	return res
 }
@@ -451,7 +453,11 @@ func copyProcessedFieldMetadata(res *expressionResult, pv operators.ProcessedVal
 		return
 	}
 	res.fieldValue = true
+	res.fieldNames = normalizeParserSchemaScopes(pv.SchemaFieldNames())
 	res.fieldName = pv.FieldName
+	if res.fieldName == "" && len(res.fieldNames) > 0 {
+		res.fieldName = res.fieldNames[0]
+	}
 	res.fieldHasDefault = pv.FieldHasDefault
 	res.fieldDefaultKnown = pv.FieldDefaultLiteralKnown
 	res.fieldDefault = pv.FieldDefaultLiteral
@@ -889,7 +895,11 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	}
 	if res.fieldValue {
 		pv.IsField = true
+		pv.FieldNames = normalizeParserSchemaScopes(res.fieldNames)
 		pv.FieldName = res.fieldName
+		if pv.FieldName == "" && len(pv.FieldNames) > 0 {
+			pv.FieldName = pv.FieldNames[0]
+		}
 		pv.FieldHasDefault = res.fieldHasDefault
 		pv.FieldDefaultLiteralKnown = res.fieldDefaultKnown
 		pv.FieldDefaultLiteral = res.fieldDefault
@@ -907,6 +917,25 @@ func operatorResultFromProcessedValue(pv operators.ProcessedValue) operators.Ope
 		res.ArrayElementType = pv.ArrayElementType
 	}
 	return res
+}
+
+func normalizeParserSchemaScopes(scopes []string) []string {
+	if len(scopes) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(scopes))
+	normalized := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope == "" {
+			continue
+		}
+		if _, exists := seen[scope]; exists {
+			continue
+		}
+		seen[scope] = struct{}{}
+		normalized = append(normalized, scope)
+	}
+	return normalized
 }
 
 func processedArgsPreserveParamRefs(args []interface{}) bool {
