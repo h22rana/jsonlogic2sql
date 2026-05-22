@@ -301,6 +301,7 @@ func (p *Parser) parseTruthinessIfParam(
 		return expressionResult{}, "", tperrors.NewInsufficientArgs("if", path, 2, len(args))
 	}
 	var parts []string
+	var paramRefs paramRefPreserver
 	pairLimit := len(args)
 	hasElse := len(args)%2 == 1
 	if hasElse {
@@ -312,18 +313,21 @@ func (p *Parser) parseTruthinessIfParam(
 			return expressionResult{}, "", err
 		}
 		if cond.truthKnown && !cond.truthy {
+			paramRefs.mark(cond)
 			continue
 		}
+		paramRefs.mark(cond)
 		thenRes, thenCondition, err := p.parseTruthinessResultParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
 		if err != nil {
 			return expressionResult{}, "", err
 		}
+		paramRefs.mark(thenRes)
 		if cond.truthKnown && cond.truthy {
 			if len(parts) == 0 {
-				return thenRes, thenCondition, nil
+				return paramRefs.apply(thenRes), thenCondition, nil
 			}
 			sql := fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenCondition)
-			return predicateResult(sql), sql, nil
+			return paramRefs.apply(predicateResult(sql)), sql, nil
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenCondition))
 	}
@@ -339,13 +343,14 @@ func (p *Parser) parseTruthinessIfParam(
 		if err != nil {
 			return expressionResult{}, "", err
 		}
+		paramRefs.mark(elseRes)
 		if len(parts) == 0 {
-			return elseRes, elseCondition, nil
+			return paramRefs.apply(elseRes), elseCondition, nil
 		}
 	}
 	if len(parts) == 0 {
-		return booleanPredicateResult(false), sqlFalse, nil
+		return paramRefs.apply(booleanPredicateResult(false)), sqlFalse, nil
 	}
 	sql := fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseCondition)
-	return predicateResult(sql), sql, nil
+	return paramRefs.apply(predicateResult(sql)), sql, nil
 }

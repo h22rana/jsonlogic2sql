@@ -499,6 +499,7 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		return expressionResult{}, tperrors.NewInsufficientArgs("if", path, 2, len(args))
 	}
 	var parts []string
+	var paramRefs paramRefPreserver
 	pairLimit := len(args)
 	hasElse := len(args)%2 == 1
 	if hasElse {
@@ -512,6 +513,7 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		}
 		if cond.truthKnown && !cond.truthy {
 			if !canRollbackParamRefs(cond) {
+				paramRefs.mark(cond)
 				continue
 			}
 			pc.Restore(conditionCheckpoint)
@@ -520,15 +522,17 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		if cond.truthKnown && cond.truthy && canRollbackParamRefs(cond) {
 			pc.Restore(conditionCheckpoint)
 		}
+		paramRefs.mark(cond)
 		thenRes, err := p.parsePredicateIfOperandParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
+		paramRefs.mark(thenRes)
 		if cond.truthKnown && cond.truthy {
 			if len(parts) == 0 {
-				return thenRes, nil
+				return paramRefs.apply(thenRes), nil
 			}
-			return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL)), nil
+			return paramRefs.apply(predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), thenRes.SQL))), nil
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
@@ -538,15 +542,16 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		if err != nil {
 			return expressionResult{}, err
 		}
+		paramRefs.mark(elseRes)
 		if len(parts) == 0 {
-			return elseRes, nil
+			return paramRefs.apply(elseRes), nil
 		}
 		elseSQL = elseRes.SQL
 	}
 	if len(parts) == 0 {
-		return booleanPredicateResult(false), nil
+		return paramRefs.apply(booleanPredicateResult(false)), nil
 	}
-	return predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL)), nil
+	return paramRefs.apply(predicateResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL))), nil
 }
 
 func (p *Parser) parsePredicateIfConditionParam(
@@ -569,6 +574,7 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 		return expressionResult{}, tperrors.NewInsufficientArgs("if", path, 2, len(args))
 	}
 	var parts []string
+	var paramRefs paramRefPreserver
 	resultRes := literalValueResult("NULL", operators.ExpressionTypeNull, false)
 	typeSet := false
 	mergeResultType := func(res expressionResult) error {
@@ -595,24 +601,27 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 			return expressionResult{}, err
 		}
 		if cond.truthKnown && !cond.truthy {
+			paramRefs.mark(cond)
 			continue
 		}
+		paramRefs.mark(cond)
 		thenRes, err := p.parseExpressionValueParam(args[i+1], tperrors.BuildArrayPath(path, i+1), pc)
 		if err != nil {
 			return expressionResult{}, err
 		}
+		paramRefs.mark(thenRes)
 		if err := mergeResultType(thenRes); err != nil {
 			return expressionResult{}, err
 		}
 		if cond.truthKnown && cond.truthy {
 			if len(parts) == 0 {
-				return thenRes, nil
+				return paramRefs.apply(thenRes), nil
 			}
 			result := valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), valueSQL(thenRes)), valueTypeOf(resultRes))
 			if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
 				result = withArrayElementTypes(result, elemTypes...)
 			}
-			return result, nil
+			return paramRefs.apply(result), nil
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, valueSQL(thenRes)))
 	}
@@ -622,8 +631,9 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 		if err != nil {
 			return expressionResult{}, err
 		}
+		paramRefs.mark(elseRes)
 		if len(parts) == 0 {
-			return elseRes, nil
+			return paramRefs.apply(elseRes), nil
 		}
 		if err := mergeResultType(elseRes); err != nil {
 			return expressionResult{}, err
@@ -631,13 +641,13 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 		elseSQL = valueSQL(elseRes)
 	}
 	if len(parts) == 0 {
-		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
+		return paramRefs.apply(literalValueResult("NULL", operators.ExpressionTypeNull, false)), nil
 	}
 	result := valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL), valueTypeOf(resultRes))
 	if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
 		result = withArrayElementTypes(result, elemTypes...)
 	}
-	return result, nil
+	return paramRefs.apply(result), nil
 }
 
 func (p *Parser) parseValueLogicalParam(operator string, args []interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {

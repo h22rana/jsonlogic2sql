@@ -89,6 +89,14 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 			logic: `{"and":[{"==":[{"always":["x"]},true]},true]}`,
 		},
 		{
+			name:  "and skips folded if with custom condition",
+			logic: `{"and":[{"if":[{"always":["x"]},true,false]},true]}`,
+		},
+		{
+			name:  "double bang folded if preserves custom condition marker",
+			logic: `{"!!":{"if":[{"always":["x"]},true,false]}}`,
+		},
+		{
 			name:      "value comparison folds custom predicate operand",
 			logic:     `{"==":[{"always":["x"]},true]}`,
 			valueMode: true,
@@ -96,6 +104,11 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 		{
 			name:      "value or short-circuits folded custom comparison",
 			logic:     `{"or":[{"==":[{"always":["x"]},true]},"fallback"]}`,
+			valueMode: true,
+		},
+		{
+			name:      "value double bang folded if preserves custom condition marker",
+			logic:     `{"!!":{"if":[{"always":["x"]},true,false]}}`,
 			valueMode: true,
 		},
 	}

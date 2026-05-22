@@ -66,6 +66,26 @@ func preserveParamRefsIfNeeded(res expressionResult, sources ...expressionResult
 	return res
 }
 
+type paramRefPreserver struct {
+	preserve bool
+}
+
+func (p *paramRefPreserver) mark(sources ...expressionResult) {
+	for _, source := range sources {
+		if !canRollbackParamRefs(source) {
+			p.preserve = true
+			return
+		}
+	}
+}
+
+func (p paramRefPreserver) apply(res expressionResult) expressionResult {
+	if p.preserve {
+		res.preserveParamRefs = true
+	}
+	return res
+}
+
 func predicateResult(sql string) expressionResult {
 	switch normalizedSQLBooleanConstant(sql) {
 	case sqlTrue:
