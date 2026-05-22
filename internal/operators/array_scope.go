@@ -797,6 +797,12 @@ func (a *ArrayOperator) arraySourceSchemaScopeInfo(value interface{}) ([]string,
 	if isEmptyArrayLiteral(value) {
 		return nil, true, true
 	}
+	// A JSONLogic if without an else renders as ELSE NULL. Null branches do
+	// not provide an element schema, but they are compatible with typed array
+	// branches for scoped-field validation.
+	if inferLiteralValueExpressionType(value) == ExpressionTypeNull {
+		return nil, true, true
+	}
 	if fieldNames := a.arraySourceFieldNamesFromValue(value); len(fieldNames) > 0 {
 		return fieldNames, false, true
 	}
@@ -899,8 +905,6 @@ func (a *ArrayOperator) ifArraySourceSchemaScope(args []interface{}) ([]string, 
 
 	if hasElse {
 		candidates = append(candidates, args[len(args)-1])
-	} else if len(candidates) > 0 {
-		return nil, false, false
 	}
 	return a.mergeArraySourceSchemaScopes(candidates)
 }

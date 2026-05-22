@@ -236,6 +236,62 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			want:      []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE backupAccounts END", "elem.profile.tier"},
 		},
 		{
+			name:      "map over dynamic if array source without else preserves element schema",
+			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"}]},{"var":"profile.region"}]}`,
+			valueRoot: true,
+			want:      []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE NULL END", "elem.profile.region"},
+		},
+		{
+			name:      "filter over dynamic if array source without else preserves element schema",
+			logic:     `{"filter":[{"if":[{"var":"useBackup"},{"var":"accounts"}]},{"==":[{"var":"profile.tier"},"gold"]}]}`,
+			valueRoot: true,
+			want:      []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE NULL END", "elem.profile.tier ="},
+			paramLen:  1,
+		},
+		{
+			name:     "some over dynamic if array source without else preserves element schema",
+			logic:    `{"some":[{"if":[{"var":"useBackup"},{"var":"accounts"}]},{"==":[{"var":"status"},"active"]}]}`,
+			want:     []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE NULL END", "elem.status ="},
+			paramLen: 1,
+		},
+		{
+			name:     "all over dynamic if array source without else preserves element schema",
+			logic:    `{"all":[{"if":[{"var":"useBackup"},{"var":"accounts"}]},{"==":[{"var":"status"},"active"]}]}`,
+			want:     []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE NULL END", "elem.status ="},
+			paramLen: 1,
+		},
+		{
+			name:     "none over dynamic if array source without else preserves element schema",
+			logic:    `{"none":[{"if":[{"var":"useBackup"},{"var":"accounts"}]},{"==":[{"var":"status"},"active"]}]}`,
+			want:     []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE NULL END", "elem.status ="},
+			paramLen: 1,
+		},
+		{
+			name:      "reduce over dynamic if array source without else preserves element schema",
+			logic:     `{"reduce":[{"if":[{"var":"useBackup"},{"var":"accounts"}]},{"+":[{"var":"accumulator"},{"===":[{"var":"current.status"},"active"]}]},0]}`,
+			valueRoot: true,
+			want:      []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE NULL END", "elem.status ="},
+			paramLen:  2,
+		},
+		{
+			name:      "nested map over dynamic if array source without else preserves nested element schema",
+			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"}]},{"map":[{"var":"transactions"},{"var":"amount"}]}]}`,
+			valueRoot: true,
+			want:      []string{"elem.transactions", "elem1.amount"},
+		},
+		{
+			name:      "map over dynamic if array source with explicit null else preserves element schema",
+			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},null]},{"var":"profile.region"}]}`,
+			valueRoot: true,
+			want:      []string{"CASE WHEN useBackup IS TRUE THEN accounts ELSE NULL END", "elem.profile.region"},
+		},
+		{
+			name:      "map over multi-branch dynamic if array source without else preserves element schema",
+			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"useAlt"},{"var":"backupAccounts"}]},{"var":"profile.tier"}]}`,
+			valueRoot: true,
+			want:      []string{"CASE WHEN useBackup IS TRUE THEN accounts WHEN useAlt IS TRUE THEN backupAccounts ELSE NULL END", "elem.profile.tier"},
+		},
+		{
 			name:      "nested map over dynamic if compatible array sources preserves nested element schema",
 			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"map":[{"var":"transactions"},{"var":"method.type"}]}]}`,
 			valueRoot: true,
@@ -398,6 +454,18 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaRequiredCases_AllDialects(t *
 			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"parentGroupA"},{"var":"parentGroupB"}]},{"map":[{"var":"children"},{"var":"y"}]}]}`,
 			valueRoot: true,
 			wantError: "field 'y' is not defined in schema scope 'parentGroupB.children'",
+		},
+		{
+			name:      "dynamic if array source without else rejects non-array branch",
+			logic:     `{"map":[{"if":[{"var":"useProfile"},{"var":"profile"}]},{"var":"status"}]}`,
+			valueRoot: true,
+			wantError: "array operation on non-array field 'profile' (type: object)",
+		},
+		{
+			name:      "dynamic if array source without else rejects incompatible scoped field types",
+			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"useMetrics"},{"var":"metricAccounts"}]},{"var":"status"}]}`,
+			valueRoot: true,
+			wantError: "field 'status' has incompatible schema types across array source scopes",
 		},
 	}
 
