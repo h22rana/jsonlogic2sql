@@ -2572,6 +2572,38 @@ func TestNewTranspilerWithConfig_WithSchema(t *testing.T) {
 	}
 }
 
+func TestNewTranspilerWithConfigCopiesConfig(t *testing.T) {
+	originalSchema := mustNewSchema([]FieldSchema{
+		{Name: "amount", Type: FieldTypeInteger},
+	})
+	replacementSchema := mustNewSchema([]FieldSchema{
+		{Name: "other", Type: FieldTypeInteger},
+	})
+	config := &TranspilerConfig{
+		Dialect: DialectBigQuery,
+		Schema:  originalSchema,
+	}
+
+	tr, err := NewTranspilerWithConfig(config)
+	if err != nil {
+		t.Fatalf("NewTranspilerWithConfig() unexpected error: %v", err)
+	}
+
+	config.Dialect = DialectPostgreSQL
+	config.Schema = replacementSchema
+
+	if got := tr.GetDialect(); got != DialectBigQuery {
+		t.Fatalf("GetDialect() = %v after caller config mutation, want %v", got, DialectBigQuery)
+	}
+	if _, err := tr.TranspileCondition(`{"==":[{"var":"amount"},1]}`); err != nil {
+		t.Fatalf("TranspileCondition() should keep original schema after caller config mutation: %v", err)
+	}
+	if _, err := tr.TranspileCondition(`{"==":[{"var":"other"},1]}`); err == nil ||
+		!strings.Contains(err.Error(), "field 'other' is not defined in schema") {
+		t.Fatalf("TranspileCondition() error = %v, want original schema to reject replacement schema field", err)
+	}
+}
+
 func TestNewTranspilerWithConfig_NilSchemaPointerRejected(t *testing.T) {
 	var nilSchema *Schema
 	_, err := NewTranspilerWithConfig(&TranspilerConfig{

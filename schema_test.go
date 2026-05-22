@@ -3,6 +3,7 @@ package jsonlogic2sql
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -709,31 +710,39 @@ func TestSchemaFromFile_NotFound(t *testing.T) {
 
 func TestSchemaGetFields(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
+		{Name: "field3", Type: FieldTypeBoolean},
 		{Name: "field1", Type: FieldTypeString},
 		{Name: "field2", Type: FieldTypeInteger},
-		{Name: "field3", Type: FieldTypeBoolean},
 	})
 
 	fields := schema.GetFields()
 
-	if len(fields) != 3 {
-		t.Errorf("GetFields() returned %d fields, want 3", len(fields))
+	want := []string{"field1", "field2", "field3"}
+	if !reflect.DeepEqual(fields, want) {
+		t.Fatalf("GetFields() = %#v, want %#v", fields, want)
+	}
+}
+
+func TestSchemaAllowedValuesAreDefensiveCopies(t *testing.T) {
+	sourceAllowed := []string{"active", "pending"}
+	sourceFields := []FieldSchema{
+		{Name: "status", Type: FieldTypeEnum, AllowedValues: sourceAllowed},
+	}
+	schema := mustNewSchema(sourceFields)
+
+	sourceAllowed[0] = "mutated"
+	sourceFields[0].AllowedValues[1] = "mutated-again"
+	if err := schema.ValidateEnumValue("status", "active"); err != nil {
+		t.Fatalf("ValidateEnumValue(active) error after source mutation = %v", err)
 	}
 
-	// Check that all fields are present (order may vary)
-	fieldMap := make(map[string]bool)
-	for _, f := range fields {
-		fieldMap[f] = true
+	allowed := schema.GetAllowedValues("status")
+	allowed[0] = "changed-by-caller"
+	if err := schema.ValidateEnumValue("status", "active"); err != nil {
+		t.Fatalf("ValidateEnumValue(active) error after returned slice mutation = %v", err)
 	}
-
-	if !fieldMap["field1"] {
-		t.Error("field1 should be in GetFields() result")
-	}
-	if !fieldMap["field2"] {
-		t.Error("field2 should be in GetFields() result")
-	}
-	if !fieldMap["field3"] {
-		t.Error("field3 should be in GetFields() result")
+	if got, want := schema.GetAllowedValues("status"), []string{"active", "pending"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetAllowedValues() = %#v, want %#v", got, want)
 	}
 }
 

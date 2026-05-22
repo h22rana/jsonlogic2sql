@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -269,6 +270,7 @@ func (r *OperatorRegistry) List() []string {
 	for name := range r.handlers {
 		names = append(names, name)
 	}
+	slices.Sort(names)
 	return names
 }
 
@@ -284,15 +286,16 @@ func (r *OperatorRegistry) Clone() *OperatorRegistry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	clone := NewOperatorRegistry()
-	for name, handler := range r.handlers {
-		clone.handlers[name] = handler
-	}
+	maps.Copy(clone.handlers, r.handlers)
 	return clone
 }
 
 // Merge adds all operators from another registry to this one.
 // Existing operators with the same name will be replaced.
 func (r *OperatorRegistry) Merge(other *OperatorRegistry) {
+	if other == nil || other == r {
+		return
+	}
 	other.mu.RLock()
 	defer other.mu.RUnlock()
 	r.mu.Lock()

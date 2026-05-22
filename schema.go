@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -61,7 +62,7 @@ func NewSchema(fields []FieldSchema) (*Schema, error) {
 
 func (s *Schema) addField(prefix string, field FieldSchema, rootAccessible bool) {
 	fieldName := joinSchemaPath(prefix, field.Name)
-	stored := field
+	stored := cloneFieldSchema(field)
 	stored.Name = fieldName
 	s.fields[fieldName] = stored
 	if rootAccessible {
@@ -77,6 +78,24 @@ func (s *Schema) addField(prefix string, field FieldSchema, rootAccessible bool)
 	for _, child := range field.ElementFields {
 		s.addField(fieldName, child, false)
 	}
+}
+
+func cloneFieldSchemas(fields []FieldSchema) []FieldSchema {
+	if len(fields) == 0 {
+		return nil
+	}
+	cloned := make([]FieldSchema, len(fields))
+	for i, field := range fields {
+		cloned[i] = cloneFieldSchema(field)
+	}
+	return cloned
+}
+
+func cloneFieldSchema(field FieldSchema) FieldSchema {
+	field.AllowedValues = slices.Clone(field.AllowedValues)
+	field.Fields = cloneFieldSchemas(field.Fields)
+	field.ElementFields = cloneFieldSchemas(field.ElementFields)
+	return field
 }
 
 func (s *Schema) addArrayScope(scopePath string, elementFields []FieldSchema) {
@@ -298,6 +317,7 @@ func (s *Schema) GetFields() []string {
 	for name := range s.fields {
 		fields = append(fields, name)
 	}
+	slices.Sort(fields)
 	return fields
 }
 
@@ -334,7 +354,7 @@ func (s *Schema) GetAllowedValues(fieldName string) []string {
 		return nil
 	}
 	if field, exists := s.fields[fieldName]; exists {
-		return field.AllowedValues
+		return slices.Clone(field.AllowedValues)
 	}
 	return nil
 }

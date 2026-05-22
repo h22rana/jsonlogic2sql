@@ -56,25 +56,7 @@ func (t *Transpiler) SetSchema(schema *Schema) error {
 // and schema. Dialect and schema are required. Use NewSchema([]FieldSchema{})
 // for literal-only JSONLogic that does not access fields.
 func NewTranspiler(d Dialect, schema *Schema) (*Transpiler, error) {
-	if err := d.Validate(); err != nil {
-		return nil, err
-	}
-	if schema == nil {
-		return nil, fmt.Errorf("schema is required")
-	}
-
-	opConfig := operators.NewOperatorConfig(d, schema)
-	t := &Transpiler{
-		parser:         parser.NewParser(opConfig),
-		operatorConfig: opConfig,
-		config: &TranspilerConfig{
-			Dialect: d,
-			Schema:  schema,
-		},
-		customOperators: NewOperatorRegistry(),
-	}
-	t.setupCustomOperatorLookup()
-	return t, nil
+	return newTranspiler(TranspilerConfig{Dialect: d, Schema: schema})
 }
 
 // NewTranspilerWithConfig creates a new transpiler instance with custom configuration.
@@ -83,6 +65,10 @@ func NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
+	return newTranspiler(*config)
+}
+
+func newTranspiler(config TranspilerConfig) (*Transpiler, error) {
 	if err := config.Dialect.Validate(); err != nil {
 		return nil, err
 	}
@@ -91,10 +77,11 @@ func NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error) {
 	}
 
 	opConfig := operators.NewOperatorConfig(config.Dialect, config.Schema)
+	ownedConfig := config
 	t := &Transpiler{
 		parser:          parser.NewParser(opConfig),
 		operatorConfig:  opConfig,
-		config:          config,
+		config:          &ownedConfig,
 		customOperators: NewOperatorRegistry(),
 	}
 	t.setupCustomOperatorLookup()

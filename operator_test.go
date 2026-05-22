@@ -2,6 +2,7 @@ package jsonlogic2sql
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -119,12 +120,13 @@ func TestOperatorRegistry(t *testing.T) {
 
 	t.Run("List", func(t *testing.T) {
 		registry := NewOperatorRegistry()
-		registry.Register("length", &LengthOperator{})
 		registry.Register("upper", &UpperOperator{})
+		registry.Register("length", &LengthOperator{})
 
 		list := registry.List()
-		if len(list) != 2 {
-			t.Errorf("expected 2 operators, got %d", len(list))
+		want := []string{"length", "upper"}
+		if !reflect.DeepEqual(list, want) {
+			t.Errorf("List() = %#v, want %#v", list, want)
 		}
 	})
 
@@ -168,6 +170,18 @@ func TestOperatorRegistry(t *testing.T) {
 		}
 		if !registry1.Has("upper") {
 			t.Error("expected registry1 to have upper after merge")
+		}
+	})
+
+	t.Run("Merge nil and self are no-op", func(t *testing.T) {
+		registry := NewOperatorRegistry()
+		registry.Register("length", &LengthOperator{})
+
+		registry.Merge(nil)
+		registry.Merge(registry)
+
+		if got, want := registry.List(), []string{"length"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("List() after no-op merges = %#v, want %#v", got, want)
 		}
 	})
 }
@@ -404,12 +418,13 @@ func TestTranspilerCustomOperators(t *testing.T) {
 
 	t.Run("ListCustomOperators", func(t *testing.T) {
 		transpiler := mustTestTranspiler(t, DialectBigQuery)
-		transpiler.RegisterOperator("length", &LengthOperator{})
 		transpiler.RegisterOperator("upper", &UpperOperator{})
+		transpiler.RegisterOperator("length", &LengthOperator{})
 
 		list := transpiler.ListCustomOperators()
-		if len(list) != 2 {
-			t.Errorf("expected 2 operators, got %d", len(list))
+		want := []string{"length", "upper"}
+		if !reflect.DeepEqual(list, want) {
+			t.Errorf("ListCustomOperators() = %#v, want %#v", list, want)
 		}
 	})
 
