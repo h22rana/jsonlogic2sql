@@ -124,13 +124,13 @@ func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *pa
 				copyProcessedFieldMetadata(&res, pv)
 				res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 				res.preserveParamRefs = pv.PreserveParamRefs
-				return res, nil
+				return p.supportedValueResult(res, path)
 			}
 			res := fieldOrValueResult(pv.Value, operators.ExpressionTypeUnknown, pv.IsField, pv.FieldName)
 			copyProcessedFieldMetadata(&res, pv)
 			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
 			res.preserveParamRefs = pv.PreserveParamRefs
-			return res, nil
+			return p.supportedValueResult(res, path)
 		}
 		return p.parseExpressionValueParam(pv.Value, path, pc)
 	}
@@ -312,7 +312,10 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 			return withVarDefaultMetadata(res, args), nil
 		}
 		fieldName := varFieldName(args)
-		return withVarDefaultMetadata(fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), args), nil
+		return p.supportedValueResult(
+			withVarDefaultMetadata(fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), args),
+			path,
+		)
 	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", operators.OpAll, operators.OpSome, operators.OpNone:
 		return p.parseOperatorPredicateParam(operator, args, path, pc)
 	case "!":

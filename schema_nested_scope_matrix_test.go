@@ -456,6 +456,12 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaRequiredCases_AllDialects(t *
 			wantError: "field 'y' is not defined in schema scope 'parentGroupB.children'",
 		},
 		{
+			name:      "scoped value branch rejects object field result",
+			logic:     `{"map":[{"var":"accounts"},{"if":[{"var":"status"},{"var":"profile"},"fallback"]}]}`,
+			valueRoot: true,
+			wantError: "object field 'accounts.profile' cannot be used as a value expression",
+		},
+		{
 			name:      "dynamic if array source without else rejects non-array branch",
 			logic:     `{"map":[{"if":[{"var":"useProfile"},{"var":"profile"}]},{"var":"status"}]}`,
 			valueRoot: true,

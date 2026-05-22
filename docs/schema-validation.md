@@ -95,7 +95,10 @@ element children, must include a non-empty `name` and one of the supported
 `type` values. Enum fields must include at least one `allowedValues` entry;
 enum values must be unique, and non-enum fields cannot use `allowedValues`.
 Object `fields` and array `elementFields` are optional so schemas can represent
-object fields and primitive-array fields without exposing named children.
+object fields and primitive-array fields without exposing named children. Object
+fields are schema containers: `{"var":"profile.status"}` is valid when `status`
+is declared, but returning `{"var":"profile"}` as a value expression is rejected
+because object/struct value SQL is not portable across supported dialects.
 Flattened field paths must be unique and cannot contain empty path segments
 such as `profile..status`.
 
@@ -188,7 +191,7 @@ element of the nested `details.events` array. Enter the nested array first:
 | `number` | `FieldTypeNumber` | Numeric fields (float/decimal) |
 | `boolean` | `FieldTypeBoolean` | Boolean fields |
 | `array` | `FieldTypeArray` | Array fields |
-| `object` | `FieldTypeObject` | Object/struct fields |
+| `object` | `FieldTypeObject` | Object/struct container fields; use nested child paths in JSONLogic value expressions |
 | `enum` | `FieldTypeEnum` | Enum fields with allowed values |
 
 ## Type-Aware Operators

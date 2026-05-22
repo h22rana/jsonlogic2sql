@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	tperrors "github.com/h22rana/jsonlogic2sql/internal/errors"
 	"github.com/h22rana/jsonlogic2sql/internal/operators"
 	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
@@ -183,6 +184,36 @@ func fieldOrValueResult(sql string, typ operators.ExpressionType, isField bool, 
 		return fieldValueResult(sql, typ, fieldName...)
 	}
 	return valueResult(sql, typ)
+}
+
+func (p *Parser) supportedValueResult(res expressionResult, path string) (expressionResult, error) {
+	if err := p.rejectObjectFieldValue(res, path); err != nil {
+		return expressionResult{}, err
+	}
+	return res, nil
+}
+
+func (p *Parser) rejectObjectFieldValue(res expressionResult, path string) error {
+	if !res.fieldValue {
+		return nil
+	}
+	for _, fieldName := range res.schemaFieldNames() {
+		if p.config.Schema.GetFieldType(fieldName) == "object" {
+			return tperrors.New(tperrors.ErrInvalidArgument, "", path,
+				fmt.Sprintf("object field '%s' cannot be used as a value expression; reference a nested field instead", fieldName))
+		}
+	}
+	return nil
+}
+
+func (res expressionResult) schemaFieldNames() []string {
+	if len(res.fieldNames) > 0 {
+		return res.fieldNames
+	}
+	if res.fieldName != "" {
+		return []string{res.fieldName}
+	}
+	return nil
 }
 
 func literalValueResult(sql string, typ operators.ExpressionType, truthy bool) expressionResult {

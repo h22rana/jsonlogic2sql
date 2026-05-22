@@ -146,6 +146,8 @@ func main() {
 
 > **Schema Is Required:** Field-accessing JSONLogic must be transpiled with a schema. Use `NewSchema(nil)` only for literal-only expressions; an empty schema rejects `var` field access.
 
+> **Object Fields:** `object` schema fields are containers for nested scalar, enum, object, or array paths. Reference nested fields such as `profile.status`; returning the object container itself from `TranspileValue` is rejected because object/struct value SQL is not portable across supported dialects.
+
 > **`in` Operator Inference:** The schema determines whether `in` means string containment or array membership for field operands. Declare field types for deterministic behavior, especially with complex expressions.
 
 > **String Containment:** JSONLogic string `in` follows JavaScript `indexOf`, so an empty string needle matches any non-null string haystack, including an empty string haystack.

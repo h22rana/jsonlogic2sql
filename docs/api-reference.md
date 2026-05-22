@@ -361,6 +361,9 @@ and array element fields. Object schemas use `Fields`; array schemas use
 requires `Type: FieldTypeArray`. Enum schemas require at least one
 unique `AllowedValues` entry, and non-enum schemas cannot set `AllowedValues`.
 Flattened field paths must be unique and cannot contain empty path segments.
+Object fields are containers for nested schema paths; value expressions must
+reference supported nested child fields rather than returning the object
+container itself.
 For example:
 
 ```json
@@ -403,7 +406,7 @@ const (
     FieldTypeNumber  FieldType = "number"  // Numeric field type (float/decimal)
     FieldTypeBoolean FieldType = "boolean" // Boolean field type
     FieldTypeArray   FieldType = "array"   // Array field type
-    FieldTypeObject  FieldType = "object"  // Object/struct field type
+    FieldTypeObject  FieldType = "object"  // Object/struct container field type
     FieldTypeEnum    FieldType = "enum"    // Enum field type (requires AllowedValues)
 )
 ```

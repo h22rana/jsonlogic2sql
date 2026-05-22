@@ -4700,6 +4700,100 @@ func TestTranspileValue_IfRejectsArrayBranchesWithIncompatibleElementTypesAllDia
 	}
 }
 
+func TestTranspileValue_RejectsObjectFieldsInValueBranchesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "if then branch is root object field",
+			logic: `{"if":[{"var":"flag"},{"var":"profile"},"fallback"]}`,
+		},
+		{
+			name:  "if else branch is root object field",
+			logic: `{"if":[{"var":"flag"},"fallback",{"var":"metadata"}]}`,
+		},
+		{
+			name:  "or branch is root object field",
+			logic: `{"or":[false,{"var":"profile"}]}`,
+		},
+		{
+			name:  "and branch is root object field",
+			logic: `{"and":[true,{"var":"metadata"}]}`,
+		},
+		{
+			name:  "direct root object value field",
+			logic: `{"var":"profile"}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+
+					if sql, err := tr.TranspileValue(tt.logic); err == nil ||
+						!strings.Contains(err.Error(), "object field") {
+						t.Fatalf("TranspileValue() SQL = %q error = %v, want object field value error", sql, err)
+					}
+
+					if sql, params, err := tr.TranspileParameterizedValue(tt.logic); err == nil ||
+						!strings.Contains(err.Error(), "object field") {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q params = %#v error = %v, want object field value error",
+							sql, params, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_AllowsNestedScalarFieldsUnderObjectsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"if":[{"var":"flag"},{"var":"profile.status"},"fallback"]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			got, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if !strings.Contains(got, "profile.status") {
+				t.Fatalf("TranspileValue() = %q, want nested scalar object field", got)
+			}
+
+			gotParam, gotParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if !strings.Contains(gotParam, "profile.status") {
+				t.Fatalf("TranspileParameterizedValue() = %q, want nested scalar object field", gotParam)
+			}
+			if wantParams := []QueryParam{{Name: "p1", Value: "fallback"}}; !reflect.DeepEqual(gotParams, wantParams) {
+				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
+			}
+		})
+	}
+}
+
 func TestTranspileValue_IfAllowsArrayBranchesWithCompatibleElementTypesAllDialects(t *testing.T) {
 	t.Parallel()
 
