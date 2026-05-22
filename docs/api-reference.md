@@ -489,7 +489,7 @@ types, invalid nested `fields` / `elementFields` usage, invalid enum metadata,
 duplicate flattened field paths, empty path segments, quote characters, or
 SQL-control punctuation. Field path segments must be raw, unquoted identifier
 tokens containing only letters, digits, and underscores. Segments outside the
-portable unquoted ASCII shape, such as `24h` and `名前`, are accepted and quoted
+portable unquoted ASCII shape, such as `24h` and `café`, are accepted and quoted
 automatically by the transpiler.
 
 ### ValidateSchemaFields

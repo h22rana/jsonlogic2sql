@@ -659,16 +659,11 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 		return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeString), nil
 	})
 
-	// normalizeWaveDash operator converts wave dash variants to ASCII tilde
-	// U+301C (〜) wave dash → ~
-	// U+FF5E (～) fullwidth tilde → ~
-	// SQL: REGEXP_REPLACE(column, '[〜～]', '~')
 	_ = transpiler.RegisterOperatorFunc("normalizeWaveDash", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
 		if len(args) != 1 {
 			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("normalizeWaveDash requires exactly 1 argument")
 		}
-		// REGEXP_REPLACE to convert both wave dash (U+301C) and fullwidth tilde (U+FF5E) to ASCII tilde
-		sql := fmt.Sprintf("REGEXP_REPLACE(%s, '[〜～]', '~')", args[0].SQL)
+		sql := fmt.Sprintf("REGEXP_REPLACE(%s, '[\\u301C\\uFF5E]', '~')", args[0].SQL)
 		return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeString), nil
 	})
 

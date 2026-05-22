@@ -93,7 +93,7 @@ func TestNeedsQuoting(t *testing.T) {
 		{"10m", true},
 		{"120d", true},
 		{"\uff124h", true},
-		{"名前", true},
+		{"café", true},
 		{"col-name", true},
 		{"has space", true},
 		{"", false},
@@ -115,7 +115,7 @@ func TestIsSafeIdentifierSegment(t *testing.T) {
 	}{
 		{"name", true},
 		{"user_name", true},
-		{"名前", true},
+		{"café", true},
 		{"\uff124h", true},
 		{"", false},
 		{"col-name", false},

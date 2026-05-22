@@ -2069,9 +2069,9 @@ func TestAdditionalEdgeCases(t *testing.T) {
 			hasError: false,
 		},
 		{
-			name:     "Japanese with SQL-like parentheses should be quoted",
-			input:    `{"==": [{"var": "shop"}, "SPA(スパ)"]}`,
-			expected: "shop = 'SPA(スパ)'",
+			name:     "unicode with SQL-like parentheses should be quoted",
+			input:    `{"==": [{"var": "shop"}, "SPA(café)"]}`,
+			expected: "shop = 'SPA(café)'",
 			hasError: false,
 		},
 		{

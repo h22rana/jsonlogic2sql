@@ -9,7 +9,7 @@ A Go library that converts JSON Logic expressions into SQL predicate and value e
 - **Parameterized Queries**: Generate SQL with bind placeholders (`@p1`, `$1`) and separate parameter values for safe execution
 - **Custom Operators**: Extensible registry pattern for custom SQL functions
 - **Schema Validation**: Required field schema for strict column validation, including nested object fields and array element fields
-- **Identifier Quoting**: Path segments such as `24h`, `7d`, and `名前` are quoted per dialect
+- **Identifier Quoting**: Path segments such as `24h`, `7d`, and `café` are quoted per dialect
 - **Structured Errors**: Error codes and JSONPath locations for debugging
 - **Regression Matrices**: Cross-dialect matrix tests for nested built-in and custom operator flows
 - **Array Scope Safety**: Array lambdas use JSONLogic element-relative vars while nested operators keep aliases distinct in generated SQL
@@ -140,7 +140,7 @@ func main() {
 
 > **Array Membership:** JSONLogic `in` over arrays follows JavaScript `indexOf` semantics. Literal array members are matched strictly and are not coerced to the left field's schema type; for example, a string field tested against `[5960, 9000]` folds to `FALSE`. Runtime array-field membership is emitted with null-safe element equality so `null in [null]` stays true across SQL dialects.
 
-> **Identifier Quoting:** JSON Logic `var` names and schema field names should use raw, unquoted identifier segments containing only letters, digits, and underscores. The transpiler quotes segments outside the portable unquoted ASCII shape automatically, for example `fixture.history.24h.events.total` becomes ``fixture.history.`24h`.events.total`` for BigQuery/Spanner/ClickHouse and `fixture.history."24h".events.total` for PostgreSQL/DuckDB; Unicode names such as `名前` are accepted and quoted the same way. `NewSchema` returns an error when schema field names contain quote characters or SQL-control punctuation; use raw identifiers and let the transpiler apply dialect-specific quoting.
+> **Identifier Quoting:** JSON Logic `var` names and schema field names should use raw, unquoted identifier segments containing only letters, digits, and underscores. The transpiler quotes segments outside the portable unquoted ASCII shape automatically, for example `fixture.history.24h.events.total` becomes ``fixture.history.`24h`.events.total`` for BigQuery/Spanner/ClickHouse and `fixture.history."24h".events.total` for PostgreSQL/DuckDB; Unicode names such as `café` are accepted and quoted the same way. `NewSchema` returns an error when schema field names contain quote characters or SQL-control punctuation; use raw identifiers and let the transpiler apply dialect-specific quoting.
 
 > **Condition vs Value APIs:** `TranspileCondition` returns SQL predicates that callers can put after `WHERE`. `TranspileValue` returns SQL value expressions. Value-producing JSONLogic such as `{"or":[false,"fallback"]}` is valid in value mode, but is rejected in condition mode instead of generating non-portable SQL like `FALSE OR 'fallback'`.
 

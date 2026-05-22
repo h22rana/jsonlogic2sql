@@ -311,12 +311,12 @@ func TestIdentifierQuotingRegression_UnicodeSchemaSegments_AllDialects(t *testin
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "metrics.名前.count", Type: FieldTypeInteger},
+		{Name: "metrics.café.count", Type: FieldTypeInteger},
 		{
 			Name: "events",
 			Type: FieldTypeArray,
 			ElementFields: []FieldSchema{
-				{Name: "名前", Type: FieldTypeString},
+				{Name: "café", Type: FieldTypeString},
 			},
 		},
 	})
@@ -330,43 +330,43 @@ func TestIdentifierQuotingRegression_UnicodeSchemaSegments_AllDialects(t *testin
 	}{
 		{
 			dialect:     DialectBigQuery,
-			rootInline:  "metrics.`名前`.count >= 10",
-			rootParam:   "metrics.`名前`.count >= @p1",
-			arrayInline: "ARRAY(SELECT elem.`名前` FROM UNNEST(events) AS elem)",
-			arrayParam:  "ARRAY(SELECT elem.`名前` FROM UNNEST(events) AS elem)",
+			rootInline:  "metrics.`café`.count >= 10",
+			rootParam:   "metrics.`café`.count >= @p1",
+			arrayInline: "ARRAY(SELECT elem.`café` FROM UNNEST(events) AS elem)",
+			arrayParam:  "ARRAY(SELECT elem.`café` FROM UNNEST(events) AS elem)",
 		},
 		{
 			dialect:     DialectSpanner,
-			rootInline:  "metrics.`名前`.count >= 10",
-			rootParam:   "metrics.`名前`.count >= @p1",
-			arrayInline: "ARRAY(SELECT elem.`名前` FROM UNNEST(events) AS elem)",
-			arrayParam:  "ARRAY(SELECT elem.`名前` FROM UNNEST(events) AS elem)",
+			rootInline:  "metrics.`café`.count >= 10",
+			rootParam:   "metrics.`café`.count >= @p1",
+			arrayInline: "ARRAY(SELECT elem.`café` FROM UNNEST(events) AS elem)",
+			arrayParam:  "ARRAY(SELECT elem.`café` FROM UNNEST(events) AS elem)",
 		},
 		{
 			dialect:     DialectPostgreSQL,
-			rootInline:  `metrics."名前".count >= 10`,
-			rootParam:   `metrics."名前".count >= $1`,
-			arrayInline: `ARRAY(SELECT elem."名前" FROM UNNEST(events) AS elem)`,
-			arrayParam:  `ARRAY(SELECT elem."名前" FROM UNNEST(events) AS elem)`,
+			rootInline:  `metrics."café".count >= 10`,
+			rootParam:   `metrics."café".count >= $1`,
+			arrayInline: `ARRAY(SELECT elem."café" FROM UNNEST(events) AS elem)`,
+			arrayParam:  `ARRAY(SELECT elem."café" FROM UNNEST(events) AS elem)`,
 		},
 		{
 			dialect:     DialectDuckDB,
-			rootInline:  `metrics."名前".count >= 10`,
-			rootParam:   `metrics."名前".count >= $1`,
-			arrayInline: `ARRAY(SELECT elem."名前" FROM UNNEST(events) AS elem)`,
-			arrayParam:  `ARRAY(SELECT elem."名前" FROM UNNEST(events) AS elem)`,
+			rootInline:  `metrics."café".count >= 10`,
+			rootParam:   `metrics."café".count >= $1`,
+			arrayInline: `ARRAY(SELECT elem."café" FROM UNNEST(events) AS elem)`,
+			arrayParam:  `ARRAY(SELECT elem."café" FROM UNNEST(events) AS elem)`,
 		},
 		{
 			dialect:     DialectClickHouse,
-			rootInline:  "metrics.`名前`.count >= 10",
-			rootParam:   "metrics.`名前`.count >= @p1",
-			arrayInline: "arrayMap(elem -> elem.`名前`, events)",
-			arrayParam:  "arrayMap(elem -> elem.`名前`, events)",
+			rootInline:  "metrics.`café`.count >= 10",
+			rootParam:   "metrics.`café`.count >= @p1",
+			arrayInline: "arrayMap(elem -> elem.`café`, events)",
+			arrayParam:  "arrayMap(elem -> elem.`café`, events)",
 		},
 	}
 
-	rootLogic := `{">=": [{"var": "metrics.名前.count"}, 10]}`
-	arrayLogic := `{"map":[{"var":"events"},{"var":"名前"}]}`
+	rootLogic := `{">=": [{"var": "metrics.café.count"}, 10]}`
+	arrayLogic := `{"map":[{"var":"events"},{"var":"café"}]}`
 
 	for _, tt := range tests {
 		t.Run(tt.dialect.String(), func(t *testing.T) {

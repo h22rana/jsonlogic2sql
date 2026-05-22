@@ -40,7 +40,7 @@ vars preserve the `COALESCE` expression while applying schema-required coercion 
 the comparison literal. The default value is emitted as provided; visible enum
 defaults are validated when enum values are configured.
 
-> **Note:** Path segments outside the portable unquoted ASCII shape, such as numeric-leading (`24h`, `7d`) or Unicode (`名前`) segments, are automatically quoted using the dialect-appropriate character. See [Identifier Quoting](dialects.md#identifier-quoting) for details.
+> **Note:** Path segments outside the portable unquoted ASCII shape, such as numeric-leading (`24h`, `7d`) or Unicode (`café`) segments, are automatically quoted using the dialect-appropriate character. See [Identifier Quoting](dialects.md#identifier-quoting) for details.
 
 ### Missing Field Check (Single)
 

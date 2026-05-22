@@ -43,13 +43,13 @@ Path segments outside the portable unquoted ASCII identifier shape (for example 
 
 | Dialect | Quote Character | Example |
 |---------|----------------|---------|
-| BigQuery | Backtick (`` ` ``) | `` fixture.history.`24h`.`名前`.total `` |
-| Spanner | Backtick (`` ` ``) | `` fixture.history.`24h`.`名前`.total `` |
-| PostgreSQL | Double quote (`"`) | `fixture.history."24h"."名前".total` |
-| DuckDB | Double quote (`"`) | `fixture.history."24h"."名前".total` |
-| ClickHouse | Backtick (`` ` ``) | `` fixture.history.`24h`.`名前`.total `` |
+| BigQuery | Backtick (`` ` ``) | `` fixture.history.`24h`.`café`.total `` |
+| Spanner | Backtick (`` ` ``) | `` fixture.history.`24h`.`café`.total `` |
+| PostgreSQL | Double quote (`"`) | `fixture.history."24h"."café".total` |
+| DuckDB | Double quote (`"`) | `fixture.history."24h"."café".total` |
+| ClickHouse | Backtick (`` ` ``) | `` fixture.history.`24h`.`café`.total `` |
 
-ASCII segments that only contain letters, digits, and underscores (and don't start with a digit) remain unquoted. Unicode letters and digits are accepted by schema validation, but are quoted for portable SQL output. The same per-segment quoting is applied inside array lambdas such as `{"var":"24h"}` or `{"var":"名前"}`, inside reduce scopes such as `{"var":"current.24h"}`, and before variable references are passed to custom operators.
+ASCII segments that only contain letters, digits, and underscores (and don't start with a digit) remain unquoted. Unicode letters and digits are accepted by schema validation, but are quoted for portable SQL output. The same per-segment quoting is applied inside array lambdas such as `{"var":"24h"}` or `{"var":"café"}`, inside reduce scopes such as `{"var":"current.24h"}`, and before variable references are passed to custom operators.
 
 ## Dialect-Specific SQL Generation
 

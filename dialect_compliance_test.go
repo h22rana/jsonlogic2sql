@@ -577,8 +577,8 @@ func TestEdgeCasesSpecialCharacters(t *testing.T) {
 		expected string
 	}{
 		{"single quote in string", `{"==": [{"var": "name"}, "O'Brien"]}`, "name = 'O''Brien'"},
-		{"unicode characters", `{"==": [{"var": "text"}, "日本語"]}`, "text = '日本語'"},
-		{"unicode with parentheses", `{"==": [{"var": "shop"}, "SPA(スパ)"]}`, "shop = 'SPA(スパ)'"},
+		{"unicode characters", `{"==": [{"var": "text"}, "café"]}`, "text = 'café'"},
+		{"unicode with parentheses", `{"==": [{"var": "shop"}, "SPA(café)"]}`, "shop = 'SPA(café)'"},
 		{"empty string", `{"==": [{"var": "text"}, ""]}`, "text = ''"},
 		{"string with spaces", `{"==": [{"var": "name"}, "John Doe"]}`, "name = 'John Doe'"},
 		{"string with SQL keywords", `{"==": [{"var": "desc"}, "SELECT * FROM users"]}`, "desc = 'SELECT * FROM users'"},

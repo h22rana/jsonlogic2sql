@@ -194,7 +194,7 @@ The transpiler preserves JSON Logic variable names in the SQL output, with autom
 - Segments outside the portable unquoted ASCII shape are quoted automatically:
   - BigQuery/Spanner/ClickHouse: `fixture.history.24h.events.total` → `` fixture.history.`24h`.events.total ``
   - PostgreSQL/DuckDB: `fixture.history.24h.events.total` → `fixture.history."24h".events.total`
-  - Unicode: `profile.名前` → `` profile.`名前` `` on BigQuery/Spanner/ClickHouse and `profile."名前"` on PostgreSQL/DuckDB
+  - Unicode: `profile.café` → `` profile.`café` `` on BigQuery/Spanner/ClickHouse and `profile."café"` on PostgreSQL/DuckDB
 
 ## Next Steps
 
