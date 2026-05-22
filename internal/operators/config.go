@@ -197,6 +197,21 @@ func (c *OperatorConfig) ArrayLiteral(elements []string) (string, error) {
 	return fmt.Sprintf("[%s]", body), nil
 }
 
+// ValidateArrayLiteralElementTypes rejects array literal shapes that the target
+// dialect cannot represent directly.
+func (c *OperatorConfig) ValidateArrayLiteralElementTypes(elementTypes []ExpressionType) error {
+	if len(elementTypes) == 0 || elementTypes[0] != ExpressionTypeArray {
+		return nil
+	}
+	switch c.GetDialect() {
+	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner:
+		return fmt.Errorf("%s does not support array literals whose elements are arrays", c.GetDialect())
+	case dialect.DialectPostgreSQL, dialect.DialectDuckDB, dialect.DialectClickHouse:
+		return nil
+	}
+	return nil
+}
+
 // StringCast renders a dialect-specific cast to a SQL string type.
 func (c *OperatorConfig) StringCast(expr string) string {
 	switch c.GetDialect() {

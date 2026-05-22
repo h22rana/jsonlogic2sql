@@ -77,6 +77,10 @@ have enough type context. Foldable contexts that do not need to emit the empty
 array, such as value fallbacks and empty-array `all`/`some`/`none` predicates,
 can still fold normally.
 
+BigQuery and Spanner do not support array literals whose elements are arrays.
+The transpiler rejects direct nested-array literal shapes in those dialects
+instead of emitting invalid SQL such as `[[]]` or `[[1]]`.
+
 ## SQL Function Reference by Dialect
 
 | Function | BigQuery | Spanner | PostgreSQL | DuckDB | ClickHouse |

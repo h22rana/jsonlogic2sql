@@ -655,8 +655,12 @@ func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, []op
 		}
 		parts[i] = valueSQL(res)
 	}
+	elementTypes := normalizeExpressionTypes(commonTypes)
+	if err := p.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
+		return "", nil, err
+	}
 	sql, err := p.config.ArrayLiteral(parts)
-	return sql, normalizeExpressionTypes(commonTypes), err
+	return sql, elementTypes, err
 }
 
 func (p *Parser) arrayLiteralToSQLParam(
@@ -677,8 +681,12 @@ func (p *Parser) arrayLiteralToSQLParam(
 		}
 		parts[i] = valueSQL(res)
 	}
+	elementTypes := normalizeExpressionTypes(commonTypes)
+	if err := p.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
+		return "", nil, err
+	}
 	sql, err := p.config.ArrayLiteral(parts)
-	return sql, normalizeExpressionTypes(commonTypes), err
+	return sql, elementTypes, err
 }
 
 func expressionResultTypeChain(res expressionResult) []operators.ExpressionType {

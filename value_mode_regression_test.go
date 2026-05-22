@@ -8,6 +8,10 @@ import (
 	"testing"
 )
 
+func dialectRejectsArrayLiteralElements(d Dialect) bool {
+	return d == DialectBigQuery || d == DialectSpanner
+}
+
 func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
 	t.Parallel()
 
@@ -195,6 +199,45 @@ func TestTranspileValue_ArraySourcesRejectMultiKeyVarObjectsAllDialects(t *testi
 					sql, params, err := tr.TranspileParameterizedCondition(logic)
 					if !IsErrorCode(err, ErrMultipleKeys) {
 						t.Fatalf("TranspileParameterizedCondition() error = %v, want %s (SQL %q params %#v)",
+							err, ErrMultipleKeys, sql, params)
+					}
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_ReduceAggregatePatternsRejectMultiKeyObjectsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		`{"reduce":[{"var":"arr"},{"+":[{"var":"accumulator"},{"var":"current"}],"bad":[]},0]}`,
+		`{"reduce":[{"var":"arr"},{"+":[{"var":"accumulator","bad":[]},{"var":"current"}]},0]}`,
+		`{"reduce":[{"var":"arr"},{"+":[{"var":"accumulator"},{"var":"current","bad":[]}]},0]}`,
+		`{"reduce":[{"var":"arr"},{"min":[{"var":"accumulator"},{"var":"current"}],"bad":[]},0]}`,
+		`{"reduce":[{"var":"arr"},{"max":[{"var":"accumulator"},{"var":"current","bad":[]}]},0]}`,
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, logic := range tests {
+				t.Run(logic, func(t *testing.T) {
+					if _, err := tr.TranspileValue(logic); !IsErrorCode(err, ErrMultipleKeys) {
+						t.Fatalf("TranspileValue() error = %v, want %s", err, ErrMultipleKeys)
+					}
+					sql, params, err := tr.TranspileParameterizedValue(logic)
+					if !IsErrorCode(err, ErrMultipleKeys) {
+						t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
 							err, ErrMultipleKeys, sql, params)
 					}
 					if len(params) != 0 {
@@ -786,12 +829,13 @@ func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name           string
-		logic          string
-		rejectPostgres bool
-		wantSQL        func(Dialect) string
-		wantParamSQL   func(Dialect) string
-		wantParams     []QueryParam
+		name                string
+		logic               string
+		rejectPostgres      bool
+		rejectArrayElements bool
+		wantSQL             func(Dialect) string
+		wantParamSQL        func(Dialect) string
+		wantParams          []QueryParam
 	}{
 		{
 			name:           "merge all empty",
@@ -827,9 +871,10 @@ func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
 			},
 		},
 		{
-			name:           "nested empty array literal",
-			logic:          `[[]]`,
-			rejectPostgres: true,
+			name:                "nested empty array literal",
+			logic:               `[[]]`,
+			rejectPostgres:      true,
+			rejectArrayElements: true,
 			wantSQL: func(Dialect) string {
 				return "[[]]"
 			},
@@ -888,7 +933,8 @@ func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
 				t.Run(tt.name, func(t *testing.T) {
 					got, err := tr.TranspileValue(tt.logic)
 					gotParam, gotParams, paramErr := tr.TranspileParameterizedValue(tt.logic)
-					if d == DialectPostgreSQL && tt.rejectPostgres {
+					if (d == DialectPostgreSQL && tt.rejectPostgres) ||
+						(tt.rejectArrayElements && dialectRejectsArrayLiteralElements(d)) {
 						if !IsErrorCode(err, ErrInvalidArgument) {
 							t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
 						}
@@ -4549,6 +4595,49 @@ func TestTranspileValue_ArrayLiteralsRejectKnownMixedElementTypesAllDialects(t *
 	}
 }
 
+func TestTranspileValue_NestedArrayLiteralsRejectUnsupportedDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		`[[1]]`,
+		`{"map":[[[1]],{"var":""}]}`,
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, defaultTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, logic := range tests {
+				t.Run(logic, func(t *testing.T) {
+					_, err := tr.TranspileValue(logic)
+					paramSQL, params, paramErr := tr.TranspileParameterizedValue(logic)
+					if dialectRejectsArrayLiteralElements(d) {
+						if !IsErrorCode(err, ErrInvalidArgument) {
+							t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
+						}
+						if !IsErrorCode(paramErr, ErrInvalidArgument) {
+							t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+								paramErr, ErrInvalidArgument, paramSQL, params)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if paramErr != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", paramErr)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspileValue_IfRejectsArrayBranchesWithIncompatibleElementTypesAllDialects(t *testing.T) {
 	t.Parallel()
 
@@ -4676,9 +4765,10 @@ func TestTranspileValue_ArrayExpressionSourcesPreserveElementTypesAllDialects(t 
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		logic         string
-		wantFragments []string
+		name                string
+		logic               string
+		rejectArrayElements bool
+		wantFragments       []string
 	}{
 		{
 			name:  "filter source from dynamic if",
@@ -4706,9 +4796,10 @@ func TestTranspileValue_ArrayExpressionSourcesPreserveElementTypesAllDialects(t 
 			wantFragments: []string{"elem IS TRUE"},
 		},
 		{
-			name:          "nested literal array current element truthiness",
-			logic:         `{"some":[[[1,0]],{"some":[{"var":""},{"var":""}]}]}`,
-			wantFragments: []string{"elem1 IS NOT NULL", "elem1 != 0"},
+			name:                "nested literal array current element truthiness",
+			logic:               `{"some":[[[1,0]],{"some":[{"var":""},{"var":""}]}]}`,
+			rejectArrayElements: true,
+			wantFragments:       []string{"elem1 IS NOT NULL", "elem1 != 0"},
 		},
 	}
 
@@ -4731,6 +4822,17 @@ func TestTranspileValue_ArrayExpressionSourcesPreserveElementTypesAllDialects(t 
 					}
 
 					got, err := tr.TranspileValue(tt.logic)
+					if tt.rejectArrayElements && dialectRejectsArrayLiteralElements(d) {
+						if !IsErrorCode(err, ErrInvalidArgument) {
+							t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
+						}
+						gotParam, params, paramErr := tr.TranspileParameterizedValue(tt.logic)
+						if !IsErrorCode(paramErr, ErrInvalidArgument) {
+							t.Fatalf("TranspileParameterizedValue() error = %v, want %s (SQL %q params %#v)",
+								paramErr, ErrInvalidArgument, gotParam, params)
+						}
+						return
+					}
 					if err != nil {
 						t.Fatalf("TranspileValue() error = %v", err)
 					}

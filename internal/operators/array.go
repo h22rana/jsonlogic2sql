@@ -1807,7 +1807,7 @@ func renderReduceAggregateResult(function, initial, aggregateSQL string, clickho
 // Returns the aggregate pattern if detected, nil otherwise.
 func (a *ArrayOperator) detectAggregatePattern(expr interface{}) *aggregatePattern {
 	exprMap, ok := expr.(map[string]interface{})
-	if !ok {
+	if !ok || len(exprMap) != 1 {
 		return nil
 	}
 
@@ -2033,7 +2033,7 @@ func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) (*aggregat
 
 	// Check first arg is {"var": "accumulator"}
 	arg0Map, ok := argsArr[0].(map[string]interface{})
-	if !ok {
+	if !ok || len(arg0Map) != 1 {
 		return nil, false
 	}
 	if varName, hasVar := arg0Map[OpVar]; !hasVar || varName != AccumulatorVar {
@@ -2042,7 +2042,7 @@ func (a *ArrayOperator) isAccumulatorCurrentPattern(args interface{}) (*aggregat
 
 	// Check second arg is {"var": "current"} or {"var": "current.field"}
 	arg1Map, ok := argsArr[1].(map[string]interface{})
-	if !ok {
+	if !ok || len(arg1Map) != 1 {
 		return nil, false
 	}
 	varName, hasVar := arg1Map[OpVar]
@@ -2520,6 +2520,10 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 			}
 			elements[i] = element.sql
 		}
+		elementTypes := normalizeArrayElementTypes(commonTypes)
+		if err := a.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
+			return typedValueSQL{}, err
+		}
 		sql, err := a.arrayLiteral(elements)
 		if err != nil {
 			return typedValueSQL{}, err
@@ -2527,8 +2531,8 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		return typedValueSQL{
 			sql:               sql,
 			typ:               ExpressionTypeArray,
-			elemType:          firstArrayElementType(commonTypes),
-			elemTypes:         normalizeArrayElementTypes(commonTypes),
+			elemType:          firstArrayElementType(elementTypes),
+			elemTypes:         elementTypes,
 			emptyArrayLiteral: len(arr) == 0,
 		}, nil
 	}
@@ -3883,6 +3887,10 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 			}
 			elements[i] = element.sql
 		}
+		elementTypes := normalizeArrayElementTypes(commonTypes)
+		if err := a.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
+			return typedValueSQL{}, err
+		}
 		sql, err := a.arrayLiteral(elements)
 		if err != nil {
 			return typedValueSQL{}, err
@@ -3890,8 +3898,8 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		return typedValueSQL{
 			sql:               sql,
 			typ:               ExpressionTypeArray,
-			elemType:          firstArrayElementType(commonTypes),
-			elemTypes:         normalizeArrayElementTypes(commonTypes),
+			elemType:          firstArrayElementType(elementTypes),
+			elemTypes:         elementTypes,
 			emptyArrayLiteral: len(arr) == 0,
 		}, nil
 	}
