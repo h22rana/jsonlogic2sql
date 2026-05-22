@@ -1745,13 +1745,13 @@ func TestComparisonOperator_ToSQL_NullSafeFieldEqualityPreservesSchemaLiteralSem
 			wantSQL: "code = '5'",
 		},
 		{
-			name:     "field field uses null-safe fallback",
+			name:     "strict field field mismatch uses null-only equality",
 			operator: "===",
 			args: []interface{}{
 				map[string]interface{}{"var": "amount"},
 				map[string]interface{}{"var": "code"},
 			},
-			wantSQL: "((amount IS NULL AND code IS NULL) OR (amount IS NOT NULL AND code IS NOT NULL AND amount = code))",
+			wantSQL: "(amount IS NULL AND code IS NULL)",
 		},
 	}
 

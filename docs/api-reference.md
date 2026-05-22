@@ -181,7 +181,10 @@ must be declared in the schema.
 Field-to-field equality is null-safe by default for JSONLogic-compatible field
 NULL equality. `==`, `===`, `!=`, and `!==` comparisons between two `var`
 operands use portable SQL that treats two `NULL` fields as equal. Field/literal
-comparisons are unchanged.
+comparisons are unchanged. For strict comparisons between fields with
+incompatible schema types, the generated SQL omits the cross-type equality arm:
+`a === b` becomes `a IS NULL AND b IS NULL`, while `a !== b` becomes
+`a IS NOT NULL OR b IS NOT NULL`.
 
 ### Dialect
 

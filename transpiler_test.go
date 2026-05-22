@@ -80,6 +80,179 @@ func TestTranspiler_NullSafeFieldEquality_AllDialects(t *testing.T) {
 	}
 }
 
+func TestTranspiler_StrictFieldTypeMismatchUsesNullOnlyEquality_AllDialects(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "n", Type: FieldTypeNumber},
+		{Name: "s", Type: FieldTypeString},
+		{
+			Name: "items",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "n", Type: FieldTypeNumber},
+				{Name: "s", Type: FieldTypeString},
+			},
+		},
+	})
+
+	rootCases := []struct {
+		name      string
+		logic     string
+		wantCond  string
+		forbidden []string
+	}{
+		{
+			name:      "strict equality",
+			logic:     `{"===":[{"var":"n"},{"var":"s"}]}`,
+			wantCond:  "(n IS NULL AND s IS NULL)",
+			forbidden: []string{"n = s", "n <> s"},
+		},
+		{
+			name:      "strict inequality",
+			logic:     `{"!==":[{"var":"n"},{"var":"s"}]}`,
+			wantCond:  "(n IS NOT NULL OR s IS NOT NULL)",
+			forbidden: []string{"n = s", "n <> s"},
+		},
+	}
+
+	scopedCases := []struct {
+		name              string
+		logic             string
+		wantNonClickHouse string
+		wantClickHouse    string
+		forbidden         []string
+	}{
+		{
+			name:              "scoped strict equality",
+			logic:             `{"some":[{"var":"items"},{"===":[{"var":"n"},{"var":"s"}]}]}`,
+			wantNonClickHouse: "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE (elem.n IS NULL AND elem.s IS NULL))",
+			wantClickHouse:    "arrayExists(elem -> (elem.n IS NULL AND elem.s IS NULL), items)",
+			forbidden:         []string{"elem.n = elem.s", "elem.n <> elem.s"},
+		},
+		{
+			name:              "scoped strict inequality",
+			logic:             `{"some":[{"var":"items"},{"!==":[{"var":"n"},{"var":"s"}]}]}`,
+			wantNonClickHouse: "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE (elem.n IS NOT NULL OR elem.s IS NOT NULL))",
+			wantClickHouse:    "arrayExists(elem -> (elem.n IS NOT NULL OR elem.s IS NOT NULL), items)",
+			forbidden:         []string{"elem.n = elem.s", "elem.n <> elem.s"},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
+				Dialect: d,
+				Schema:  schema,
+			})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			for _, tc := range rootCases {
+				t.Run(tc.name, func(t *testing.T) {
+					got, err := tr.TranspileCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != tc.wantCond {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, tc.wantCond)
+					}
+
+					gotParamSQL, gotParams, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParamSQL != tc.wantCond {
+						t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", gotParamSQL, tc.wantCond)
+					}
+					if len(gotParams) != 0 {
+						t.Fatalf("TranspileParameterizedCondition() params = %#v, want none", gotParams)
+					}
+
+					wantValue := fmt.Sprintf("CASE WHEN %s THEN TRUE ELSE FALSE END", strings.TrimSuffix(strings.TrimPrefix(tc.wantCond, "("), ")"))
+					gotValue, err := tr.TranspileValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if gotValue != wantValue {
+						t.Fatalf("TranspileValue() = %q, want %q", gotValue, wantValue)
+					}
+
+					gotValueParamSQL, gotValueParams, err := tr.TranspileParameterizedValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if gotValueParamSQL != wantValue {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", gotValueParamSQL, wantValue)
+					}
+					if len(gotValueParams) != 0 {
+						t.Fatalf("TranspileParameterizedValue() params = %#v, want none", gotValueParams)
+					}
+
+					for _, fragment := range tc.forbidden {
+						assertNotContains(t, got, fragment)
+						assertNotContains(t, gotValue, fragment)
+					}
+				})
+			}
+
+			for _, tc := range scopedCases {
+				t.Run(tc.name, func(t *testing.T) {
+					want := tc.wantNonClickHouse
+					if d == DialectClickHouse {
+						want = tc.wantClickHouse
+					} else {
+						want = testDuckDBUnnestSourceAliases(d, want)
+					}
+
+					got, err := tr.TranspileCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if got != want {
+						t.Fatalf("TranspileCondition() = %q, want %q", got, want)
+					}
+
+					gotParamSQL, gotParams, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if gotParamSQL != want {
+						t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", gotParamSQL, want)
+					}
+					if len(gotParams) != 0 {
+						t.Fatalf("TranspileParameterizedCondition() params = %#v, want none", gotParams)
+					}
+
+					wantValue := fmt.Sprintf("CASE WHEN %s THEN TRUE ELSE FALSE END", want)
+					gotValue, err := tr.TranspileValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if gotValue != wantValue {
+						t.Fatalf("TranspileValue() = %q, want %q", gotValue, wantValue)
+					}
+
+					gotValueParamSQL, gotValueParams, err := tr.TranspileParameterizedValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if gotValueParamSQL != wantValue {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", gotValueParamSQL, wantValue)
+					}
+					if len(gotValueParams) != 0 {
+						t.Fatalf("TranspileParameterizedValue() params = %#v, want none", gotValueParams)
+					}
+
+					for _, fragment := range tc.forbidden {
+						assertNotContains(t, got, fragment)
+						assertNotContains(t, gotValue, fragment)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestTranspiler_NullSafeFieldEquality_DeeplyNested(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "a", Type: FieldTypeString},

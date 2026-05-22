@@ -109,6 +109,22 @@ known at transpile time:
 FALSE
 ```
 
+Strict field-to-field comparisons with incompatible schema types keep the
+JSONLogic-compatible null branch without emitting a cross-type SQL comparison:
+
+```json
+{"===": [{"var": "amount"}, {"var": "code"}]}
+```
+```sql
+(amount IS NULL AND code IS NULL)
+```
+
+For `!==`, the inverse is emitted:
+
+```sql
+(amount IS NOT NULL OR code IS NOT NULL)
+```
+
 ### Schema-Aware Equality Coercion
 
 When a schema is configured, equality and inequality use type-aware literal
@@ -172,6 +188,10 @@ Field-to-field equality uses JSONLogic-compatible null-safe SQL by default:
 
 This matches JSONLogic's `null == null` and `null === null` behavior when both
 compared fields are `NULL`.
+
+For strict equality between fields with incompatible schema types, the ordinary
+`a = b` arm is omitted because typed SQL dialects can reject that comparison.
+Only the both-null case can satisfy `===`; any not-null side satisfies `!==`.
 
 For inequality, the null-safe fallback checks one-null-only rows plus the ordinary
 comparison:

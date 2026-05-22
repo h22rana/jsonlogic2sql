@@ -310,6 +310,37 @@ func (c *ComparisonOperator) shouldUseNullSafeFieldEquality(operator string, lef
 	return c.isNullSafeFieldOperand(leftArg) && c.isNullSafeFieldOperand(rightArg)
 }
 
+func (c *ComparisonOperator) strictIncompatibleFieldEqualitySQL(
+	operator string,
+	leftArg, rightArg interface{},
+	leftSQL, rightSQL string,
+) (string, bool) {
+	if !c.hasStrictIncompatibleFieldEqualityOperands(operator, leftArg, rightArg) {
+		return "", false
+	}
+
+	if operator == "===" {
+		return fmt.Sprintf("(%s IS NULL AND %s IS NULL)", leftSQL, rightSQL), true
+	}
+	return fmt.Sprintf("(%s IS NOT NULL OR %s IS NOT NULL)", leftSQL, rightSQL), true
+}
+
+func (c *ComparisonOperator) hasStrictIncompatibleFieldEqualityOperands(operator string, leftArg, rightArg interface{}) bool {
+	if !isStrictEqualityOperator(operator) {
+		return false
+	}
+
+	leftField, leftOK := c.extractEqualityFieldOperand(leftArg)
+	rightField, rightOK := c.extractEqualityFieldOperand(rightArg)
+	if !leftOK || !rightOK || leftField.hasDefault || rightField.hasDefault {
+		return false
+	}
+
+	leftKind, leftKnown := c.schemaEqualityKind(leftField.fieldName)
+	rightKind, rightKnown := c.schemaEqualityKind(rightField.fieldName)
+	return leftKnown && rightKnown && leftKind != rightKind
+}
+
 func (c *ComparisonOperator) isNullSafeFieldOperand(value interface{}) bool {
 	if _, ok := c.extractEqualityFieldOperand(value); ok {
 		return true
@@ -1164,6 +1195,9 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 			return dec
 		}
 	}
+	if leftIsField && rightIsField && c.hasStrictIncompatibleFieldEqualityOperands(operator, leftArg, rightArg) {
+		return dec
+	}
 	if leftIsField == rightIsField {
 		return c.applyTypedExpressionEqualitySemantics(dec, operator, leftArg, rightArg)
 	}
@@ -1506,6 +1540,8 @@ func (c *ComparisonOperator) schemaEqualityKind(fieldName string) (string, bool)
 		return "boolean", true
 	case c.schema().IsArrayType(fieldName):
 		return "array", true
+	case c.schema().GetFieldType(fieldName) == "object":
+		return "object", true
 	default:
 		return "", false
 	}
@@ -1989,6 +2025,12 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 			if rightBool, ok := sqlBooleanConstant(rightSQL); ok {
 				return boolSQL(equalityPredicateConstant(operator, leftBool, rightBool)), nil
 			}
+		}
+	}
+
+	if !isLeftNull && !isRightNull {
+		if sql, ok := c.strictIncompatibleFieldEqualitySQL(operator, args[0], args[1], leftSQL, rightSQL); ok {
+			return sql, nil
 		}
 	}
 
@@ -2771,6 +2813,12 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 			if rightBool, ok := sqlBooleanConstant(rightSQL); ok {
 				return boolSQL(equalityPredicateConstant(operator, leftBool, rightBool)), nil
 			}
+		}
+	}
+
+	if !isLeftNull && !isRightNull {
+		if sql, ok := c.strictIncompatibleFieldEqualitySQL(operator, args[0], args[1], leftSQL, rightSQL); ok {
+			return sql, nil
 		}
 	}
 
