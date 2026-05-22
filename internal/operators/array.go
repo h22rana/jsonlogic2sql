@@ -48,6 +48,7 @@ type ArrayOperator struct {
 	hasAccumulatorType bool
 	accumulatorSQL     string
 	elementType        ExpressionType
+	elementNestedTypes []ExpressionType
 	hasElementType     bool
 }
 
@@ -55,7 +56,150 @@ type typedValueSQL struct {
 	sql               string
 	typ               ExpressionType
 	elemType          ExpressionType
+	elemTypes         []ExpressionType
 	emptyArrayLiteral bool
+}
+
+func normalizeArrayElementTypes(types []ExpressionType) []ExpressionType {
+	if len(types) == 0 || types[0] == ExpressionTypeUnknown {
+		return nil
+	}
+	normalized := make([]ExpressionType, 0, len(types))
+	for _, typ := range types {
+		if typ == ExpressionTypeUnknown {
+			break
+		}
+		normalized = append(normalized, typ)
+	}
+	return normalized
+}
+
+func typedValueElementTypes(value typedValueSQL) []ExpressionType {
+	if types := normalizeArrayElementTypes(value.elemTypes); len(types) > 0 {
+		return types
+	}
+	if value.elemType != ExpressionTypeUnknown {
+		return []ExpressionType{value.elemType}
+	}
+	return nil
+}
+
+func typedValueTypeChain(value typedValueSQL) []ExpressionType {
+	if value.emptyArrayLiteral || value.typ == ExpressionTypeUnknown {
+		return nil
+	}
+	if value.typ != ExpressionTypeArray {
+		return []ExpressionType{value.typ}
+	}
+	chain := []ExpressionType{ExpressionTypeArray}
+	if elemTypes := typedValueElementTypes(value); len(elemTypes) > 0 {
+		chain = append(chain, elemTypes...)
+	}
+	return chain
+}
+
+func updateArrayLiteralElementTypes(common []ExpressionType, value typedValueSQL, index int) ([]ExpressionType, error) {
+	elemTypes := typedValueTypeChain(value)
+	if len(elemTypes) == 0 {
+		return common, nil
+	}
+	if elemTypes[0] == ExpressionTypeNull {
+		if len(common) == 0 {
+			return elemTypes, nil
+		}
+		return common, nil
+	}
+	if len(common) > 0 && common[0] == ExpressionTypeNull {
+		return elemTypes, nil
+	}
+	if len(common) == 0 {
+		return elemTypes, nil
+	}
+	if !sameExpressionTypes(common, elemTypes) {
+		return common, fmt.Errorf("array literal elements must have compatible SQL types: element %d has type %s, previous non-null elements have type %s",
+			index,
+			arrayElementTypesName(elemTypes),
+			arrayElementTypesName(common))
+	}
+	return common, nil
+}
+
+func firstArrayElementType(types []ExpressionType) ExpressionType {
+	normalized := normalizeArrayElementTypes(types)
+	if len(normalized) == 0 {
+		return ExpressionTypeUnknown
+	}
+	return normalized[0]
+}
+
+func operatorResultElementTypes(res OperatorResult) []ExpressionType {
+	if types := normalizeArrayElementTypes(res.ArrayElementTypes); len(types) > 0 {
+		return types
+	}
+	if res.ArrayElementType != ExpressionTypeUnknown {
+		return []ExpressionType{res.ArrayElementType}
+	}
+	return nil
+}
+
+func arrayValueSQLWithElementTypes(sql string, elemTypes ...ExpressionType) OperatorResult {
+	normalized := normalizeArrayElementTypes(elemTypes)
+	if len(normalized) == 0 {
+		return ArrayValueSQL(sql, ExpressionTypeUnknown)
+	}
+	res := ArrayValueSQL(sql, normalized[0])
+	res.ArrayElementTypes = normalized
+	return res
+}
+
+func mappedArrayElementTypes(result OperatorResult) []ExpressionType {
+	typ := expressionTypeFromResultKind(result.Kind, result.Type)
+	if typ == ExpressionTypeArray {
+		return append([]ExpressionType{ExpressionTypeArray}, operatorResultElementTypes(result)...)
+	}
+	if typ == ExpressionTypeUnknown {
+		return nil
+	}
+	return []ExpressionType{typ}
+}
+
+func mergeElementTypes(values []typedValueSQL, common ExpressionType) []ExpressionType {
+	if common == ExpressionTypeUnknown || common == ExpressionTypeNull {
+		return nil
+	}
+	if common != ExpressionTypeArray {
+		return []ExpressionType{common}
+	}
+	for _, value := range values {
+		elemTypes := typedValueElementTypes(value)
+		if len(elemTypes) > 0 && elemTypes[0] == ExpressionTypeArray {
+			return elemTypes
+		}
+	}
+	return []ExpressionType{common}
+}
+
+func sameExpressionTypes(left, right []ExpressionType) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayElementTypesName(types []ExpressionType) string {
+	if len(types) == 0 {
+		return expressionTypeName(ExpressionTypeUnknown)
+	}
+	parts := make([]string, len(types))
+	for i, typ := range types {
+		parts[i] = expressionTypeName(typ)
+	}
+	return strings.Join(parts, " of ")
 }
 
 // NewArrayOperator creates a new ArrayOperator instance.
@@ -104,6 +248,7 @@ func (a *ArrayOperator) withChildScope() *ArrayOperator {
 		hasAccumulatorType: a.hasAccumulatorType,
 		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
+		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
 		hasElementType:     a.hasElementType,
 	}
 	childAlias := child.elemAlias()
@@ -135,6 +280,7 @@ func (a *ArrayOperator) withPath(path string) *ArrayOperator {
 		hasAccumulatorType: a.hasAccumulatorType,
 		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
+		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
 		hasElementType:     a.hasElementType,
 	}
 	return child
@@ -160,6 +306,7 @@ func (a *ArrayOperator) withValueScope(enabled bool) *ArrayOperator {
 		hasAccumulatorType: a.hasAccumulatorType,
 		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
+		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
 		hasElementType:     a.hasElementType,
 	}
 	return child
@@ -185,6 +332,7 @@ func (a *ArrayOperator) withValueSemantics(enabled bool) *ArrayOperator {
 		hasAccumulatorType: a.hasAccumulatorType,
 		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
+		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
 		hasElementType:     a.hasElementType,
 	}
 	return child
@@ -210,6 +358,7 @@ func (a *ArrayOperator) withAccumulatorType(typ ExpressionType) *ArrayOperator {
 		hasAccumulatorType: true,
 		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
+		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
 		hasElementType:     a.hasElementType,
 	}
 	return child
@@ -235,16 +384,19 @@ func (a *ArrayOperator) withAccumulatorSQL(sql string) *ArrayOperator {
 		hasAccumulatorType: a.hasAccumulatorType,
 		accumulatorSQL:     sql,
 		elementType:        a.elementType,
+		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
 		hasElementType:     a.hasElementType,
 	}
 	return child
 }
 
 func (a *ArrayOperator) withSourceElementType(arrayValue typedValueSQL, sourceScopes []string) *ArrayOperator {
-	if len(sourceScopes) > 0 || arrayValue.elemType == ExpressionTypeUnknown {
+	elemTypes := typedValueElementTypes(arrayValue)
+	if len(sourceScopes) > 0 || len(elemTypes) == 0 {
 		return a
 	}
-	a.elementType = arrayValue.elemType
+	a.elementType = elemTypes[0]
+	a.elementNestedTypes = append([]ExpressionType{}, elemTypes[1:]...)
 	a.hasElementType = true
 	return a
 }
@@ -268,8 +420,9 @@ func (a *ArrayOperator) withLambdaScope(scope arrayLambdaScope) *ArrayOperator {
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
 		accumulatorSQL:     a.accumulatorSQL,
-		elementType:        a.elementType,
-		hasElementType:     a.hasElementType,
+		elementType:        ExpressionTypeUnknown,
+		elementNestedTypes: nil,
+		hasElementType:     false,
 	}
 	return child
 }
@@ -299,6 +452,7 @@ func (a *ArrayOperator) withSchemaScopes(scopes []string) *ArrayOperator {
 		hasAccumulatorType: a.hasAccumulatorType,
 		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
+		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
 		hasElementType:     a.hasElementType,
 	}
 	if len(child.visibleScopes) > 0 {
@@ -505,6 +659,13 @@ func (a *ArrayOperator) scopedSQLFieldResult(sql string, fieldNames ...string) P
 			result.HasExpressionInfo = true
 			result.Kind = ExpressionKindValue
 			result.Type = a.elementType
+			if a.elementType == ExpressionTypeArray {
+				elemTypes := normalizeArrayElementTypes(a.elementNestedTypes)
+				if len(elemTypes) > 0 {
+					result.ArrayElementType = elemTypes[0]
+					result.ArrayElementTypes = elemTypes
+				}
+			}
 		}
 		return result
 	}
@@ -547,53 +708,6 @@ func inferLiteralValueExpressionType(expr interface{}) ExpressionType {
 	default:
 		return ExpressionTypeUnknown
 	}
-}
-
-func inferArrayLiteralElementType(elements []interface{}) ExpressionType {
-	common := ExpressionTypeUnknown
-	sawNull := false
-	for _, elem := range elements {
-		elemType := inferLiteralValueExpressionType(elem)
-		if elemType == ExpressionTypeArray || elemType == ExpressionTypeUnknown {
-			return elemType
-		}
-		if elemType == ExpressionTypeNull {
-			sawNull = true
-			continue
-		}
-		if common == ExpressionTypeUnknown {
-			common = elemType
-			continue
-		}
-		if common != elemType {
-			return ExpressionTypeUnknown
-		}
-	}
-	if common == ExpressionTypeUnknown && sawNull {
-		return ExpressionTypeNull
-	}
-	return common
-}
-
-func updateArrayLiteralElementType(common, elemType ExpressionType, index int) (ExpressionType, error) {
-	if elemType == ExpressionTypeUnknown || elemType == ExpressionTypeNull {
-		return common, nil
-	}
-	if common == ExpressionTypeUnknown {
-		return elemType, nil
-	}
-	if common != elemType {
-		return common, fmt.Errorf("array literal elements must have compatible SQL types: element %d has type %s, previous non-null elements have type %s",
-			index, expressionTypeName(elemType), expressionTypeName(common))
-	}
-	return common, nil
-}
-
-func renderedArrayLiteralElementType(commonType ExpressionType, rawElements []interface{}) ExpressionType {
-	if commonType != ExpressionTypeUnknown {
-		return commonType
-	}
-	return inferArrayLiteralElementType(rawElements)
 }
 
 func expressionTypeName(typ ExpressionType) string {
@@ -855,11 +969,13 @@ func validateArraySourceValue(value typedValueSQL) error {
 
 func validateMergeElementCompatibility(values []typedValueSQL) (ExpressionType, error) {
 	common := ExpressionTypeUnknown
+	var commonTypes []ExpressionType
 	for _, value := range values {
 		if value.emptyArrayLiteral {
 			continue
 		}
 		elemType := value.typ
+		elemTypes := typedValueElementTypes(value)
 		if value.typ == ExpressionTypeArray {
 			elemType = value.elemType
 		}
@@ -868,6 +984,7 @@ func validateMergeElementCompatibility(values []typedValueSQL) (ExpressionType, 
 		}
 		if common == ExpressionTypeUnknown {
 			common = elemType
+			commonTypes = elemTypes
 			continue
 		}
 		if common != elemType {
@@ -875,6 +992,13 @@ func validateMergeElementCompatibility(values []typedValueSQL) (ExpressionType, 
 				"merge arguments have incompatible element types (%s and %s)",
 				arrayExpressionTypeName(common),
 				arrayExpressionTypeName(elemType),
+			)
+		}
+		if len(commonTypes) > 0 && len(elemTypes) > 0 && !sameExpressionTypes(commonTypes, elemTypes) {
+			return ExpressionTypeUnknown, fmt.Errorf(
+				"merge arguments have incompatible element types (%s and %s)",
+				arrayExpressionTypeName(commonTypes[len(commonTypes)-1]),
+				arrayExpressionTypeName(elemTypes[len(elemTypes)-1]),
 			)
 		}
 	}
@@ -1228,6 +1352,44 @@ func (a *ArrayOperator) ToSQLAtPath(operator string, args []interface{}, path st
 	return scoped.ToSQL(operator, args)
 }
 
+// ToValueResultAtPath converts a value-producing array operation to typed SQL
+// using the provided JSONPath for nested expression error reporting.
+func (a *ArrayOperator) ToValueResultAtPath(operator string, args []interface{}, path string) (OperatorResult, error) {
+	scoped := a.withPath(path)
+	if scoped.shouldUseRenderedSourceChildScope(operator, args) {
+		return scoped.withChildScope().ToValueResult(operator, args)
+	}
+	return scoped.ToValueResult(operator, args)
+}
+
+// ToValueResult converts value-producing array operations to typed SQL while
+// preserving array element metadata for downstream array expressions.
+func (a *ArrayOperator) ToValueResult(operator string, args []interface{}) (OperatorResult, error) {
+	if len(args) == 0 {
+		return OperatorResult{}, fmt.Errorf("array operator %s requires at least one argument", operator)
+	}
+
+	switch operator {
+	case OpMap:
+		return a.handleMapResult(args)
+	case OpFilter:
+		return a.handleFilterResult(args)
+	case OpMerge:
+		return a.handleMergeResult(args)
+	default:
+		return OperatorResult{}, fmt.Errorf("unsupported value array operator: %s", operator)
+	}
+}
+
+func emptyArrayResult(sql string, err error) (OperatorResult, error) {
+	if err != nil {
+		return OperatorResult{}, err
+	}
+	res := ArrayValueSQL(sql, ExpressionTypeUnknown)
+	res.EmptyArrayLiteral = true
+	return res, nil
+}
+
 func (a *ArrayOperator) shouldUseRenderedSourceChildScope(op string, args []interface{}) bool {
 	return a.shouldUseChildScope(op, args)
 }
@@ -1329,35 +1491,43 @@ func isRenderedArrayScopeSource(value interface{}) bool {
 // Generates: ARRAY(SELECT transformation FROM UNNEST(array) AS elem).
 // For ClickHouse: Uses arrayMap or subquery with arrayJoin.
 func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
+	res, err := a.handleMapResult(args)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
+func (a *ArrayOperator) handleMapResult(args []interface{}) (OperatorResult, error) {
 	if len(args) != binaryArrayOperatorArgCount {
-		return "", fmt.Errorf("map requires exactly 2 arguments")
+		return OperatorResult{}, fmt.Errorf("map requires exactly 2 arguments")
 	}
 
 	// Validate dialect support
 	if a.config != nil {
 		if err := a.config.ValidateDialect("map"); err != nil {
-			return "", err
+			return OperatorResult{}, err
 		}
 	}
 
 	// Validate that first argument is an array type
 	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
-		return "", err
+		return OperatorResult{}, err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return a.emptyArrayLiteralSQL()
+		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 
 	// First argument: array
 	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid map array argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", err)
 	}
 	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
-		return "", fmt.Errorf("invalid map array argument: %w", arraySourceErr)
+		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return a.emptyArrayLiteralSQL()
+		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
@@ -1366,48 +1536,61 @@ func (a *ArrayOperator) handleMap(args []interface{}) (string, error) {
 		withSchemaScopes(sourceScopes).
 		withSourceElementType(arrayValue, sourceScopes).
 		withValueSemantics(true)
-	transformation, err := valueScoped.valueExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], false, a.argPath(arrayExpressionArgIndex))
+	transformation, err := valueScoped.valueExpressionResultWithContextAndPath(
+		args[arrayExpressionArgIndex],
+		false,
+		a.argPath(arrayExpressionArgIndex),
+	)
 	if err != nil {
-		return "", fmt.Errorf("invalid map transformation argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid map transformation argument: %w", err)
 	}
 
 	alias := a.elemAlias()
-	return a.renderMapSQL(alias, transformation, array), nil
+	sql := a.renderMapSQL(alias, transformation.SQL, array)
+	return arrayValueSQLWithElementTypes(sql, mappedArrayElementTypes(transformation)...), nil
 }
 
 // handleFilter converts filter operator to SQL.
 // Generates: ARRAY(SELECT elem FROM UNNEST(array) AS elem WHERE condition).
 // For ClickHouse: Uses arrayFilter function.
 func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
+	res, err := a.handleFilterResult(args)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
+func (a *ArrayOperator) handleFilterResult(args []interface{}) (OperatorResult, error) {
 	if len(args) != binaryArrayOperatorArgCount {
-		return "", fmt.Errorf("filter requires exactly 2 arguments")
+		return OperatorResult{}, fmt.Errorf("filter requires exactly 2 arguments")
 	}
 
 	// Validate dialect support
 	if a.config != nil {
 		if err := a.config.ValidateDialect("filter"); err != nil {
-			return "", err
+			return OperatorResult{}, err
 		}
 	}
 
 	// Validate that first argument is an array type
 	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
-		return "", err
+		return OperatorResult{}, err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return a.emptyArrayLiteralSQL()
+		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 
 	// First argument: array
 	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid filter array argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", err)
 	}
 	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
-		return "", fmt.Errorf("invalid filter array argument: %w", arraySourceErr)
+		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return a.emptyArrayLiteralSQL()
+		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
@@ -1418,11 +1601,11 @@ func (a *ArrayOperator) handleFilter(args []interface{}) (string, error) {
 		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid filter condition argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid filter condition argument: %w", err)
 	}
 
 	alias := a.elemAlias()
-	return a.renderFilterSQL(alias, array, condition), nil
+	return arrayValueSQLWithElementTypes(a.renderFilterSQL(alias, array, condition), typedValueElementTypes(arrayValue)...), nil
 }
 
 // handleReduce converts reduce operator to SQL.
@@ -2170,14 +2353,22 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 // BigQuery/Spanner: ARRAY_CONCAT(array1, array2, ...)
 // PostgreSQL: array1 || array2 || ...
 func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
+	res, err := a.handleMergeResult(args)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
+func (a *ArrayOperator) handleMergeResult(args []interface{}) (OperatorResult, error) {
 	if len(args) < 1 {
-		return "", fmt.Errorf("merge requires at least 1 argument")
+		return OperatorResult{}, fmt.Errorf("merge requires at least 1 argument")
 	}
 
 	// Validate dialect support
 	if a.config != nil {
 		if err := a.config.ValidateDialect("merge"); err != nil {
-			return "", err
+			return OperatorResult{}, err
 		}
 	}
 
@@ -2189,27 +2380,33 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 		}
 		arrayValue, err := a.valueToTypedSQLAtPath(arg, a.argPath(i))
 		if err != nil {
-			return "", fmt.Errorf("invalid merge argument %d: %w", i, err)
+			return OperatorResult{}, fmt.Errorf("invalid merge argument %d: %w", i, err)
 		}
 		values = append(values, arrayValue)
 	}
 	common, err := validateMergeElementCompatibility(values)
 	if err != nil {
-		return "", err
+		return OperatorResult{}, err
 	}
 
 	arrays := make([]string, 0, len(values))
 	for i, value := range values {
-		arraySQL, skip, err := a.mergeValueToArraySQL(value, common)
+		var arraySQL string
+		var skip bool
+		arraySQL, skip, err = a.mergeValueToArraySQL(value, common)
 		if err != nil {
-			return "", fmt.Errorf("invalid merge argument %d: %w", i, err)
+			return OperatorResult{}, fmt.Errorf("invalid merge argument %d: %w", i, err)
 		}
 		if skip {
 			continue
 		}
 		arrays = append(arrays, arraySQL)
 	}
-	return a.renderMergeSQL(arrays)
+	sql, err := a.renderMergeSQL(arrays)
+	if err != nil {
+		return OperatorResult{}, err
+	}
+	return arrayValueSQLWithElementTypes(sql, mergeElementTypes(values, common)...), nil
 }
 
 // valueToSQL converts a value to SQL, handling var expressions, arrays, and literals.
@@ -2358,10 +2555,11 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		if pv.IsSQL {
 			if pv.HasExpressionInfo {
 				return typedSQLFromOperatorResult(OperatorResult{
-					SQL:              pv.Value,
-					Kind:             pv.Kind,
-					Type:             pv.Type,
-					ArrayElementType: pv.ArrayElementType,
+					SQL:               pv.Value,
+					Kind:              pv.Kind,
+					Type:              pv.Type,
+					ArrayElementType:  pv.ArrayElementType,
+					ArrayElementTypes: pv.ArrayElementTypes,
 				}), nil
 			}
 			return typedValueSQL{sql: pv.Value, typ: ExpressionTypeUnknown}, nil
@@ -2405,13 +2603,13 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 	// Handle arrays
 	if arr, ok := value.([]interface{}); ok {
 		elements := make([]string, len(arr))
-		commonType := ExpressionTypeUnknown
+		var commonTypes []ExpressionType
 		for i, elem := range arr {
 			element, err := a.valueToTypedSQLAtPath(elem, tperrors.BuildArrayPath(path, i))
 			if err != nil {
 				return typedValueSQL{}, fmt.Errorf("invalid array element %d: %w", i, err)
 			}
-			commonType, err = updateArrayLiteralElementType(commonType, element.typ, i)
+			commonTypes, err = updateArrayLiteralElementTypes(commonTypes, element, i)
 			if err != nil {
 				return typedValueSQL{}, err
 			}
@@ -2424,7 +2622,8 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		return typedValueSQL{
 			sql:               sql,
 			typ:               ExpressionTypeArray,
-			elemType:          renderedArrayLiteralElementType(commonType, arr),
+			elemType:          firstArrayElementType(commonTypes),
+			elemTypes:         normalizeArrayElementTypes(commonTypes),
 			emptyArrayLiteral: len(arr) == 0,
 		}, nil
 	}
@@ -3217,31 +3416,75 @@ func (a *ArrayOperator) ToSQLParamAtPath(operator string, args []interface{}, pc
 	return scoped.ToSQLParam(operator, args, pc)
 }
 
+// ToValueResultParamAtPath is the parameterized variant of ToValueResultAtPath.
+func (a *ArrayOperator) ToValueResultParamAtPath(
+	operator string,
+	args []interface{},
+	pc *params.ParamCollector,
+	path string,
+) (OperatorResult, error) {
+	scoped := a.withPath(path)
+	if scoped.shouldUseRenderedSourceChildScope(operator, args) {
+		return scoped.withChildScope().ToValueResultParam(operator, args, pc)
+	}
+	return scoped.ToValueResultParam(operator, args, pc)
+}
+
+// ToValueResultParam is the parameterized variant of ToValueResult.
+func (a *ArrayOperator) ToValueResultParam(
+	operator string,
+	args []interface{},
+	pc *params.ParamCollector,
+) (OperatorResult, error) {
+	if len(args) == 0 {
+		return OperatorResult{}, fmt.Errorf("array operator %s requires at least one argument", operator)
+	}
+
+	switch operator {
+	case OpMap:
+		return a.handleMapResultParam(args, pc)
+	case OpFilter:
+		return a.handleFilterResultParam(args, pc)
+	case OpMerge:
+		return a.handleMergeResultParam(args, pc)
+	default:
+		return OperatorResult{}, fmt.Errorf("unsupported value array operator: %s", operator)
+	}
+}
+
 // handleMapParam is the parameterized variant of handleMap. Keep in sync.
 func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamCollector) (string, error) {
+	res, err := a.handleMapResultParam(args, pc)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
+func (a *ArrayOperator) handleMapResultParam(args []interface{}, pc *params.ParamCollector) (OperatorResult, error) {
 	if len(args) != binaryArrayOperatorArgCount {
-		return "", fmt.Errorf("map requires exactly 2 arguments")
+		return OperatorResult{}, fmt.Errorf("map requires exactly 2 arguments")
 	}
 	if a.config != nil {
 		if err := a.config.ValidateDialect("map"); err != nil {
-			return "", err
+			return OperatorResult{}, err
 		}
 	}
 	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
-		return "", err
+		return OperatorResult{}, err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return a.emptyArrayLiteralSQL()
+		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid map array argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", err)
 	}
 	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
-		return "", fmt.Errorf("invalid map array argument: %w", arraySourceErr)
+		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return a.emptyArrayLiteralSQL()
+		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
@@ -3249,39 +3492,53 @@ func (a *ArrayOperator) handleMapParam(args []interface{}, pc *params.ParamColle
 		withSchemaScopes(sourceScopes).
 		withSourceElementType(arrayValue, sourceScopes).
 		withValueSemantics(true)
-	transformation, err := valueScoped.valueExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, false, a.argPath(arrayExpressionArgIndex))
+	transformation, err := valueScoped.valueExpressionResultParamWithContextAndPath(
+		args[arrayExpressionArgIndex],
+		pc,
+		false,
+		a.argPath(arrayExpressionArgIndex),
+	)
 	if err != nil {
-		return "", fmt.Errorf("invalid map transformation argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid map transformation argument: %w", err)
 	}
 	alias := a.elemAlias()
-	return a.renderMapSQL(alias, transformation, array), nil
+	sql := a.renderMapSQL(alias, transformation.SQL, array)
+	return arrayValueSQLWithElementTypes(sql, mappedArrayElementTypes(transformation)...), nil
 }
 
 // handleFilterParam is the parameterized variant of handleFilter. Keep in sync.
 func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCollector) (string, error) {
+	res, err := a.handleFilterResultParam(args, pc)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
+func (a *ArrayOperator) handleFilterResultParam(args []interface{}, pc *params.ParamCollector) (OperatorResult, error) {
 	if len(args) != binaryArrayOperatorArgCount {
-		return "", fmt.Errorf("filter requires exactly 2 arguments")
+		return OperatorResult{}, fmt.Errorf("filter requires exactly 2 arguments")
 	}
 	if a.config != nil {
 		if err := a.config.ValidateDialect("filter"); err != nil {
-			return "", err
+			return OperatorResult{}, err
 		}
 	}
 	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
-		return "", err
+		return OperatorResult{}, err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return a.emptyArrayLiteralSQL()
+		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid filter array argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", err)
 	}
 	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
-		return "", fmt.Errorf("invalid filter array argument: %w", arraySourceErr)
+		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return a.emptyArrayLiteralSQL()
+		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
@@ -3290,10 +3547,10 @@ func (a *ArrayOperator) handleFilterParam(args []interface{}, pc *params.ParamCo
 		withSourceElementType(arrayValue, sourceScopes).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid filter condition argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid filter condition argument: %w", err)
 	}
 	alias := a.elemAlias()
-	return a.renderFilterSQL(alias, array, condition), nil
+	return arrayValueSQLWithElementTypes(a.renderFilterSQL(alias, array, condition), typedValueElementTypes(arrayValue)...), nil
 }
 
 // handleReduceParam is the parameterized variant of handleReduce. Keep in sync.
@@ -3504,12 +3761,20 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 
 // handleMergeParam is the parameterized variant of handleMerge. Keep in sync.
 func (a *ArrayOperator) handleMergeParam(args []interface{}, pc *params.ParamCollector) (string, error) {
+	res, err := a.handleMergeResultParam(args, pc)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
+func (a *ArrayOperator) handleMergeResultParam(args []interface{}, pc *params.ParamCollector) (OperatorResult, error) {
 	if len(args) < 1 {
-		return "", fmt.Errorf("merge requires at least 1 argument")
+		return OperatorResult{}, fmt.Errorf("merge requires at least 1 argument")
 	}
 	if a.config != nil {
 		if err := a.config.ValidateDialect("merge"); err != nil {
-			return "", err
+			return OperatorResult{}, err
 		}
 	}
 	values := make([]typedValueSQL, 0, len(args))
@@ -3520,27 +3785,33 @@ func (a *ArrayOperator) handleMergeParam(args []interface{}, pc *params.ParamCol
 		}
 		arrayValue, err := a.valueToTypedSQLParamAtPath(arg, pc, a.argPath(i))
 		if err != nil {
-			return "", fmt.Errorf("invalid merge argument %d: %w", i, err)
+			return OperatorResult{}, fmt.Errorf("invalid merge argument %d: %w", i, err)
 		}
 		values = append(values, arrayValue)
 	}
 	common, err := validateMergeElementCompatibility(values)
 	if err != nil {
-		return "", err
+		return OperatorResult{}, err
 	}
 
 	arrays := make([]string, 0, len(values))
 	for i, value := range values {
-		arraySQL, skip, err := a.mergeValueToArraySQL(value, common)
+		var arraySQL string
+		var skip bool
+		arraySQL, skip, err = a.mergeValueToArraySQL(value, common)
 		if err != nil {
-			return "", fmt.Errorf("invalid merge argument %d: %w", i, err)
+			return OperatorResult{}, fmt.Errorf("invalid merge argument %d: %w", i, err)
 		}
 		if skip {
 			continue
 		}
 		arrays = append(arrays, arraySQL)
 	}
-	return a.renderMergeSQL(arrays)
+	sql, err := a.renderMergeSQL(arrays)
+	if err != nil {
+		return OperatorResult{}, err
+	}
+	return arrayValueSQLWithElementTypes(sql, mergeElementTypes(values, common)...), nil
 }
 
 // valueToSQLParam is the parameterized variant of valueToSQL. Keep in sync.
@@ -3649,10 +3920,11 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		if pv.IsSQL {
 			if pv.HasExpressionInfo {
 				return typedSQLFromOperatorResult(OperatorResult{
-					SQL:              pv.Value,
-					Kind:             pv.Kind,
-					Type:             pv.Type,
-					ArrayElementType: pv.ArrayElementType,
+					SQL:               pv.Value,
+					Kind:              pv.Kind,
+					Type:              pv.Type,
+					ArrayElementType:  pv.ArrayElementType,
+					ArrayElementTypes: pv.ArrayElementTypes,
 				}), nil
 			}
 			return typedValueSQL{sql: pv.Value, typ: ExpressionTypeUnknown}, nil
@@ -3691,13 +3963,13 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 
 	if arr, ok := value.([]interface{}); ok {
 		elements := make([]string, len(arr))
-		commonType := ExpressionTypeUnknown
+		var commonTypes []ExpressionType
 		for i, elem := range arr {
 			element, err := a.valueToTypedSQLParamAtPath(elem, pc, tperrors.BuildArrayPath(path, i))
 			if err != nil {
 				return typedValueSQL{}, fmt.Errorf("invalid array element %d: %w", i, err)
 			}
-			commonType, err = updateArrayLiteralElementType(commonType, element.typ, i)
+			commonTypes, err = updateArrayLiteralElementTypes(commonTypes, element, i)
 			if err != nil {
 				return typedValueSQL{}, err
 			}
@@ -3710,7 +3982,8 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		return typedValueSQL{
 			sql:               sql,
 			typ:               ExpressionTypeArray,
-			elemType:          renderedArrayLiteralElementType(commonType, arr),
+			elemType:          firstArrayElementType(commonTypes),
+			elemTypes:         normalizeArrayElementTypes(commonTypes),
 			emptyArrayLiteral: len(arr) == 0,
 		}, nil
 	}
@@ -3736,8 +4009,12 @@ func typedSQLFromOperatorResult(res OperatorResult) typedValueSQL {
 		typ:               typ,
 		emptyArrayLiteral: res.EmptyArrayLiteral,
 	}
-	if typ == ExpressionTypeArray && res.ArrayElementType != ExpressionTypeUnknown {
-		out.elemType = res.ArrayElementType
+	if typ == ExpressionTypeArray {
+		elemTypes := operatorResultElementTypes(res)
+		if len(elemTypes) > 0 {
+			out.elemType = elemTypes[0]
+			out.elemTypes = elemTypes
+		}
 	}
 	return out
 }

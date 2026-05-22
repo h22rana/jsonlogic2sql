@@ -4601,8 +4601,9 @@ func TestTranspileValue_ArrayExpressionSourcesPreserveElementTypesAllDialects(t 
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		logic string
+		name          string
+		logic         string
+		wantFragments []string
 	}{
 		{
 			name:  "filter source from dynamic if",
@@ -4611,6 +4612,28 @@ func TestTranspileValue_ArrayExpressionSourcesPreserveElementTypesAllDialects(t 
 		{
 			name:  "some source from value logical",
 			logic: `{"some":[{"or":[false,[0,1]]},{"var":""}]}`,
+		},
+		{
+			name:  "filter source from map",
+			logic: `{"filter":[{"map":[[1,2,0],{"var":""}]},{"var":""}]}`,
+		},
+		{
+			name:  "filter source from filter",
+			logic: `{"filter":[{"filter":[[1,2,0],{">":[{"var":""},0]}]},{"var":""}]}`,
+		},
+		{
+			name:  "filter source from merge",
+			logic: `{"filter":[{"merge":[[1,2],[0]]},{"var":""}]}`,
+		},
+		{
+			name:          "filter source from predicate map",
+			logic:         `{"filter":[{"map":[[1,0],{">":[{"var":""},0]}]},{"var":""}]}`,
+			wantFragments: []string{"elem IS TRUE"},
+		},
+		{
+			name:          "nested literal array current element truthiness",
+			logic:         `{"some":[[[1,0]],{"some":[{"var":""},{"var":""}]}]}`,
+			wantFragments: []string{"elem1 IS NOT NULL", "elem1 != 0"},
 		},
 	}
 
@@ -4627,20 +4650,29 @@ func TestTranspileValue_ArrayExpressionSourcesPreserveElementTypesAllDialects(t 
 				t.Run(tt.name, func(t *testing.T) {
 					t.Parallel()
 
+					wantFragments := tt.wantFragments
+					if len(wantFragments) == 0 {
+						wantFragments = []string{"elem IS NOT NULL", "elem != 0"}
+					}
+
 					got, err := tr.TranspileValue(tt.logic)
 					if err != nil {
 						t.Fatalf("TranspileValue() error = %v", err)
 					}
-					if !strings.Contains(got, "elem IS NOT NULL") || !strings.Contains(got, "elem != 0") {
-						t.Fatalf("TranspileValue() = %q, want numeric element truthiness", got)
+					for _, want := range wantFragments {
+						if !strings.Contains(got, want) {
+							t.Fatalf("TranspileValue() = %q, want fragment %q", got, want)
+						}
 					}
 
 					gotParam, _, err := tr.TranspileParameterizedValue(tt.logic)
 					if err != nil {
 						t.Fatalf("TranspileParameterizedValue() error = %v", err)
 					}
-					if !strings.Contains(gotParam, "elem IS NOT NULL") || !strings.Contains(gotParam, "elem != 0") {
-						t.Fatalf("TranspileParameterizedValue() = %q, want numeric element truthiness", gotParam)
+					for _, want := range wantFragments {
+						if !strings.Contains(gotParam, want) {
+							t.Fatalf("TranspileParameterizedValue() = %q, want fragment %q", gotParam, want)
+						}
 					}
 				})
 			}

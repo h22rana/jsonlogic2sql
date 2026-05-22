@@ -209,8 +209,9 @@ type OperatorFunc func(operator string, args []OperatorArg) (OperatorResult, err
 
 Use `ValueSQL(sql, type)` for scalar value-producing custom operators,
 `ArrayValueSQL(sql, elementType)` for array-producing custom operators with a
-known scalar element type, and `PredicateSQL(sql)` for boolean predicate custom
-operators.
+known immediate element type, and `PredicateSQL(sql)` for boolean predicate
+custom operators. For nested arrays, set `OperatorResult.ArrayElementTypes`
+with the immediate element type first.
 Raw string-returning legacy custom operator functions are not accepted; the
 result kind must be explicit so condition and value contexts can be validated.
 
@@ -237,11 +238,15 @@ type OperatorResult struct {
     Type              ExpressionType
     EmptyArrayLiteral bool
     ArrayElementType  ExpressionType
+    ArrayElementTypes []ExpressionType
 }
 ```
 
 `ArrayElementType` is only meaningful when `Type` is `ExpressionTypeArray`;
 `ExpressionTypeUnknown` means the array element type is not statically known.
+`ArrayElementTypes` carries nested array element types. For example,
+`array<array<number>>` is represented as
+`[]ExpressionType{ExpressionTypeArray, ExpressionTypeNumber}`.
 
 ### ExpressionKind
 

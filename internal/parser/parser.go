@@ -337,6 +337,7 @@ type expressionResult struct {
 	rawLiteral              interface{}
 	arrayElementTypeKnown   bool
 	arrayElementType        operators.ExpressionType
+	arrayElementTypes       []operators.ExpressionType
 	requiresKnownTruthiness bool
 	preserveParamRefs       bool
 }
@@ -346,9 +347,10 @@ func resultFromOperator(res operators.OperatorResult) expressionResult {
 		return predicateResult(res.SQL)
 	}
 	result := expressionResult{OperatorResult: res}
-	if res.ArrayElementType != operators.ExpressionTypeUnknown {
+	if elemTypes := operatorResultArrayElementTypes(res); len(elemTypes) > 0 {
 		result.arrayElementTypeKnown = true
-		result.arrayElementType = res.ArrayElementType
+		result.arrayElementType = elemTypes[0]
+		result.arrayElementTypes = elemTypes
 	}
 	return result
 }
@@ -413,15 +415,17 @@ func valueResult(sql string, typ operators.ExpressionType) expressionResult {
 	return expressionResult{OperatorResult: operators.ValueSQL(sql, typ)}
 }
 
-func withArrayElementType(res expressionResult, elemType operators.ExpressionType) expressionResult {
+func withArrayElementTypes(res expressionResult, elemTypes ...operators.ExpressionType) expressionResult {
+	elemTypes = normalizeExpressionTypes(elemTypes)
 	if valueTypeOf(res) != operators.ExpressionTypeArray ||
-		elemType == operators.ExpressionTypeUnknown ||
-		elemType == operators.ExpressionTypeNull {
+		len(elemTypes) == 0 {
 		return res
 	}
 	res.arrayElementTypeKnown = true
-	res.arrayElementType = elemType
-	res.OperatorResult.ArrayElementType = elemType
+	res.arrayElementType = elemTypes[0]
+	res.arrayElementTypes = elemTypes
+	res.OperatorResult.ArrayElementType = elemTypes[0]
+	res.OperatorResult.ArrayElementTypes = elemTypes
 	return res
 }
 
@@ -637,56 +641,86 @@ func (p *Parser) literalToSQLParam(value interface{}, pc *params.ParamCollector)
 	return p.dataOp.ValueToSQLParam(value, pc)
 }
 
-func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, operators.ExpressionType, error) {
+func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, []operators.ExpressionType, error) {
 	parts := make([]string, len(arr))
-	commonType := operators.ExpressionTypeUnknown
+	var commonTypes []operators.ExpressionType
 	for i, elem := range arr {
 		res, err := p.parseExpressionValue(elem, tperrors.BuildArrayPath(path, i))
 		if err != nil {
-			return "", operators.ExpressionTypeUnknown, fmt.Errorf("invalid array element %d: %w", i, err)
+			return "", nil, fmt.Errorf("invalid array element %d: %w", i, err)
 		}
-		commonType, err = updateArrayLiteralElementType(commonType, valueTypeOf(res), i)
+		commonTypes, err = updateArrayLiteralElementTypes(commonTypes, res, i)
 		if err != nil {
-			return "", operators.ExpressionTypeUnknown, err
+			return "", nil, err
 		}
 		parts[i] = valueSQL(res)
 	}
 	sql, err := p.config.ArrayLiteral(parts)
-	return sql, commonType, err
+	return sql, normalizeExpressionTypes(commonTypes), err
 }
 
 func (p *Parser) arrayLiteralToSQLParam(
 	arr []interface{},
 	path string,
 	pc *params.ParamCollector,
-) (string, operators.ExpressionType, error) {
+) (string, []operators.ExpressionType, error) {
 	parts := make([]string, len(arr))
-	commonType := operators.ExpressionTypeUnknown
+	var commonTypes []operators.ExpressionType
 	for i, elem := range arr {
 		res, err := p.parseExpressionValueParam(elem, tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
-			return "", operators.ExpressionTypeUnknown, fmt.Errorf("invalid array element %d: %w", i, err)
+			return "", nil, fmt.Errorf("invalid array element %d: %w", i, err)
 		}
-		commonType, err = updateArrayLiteralElementType(commonType, valueTypeOf(res), i)
+		commonTypes, err = updateArrayLiteralElementTypes(commonTypes, res, i)
 		if err != nil {
-			return "", operators.ExpressionTypeUnknown, err
+			return "", nil, err
 		}
 		parts[i] = valueSQL(res)
 	}
 	sql, err := p.config.ArrayLiteral(parts)
-	return sql, commonType, err
+	return sql, normalizeExpressionTypes(commonTypes), err
 }
 
-func updateArrayLiteralElementType(common, elemType operators.ExpressionType, index int) (operators.ExpressionType, error) {
-	if elemType == operators.ExpressionTypeUnknown || elemType == operators.ExpressionTypeNull {
+func expressionResultTypeChain(res expressionResult) []operators.ExpressionType {
+	typ := valueTypeOf(res)
+	if typ == operators.ExpressionTypeUnknown {
+		return nil
+	}
+	if typ != operators.ExpressionTypeArray {
+		return []operators.ExpressionType{typ}
+	}
+	chain := []operators.ExpressionType{operators.ExpressionTypeArray}
+	if elemTypes, ok := arrayElementTypesOf(res); ok {
+		chain = append(chain, elemTypes...)
+	}
+	return chain
+}
+
+func updateArrayLiteralElementTypes(common []operators.ExpressionType, res expressionResult, index int) ([]operators.ExpressionType, error) {
+	if expressionResultIsEmptyArrayLiteral(res) {
 		return common, nil
 	}
-	if common == operators.ExpressionTypeUnknown {
-		return elemType, nil
+	elemTypes := expressionResultTypeChain(res)
+	if len(elemTypes) == 0 {
+		return common, nil
 	}
-	if common != elemType {
+	if elemTypes[0] == operators.ExpressionTypeNull {
+		if len(common) == 0 {
+			return elemTypes, nil
+		}
+		return common, nil
+	}
+	if len(common) > 0 && common[0] == operators.ExpressionTypeNull {
+		return elemTypes, nil
+	}
+	if len(common) == 0 {
+		return elemTypes, nil
+	}
+	if !sameExpressionTypes(common, elemTypes) {
 		return common, fmt.Errorf("array literal elements must have compatible SQL types: element %d has type %s, previous non-null elements have type %s",
-			index, typeName(elemType), typeName(common))
+			index,
+			arrayElementTypesName(elemTypes),
+			arrayElementTypesName(common))
 	}
 	return common, nil
 }
@@ -854,6 +888,7 @@ func valueOperatorResult(res expressionResult) operators.OperatorResult {
 	}
 	if res.arrayElementTypeKnown {
 		opResult.ArrayElementType = res.arrayElementType
+		opResult.ArrayElementTypes = normalizeExpressionTypes(res.arrayElementTypes)
 	}
 	return opResult
 }
@@ -892,6 +927,7 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	pv.PreserveParamRefs = res.preserveParamRefs
 	if res.arrayElementTypeKnown {
 		pv.ArrayElementType = res.arrayElementType
+		pv.ArrayElementTypes = normalizeExpressionTypes(res.arrayElementTypes)
 	}
 	if res.fieldValue {
 		pv.IsField = true
@@ -916,7 +952,37 @@ func operatorResultFromProcessedValue(pv operators.ProcessedValue) operators.Ope
 	if pv.ArrayElementType != operators.ExpressionTypeUnknown {
 		res.ArrayElementType = pv.ArrayElementType
 	}
+	if len(pv.ArrayElementTypes) > 0 {
+		res.ArrayElementTypes = normalizeExpressionTypes(pv.ArrayElementTypes)
+		if res.ArrayElementType == operators.ExpressionTypeUnknown && len(res.ArrayElementTypes) > 0 {
+			res.ArrayElementType = res.ArrayElementTypes[0]
+		}
+	}
 	return res
+}
+
+func operatorResultArrayElementTypes(res operators.OperatorResult) []operators.ExpressionType {
+	if types := normalizeExpressionTypes(res.ArrayElementTypes); len(types) > 0 {
+		return types
+	}
+	if res.ArrayElementType != operators.ExpressionTypeUnknown && res.ArrayElementType != operators.ExpressionTypeNull {
+		return []operators.ExpressionType{res.ArrayElementType}
+	}
+	return nil
+}
+
+func normalizeExpressionTypes(types []operators.ExpressionType) []operators.ExpressionType {
+	if len(types) == 0 || types[0] == operators.ExpressionTypeUnknown || types[0] == operators.ExpressionTypeNull {
+		return nil
+	}
+	normalized := make([]operators.ExpressionType, 0, len(types))
+	for _, typ := range types {
+		if typ == operators.ExpressionTypeUnknown || typ == operators.ExpressionTypeNull {
+			break
+		}
+		normalized = append(normalized, typ)
+	}
+	return normalized
 }
 
 func normalizeParserSchemaScopes(scopes []string) []string {
@@ -1304,59 +1370,97 @@ func compatibleValueResult(left, right expressionResult, path string) (expressio
 	if typ != operators.ExpressionTypeArray {
 		return res, nil
 	}
-	elemType, known, err := mergedArrayElementType(left, right, path)
+	elemTypes, known, err := mergedArrayElementTypes(left, right, path)
 	if err != nil {
 		return expressionResult{}, err
 	}
 	if known {
-		res = withArrayElementType(res, elemType)
+		res = withArrayElementTypes(res, elemTypes...)
 	}
 	return res, nil
 }
 
-func mergedArrayElementType(left, right expressionResult, path string) (operators.ExpressionType, bool, error) {
+func mergedArrayElementTypes(left, right expressionResult, path string) ([]operators.ExpressionType, bool, error) {
 	if valueTypeOf(left) == operators.ExpressionTypeArray && valueTypeOf(right) == operators.ExpressionTypeArray {
-		return compatibleArrayElementType(left, right, path)
+		return compatibleArrayElementTypes(left, right, path)
 	}
 	if valueTypeOf(left) == operators.ExpressionTypeArray && valueTypeOf(right) == operators.ExpressionTypeNull {
-		elemType, known := arrayElementTypeOf(left)
-		return elemType, known, nil
+		elemTypes, known := arrayElementTypesOf(left)
+		return elemTypes, known, nil
 	}
 	if valueTypeOf(right) == operators.ExpressionTypeArray && valueTypeOf(left) == operators.ExpressionTypeNull {
-		elemType, known := arrayElementTypeOf(right)
-		return elemType, known, nil
+		elemTypes, known := arrayElementTypesOf(right)
+		return elemTypes, known, nil
 	}
-	return operators.ExpressionTypeUnknown, false, nil
+	return nil, false, nil
 }
 
 func compatibleArrayElementType(left, right expressionResult, path string) (operators.ExpressionType, bool, error) {
-	if valueTypeOf(left) != operators.ExpressionTypeArray || valueTypeOf(right) != operators.ExpressionTypeArray {
-		return operators.ExpressionTypeUnknown, false, nil
+	elemTypes, known, err := compatibleArrayElementTypes(left, right, path)
+	if !known || err != nil {
+		return operators.ExpressionTypeUnknown, known, err
 	}
-	leftElem, leftKnown := arrayElementTypeOf(left)
-	rightElem, rightKnown := arrayElementTypeOf(right)
-	if leftKnown && rightKnown {
-		if leftElem == rightElem {
-			return leftElem, true, nil
-		}
-		return operators.ExpressionTypeUnknown, false, tperrors.NewTypeMismatch("", path,
-			"array value branches must have compatible element types",
-			fmt.Sprintf("%s and %s", typeName(leftElem), typeName(rightElem)))
-	}
-	if leftKnown && arrayElementTypeNeutral(right) {
-		return leftElem, true, nil
-	}
-	if rightKnown && arrayElementTypeNeutral(left) {
-		return rightElem, true, nil
-	}
-	return operators.ExpressionTypeUnknown, false, nil
+	return elemTypes[0], true, nil
 }
 
-func arrayElementTypeOf(res expressionResult) (operators.ExpressionType, bool) {
-	if valueTypeOf(res) != operators.ExpressionTypeArray || !res.arrayElementTypeKnown {
-		return operators.ExpressionTypeUnknown, false
+func compatibleArrayElementTypes(left, right expressionResult, path string) ([]operators.ExpressionType, bool, error) {
+	if valueTypeOf(left) != operators.ExpressionTypeArray || valueTypeOf(right) != operators.ExpressionTypeArray {
+		return nil, false, nil
 	}
-	return res.arrayElementType, true
+	leftTypes, leftKnown := arrayElementTypesOf(left)
+	rightTypes, rightKnown := arrayElementTypesOf(right)
+	if leftKnown && rightKnown {
+		if sameExpressionTypes(leftTypes, rightTypes) {
+			return leftTypes, true, nil
+		}
+		return nil, false, tperrors.NewTypeMismatch("", path,
+			"array value branches must have compatible element types",
+			fmt.Sprintf("%s and %s", arrayElementTypesName(leftTypes), arrayElementTypesName(rightTypes)))
+	}
+	if leftKnown && arrayElementTypeNeutral(right) {
+		return leftTypes, true, nil
+	}
+	if rightKnown && arrayElementTypeNeutral(left) {
+		return rightTypes, true, nil
+	}
+	return nil, false, nil
+}
+
+func arrayElementTypesOf(res expressionResult) ([]operators.ExpressionType, bool) {
+	if valueTypeOf(res) != operators.ExpressionTypeArray || !res.arrayElementTypeKnown {
+		return nil, false
+	}
+	elemTypes := normalizeExpressionTypes(res.arrayElementTypes)
+	if len(elemTypes) == 0 && res.arrayElementType != operators.ExpressionTypeUnknown {
+		elemTypes = []operators.ExpressionType{res.arrayElementType}
+	}
+	if len(elemTypes) == 0 {
+		return nil, false
+	}
+	return elemTypes, true
+}
+
+func sameExpressionTypes(left, right []operators.ExpressionType) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayElementTypesName(types []operators.ExpressionType) string {
+	if len(types) == 0 {
+		return typeName(operators.ExpressionTypeUnknown)
+	}
+	parts := make([]string, len(types))
+	for i, typ := range types {
+		parts[i] = typeName(typ)
+	}
+	return strings.Join(parts, " of ")
 }
 
 func arrayElementTypeNeutral(res expressionResult) bool {
@@ -1451,13 +1555,13 @@ func (p *Parser) parseExpressionValue(expr interface{}, path string) (expression
 		return p.parsePrimitiveValue(expr, path)
 	}
 	if arr, ok := expr.([]interface{}); ok {
-		sql, elemType, err := p.arrayLiteralToSQL(arr, path)
+		sql, elemTypes, err := p.arrayLiteralToSQL(arr, path)
 		if err != nil {
 			return expressionResult{}, tperrors.Wrap(tperrors.ErrInvalidArgument, "", path, "invalid array literal", err)
 		}
-		return withArrayElementType(
+		return withArrayElementTypes(
 			literalValueResultWithRaw(sql, operators.ExpressionTypeArray, len(arr) > 0, expr),
-			elemType,
+			elemTypes...,
 		), nil
 	}
 	if obj, ok := expr.(map[string]interface{}); ok {
@@ -1663,14 +1767,15 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
-		sql, err := p.arrayOp.ToSQLAtPath(operator, arr, path)
+		res, err := p.arrayOp.ToValueResultAtPath(operator, arr, path)
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
+		sql := res.SQL
 		if arrayValueOperatorReturnsEmptyLiteral(operator, arr) || p.sqlIsEmptyArrayLiteral(sql) {
 			return literalValueResultWithRaw(sql, operators.ExpressionTypeArray, false, []interface{}{}), nil
 		}
-		return valueResult(sql, operators.ExpressionTypeArray), nil
+		return resultFromOperator(res), nil
 	case operators.OpReduce:
 		arr, ok := args.([]interface{})
 		if !ok {
@@ -1883,8 +1988,8 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 				return thenRes, nil
 			}
 			result := valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), valueSQL(thenRes)), valueTypeOf(resultRes))
-			if elemType, ok := arrayElementTypeOf(resultRes); ok {
-				result = withArrayElementType(result, elemType)
+			if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
+				result = withArrayElementTypes(result, elemTypes...)
 			}
 			return result, nil
 		}
@@ -1908,8 +2013,8 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
 	}
 	result := valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL), valueTypeOf(resultRes))
-	if elemType, ok := arrayElementTypeOf(resultRes); ok {
-		result = withArrayElementType(result, elemType)
+	if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
+		result = withArrayElementTypes(result, elemTypes...)
 	}
 	return result, nil
 }
@@ -1962,14 +2067,14 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 	}
 	if operator == "or" {
 		result := valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(current), valueSQL(rest)), valueTypeOf(resultRes))
-		if elemType, ok := arrayElementTypeOf(resultRes); ok {
-			result = withArrayElementType(result, elemType)
+		if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
+			result = withArrayElementTypes(result, elemTypes...)
 		}
 		return result, nil
 	}
 	result := valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(rest), valueSQL(current)), valueTypeOf(resultRes))
-	if elemType, ok := arrayElementTypeOf(resultRes); ok {
-		result = withArrayElementType(result, elemType)
+	if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
+		result = withArrayElementTypes(result, elemTypes...)
 	}
 	return result, nil
 }
@@ -2637,13 +2742,13 @@ func (p *Parser) parseExpressionValueParam(expr interface{}, path string, pc *pa
 		return p.parsePrimitiveValueParam(expr, path, pc)
 	}
 	if arr, ok := expr.([]interface{}); ok {
-		sql, elemType, err := p.arrayLiteralToSQLParam(arr, path, pc)
+		sql, elemTypes, err := p.arrayLiteralToSQLParam(arr, path, pc)
 		if err != nil {
 			return expressionResult{}, tperrors.Wrap(tperrors.ErrInvalidArgument, "", path, "invalid array literal", err)
 		}
-		return withArrayElementType(
+		return withArrayElementTypes(
 			literalValueResultWithRaw(sql, operators.ExpressionTypeArray, len(arr) > 0, expr),
-			elemType,
+			elemTypes...,
 		), nil
 	}
 	if obj, ok := expr.(map[string]interface{}); ok {
@@ -2869,14 +2974,15 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
-		sql, err := p.arrayOp.ToSQLParamAtPath(operator, arr, pc, path)
+		res, err := p.arrayOp.ToValueResultParamAtPath(operator, arr, pc, path)
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
+		sql := res.SQL
 		if arrayValueOperatorReturnsEmptyLiteral(operator, arr) || p.sqlIsEmptyArrayLiteral(sql) {
 			return literalValueResultWithRaw(sql, operators.ExpressionTypeArray, false, []interface{}{}), nil
 		}
-		return valueResult(sql, operators.ExpressionTypeArray), nil
+		return resultFromOperator(res), nil
 	case operators.OpReduce:
 		arr, ok := args.([]interface{})
 		if !ok {
@@ -3107,8 +3213,8 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 				return thenRes, nil
 			}
 			result := valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), valueSQL(thenRes)), valueTypeOf(resultRes))
-			if elemType, ok := arrayElementTypeOf(resultRes); ok {
-				result = withArrayElementType(result, elemType)
+			if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
+				result = withArrayElementTypes(result, elemTypes...)
 			}
 			return result, nil
 		}
@@ -3132,8 +3238,8 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
 	}
 	result := valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL), valueTypeOf(resultRes))
-	if elemType, ok := arrayElementTypeOf(resultRes); ok {
-		result = withArrayElementType(result, elemType)
+	if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
+		result = withArrayElementTypes(result, elemTypes...)
 	}
 	return result, nil
 }
@@ -3196,14 +3302,14 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 	}
 	if operator == "or" {
 		result := valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(current), valueSQL(rest)), valueTypeOf(resultRes))
-		if elemType, ok := arrayElementTypeOf(resultRes); ok {
-			result = withArrayElementType(result, elemType)
+		if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
+			result = withArrayElementTypes(result, elemTypes...)
 		}
 		return result, nil
 	}
 	result := valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(rest), valueSQL(current)), valueTypeOf(resultRes))
-	if elemType, ok := arrayElementTypeOf(resultRes); ok {
-		result = withArrayElementType(result, elemType)
+	if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
+		result = withArrayElementTypes(result, elemTypes...)
 	}
 	return result, nil
 }

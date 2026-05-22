@@ -25,9 +25,12 @@ transpiler.RegisterOperatorFunc("and", handler)    // built-in operator
 
 The simplest way to register a custom operator is to return a typed `OperatorResult`.
 Use `ValueSQL` for scalar/value expressions, `ArrayValueSQL` for array
-expressions with known scalar element types, and `PredicateSQL` for boolean
+expressions with known immediate element types, and `PredicateSQL` for boolean
 predicates. This lets `TranspileCondition` reject value-only operators at the
 root while still allowing those operators inside comparisons.
+For nested arrays, set `OperatorResult.ArrayElementTypes` with the immediate
+element type first, for example `[]ExpressionType{ExpressionTypeArray,
+ExpressionTypeNumber}` for `array<array<number>>`.
 
 Custom operators must use this typed contract. Legacy handlers that return only
 a SQL string are no longer accepted because the transpiler cannot infer whether

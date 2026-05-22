@@ -138,6 +138,9 @@ func TestArrayValueSQL(t *testing.T) {
 	if result.ArrayElementType != ExpressionTypeNumber {
 		t.Errorf("ArrayValueSQL().ArrayElementType = %v, want %v", result.ArrayElementType, ExpressionTypeNumber)
 	}
+	if len(result.ArrayElementTypes) != 1 || result.ArrayElementTypes[0] != ExpressionTypeNumber {
+		t.Errorf("ArrayValueSQL().ArrayElementTypes = %#v, want [%v]", result.ArrayElementTypes, ExpressionTypeNumber)
+	}
 }
 
 func TestLiteralResult(t *testing.T) {

@@ -47,10 +47,14 @@ type OperatorResult struct {
 	Kind              ExpressionKind
 	Type              ExpressionType
 	EmptyArrayLiteral bool
-	// ArrayElementType optionally carries the scalar element type when Type is
-	// ExpressionTypeArray. ExpressionTypeUnknown means the element type is not
-	// statically known.
+	// ArrayElementType optionally carries the immediate element type when Type
+	// is ExpressionTypeArray. ExpressionTypeUnknown means the element type is
+	// not statically known.
 	ArrayElementType ExpressionType
+	// ArrayElementTypes carries nested array element types, with the immediate
+	// element type first. For example, array<array<number>> is represented as
+	// []ExpressionType{ExpressionTypeArray, ExpressionTypeNumber}.
+	ArrayElementTypes []ExpressionType
 }
 
 // PredicateSQL creates a custom-operator result that can be used in predicate
@@ -70,6 +74,9 @@ func ValueSQL(sql string, typ ExpressionType) OperatorResult {
 func ArrayValueSQL(sql string, elemType ExpressionType) OperatorResult {
 	res := ValueSQL(sql, ExpressionTypeArray)
 	res.ArrayElementType = elemType
+	if elemType != ExpressionTypeUnknown {
+		res.ArrayElementTypes = []ExpressionType{elemType}
+	}
 	return res
 }
 
@@ -115,9 +122,12 @@ type ProcessedValue struct {
 	// must keep those params so placeholder validation still reports dropped
 	// custom-operator arguments.
 	PreserveParamRefs bool
-	// ArrayElementType optionally carries the scalar element type for
+	// ArrayElementType optionally carries the immediate element type for
 	// array-valued SQL expressions. ExpressionTypeUnknown means unknown.
 	ArrayElementType ExpressionType
+	// ArrayElementTypes carries nested array element types, with the immediate
+	// element type first. ExpressionTypeUnknown or an empty slice means unknown.
+	ArrayElementTypes []ExpressionType
 }
 
 // SQLResult creates a ProcessedValue marked as SQL.
