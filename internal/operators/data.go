@@ -12,10 +12,6 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
 
-// validIdentifierSegment matches the raw identifier segments accepted in
-// array-lambda scope paths before dialect-specific quoting is applied.
-var validIdentifierSegment = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
-
 // validJSONNumberLiteral matches strict JSON numeric literals.
 // This prevents crafted json.Number values (from map/interface APIs) from being
 // inlined as arbitrary SQL fragments.
@@ -269,17 +265,75 @@ func (d *DataOperator) convertVarName(varName string) (string, error) {
 		dl = d.config.GetDialect()
 	}
 
-	segments := strings.Split(varName, ".")
-	for i, seg := range segments {
+	needsQuoting := false
+	forEachDottedSegment(varName, func(seg string) {
 		if dialect.ContainsQuoteCharacters(seg) {
-			return "", fmt.Errorf("variable name %q contains quote characters; "+
-				"use raw identifiers — the transpiler handles quoting automatically", varName)
+			needsQuoting = true
+			return
 		}
 		if dialect.NeedsQuoting(seg) {
-			segments[i] = dialect.QuoteIdentifierSegment(seg, dl)
+			needsQuoting = true
 		}
+	})
+	if !needsQuoting {
+		return varName, nil
 	}
-	return strings.Join(segments, "."), nil
+
+	var out strings.Builder
+	out.Grow(len(varName) + 4)
+	var quoteErr error
+	firstSegment := true
+	forEachDottedSegment(varName, func(seg string) {
+		if quoteErr != nil {
+			return
+		}
+		if !firstSegment {
+			out.WriteByte('.')
+		}
+		firstSegment = false
+		if dialect.ContainsQuoteCharacters(seg) {
+			quoteErr = fmt.Errorf("variable name %q contains quote characters; "+
+				"use raw identifiers — the transpiler handles quoting automatically", varName)
+			return
+		}
+		if dialect.NeedsQuoting(seg) {
+			out.WriteString(dialect.QuoteIdentifierSegment(seg, dl))
+			return
+		}
+		out.WriteString(seg)
+	})
+	if quoteErr != nil {
+		return "", quoteErr
+	}
+	return out.String(), nil
+}
+
+func forEachDottedSegment(name string, visit func(string)) {
+	start := 0
+	for {
+		dot := strings.IndexByte(name[start:], '.')
+		if dot < 0 {
+			visit(name[start:])
+			return
+		}
+		end := start + dot
+		visit(name[start:end])
+		start = end + 1
+	}
+}
+
+func isValidIdentifierSegment(segment string) bool {
+	if segment == "" {
+		return false
+	}
+	for i := 0; i < len(segment); i++ {
+		c := segment[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // getNumber extracts a number from an interface{} and returns it as float64.

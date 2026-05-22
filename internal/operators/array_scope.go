@@ -17,40 +17,20 @@ func (a *ArrayOperator) elemAlias() string {
 	if a == nil || a.scopeDepth == 0 {
 		return ElemVar
 	}
-	return fmt.Sprintf("%s%d", ElemVar, a.scopeDepth)
+	return ElemVar + strconv.Itoa(a.scopeDepth)
 }
 
 func (a *ArrayOperator) clone() *ArrayOperator {
-	return &ArrayOperator{
-		config:             a.config,
-		dataOp:             a.dataOp,
-		comparisonOp:       a.comparisonOp,
-		logicalOp:          a.logicalOp,
-		numericOp:          a.numericOp,
-		scopeDepth:         a.scopeDepth,
-		visibleElems:       slices.Clone(a.visibleElems),
-		visibleScopes:      slices.Clone(a.visibleScopes),
-		exprPath:           a.exprPath,
-		valueScope:         a.valueScope,
-		lambdaScope:        a.lambdaScope,
-		schemaScope:        a.schemaScope,
-		schemaScopes:       slices.Clone(a.schemaScopes),
-		valueSemantics:     a.valueSemantics,
-		accumulatorType:    a.accumulatorType,
-		hasAccumulatorType: a.hasAccumulatorType,
-		accumulatorSQL:     a.accumulatorSQL,
-		elementType:        a.elementType,
-		elementNestedTypes: slices.Clone(a.elementNestedTypes),
-		hasElementType:     a.hasElementType,
-	}
+	child := *a
+	return &child
 }
 
 func (a *ArrayOperator) withChildScope() *ArrayOperator {
 	child := a.clone()
 	child.scopeDepth++
 	childAlias := child.elemAlias()
-	child.visibleElems = append(child.visibleElems, childAlias)
-	child.visibleScopes = append(child.visibleScopes, "")
+	child.visibleElems = appendStringCopy(a.visibleElems, childAlias)
+	child.visibleScopes = appendStringCopy(a.visibleScopes, "")
 	return child
 }
 
@@ -75,55 +55,61 @@ func (a *ArrayOperator) withValueSemantics(enabled bool) *ArrayOperator {
 	return child
 }
 
-func (a *ArrayOperator) withAccumulatorType(typ ExpressionType) *ArrayOperator {
-	child := a.clone()
-	child.accumulatorType = typ
-	child.hasAccumulatorType = true
-	return child
-}
-
-func (a *ArrayOperator) withAccumulatorSQL(sql string) *ArrayOperator {
-	child := a.clone()
-	child.accumulatorSQL = sql
-	return child
-}
-
-func (a *ArrayOperator) withSourceElementType(arrayValue typedValueSQL, sourceScopes []string) *ArrayOperator {
-	elemTypes := typedValueElementTypes(arrayValue)
-	if len(sourceScopes) > 0 || len(elemTypes) == 0 {
-		return a
-	}
-	a.elementType = elemTypes[0]
-	a.elementNestedTypes = slices.Clone(elemTypes[1:])
-	a.hasElementType = true
-	return a
-}
-
-func (a *ArrayOperator) withLambdaScope(scope arrayLambdaScope) *ArrayOperator {
+func (a *ArrayOperator) withArrayLambdaSource(
+	scope arrayLambdaScope,
+	sourceScopes []string,
+	arrayValue typedValueSQL,
+	valueSemantics bool,
+) *ArrayOperator {
 	child := a.clone()
 	child.lambdaScope = scope
-	// Each lambda installs its own current-element metadata. Clearing the
-	// inherited type prevents an outer element type from leaking into a nested
-	// lambda before the nested source is evaluated.
+	child.valueSemantics = valueSemantics
 	child.elementType = ExpressionTypeUnknown
 	child.elementNestedTypes = nil
 	child.hasElementType = false
+
+	scopes := normalizeSchemaScopes(sourceScopes)
+	if len(scopes) > 0 {
+		child.schemaScope = scopes[0]
+		child.schemaScopes = scopes
+		if len(child.visibleScopes) > 0 {
+			child.visibleScopes = replaceLastStringCopy(a.visibleScopes, scopes[0])
+		}
+		return child
+	}
+
+	child.schemaScope = ""
+	child.schemaScopes = nil
+	elemTypes := typedValueElementTypes(arrayValue)
+	if len(elemTypes) > 0 {
+		child.elementType = elemTypes[0]
+		child.elementNestedTypes = slices.Clone(elemTypes[1:])
+		child.hasElementType = true
+	}
 	return child
 }
 
-func (a *ArrayOperator) withSchemaScopes(scopes []string) *ArrayOperator {
-	scopes = normalizeSchemaScopes(scopes)
-	scope := ""
-	if len(scopes) > 0 {
-		scope = scopes[0]
-	}
+func (a *ArrayOperator) withReduceValueScope(typ ExpressionType, accumulatorSQL string) *ArrayOperator {
 	child := a.clone()
-	child.schemaScope = scope
-	child.schemaScopes = slices.Clone(scopes)
-	if len(child.visibleScopes) > 0 {
-		child.visibleScopes[len(child.visibleScopes)-1] = scope
-	}
+	child.valueSemantics = true
+	child.accumulatorType = typ
+	child.hasAccumulatorType = true
+	child.accumulatorSQL = accumulatorSQL
 	return child
+}
+
+func appendStringCopy(values []string, value string) []string {
+	copied := make([]string, len(values)+1)
+	copy(copied, values)
+	copied[len(values)] = value
+	return copied
+}
+
+func replaceLastStringCopy(values []string, value string) []string {
+	copied := make([]string, len(values))
+	copy(copied, values)
+	copied[len(copied)-1] = value
+	return copied
 }
 
 func singleSchemaScope(scope string) []string {
@@ -137,19 +123,55 @@ func normalizeSchemaScopes(scopes []string) []string {
 	if len(scopes) == 0 {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(scopes))
+	if len(scopes) == 1 {
+		if scopes[0] == "" {
+			return nil
+		}
+		return scopes
+	}
+	needsNormalize := false
+	for i, scope := range scopes {
+		if scope == "" {
+			needsNormalize = true
+			break
+		}
+		for j := 0; j < i; j++ {
+			if scopes[j] == scope {
+				needsNormalize = true
+				break
+			}
+		}
+		if needsNormalize {
+			break
+		}
+	}
+	if !needsNormalize {
+		return scopes
+	}
+
 	normalized := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
 		if scope == "" {
 			continue
 		}
-		if _, exists := seen[scope]; exists {
+		if stringSliceContains(normalized, scope) {
 			continue
 		}
-		seen[scope] = struct{}{}
 		normalized = append(normalized, scope)
 	}
+	if len(normalized) == 0 {
+		return nil
+	}
 	return normalized
+}
+
+func stringSliceContains(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *ArrayOperator) currentSchemaScopes() []string {

@@ -49,10 +49,7 @@ func (a *ArrayOperator) handleMapResult(args []interface{}) (OperatorResult, err
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
-	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
-		withValueSemantics(true)
+	valueScoped := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, true)
 	transformation, err := valueScoped.valueExpressionResultWithContextAndPath(
 		args[arrayExpressionArgIndex],
 		false,
@@ -113,9 +110,7 @@ func (a *ArrayOperator) handleFilterResult(args []interface{}) (OperatorResult, 
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
-	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
+	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid filter condition argument: %w", err)

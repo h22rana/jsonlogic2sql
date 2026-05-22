@@ -43,9 +43,7 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
-	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
+	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
@@ -97,9 +95,7 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
-	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
+	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
@@ -148,9 +144,7 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
-	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
+	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)

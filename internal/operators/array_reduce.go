@@ -67,9 +67,7 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	alias := a.elemAlias()
 
 	// Check for common reduction patterns and optimize
-	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes)
+	reduceScoped := a.withArrayLambdaSource(arrayLambdaScopeReduce, sourceScopes, arrayValue, false)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
 		// Generate optimized aggregate SQL based on dialect
 		switch a.getDialect() {
@@ -116,7 +114,7 @@ generalReduce:
 	if a.getDialect() == dialect.DialectClickHouse || a.getDialect() == dialect.DialectDuckDB {
 		accumulatorSQL = "acc"
 	}
-	valueScoped := reduceScoped.withValueSemantics(true).withAccumulatorType(initialValue.typ).withAccumulatorSQL(accumulatorSQL)
+	valueScoped := reduceScoped.withReduceValueScope(initialValue.typ, accumulatorSQL)
 	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(reducerExpr, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)

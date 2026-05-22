@@ -3,6 +3,7 @@ package errors
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -245,9 +246,9 @@ func BuildPath(parent, operator string, index int) string {
 		parent = "$"
 	}
 	if index >= 0 {
-		return fmt.Sprintf("%s.%s[%d]", parent, operator, index)
+		return parent + "." + operator + "[" + strconv.Itoa(index) + "]"
 	}
-	return fmt.Sprintf("%s.%s", parent, operator)
+	return parent + "." + operator
 }
 
 // BuildArrayPath constructs a JSONPath string for an array index.
@@ -255,7 +256,7 @@ func BuildArrayPath(parent string, index int) string {
 	if parent == "" {
 		parent = "$"
 	}
-	return fmt.Sprintf("%s[%d]", parent, index)
+	return parent + "[" + strconv.Itoa(index) + "]"
 }
 
 // NewValidationError wraps a validation error from the validator package.

@@ -115,10 +115,7 @@ func (a *ArrayOperator) handleMapResultParam(args []interface{}, pc *params.Para
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
-	valueScoped := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
-		withValueSemantics(true)
+	valueScoped := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, true)
 	transformation, err := valueScoped.valueExpressionResultParamWithContextAndPath(
 		args[arrayExpressionArgIndex],
 		pc,
@@ -169,9 +166,7 @@ func (a *ArrayOperator) handleFilterResultParam(args []interface{}, pc *params.P
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
-	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
+	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid filter condition argument: %w", err)
@@ -216,9 +211,7 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 	reducerExpr := args[arrayExpressionArgIndex]
 	alias := a.elemAlias()
 
-	reduceScoped := a.withLambdaScope(arrayLambdaScopeReduce).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes)
+	reduceScoped := a.withArrayLambdaSource(arrayLambdaScopeReduce, sourceScopes, arrayValue, false)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
 		switch a.getDialect() {
 		case dialect.DialectClickHouse:
@@ -260,7 +253,7 @@ generalReduceParam:
 	if a.getDialect() == dialect.DialectClickHouse || a.getDialect() == dialect.DialectDuckDB {
 		accumulatorSQL = "acc"
 	}
-	valueScoped := reduceScoped.withValueSemantics(true).withAccumulatorType(initialValue.typ).withAccumulatorSQL(accumulatorSQL)
+	valueScoped := reduceScoped.withReduceValueScope(initialValue.typ, accumulatorSQL)
 	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(reducerExpr, pc, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid reduce expression: %w", err)
@@ -296,9 +289,7 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
-	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
+	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
@@ -336,9 +327,7 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
-	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
+	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
@@ -375,9 +364,7 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
-	condition, err := a.withLambdaScope(arrayLambdaScopeElement).
-		withSchemaScopes(sourceScopes).
-		withSourceElementType(arrayValue, sourceScopes).
+	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)

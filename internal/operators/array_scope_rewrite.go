@@ -17,20 +17,47 @@ func (a *ArrayOperator) quoteArrayScopePath(alias, suffix string) (string, error
 }
 
 func (a *ArrayOperator) quoteArrayScopeIdentifier(name string) (string, error) {
-	segments := strings.Split(name, ".")
-	for i, seg := range segments {
+	needsQuoting := false
+	var validateErr error
+	forEachDottedSegment(name, func(seg string) {
+		if validateErr != nil {
+			return
+		}
 		if dialect.ContainsQuoteCharacters(seg) {
-			return "", fmt.Errorf("array-scope variable name %q contains quote characters; "+
+			validateErr = fmt.Errorf("array-scope variable name %q contains quote characters; "+
 				"use raw identifiers — the transpiler handles quoting automatically", name)
+			return
 		}
-		if seg == "" || !validIdentifierSegment.MatchString(seg) {
-			return "", fmt.Errorf("invalid identifier %q: each segment must match [a-zA-Z0-9_]+", name)
+		if !isValidIdentifierSegment(seg) {
+			validateErr = fmt.Errorf("invalid identifier %q: each segment must match [a-zA-Z0-9_]+", name)
+			return
 		}
-		if i > 0 && dialect.NeedsQuoting(seg) {
-			segments[i] = dialect.QuoteIdentifierSegment(seg, a.getDialect())
+		if dialect.NeedsQuoting(seg) {
+			needsQuoting = true
 		}
+	})
+	if validateErr != nil {
+		return "", validateErr
 	}
-	return strings.Join(segments, "."), nil
+	if !needsQuoting {
+		return name, nil
+	}
+
+	var out strings.Builder
+	out.Grow(len(name) + 4)
+	firstSegment := true
+	forEachDottedSegment(name, func(seg string) {
+		if !firstSegment {
+			out.WriteByte('.')
+		}
+		firstSegment = false
+		if dialect.NeedsQuoting(seg) {
+			out.WriteString(dialect.QuoteIdentifierSegment(seg, a.getDialect()))
+			return
+		}
+		out.WriteString(seg)
+	})
+	return out.String(), nil
 }
 
 // mapArrayScopeVar maps var names according to the active JSONLogic lambda
