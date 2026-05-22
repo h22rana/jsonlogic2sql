@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -228,29 +229,34 @@ func (a *ArrayOperator) elemAlias() string {
 	return fmt.Sprintf("%s%d", ElemVar, a.scopeDepth)
 }
 
-func (a *ArrayOperator) withChildScope() *ArrayOperator {
-	child := &ArrayOperator{
+func (a *ArrayOperator) clone() *ArrayOperator {
+	return &ArrayOperator{
 		config:             a.config,
 		dataOp:             a.dataOp,
 		comparisonOp:       a.comparisonOp,
 		logicalOp:          a.logicalOp,
 		numericOp:          a.numericOp,
-		scopeDepth:         a.scopeDepth + 1,
-		visibleElems:       append([]string{}, a.visibleElems...),
-		visibleScopes:      append([]string{}, a.visibleScopes...),
+		scopeDepth:         a.scopeDepth,
+		visibleElems:       slices.Clone(a.visibleElems),
+		visibleScopes:      slices.Clone(a.visibleScopes),
 		exprPath:           a.exprPath,
 		valueScope:         a.valueScope,
 		lambdaScope:        a.lambdaScope,
 		schemaScope:        a.schemaScope,
-		schemaScopes:       append([]string{}, a.schemaScopes...),
+		schemaScopes:       slices.Clone(a.schemaScopes),
 		valueSemantics:     a.valueSemantics,
 		accumulatorType:    a.accumulatorType,
 		hasAccumulatorType: a.hasAccumulatorType,
 		accumulatorSQL:     a.accumulatorSQL,
 		elementType:        a.elementType,
-		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
+		elementNestedTypes: slices.Clone(a.elementNestedTypes),
 		hasElementType:     a.hasElementType,
 	}
+}
+
+func (a *ArrayOperator) withChildScope() *ArrayOperator {
+	child := a.clone()
+	child.scopeDepth++
 	childAlias := child.elemAlias()
 	child.visibleElems = append(child.visibleElems, childAlias)
 	child.visibleScopes = append(child.visibleScopes, "")
@@ -261,132 +267,33 @@ func (a *ArrayOperator) withPath(path string) *ArrayOperator {
 	if path == "" {
 		path = "$"
 	}
-	child := &ArrayOperator{
-		config:             a.config,
-		dataOp:             a.dataOp,
-		comparisonOp:       a.comparisonOp,
-		logicalOp:          a.logicalOp,
-		numericOp:          a.numericOp,
-		scopeDepth:         a.scopeDepth,
-		visibleElems:       append([]string{}, a.visibleElems...),
-		visibleScopes:      append([]string{}, a.visibleScopes...),
-		exprPath:           path,
-		valueScope:         a.valueScope,
-		lambdaScope:        a.lambdaScope,
-		schemaScope:        a.schemaScope,
-		schemaScopes:       append([]string{}, a.schemaScopes...),
-		valueSemantics:     a.valueSemantics,
-		accumulatorType:    a.accumulatorType,
-		hasAccumulatorType: a.hasAccumulatorType,
-		accumulatorSQL:     a.accumulatorSQL,
-		elementType:        a.elementType,
-		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
-		hasElementType:     a.hasElementType,
-	}
+	child := a.clone()
+	child.exprPath = path
 	return child
 }
 
 func (a *ArrayOperator) withValueScope(enabled bool) *ArrayOperator {
-	child := &ArrayOperator{
-		config:             a.config,
-		dataOp:             a.dataOp,
-		comparisonOp:       a.comparisonOp,
-		logicalOp:          a.logicalOp,
-		numericOp:          a.numericOp,
-		scopeDepth:         a.scopeDepth,
-		visibleElems:       append([]string{}, a.visibleElems...),
-		visibleScopes:      append([]string{}, a.visibleScopes...),
-		exprPath:           a.exprPath,
-		valueScope:         enabled,
-		lambdaScope:        a.lambdaScope,
-		schemaScope:        a.schemaScope,
-		schemaScopes:       append([]string{}, a.schemaScopes...),
-		valueSemantics:     a.valueSemantics,
-		accumulatorType:    a.accumulatorType,
-		hasAccumulatorType: a.hasAccumulatorType,
-		accumulatorSQL:     a.accumulatorSQL,
-		elementType:        a.elementType,
-		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
-		hasElementType:     a.hasElementType,
-	}
+	child := a.clone()
+	child.valueScope = enabled
 	return child
 }
 
 func (a *ArrayOperator) withValueSemantics(enabled bool) *ArrayOperator {
-	child := &ArrayOperator{
-		config:             a.config,
-		dataOp:             a.dataOp,
-		comparisonOp:       a.comparisonOp,
-		logicalOp:          a.logicalOp,
-		numericOp:          a.numericOp,
-		scopeDepth:         a.scopeDepth,
-		visibleElems:       append([]string{}, a.visibleElems...),
-		visibleScopes:      append([]string{}, a.visibleScopes...),
-		exprPath:           a.exprPath,
-		valueScope:         a.valueScope,
-		lambdaScope:        a.lambdaScope,
-		schemaScope:        a.schemaScope,
-		schemaScopes:       append([]string{}, a.schemaScopes...),
-		valueSemantics:     enabled,
-		accumulatorType:    a.accumulatorType,
-		hasAccumulatorType: a.hasAccumulatorType,
-		accumulatorSQL:     a.accumulatorSQL,
-		elementType:        a.elementType,
-		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
-		hasElementType:     a.hasElementType,
-	}
+	child := a.clone()
+	child.valueSemantics = enabled
 	return child
 }
 
 func (a *ArrayOperator) withAccumulatorType(typ ExpressionType) *ArrayOperator {
-	child := &ArrayOperator{
-		config:             a.config,
-		dataOp:             a.dataOp,
-		comparisonOp:       a.comparisonOp,
-		logicalOp:          a.logicalOp,
-		numericOp:          a.numericOp,
-		scopeDepth:         a.scopeDepth,
-		visibleElems:       append([]string{}, a.visibleElems...),
-		visibleScopes:      append([]string{}, a.visibleScopes...),
-		exprPath:           a.exprPath,
-		valueScope:         a.valueScope,
-		lambdaScope:        a.lambdaScope,
-		schemaScope:        a.schemaScope,
-		schemaScopes:       append([]string{}, a.schemaScopes...),
-		valueSemantics:     a.valueSemantics,
-		accumulatorType:    typ,
-		hasAccumulatorType: true,
-		accumulatorSQL:     a.accumulatorSQL,
-		elementType:        a.elementType,
-		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
-		hasElementType:     a.hasElementType,
-	}
+	child := a.clone()
+	child.accumulatorType = typ
+	child.hasAccumulatorType = true
 	return child
 }
 
 func (a *ArrayOperator) withAccumulatorSQL(sql string) *ArrayOperator {
-	child := &ArrayOperator{
-		config:             a.config,
-		dataOp:             a.dataOp,
-		comparisonOp:       a.comparisonOp,
-		logicalOp:          a.logicalOp,
-		numericOp:          a.numericOp,
-		scopeDepth:         a.scopeDepth,
-		visibleElems:       append([]string{}, a.visibleElems...),
-		visibleScopes:      append([]string{}, a.visibleScopes...),
-		exprPath:           a.exprPath,
-		valueScope:         a.valueScope,
-		lambdaScope:        a.lambdaScope,
-		schemaScope:        a.schemaScope,
-		schemaScopes:       append([]string{}, a.schemaScopes...),
-		valueSemantics:     a.valueSemantics,
-		accumulatorType:    a.accumulatorType,
-		hasAccumulatorType: a.hasAccumulatorType,
-		accumulatorSQL:     sql,
-		elementType:        a.elementType,
-		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
-		hasElementType:     a.hasElementType,
-	}
+	child := a.clone()
+	child.accumulatorSQL = sql
 	return child
 }
 
@@ -396,34 +303,20 @@ func (a *ArrayOperator) withSourceElementType(arrayValue typedValueSQL, sourceSc
 		return a
 	}
 	a.elementType = elemTypes[0]
-	a.elementNestedTypes = append([]ExpressionType{}, elemTypes[1:]...)
+	a.elementNestedTypes = slices.Clone(elemTypes[1:])
 	a.hasElementType = true
 	return a
 }
 
 func (a *ArrayOperator) withLambdaScope(scope arrayLambdaScope) *ArrayOperator {
-	child := &ArrayOperator{
-		config:             a.config,
-		dataOp:             a.dataOp,
-		comparisonOp:       a.comparisonOp,
-		logicalOp:          a.logicalOp,
-		numericOp:          a.numericOp,
-		scopeDepth:         a.scopeDepth,
-		visibleElems:       append([]string{}, a.visibleElems...),
-		visibleScopes:      append([]string{}, a.visibleScopes...),
-		exprPath:           a.exprPath,
-		valueScope:         a.valueScope,
-		lambdaScope:        scope,
-		schemaScope:        a.schemaScope,
-		schemaScopes:       append([]string{}, a.schemaScopes...),
-		valueSemantics:     a.valueSemantics,
-		accumulatorType:    a.accumulatorType,
-		hasAccumulatorType: a.hasAccumulatorType,
-		accumulatorSQL:     a.accumulatorSQL,
-		elementType:        ExpressionTypeUnknown,
-		elementNestedTypes: nil,
-		hasElementType:     false,
-	}
+	child := a.clone()
+	child.lambdaScope = scope
+	// Each lambda installs its own current-element metadata. Clearing the
+	// inherited type prevents an outer element type from leaking into a nested
+	// lambda before the nested source is evaluated.
+	child.elementType = ExpressionTypeUnknown
+	child.elementNestedTypes = nil
+	child.hasElementType = false
 	return child
 }
 
@@ -433,28 +326,9 @@ func (a *ArrayOperator) withSchemaScopes(scopes []string) *ArrayOperator {
 	if len(scopes) > 0 {
 		scope = scopes[0]
 	}
-	child := &ArrayOperator{
-		config:             a.config,
-		dataOp:             a.dataOp,
-		comparisonOp:       a.comparisonOp,
-		logicalOp:          a.logicalOp,
-		numericOp:          a.numericOp,
-		scopeDepth:         a.scopeDepth,
-		visibleElems:       append([]string{}, a.visibleElems...),
-		visibleScopes:      append([]string{}, a.visibleScopes...),
-		exprPath:           a.exprPath,
-		valueScope:         a.valueScope,
-		lambdaScope:        a.lambdaScope,
-		schemaScope:        scope,
-		schemaScopes:       append([]string{}, scopes...),
-		valueSemantics:     a.valueSemantics,
-		accumulatorType:    a.accumulatorType,
-		hasAccumulatorType: a.hasAccumulatorType,
-		accumulatorSQL:     a.accumulatorSQL,
-		elementType:        a.elementType,
-		elementNestedTypes: append([]ExpressionType{}, a.elementNestedTypes...),
-		hasElementType:     a.hasElementType,
-	}
+	child := a.clone()
+	child.schemaScope = scope
+	child.schemaScopes = slices.Clone(scopes)
 	if len(child.visibleScopes) > 0 {
 		child.visibleScopes[len(child.visibleScopes)-1] = scope
 	}

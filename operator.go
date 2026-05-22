@@ -314,25 +314,21 @@ func validateOperatorName(name string) error {
 		return fmt.Errorf("operator name %q must match pattern !?[a-zA-Z_][a-zA-Z0-9_]*", name)
 	}
 
-	builtInOperators := map[string]bool{
-		// Data access
-		"var": true, "missing": true, "missing_some": true,
-		// Logical and Boolean
-		"if": true, "==": true, "===": true, "!=": true, "!==": true,
-		"and": true, "or": true, "!": true, "!!": true,
-		// Numeric
-		">": true, ">=": true, "<": true, "<=": true,
-		"+": true, "-": true, "*": true, "/": true, "%": true,
-		"max": true, "min": true,
-		// String and Array
-		"cat": true, "substr": true,
-		"in":  true,
-		"map": true, "filter": true, "reduce": true,
-		"all": true, "some": true, "none": true, "merge": true,
-	}
-
-	if builtInOperators[name] {
+	if isBuiltInOperatorName(name) {
 		return fmt.Errorf("cannot override built-in operator: %s", name)
 	}
 	return nil
+}
+
+func isBuiltInOperatorName(name string) bool {
+	switch name {
+	case "var", "missing", "missing_some",
+		"if", "==", "===", "!=", "!==", "and", "or", "!", "!!",
+		">", ">=", "<", "<=", "+", "-", "*", "/", "%", "max", "min",
+		"cat", "substr", "in",
+		"map", "filter", "reduce", "all", "some", "none", "merge":
+		return true
+	default:
+		return false
+	}
 }
