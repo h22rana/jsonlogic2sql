@@ -39,12 +39,23 @@ func resultFromOperator(res operators.OperatorResult) expressionResult {
 		return predicateResult(res.SQL)
 	}
 	result := expressionResult{OperatorResult: res}
+	applyStaticOperatorTruth(&result)
 	if elemTypes := operatorResultArrayElementTypes(res); len(elemTypes) > 0 {
 		result.arrayElementTypeKnown = true
 		result.arrayElementType = elemTypes[0]
 		result.arrayElementTypes = elemTypes
 	}
 	return result
+}
+
+func applyStaticOperatorTruth(result *expressionResult) {
+	if result.Kind != operators.ExpressionKindValue {
+		return
+	}
+	if result.Type == operators.ExpressionTypeNull || result.EmptyArrayLiteral {
+		result.truthKnown = true
+		result.truthy = false
+	}
 }
 
 func customOperatorResult(res operators.OperatorResult, preserveParamRefs bool) expressionResult {

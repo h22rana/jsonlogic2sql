@@ -35,6 +35,9 @@ ExpressionTypeNumber}` for `array<array<number>>`.
 Custom operators must use this typed contract. Legacy handlers that return only
 a SQL string are no longer accepted because the transpiler cannot infer whether
 the SQL is a predicate or a value expression safely.
+`ValueSQL("NULL", ExpressionTypeNull)` is treated as a statically falsy
+JSONLogic value, so value-mode `and`/`or`/`if` short-circuit the same way they
+do for a literal `null`.
 
 The examples below assume a schema variable such as:
 

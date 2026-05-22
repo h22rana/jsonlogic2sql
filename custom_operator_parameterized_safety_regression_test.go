@@ -259,6 +259,152 @@ func TestParameterizedCustomNullValueFoldedComparisonPreservesDroppedParamDetect
 	}
 }
 
+func TestCustomNullValueShortCircuitsValueModeAllDialects(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		logic       string
+		wantSQL     string
+		wantParamFn func(Dialect) string
+		wantParams  []QueryParam
+	}{
+		{
+			name:    "and returns custom null before unreachable field",
+			logic:   `{"and":[{"nuller":[]},{"var":"missing"}]}`,
+			wantSQL: "NULL",
+			wantParamFn: func(Dialect) string {
+				return "NULL"
+			},
+		},
+		{
+			name:    "or skips custom null before fallback",
+			logic:   `{"or":[{"nuller":[]},"fallback"]}`,
+			wantSQL: "'fallback'",
+			wantParamFn: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
+		},
+		{
+			name:    "if skips then branch for custom null condition",
+			logic:   `{"if":[{"nuller":[]},{"var":"missing"},"fallback"]}`,
+			wantSQL: "'fallback'",
+			wantParamFn: func(d Dialect) string {
+				return testPlaceholder(d, 1)
+			},
+			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
+		},
+		{
+			name:    "cat stringifies short-circuited custom null logical",
+			logic:   `{"cat":[{"and":[{"nuller":[]},{"var":"missing"}]}]}`,
+			wantSQL: "CONCAT('')",
+			wantParamFn: func(Dialect) string {
+				return "CONCAT('')"
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: defaultTestSchema()})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+			if regErr := tr.RegisterOperatorFunc("nuller", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return ValueSQL("NULL", ExpressionTypeNull), nil
+			}); regErr != nil {
+				t.Fatalf("RegisterOperatorFunc(nuller) error: %v", regErr)
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					gotSQL, err := tr.TranspileValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if gotSQL != tc.wantSQL {
+						t.Fatalf("TranspileValue() = %q, want %q", gotSQL, tc.wantSQL)
+					}
+
+					gotParamSQL, gotParams, err := tr.TranspileParameterizedValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tc.wantParamFn(d); gotParamSQL != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParamSQL, want)
+					}
+					if len(gotParams) != len(tc.wantParams) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tc.wantParams)
+					}
+					for i := range gotParams {
+						if gotParams[i] != tc.wantParams[i] {
+							t.Fatalf("params = %#v, want %#v", gotParams, tc.wantParams)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestParameterizedCustomNullValueShortCircuitPreservesDroppedParamDetection(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "and custom null hides unreachable field but preserves dropped arg",
+			logic: `{"and":[{"nuller":["x"]},{"var":"missing"}]}`,
+		},
+		{
+			name:  "or custom null hides unreachable field but preserves dropped arg",
+			logic: `{"or":[{"nuller":["x"]},"fallback"]}`,
+		},
+		{
+			name:  "if custom null condition hides then field but preserves dropped arg",
+			logic: `{"if":[{"nuller":["x"]},{"var":"missing"},"fallback"]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: defaultTestSchema()})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+			if regErr := tr.RegisterOperatorFunc("nuller", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return ValueSQL("NULL", ExpressionTypeNull), nil
+			}); regErr != nil {
+				t.Fatalf("RegisterOperatorFunc(nuller) error: %v", regErr)
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, params, err := tr.TranspileParameterizedValue(tc.logic)
+					if !IsErrorCode(err, ErrUnreferencedPlaceholder) {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q params = %#v error = %v, want %s",
+							sql, params, err, ErrUnreferencedPlaceholder)
+					}
+					if !strings.Contains(err.Error(), "custom operator may have dropped an argument") {
+						t.Fatalf("error missing custom-operator safety message: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestParameterizedCustomOperatorRejectsPostgreSQLDollarQuotedPlaceholders(t *testing.T) {
 	t.Parallel()
 
