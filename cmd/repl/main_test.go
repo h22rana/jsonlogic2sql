@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
+
 	"github.com/h22rana/jsonlogic2sql"
 )
 
@@ -204,6 +206,156 @@ func setupTestTranspiler(t *testing.T) *jsonlogic2sql.Transpiler {
 	}
 	registerCustomOperators(tr)
 	return tr
+}
+
+func replFieldEqualityScenarioSchema(t *testing.T) *jsonlogic2sql.Schema {
+	t.Helper()
+	schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+		{
+			Name: "request.methods",
+			Type: jsonlogic2sql.FieldTypeArray,
+			ElementFields: []jsonlogic2sql.FieldSchema{
+				{Name: "type", Type: jsonlogic2sql.FieldTypeString},
+			},
+		},
+		{Name: "request.channel", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "request.description", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "request.account_id", Type: jsonlogic2sql.FieldTypeString},
+		{Name: "request.amount", Type: jsonlogic2sql.FieldTypeInteger},
+		{Name: "request.numeric_user_id", Type: jsonlogic2sql.FieldTypeInteger},
+		{Name: "metrics.window.2m.count", Type: jsonlogic2sql.FieldTypeInteger},
+	})
+	if err != nil {
+		t.Fatalf("NewSchema() error: %v", err)
+	}
+	return schema
+}
+
+func fieldEqualityScenarioJSON(finalComparison string) string {
+	return fmt.Sprintf(`{"and":[{"==":[{"var":"request.channel"},"Code"]},{"some":[{"var":"request.methods"},{"==":[{"var":"type"},"BALANCE"]}]},{"!=":[{"var":"request.description"},""]},{"!=":[{"var":"request.account_id"},""]},{">=":[{"var":"request.amount"},10000]},{"or":[{"contains":[{"var":"request.description"},"alpha"]},{"contains":[{"var":"request.description"},"beta"]},{"contains":[{"var":"request.description"},"gamma"]},{"contains":[{"var":"request.description"},"delta"]}]},%s]}`, finalComparison)
+}
+
+func scenarioCountFieldSQL(d jsonlogic2sql.Dialect) string {
+	return fmt.Sprintf("metrics.window.%s.count", dialect.QuoteIdentifierSegment("2m", d))
+}
+
+func TestTransactionRuleFieldEqualityAcrossDialectsAndModes(t *testing.T) {
+	schema := replFieldEqualityScenarioSchema(t)
+	countField := `{"var":"metrics.window.2m.count"}`
+
+	tests := []struct {
+		name           string
+		final          string
+		wantFragments  []string
+		blockFragments []string
+		wantErr        string
+	}{
+		{
+			name:  "integer integer loose equality",
+			final: fmt.Sprintf(`{"==":[%s,{"var":"request.numeric_user_id"}]}`, countField),
+			wantFragments: []string{
+				"{count} IS NULL AND request.numeric_user_id IS NULL",
+				"{count} = request.numeric_user_id",
+			},
+		},
+		{
+			name:  "integer integer strict equality",
+			final: fmt.Sprintf(`{"===":[%s,{"var":"request.numeric_user_id"}]}`, countField),
+			wantFragments: []string{
+				"{count} IS NULL AND request.numeric_user_id IS NULL",
+				"{count} = request.numeric_user_id",
+			},
+		},
+		{
+			name:  "integer string strict equality",
+			final: fmt.Sprintf(`{"===":[%s,{"var":"request.channel"}]}`, countField),
+			wantFragments: []string{
+				"{count} IS NULL AND request.channel IS NULL",
+			},
+			blockFragments: []string{
+				"{count} = request.channel",
+			},
+		},
+		{
+			name:    "integer string loose equality",
+			final:   fmt.Sprintf(`{"==":[%s,{"var":"request.channel"}]}`, countField),
+			wantErr: "loose equality between number field",
+		},
+	}
+
+	for _, d := range []jsonlogic2sql.Dialect{
+		jsonlogic2sql.DialectBigQuery,
+		jsonlogic2sql.DialectSpanner,
+		jsonlogic2sql.DialectPostgreSQL,
+		jsonlogic2sql.DialectDuckDB,
+		jsonlogic2sql.DialectClickHouse,
+	} {
+		t.Run(d.String(), func(t *testing.T) {
+			currentDialect = d
+			tr, err := jsonlogic2sql.NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			registerCustomOperators(tr)
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					logic := fieldEqualityScenarioJSON(tt.final)
+					countSQL := scenarioCountFieldSQL(d)
+					wantFragments := make([]string, 0, len(tt.wantFragments))
+					for _, fragment := range tt.wantFragments {
+						wantFragments = append(wantFragments, strings.ReplaceAll(fragment, "{count}", countSQL))
+					}
+					blockFragments := make([]string, 0, len(tt.blockFragments))
+					for _, fragment := range tt.blockFragments {
+						blockFragments = append(blockFragments, strings.ReplaceAll(fragment, "{count}", countSQL))
+					}
+					apis := map[string]func() (string, error){
+						"condition": func() (string, error) {
+							return tr.TranspileCondition(logic)
+						},
+						"parameterized condition": func() (string, error) {
+							sql, _, err := tr.TranspileParameterizedCondition(logic)
+							return sql, err
+						},
+						"value": func() (string, error) {
+							return tr.TranspileValue(logic)
+						},
+						"parameterized value": func() (string, error) {
+							sql, _, err := tr.TranspileParameterizedValue(logic)
+							return sql, err
+						},
+					}
+
+					for apiName, run := range apis {
+						sql, err := run()
+						if tt.wantErr != "" {
+							if err == nil {
+								t.Fatalf("%s SQL = %q, want error containing %q", apiName, sql, tt.wantErr)
+							}
+							if !strings.Contains(err.Error(), tt.wantErr) {
+								t.Fatalf("%s error = %v, want %q", apiName, err, tt.wantErr)
+							}
+							continue
+						}
+						if err != nil {
+							t.Fatalf("%s error = %v", apiName, err)
+						}
+						for _, fragment := range wantFragments {
+							if !strings.Contains(sql, fragment) {
+								t.Fatalf("%s SQL missing %q:\n%s", apiName, fragment, sql)
+							}
+						}
+						for _, fragment := range blockFragments {
+							if strings.Contains(sql, fragment) {
+								t.Fatalf("%s SQL contains blocked fragment %q:\n%s", apiName, fragment, sql)
+							}
+						}
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestLikeOperatorsQuoteEscaping(t *testing.T) {

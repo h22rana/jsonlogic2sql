@@ -139,6 +139,8 @@ coercion where the JSONLogic behavior is portable SQL:
   match a boolean field and folds to a constant.
 - String fields compared with numeric literals keep the canonical string match,
   for example `code == 5` emits `code = '5'`.
+- Loose mixed-type field-to-field comparisons return an unsupported-comparison
+  error instead of emitting non-portable runtime coercion SQL.
 - Loose string/boolean field comparisons such as `code == true` return an error
   because JSONLogic's runtime string coercion cannot be expressed portably in
   SQL.

@@ -184,7 +184,9 @@ operands use portable SQL that treats two `NULL` fields as equal. Field/literal
 comparisons are unchanged. For strict comparisons between fields with
 incompatible schema types, the generated SQL omits the cross-type equality arm:
 `a === b` becomes `a IS NULL AND b IS NULL`, while `a !== b` becomes
-`a IS NOT NULL OR b IS NOT NULL`.
+`a IS NOT NULL OR b IS NOT NULL`. Loose `==`/`!=` comparisons between fields
+with incompatible schema types return an unsupported-comparison error because
+runtime mixed-field coercion is not modeled portably across SQL dialects.
 
 ### Dialect
 

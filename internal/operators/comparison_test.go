@@ -1707,6 +1707,7 @@ func TestComparisonOperator_ToSQL_NullSafeFieldEqualityPreservesSchemaLiteralSem
 		operator string
 		args     []interface{}
 		wantSQL  string
+		wantErr  string
 	}{
 		{
 			name:     "strict field literal mismatch still folds",
@@ -1753,11 +1754,38 @@ func TestComparisonOperator_ToSQL_NullSafeFieldEqualityPreservesSchemaLiteralSem
 			},
 			wantSQL: "(amount IS NULL AND code IS NULL)",
 		},
+		{
+			name:     "loose field field mismatch errors",
+			operator: "==",
+			args: []interface{}{
+				map[string]interface{}{"var": "amount"},
+				map[string]interface{}{"var": "code"},
+			},
+			wantErr: "loose equality between number field",
+		},
+		{
+			name:     "loose field field inequality mismatch errors",
+			operator: "!=",
+			args: []interface{}{
+				map[string]interface{}{"var": "amount"},
+				map[string]interface{}{"var": "code"},
+			},
+			wantErr: "loose equality between number field",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := op.ToSQL(tt.operator, tt.args)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("ToSQL() = %q, want error containing %q", got, tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ToSQL() error = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("ToSQL() unexpected error = %v", err)
 			}

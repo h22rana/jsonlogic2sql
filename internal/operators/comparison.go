@@ -310,6 +310,27 @@ func (c *ComparisonOperator) shouldUseNullSafeFieldEquality(operator string, lef
 	return c.isNullSafeFieldOperand(leftArg) && c.isNullSafeFieldOperand(rightArg)
 }
 
+func (c *ComparisonOperator) looseIncompatibleFieldEqualityError(
+	operator string,
+	leftField, rightField equalityFieldOperand,
+) error {
+	if operator != "==" && operator != "!=" {
+		return nil
+	}
+	leftKind, leftKnown := c.schemaEqualityKind(leftField.fieldName)
+	rightKind, rightKnown := c.schemaEqualityKind(rightField.fieldName)
+	if !leftKnown || !rightKnown || leftKind == rightKind {
+		return nil
+	}
+	return fmt.Errorf(
+		"loose equality between %s field %q and %s field %q is not supported",
+		leftKind,
+		leftField.fieldName,
+		rightKind,
+		rightField.fieldName,
+	)
+}
+
 func (c *ComparisonOperator) strictIncompatibleFieldEqualitySQL(
 	operator string,
 	leftArg, rightArg interface{},
@@ -1195,8 +1216,15 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 			return dec
 		}
 	}
-	if leftIsField && rightIsField && c.hasStrictIncompatibleFieldEqualityOperands(operator, leftArg, rightArg) {
-		return dec
+	if leftIsField && rightIsField {
+		if err := c.looseIncompatibleFieldEqualityError(operator, leftField, rightField); err != nil {
+			dec.unsupported = err
+			dec.handled = true
+			return dec
+		}
+		if c.hasStrictIncompatibleFieldEqualityOperands(operator, leftArg, rightArg) {
+			return dec
+		}
 	}
 	if leftIsField == rightIsField {
 		return c.applyTypedExpressionEqualitySemantics(dec, operator, leftArg, rightArg)

@@ -137,6 +137,28 @@ func TestTranspiler_StrictFieldTypeMismatchUsesNullOnlyEquality_AllDialects(t *t
 		},
 	}
 
+	looseErrorCases := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "loose equality",
+			logic: `{"==":[{"var":"n"},{"var":"s"}]}`,
+		},
+		{
+			name:  "loose inequality",
+			logic: `{"!=":[{"var":"n"},{"var":"s"}]}`,
+		},
+		{
+			name:  "scoped loose equality",
+			logic: `{"some":[{"var":"items"},{"==":[{"var":"n"},{"var":"s"}]}]}`,
+		},
+		{
+			name:  "scoped loose inequality",
+			logic: `{"some":[{"var":"items"},{"!=":[{"var":"n"},{"var":"s"}]}]}`,
+		},
+	}
+
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
 			tr, err := NewTranspilerWithConfig(&TranspilerConfig{
@@ -191,6 +213,38 @@ func TestTranspiler_StrictFieldTypeMismatchUsesNullOnlyEquality_AllDialects(t *t
 					for _, fragment := range tc.forbidden {
 						assertNotContains(t, got, fragment)
 						assertNotContains(t, gotValue, fragment)
+					}
+				})
+			}
+
+			for _, tc := range looseErrorCases {
+				t.Run(tc.name, func(t *testing.T) {
+					for name, fn := range map[string]func() error{
+						"TranspileCondition": func() error {
+							_, err := tr.TranspileCondition(tc.logic)
+							return err
+						},
+						"TranspileParameterizedCondition": func() error {
+							_, _, err := tr.TranspileParameterizedCondition(tc.logic)
+							return err
+						},
+						"TranspileValue": func() error {
+							_, err := tr.TranspileValue(tc.logic)
+							return err
+						},
+						"TranspileParameterizedValue": func() error {
+							_, _, err := tr.TranspileParameterizedValue(tc.logic)
+							return err
+						},
+					} {
+						err := fn()
+						if err == nil {
+							t.Fatalf("%s() succeeded, want loose mixed field type error", name)
+						}
+						if !strings.Contains(err.Error(), "loose equality between number field") ||
+							!strings.Contains(err.Error(), "string field") {
+							t.Fatalf("%s() error = %v, want loose mixed field type error", name, err)
+						}
 					}
 				})
 			}
