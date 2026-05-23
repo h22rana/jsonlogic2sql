@@ -267,6 +267,13 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 					}); handled || membershipErr != nil {
 						return sql, membershipErr
 					}
+					compatible, membershipErr := c.validateArrayMembershipNeedle(fieldName, leftOriginal)
+					if membershipErr != nil {
+						return "", membershipErr
+					}
+					if !compatible {
+						return boolSQL(false), nil
+					}
 					return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 				} else if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 					sql, lErr := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
@@ -470,7 +477,11 @@ func (c *ComparisonOperator) handleInSQLRightParamWithLeftSQL(
 		}); handled || err != nil {
 			return sql, err
 		}
-		if !c.arrayMembershipCompatibleWithNeedle(fieldName, leftOriginal) {
+		compatible, err := c.validateArrayMembershipNeedle(fieldName, leftOriginal)
+		if err != nil {
+			return "", err
+		}
+		if !compatible {
 			return boolSQL(false), nil
 		}
 		return c.arrayMembershipSQL(leftSQL, rightSQL), nil

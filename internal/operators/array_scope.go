@@ -338,6 +338,7 @@ func (a *ArrayOperator) resolveFieldNamesInScopes(scopePaths []string, fieldName
 		}
 
 		var firstType string
+		var firstElementType string
 		var firstAllowed []string
 		resolvedFields := make([]string, 0, len(scopes))
 		for i, scope := range scopes {
@@ -348,11 +349,15 @@ func (a *ArrayOperator) resolveFieldNamesInScopes(scopePaths []string, fieldName
 			resolvedFields = append(resolvedFields, resolved)
 			if i == 0 {
 				firstType = schema.GetFieldType(resolved)
+				firstElementType = schemaArrayElementType(schema, resolved)
 				firstAllowed = schema.GetAllowedValues(resolved)
 				continue
 			}
 			if typ := schema.GetFieldType(resolved); typ != firstType {
 				return nil, fmt.Errorf("field '%s' has incompatible schema types across array source scopes", fieldName)
+			}
+			if firstType == "array" && schemaArrayElementType(schema, resolved) != firstElementType {
+				return nil, fmt.Errorf("field '%s' has incompatible array element types across array source scopes", fieldName)
 			}
 			if !sameStringSet(schema.GetAllowedValues(resolved), firstAllowed) {
 				return nil, fmt.Errorf("field '%s' has incompatible enum values across array source scopes", fieldName)

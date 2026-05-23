@@ -2,6 +2,7 @@ package operators
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
@@ -146,11 +147,11 @@ func (c *ComparisonOperator) arrayElementEqualityKind(fieldName string) (string,
 	if fieldName == "" {
 		return "", false
 	}
-	provider, ok := c.schema().(ArrayElementTypeProvider)
-	if !ok {
+	elemType, known := schemaArrayElementExpressionType(c.schema(), fieldName)
+	if !known {
 		return "", false
 	}
-	switch schemaFieldTypeExpressionType(provider.GetArrayElementType(fieldName)) {
+	switch elemType {
 	case ExpressionTypeString:
 		return "string", true
 	case ExpressionTypeNumber:
@@ -167,17 +168,34 @@ func (c *ComparisonOperator) arrayElementEqualityKind(fieldName string) (string,
 	return "", false
 }
 
-func (c *ComparisonOperator) arrayMembershipCompatibleWithNeedle(fieldName string, needle interface{}) bool {
+func (c *ComparisonOperator) validateArrayMembershipNeedle(fieldName string, needle interface{}) (bool, error) {
 	elemKind, elemKnown := c.arrayElementEqualityKind(fieldName)
 	if !elemKnown {
-		return true
+		return true, nil
 	}
 	needleKinds, needleKnown := c.strictArrayMembershipLeftKinds(needle)
 	if !needleKnown {
-		return true
+		return true, nil
 	}
-	_, ok := needleKinds[elemKind]
-	return ok
+	if _, ok := needleKinds[elemKind]; !ok {
+		return false, nil
+	}
+	if literal, ok := equalityLiteralValue(needle); ok && equalityLiteralKind(literal) == "string" {
+		str, ok := literal.(string)
+		if !ok {
+			return true, nil
+		}
+		if err := validateSchemaEnumArrayElementValue(c.schema(), fieldName, str); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if str, ok := staticStringExpressionValue(needle); ok {
+		if err := validateSchemaEnumArrayElementValue(c.schema(), fieldName, str); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func (c *ComparisonOperator) validateFieldEqualityArrayCompatibility(
@@ -188,6 +206,17 @@ func (c *ComparisonOperator) validateFieldEqualityArrayCompatibility(
 		!c.schema().IsArrayType(leftField.fieldName) ||
 		!c.schema().IsArrayType(rightField.fieldName) {
 		return nil
+	}
+	leftElemKind, leftElemKnown := c.arrayElementEqualityKind(leftField.fieldName)
+	rightElemKind, rightElemKnown := c.arrayElementEqualityKind(rightField.fieldName)
+	if leftElemKnown && rightElemKnown && leftElemKind != rightElemKind {
+		return fmt.Errorf(
+			"equality between array fields %q and %q has incompatible array element types %s and %s",
+			leftField.fieldName,
+			rightField.fieldName,
+			leftElemKind,
+			rightElemKind,
+		)
 	}
 	if c.config.GetDialect() == dialect.DialectBigQuery {
 		return fmt.Errorf(
@@ -270,6 +299,24 @@ func (c *ComparisonOperator) membershipNeedleEqualityKind(value interface{}) (st
 	}
 	kind := equalityLiteralKind(literal)
 	return kind, kind != ""
+}
+
+func staticStringExpressionValue(value interface{}) (string, bool) {
+	pv, ok := value.(ProcessedValue)
+	if !ok || !pv.IsSQL || !pv.HasExpressionInfo ||
+		pv.Kind != ExpressionKindValue || pv.Type != ExpressionTypeString {
+		return "", false
+	}
+	return staticSQLStringValue(pv.Value)
+}
+
+func staticSQLStringValue(sql string) (string, bool) {
+	sql = StripRedundantOuterParens(sql)
+	if !isSQLStringLiteral(sql) {
+		return "", false
+	}
+	unquoted := sql[1 : len(sql)-1]
+	return strings.ReplaceAll(unquoted, "''", "'"), true
 }
 
 // extractFieldName extracts the field name from a var argument.

@@ -475,7 +475,11 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 					}); handled || err != nil {
 						return sql, err
 					}
-					if !c.arrayMembershipCompatibleWithNeedle(fieldName, leftOriginal) {
+					compatible, err := c.validateArrayMembershipNeedle(fieldName, leftOriginal)
+					if err != nil {
+						return "", err
+					}
+					if !compatible {
 						return boolSQL(false), nil
 					}
 					// Array type: use null-safe JSONLogic element membership.
@@ -672,7 +676,11 @@ func (c *ComparisonOperator) handleInSQLRight(
 			}); handled || err != nil {
 				return sql, err
 			}
-			if !c.arrayMembershipCompatibleWithNeedle(fieldName, leftOriginal) {
+			compatible, err := c.validateArrayMembershipNeedle(fieldName, leftOriginal)
+			if err != nil {
+				return "", err
+			}
+			if !compatible {
 				return boolSQL(false), nil
 			}
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil

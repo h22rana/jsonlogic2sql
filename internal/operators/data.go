@@ -123,11 +123,46 @@ func validateArrayVarDefaultForField(schema SchemaProvider, fieldName string, de
 			fieldName, expressionTypeName(inferLiteralValueExpressionType(defaultValue)))
 	}
 	provider, ok := schema.(ArrayElementSchemaProvider)
+	if err := validateArrayVarDefaultElementsForField(schema, fieldName, arr); err != nil {
+		return err
+	}
 	if !ok || !provider.HasArrayElementFields(fieldName) || len(arr) == 0 {
 		return nil
 	}
 	return fmt.Errorf("default value for object-array field '%s' must be an empty array or null; non-empty object-array defaults are not renderable as portable SQL literals",
 		fieldName)
+}
+
+func validateArrayVarDefaultElementsForField(schema SchemaProvider, fieldName string, arr []interface{}) error {
+	expected, known := schemaArrayElementExpressionType(schema, fieldName)
+	if !known || expected == ExpressionTypeObject {
+		return nil
+	}
+	for i, elem := range arr {
+		if err := validateEqualityJSONNumberLiteral(elem); err != nil {
+			return err
+		}
+		actual := inferLiteralValueExpressionType(elem)
+		if actual == ExpressionTypeNull {
+			continue
+		}
+		if expected == ExpressionTypeString && schemaArrayElementType(schema, fieldName) == "enum" {
+			strVal, ok := elem.(string)
+			if !ok {
+				return fmt.Errorf("default value for array field '%s' element %d has incompatible type %s; expected string or null",
+					fieldName, i, expressionTypeName(actual))
+			}
+			if err := validateSchemaEnumArrayElementValue(schema, fieldName, strVal); err != nil {
+				return err
+			}
+			continue
+		}
+		if actual != expected {
+			return fmt.Errorf("default value for array field '%s' element %d has incompatible type %s; expected %s or null",
+				fieldName, i, expressionTypeName(actual), expressionTypeName(expected))
+		}
+	}
+	return nil
 }
 
 func validateVarDefaultForExpressionType(typ ExpressionType, defaultValue interface{}, label string) error {

@@ -579,6 +579,47 @@ func TestSchemaArrayElementTypeMetadata(t *testing.T) {
 	}
 }
 
+func TestSchemaArrayElementCompatibilityChecksNestedScalarElementTypes(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{
+			Name: "leftItems",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "labels", Type: FieldTypeArray, ElementType: FieldTypeString},
+			},
+		},
+		{
+			Name: "rightItems",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "labels", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+			},
+		},
+		{
+			Name: "sameItems",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "labels", Type: FieldTypeArray, ElementType: FieldTypeString},
+			},
+		},
+	})
+
+	if err := schema.ValidateArrayElementSchemasCompatible("leftItems", "sameItems"); err != nil {
+		t.Fatalf("ValidateArrayElementSchemasCompatible(leftItems, sameItems) error = %v", err)
+	}
+
+	err := schema.ValidateArrayElementSchemasCompatible("leftItems", "rightItems")
+	if err == nil || !strings.Contains(err.Error(), "field 'labels' has incompatible array element types across array source scopes") {
+		t.Fatalf("ValidateArrayElementSchemasCompatible(leftItems, rightItems) error = %v, want element type mismatch", err)
+	}
+
+	leftSig := schema.ArrayElementSchemaSignature("leftItems")
+	rightSig := schema.ArrayElementSchemaSignature("rightItems")
+	if leftSig == rightSig {
+		t.Fatalf("ArrayElementSchemaSignature() did not include scalar array element types: %q", leftSig)
+	}
+}
+
 func TestSchemaObjectAndArrayChildrenAreOptional(t *testing.T) {
 	schema, err := NewSchema([]FieldSchema{
 		{Name: "metadata", Type: FieldTypeObject},

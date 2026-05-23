@@ -1,5 +1,7 @@
 package operators
 
+import "fmt"
+
 // SchemaProvider provides schema information for field validation and type checking.
 type SchemaProvider interface {
 	// HasField checks if a field exists in the schema
@@ -57,4 +59,41 @@ type ArrayElementSchemaSignatureProvider interface {
 type ArrayElementSchemaComparator interface {
 	SchemaProvider
 	ValidateArrayElementSchemasCompatible(leftField, rightField string) error
+}
+
+func schemaArrayElementType(schema SchemaProvider, fieldName string) string {
+	provider, ok := schema.(ArrayElementTypeProvider)
+	if !ok {
+		return ""
+	}
+	return provider.GetArrayElementType(fieldName)
+}
+
+func schemaArrayElementExpressionType(schema SchemaProvider, fieldName string) (ExpressionType, bool) {
+	typ := schemaFieldTypeExpressionType(schemaArrayElementType(schema, fieldName))
+	return typ, typ != ExpressionTypeUnknown
+}
+
+func validateSchemaAllowedValue(schema SchemaProvider, fieldName, value string) error {
+	allowedValues := schema.GetAllowedValues(fieldName)
+	if len(allowedValues) == 0 {
+		return nil
+	}
+	for _, allowed := range allowedValues {
+		if value == allowed {
+			return nil
+		}
+	}
+	return errInvalidSchemaEnumValue(fieldName, value, allowedValues)
+}
+
+func validateSchemaEnumArrayElementValue(schema SchemaProvider, fieldName, value string) error {
+	if schemaArrayElementType(schema, fieldName) != "enum" {
+		return nil
+	}
+	return validateSchemaAllowedValue(schema, fieldName, value)
+}
+
+func errInvalidSchemaEnumValue(fieldName, value string, allowedValues []string) error {
+	return fmt.Errorf("invalid enum value '%s' for field '%s': allowed values are %v", value, fieldName, allowedValues)
 }
