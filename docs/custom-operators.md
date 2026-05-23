@@ -31,6 +31,9 @@ root while still allowing those operators inside comparisons.
 For nested arrays, set `OperatorResult.ArrayElementTypes` with the immediate
 element type first, for example `[]ExpressionType{ExpressionTypeArray,
 ExpressionTypeNumber}` for `array<array<number>>`.
+For object-array results, set `OperatorResult.ArrayElementSchemaScopes` to the
+schema path or paths whose element fields describe the returned objects; this
+keeps downstream array lambdas schema-validated.
 
 Custom operators must use this typed contract. Legacy handlers that return only
 a SQL string are no longer accepted because the transpiler cannot infer whether

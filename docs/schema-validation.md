@@ -18,7 +18,7 @@ func main() {
         {Name: "order.amount", Type: jsonlogic2sql.FieldTypeInteger},
         {Name: "order.status", Type: jsonlogic2sql.FieldTypeString},
         {Name: "user.verified", Type: jsonlogic2sql.FieldTypeBoolean},
-        {Name: "user.roles", Type: jsonlogic2sql.FieldTypeArray},
+        {Name: "user.roles", Type: jsonlogic2sql.FieldTypeArray, ElementType: jsonlogic2sql.FieldTypeString},
     })
     if err != nil {
         panic(err)
@@ -69,7 +69,7 @@ schemaJSON := `[
     {"name": "order.amount", "type": "integer"},
     {"name": "order.status", "type": "string"},
     {"name": "user.verified", "type": "boolean"},
-    {"name": "user.roles", "type": "array"}
+    {"name": "user.roles", "type": "array", "elementType": "string"}
 ]`
 
 schema, err := jsonlogic2sql.NewSchemaFromJSON([]byte(schemaJSON))
@@ -86,19 +86,23 @@ if err != nil {
 
 ## Nested Object and Array Element Fields
 
-Schemas can describe object fields with `fields` and array element fields with
-`elementFields`. The transpiler flattens those definitions internally for type
-validation, while array lambdas still emit SQL relative to the element alias.
-`fields` is valid only on `object` fields, and `elementFields` is valid only on
-`array` fields. Every field entry, including nested object children and array
-element children, must include a non-empty `name` and one of the supported
-`type` values. Enum fields must include at least one `allowedValues` entry;
-enum values must be unique, and non-enum fields cannot use `allowedValues`.
-Object `fields` and array `elementFields` are optional so schemas can represent
-object fields and primitive-array fields without exposing named children. Object
-fields are schema containers: `{"var":"profile.status"}` is valid when `status`
-is declared, but returning `{"var":"profile"}` as a value expression is rejected
-because object/struct value SQL is not portable across supported dialects.
+Schemas can describe object fields with `fields`, scalar array elements with
+`elementType`, and array element object fields with `elementFields`. The
+transpiler flattens those definitions internally for type validation, while
+array lambdas still emit SQL relative to the element alias.
+`fields` is valid only on `object` fields, `elementType` is valid only on
+`array` fields, and `elementFields` is valid only on `array` fields. Every field
+entry, including nested object children and array element children, must include
+a non-empty `name` and one of the supported `type` values. Enum fields and enum
+arrays must include at least one `allowedValues` entry; enum values must be
+unique, and non-enum fields cannot use `allowedValues`. `elementFields` implies
+object elements; if `elementType` is also set, it must be `object`.
+Object `fields`, array `elementType`, and array `elementFields` are optional so
+schemas can represent object fields and arrays whose children are intentionally
+opaque. Object fields are schema containers: `{"var":"profile.status"}` is
+valid when `status` is declared, but returning `{"var":"profile"}` as a value
+expression is rejected because object/struct value SQL is not portable across
+supported dialects.
 Flattened field paths must be unique and cannot contain empty path segments
 such as `profile..status`.
 
@@ -119,6 +123,7 @@ such as `profile..status`.
   {
     "name": "payment_methods",
     "type": "array",
+    "elementType": "object",
     "elementFields": [
       {
         "name": "type",
@@ -145,6 +150,17 @@ such as `profile..status`.
         ]
       }
     ]
+  },
+  {
+    "name": "tags",
+    "type": "array",
+    "elementType": "string"
+  },
+  {
+    "name": "states",
+    "type": "array",
+    "elementType": "enum",
+    "allowedValues": ["active", "blocked"]
   }
 ]
 ```
@@ -152,7 +168,8 @@ such as `profile..status`.
 Those entries define these schema paths: `profile.country`,
 `profile.status`, `payment_methods.type`, `payment_methods.amount`,
 `payment_methods.details.issuer`, `payment_methods.details.events`, and
-`payment_methods.details.events.code`.
+`payment_methods.details.events.code`, plus scalar arrays `tags` and `states`
+with declared element types.
 
 ```json
 {"some":[{"var":"payment_methods"},{"==":[{"var":"type"},"BALANCE"]}]}
@@ -193,6 +210,13 @@ element of the nested `details.events` array. Enter the nested array first:
 | `array` | `FieldTypeArray` | Array fields |
 | `object` | `FieldTypeObject` | Object/struct container fields; use nested child paths in JSONLogic value expressions |
 | `enum` | `FieldTypeEnum` | Enum fields with allowed values |
+
+For arrays, `ElementType` can be any supported field type. Primitive arrays
+such as `array<string>` should set `ElementType` so lambda truthiness and
+comparison checks can be validated. Object arrays can either set
+`ElementType: FieldTypeObject` with `ElementFields`, or omit `ElementType` when
+`ElementFields` are present. `GetArrayElementType(field)` returns the declared
+element type, and returns `object` for arrays with `ElementFields`.
 
 ## Type-Aware Operators
 

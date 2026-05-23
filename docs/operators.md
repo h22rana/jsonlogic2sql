@@ -66,8 +66,12 @@ email IS NULL
 {"missing_some": [1, ["field1", "field2"]]}
 ```
 ```sql
-(field1 IS NULL OR field2 IS NULL)
+(field1 IS NULL AND field2 IS NULL)
 ```
+
+`missing_some` returns the missing fields only when fewer than the required
+minimum are present. With `minimum = 1` and two fields, that means both fields
+must be missing.
 
 ## Logic and Boolean Operations
 
@@ -316,6 +320,9 @@ LEAST(price1, price2)
 (count % 3)
 ```
 
+BigQuery and Spanner render modulo as `MOD(count, 3)` because GoogleSQL does
+not use the portable `%` operator form.
+
 ### String Operands in Arithmetic
 
 When string literals appear in numeric operations, the transpiler coerces them following JSONLogic's JavaScript-like semantics:
@@ -509,6 +516,15 @@ ARRAY_CONCAT([1], [2])
 Unknown-typed or incompatible scalar element types return an explicit error
 instead of generating dialect-specific invalid array SQL.
 
+With no arguments, `merge` returns the empty-array identity:
+
+```json
+{"merge": []}
+```
+```sql
+[]
+```
+
 ## String Operations
 
 | Operator | Description |
@@ -545,6 +561,15 @@ CONCAT(COALESCE(CAST(firstName AS STRING), ''), ' ', COALESCE(CAST(lastName AS S
 string, and nullable operands are wrapped so SQL `CONCAT` does not return
 `NULL` for the whole expression.
 
+With no arguments, `cat` returns the empty string:
+
+```json
+{"cat": []}
+```
+```sql
+''
+```
+
 ### Concatenate with Conditional
 
 ```json
@@ -571,6 +596,11 @@ SUBSTR(email, 1, 10)
 ```sql
 SUBSTR(email, 5)
 ```
+
+Negative starts count back from the end of the string, and negative lengths stop
+before the end. Dynamic start or length operands use `CASE`, `GREATEST`, and
+`LENGTH`/`length` so SQL follows JSONLogic `substr` semantics instead of the
+target database's native negative-index behavior.
 
 ## See Also
 

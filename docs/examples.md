@@ -54,8 +54,12 @@ email IS NULL
 {"missing_some": [1, ["field1", "field2"]]}
 ```
 ```sql
-(field1 IS NULL OR field2 IS NULL)
+(field1 IS NULL AND field2 IS NULL)
 ```
+
+For `missing_some`, SQL checks whether the number of missing fields exceeds the
+allowed missing count. Requiring one of two fields means both fields must be
+missing before the operator returns the missing-field array.
 
 ## Logic and Boolean Operations
 
@@ -317,6 +321,8 @@ LEAST(price1, price2)
 (count % 3)
 ```
 
+BigQuery and Spanner render this as `MOD(count, 3)`.
+
 ### Unary Minus (Negation)
 
 ```json
@@ -498,6 +504,10 @@ SUBSTR(email, 1, 10)
 ```sql
 SUBSTR(email, 5)
 ```
+
+Negative `substr` starts and lengths are translated with explicit
+`CASE`/`GREATEST`/`LENGTH` logic so dynamic operands keep JSONLogic semantics
+across dialects.
 
 ## Complex Nested Examples
 

@@ -60,6 +60,7 @@ Some operators generate different SQL based on the target dialect:
 | `merge` (arrays/scalars) | `ARRAY_CONCAT(a, [x])` | `ARRAY_CONCAT(a, [x])` | `(a \|\| ARRAY[x])` | `ARRAY_CONCAT(a, [x])` | `arrayConcat(a, [x])` |
 | `map` (arrays) | `ARRAY(SELECT ... UNNEST)` | `ARRAY(SELECT ... UNNEST)` | `ARRAY(SELECT ... UNNEST)` | `ARRAY(SELECT ... UNNEST)` | `arrayMap(x -> ..., arr)` |
 | `filter` (arrays) | `ARRAY(SELECT ... WHERE)` | `ARRAY(SELECT ... WHERE)` | `ARRAY(SELECT ... WHERE)` | `ARRAY(SELECT ... WHERE)` | `arrayFilter(x -> ..., arr)` |
+| `%` | `MOD(a, b)` | `MOD(a, b)` | `(a % b)` | `(a % b)` | `(a % b)` |
 | `substr` | `SUBSTR(s, i, n)` | `SUBSTR(s, i, n)` | `SUBSTR(s, i, n)` | `SUBSTR(s, i, n)` | `substring(s, i, n)` |
 | `in` (array) | `EXISTS ... UNNEST(array)` | `EXISTS ... UNNEST(array)` | `EXISTS ... UNNEST(array)` | `EXISTS ... UNNEST(array)` | `arrayExists(...)` |
 | `in` (string) | `STRPOS(h, n) > 0` | `STRPOS(h, n) > 0` | `POSITION(n IN h) > 0` | `STRPOS(h, n) > 0` | `position(h, n) > 0` |
@@ -70,12 +71,21 @@ a struct-like `unnest` column. BigQuery, Spanner, and PostgreSQL use the shorter
 `UNNEST(items) AS elem` form. ClickHouse uses lambda array functions instead of
 `UNNEST`.
 
+`substr` uses the dialect-specific function name above for simple positive
+literal indexes. Negative or dynamic start/length operands are wrapped with
+portable `CASE`, `GREATEST`, and `LENGTH`/`length` expressions to preserve
+JSONLogic `substr` behavior.
+
 PostgreSQL array literals use `ARRAY[...]`. Empty-array value results are
 rejected whenever the emitted SQL would contain an untyped `ARRAY[]`, because
 PostgreSQL requires an explicit element type and the transpiler does not always
 have enough type context. Foldable contexts that do not need to emit the empty
 array, such as value fallbacks and empty-array `all`/`some`/`none` predicates,
 can still fold normally.
+
+PostgreSQL multidimensional array literals must also be rectangular. The
+transpiler rejects ragged direct literals such as `[[1], [2, 3]]` instead of
+emitting `ARRAY[ARRAY[1], ARRAY[2, 3]]`, which PostgreSQL rejects at execution.
 
 BigQuery and Spanner do not support array literals whose elements are arrays.
 The transpiler rejects direct nested-array literal shapes in those dialects

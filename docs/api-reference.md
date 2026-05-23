@@ -226,9 +226,12 @@ Typed SQL argument passed to custom operators.
 
 ```go
 type OperatorArg struct {
-    SQL  string
-    Kind ExpressionKind
-    Type ExpressionType
+    SQL                      string
+    Kind                     ExpressionKind
+    Type                     ExpressionType
+    ArrayElementType         ExpressionType
+    ArrayElementTypes        []ExpressionType
+    ArrayElementSchemaScopes []string
 }
 ```
 
@@ -238,12 +241,14 @@ Typed SQL result returned by custom operators.
 
 ```go
 type OperatorResult struct {
-    SQL               string
-    Kind              ExpressionKind
-    Type              ExpressionType
-    EmptyArrayLiteral bool
-    ArrayElementType  ExpressionType
-    ArrayElementTypes []ExpressionType
+    SQL                      string
+    Kind                     ExpressionKind
+    Type                     ExpressionType
+    EmptyArrayLiteral        bool
+    PreserveParamRefs        bool
+    ArrayElementType         ExpressionType
+    ArrayElementTypes        []ExpressionType
+    ArrayElementSchemaScopes []string
 }
 ```
 
@@ -252,6 +257,11 @@ type OperatorResult struct {
 `ArrayElementTypes` carries nested array element types. For example,
 `array<array<number>>` is represented as
 `[]ExpressionType{ExpressionTypeArray, ExpressionTypeNumber}`.
+`ArrayElementSchemaScopes` carries schema paths for object-array values; set it
+when a custom operator returns an object array whose element fields should be
+available to downstream `map`/`filter`/`some` lambdas. `PreserveParamRefs` is
+reserved for parameterized custom-operator safety and is normally set by the
+parser.
 
 ### ExpressionKind
 
@@ -334,6 +344,7 @@ Schema for field validation.
 | `GetFieldType(fieldName string) string` | Get field type as string |
 | `IsArrayType(fieldName string) bool` | Check if field is array type |
 | `HasArrayElementFields(fieldName string) bool` | Check if an array field has object element fields |
+| `GetArrayElementType(fieldName string) string` | Get declared array element type, or `object` for arrays with element fields |
 | `IsStringType(fieldName string) bool` | Check if field is string type |
 | `IsNumericType(fieldName string) bool` | Check if field is numeric type |
 | `IsBooleanType(fieldName string) bool` | Check if field is boolean type |
@@ -350,6 +361,7 @@ Field definition for schema.
 type FieldSchema struct {
     Name          string        // Field name (e.g., "order.amount")
     Type          FieldType     // Field type
+    ElementType   FieldType     // For array element metadata
     AllowedValues []string      // For enum types: list of valid values
     Fields        []FieldSchema // Nested object fields
     ElementFields []FieldSchema // Nested fields on array elements
@@ -365,6 +377,10 @@ Flattened field paths must be unique and cannot contain empty path segments.
 Object fields are containers for nested schema paths; value expressions must
 reference supported nested child fields rather than returning the object
 container itself.
+Array fields can set `ElementType` for scalar arrays, enum arrays, nested
+arrays, and object arrays. `ElementFields` implies object elements; when both
+are provided, `ElementType` must be `FieldTypeObject`. Enum arrays set
+`Type: FieldTypeArray`, `ElementType: FieldTypeEnum`, and `AllowedValues`.
 For example:
 
 ```json
