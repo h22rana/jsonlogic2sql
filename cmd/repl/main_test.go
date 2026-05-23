@@ -1124,6 +1124,76 @@ func TestRegexpContainsBigQuery_Parameterized(t *testing.T) {
 	}
 }
 
+func TestNormalizeWaveDashUsesDialectSafeRegex(t *testing.T) {
+	origDialect := currentDialect
+	t.Cleanup(func() { currentDialect = origDialect })
+
+	tests := []struct {
+		name    string
+		dialect jsonlogic2sql.Dialect
+		want    string
+	}{
+		{
+			name:    "bigquery raw re2 escape",
+			dialect: jsonlogic2sql.DialectBigQuery,
+			want:    `REGEXP_REPLACE(col, r'[\x{301C}\x{FF5E}]', '~')`,
+		},
+		{
+			name:    "spanner raw re2 escape",
+			dialect: jsonlogic2sql.DialectSpanner,
+			want:    `REGEXP_REPLACE(col, r'[\x{301C}\x{FF5E}]', '~')`,
+		},
+		{
+			name:    "postgres unicode escape string",
+			dialect: jsonlogic2sql.DialectPostgreSQL,
+			want:    `REGEXP_REPLACE(col, U&'[\301C\FF5E]', '~', 'g')`,
+		},
+		{
+			name:    "duckdb global re2 replace",
+			dialect: jsonlogic2sql.DialectDuckDB,
+			want:    `regexp_replace(col, '[\x{301C}\x{FF5E}]', '~', 'g')`,
+		},
+		{
+			name:    "clickhouse escaped re2 replace all",
+			dialect: jsonlogic2sql.DialectClickHouse,
+			want:    `replaceRegexpAll(col, '[\\x{301C}\\x{FF5E}]', '~')`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			currentDialect = tt.dialect
+			tr, err := jsonlogic2sql.NewTranspiler(tt.dialect, replTestSchema(t))
+			if err != nil {
+				t.Fatalf("NewTranspiler: %v", err)
+			}
+			registerCustomOperators(tr)
+
+			sql, err := tr.TranspileValue(`{"normalizeWaveDash": [{"var": "col"}]}`)
+			if err != nil {
+				t.Fatalf("TranspileValue error: %v", err)
+			}
+			if sql != tt.want {
+				t.Fatalf("SQL:\n  got:  %s\n  want: %s", sql, tt.want)
+			}
+			if strings.Contains(sql, `\u301C`) || strings.Contains(sql, `\uFF5E`) {
+				t.Fatalf("SQL still uses non-portable unicode escapes: %s", sql)
+			}
+
+			paramSQL, params, err := tr.TranspileParameterizedValue(`{"normalizeWaveDash": [{"var": "col"}]}`)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue error: %v", err)
+			}
+			if paramSQL != tt.want {
+				t.Fatalf("Parameterized SQL:\n  got:  %s\n  want: %s", paramSQL, tt.want)
+			}
+			if len(params) != 0 {
+				t.Fatalf("Params = %#v, want none", params)
+			}
+		})
+	}
+}
+
 func TestReplExamplesTranspileInDefaultConditionMode(t *testing.T) {
 	tr := setupTestTranspiler(t)
 

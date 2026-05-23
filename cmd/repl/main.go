@@ -131,6 +131,21 @@ func buildLikeSQL(column, patternArg, prefix, suffix string, negate bool, d json
 	return fmt.Sprintf("%s %s '%s%s%s'", column, keyword, prefix, escapeLikePattern(patternArg), suffix)
 }
 
+func normalizeWaveDashSQL(expr string, d jsonlogic2sql.Dialect) (string, error) {
+	switch d {
+	case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner:
+		return fmt.Sprintf("REGEXP_REPLACE(%s, r'[\\x{301C}\\x{FF5E}]', '~')", expr), nil
+	case jsonlogic2sql.DialectPostgreSQL:
+		return fmt.Sprintf("REGEXP_REPLACE(%s, U&'[\\301C\\FF5E]', '~', 'g')", expr), nil
+	case jsonlogic2sql.DialectDuckDB:
+		return fmt.Sprintf("regexp_replace(%s, '[\\x{301C}\\x{FF5E}]', '~', 'g')", expr), nil
+	case jsonlogic2sql.DialectClickHouse:
+		return fmt.Sprintf("replaceRegexpAll(%s, '[\\\\x{301C}\\\\x{FF5E}]', '~')", expr), nil
+	default:
+		return "", fmt.Errorf("unsupported dialect: %v", d)
+	}
+}
+
 // placeholderRe matches bind-parameter placeholders across all supported dialects:
 // @p1, @p2, ... (BigQuery, Spanner, ClickHouse) and $1, $2, ... (PostgreSQL, DuckDB).
 var placeholderRe = regexp.MustCompile(`^(?:@p\d+|\$\d+)$`)
@@ -659,13 +674,17 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 		return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeString), nil
 	})
 
-	_ = transpiler.RegisterOperatorFunc("normalizeWaveDash", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
-		if len(args) != 1 {
-			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("normalizeWaveDash requires exactly 1 argument")
-		}
-		sql := fmt.Sprintf("REGEXP_REPLACE(%s, '[\\u301C\\uFF5E]', '~')", args[0].SQL)
-		return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeString), nil
-	})
+	_ = transpiler.RegisterDialectAwareOperatorFunc("normalizeWaveDash",
+		func(_ string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
+			if len(args) != 1 {
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("normalizeWaveDash requires exactly 1 argument")
+			}
+			sql, err := normalizeWaveDashSQL(args[0].SQL, dialect)
+			if err != nil {
+				return jsonlogic2sql.OperatorResult{}, err
+			}
+			return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeString), nil
+		})
 
 	// toLower operator is basically LOWER(column).
 	_ = transpiler.RegisterOperatorFunc("toLower", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
