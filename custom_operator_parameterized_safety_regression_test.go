@@ -129,6 +129,33 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 			name:  "none lambda preserves custom predicate marker",
 			logic: `{"none":[[1],{"always":["x"]}]}`,
 		},
+		{
+			name:      "value map empty-array source preserves custom source marker",
+			logic:     `{"or":[{"map":[{"if":[{"always":["secret"]},[],[1]]},{"var":""}]},[2]]}`,
+			valueMode: true,
+		},
+		{
+			name:      "value filter empty-array source preserves custom source marker",
+			logic:     `{"or":[{"filter":[{"if":[{"always":["secret"]},[],[1]]},true]},[2]]}`,
+			valueMode: true,
+		},
+		{
+			name:      "value reduce empty-array source preserves custom source marker",
+			logic:     `{"or":[{"reduce":[{"if":[{"always":["secret"]},[],[1]]},{"+":[{"var":"accumulator"},{"var":"current"}]},0]},1]}`,
+			valueMode: true,
+		},
+		{
+			name:  "some empty-array source preserves custom source marker",
+			logic: `{"or":[{"some":[{"if":[{"always":["secret"]},[],[1]]},true]},false]}`,
+		},
+		{
+			name:  "all empty-array source preserves custom source marker",
+			logic: `{"or":[{"all":[{"if":[{"always":["secret"]},[],[1]]},true]},false]}`,
+		},
+		{
+			name:  "none empty-array source preserves custom source marker",
+			logic: `{"and":[{"none":[{"if":[{"always":["secret"]},[],[1]]},true]},true]}`,
+		},
 	}
 
 	for _, d := range allDialects() {

@@ -387,7 +387,9 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 		}
 		sql := res.SQL
 		if arrayValueOperatorReturnsEmptyLiteral(operator, arr) || p.sqlIsEmptyArrayLiteral(sql) {
-			return literalValueResultWithRaw(sql, operators.ExpressionTypeArray, false, []interface{}{}), nil
+			result := literalValueResultWithRaw(sql, operators.ExpressionTypeArray, false, []interface{}{})
+			result.preserveParamRefs = res.PreserveParamRefs
+			return result, nil
 		}
 		return resultFromOperator(res), nil
 	case operators.OpReduce:
