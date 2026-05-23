@@ -434,6 +434,9 @@ func (a *ArrayOperator) arrayScopeVarToSQL(varExpr interface{}) (string, bool, e
 		if defaultErr := a.validateArrayScopeVarDefault(varName, arr[1]); defaultErr != nil {
 			return "", true, defaultErr
 		}
+		if a.shouldSimplifyNullDefault(varName, arr[1]) {
+			return mapped, true, nil
+		}
 		defaultSQL, err := a.dataOp.defaultValueToSQL(arr[1])
 		if err != nil {
 			return "", true, fmt.Errorf("invalid default value: %w", err)
@@ -500,6 +503,9 @@ func (a *ArrayOperator) arrayInternalVarToSQL(varExpr interface{}) (string, bool
 		}
 		if err := a.validateArrayScopeVarDefault(varName, arr[1]); err != nil {
 			return "", true, err
+		}
+		if a.shouldSimplifyNullDefault(varName, arr[1]) {
+			return mapped, true, nil
 		}
 		defaultSQL, err := a.dataOp.defaultValueToSQL(arr[1])
 		if err != nil {

@@ -18,13 +18,23 @@ func (p *Parser) compatibleValueType(left, right expressionResult, path string) 
 		return leftType, nil
 	}
 	if leftType == rightType {
-		if leftType == operators.ExpressionTypeArray {
+		switch leftType {
+		case operators.ExpressionTypeArray:
 			if _, _, err := p.compatibleArrayElementType(left, right, path); err != nil {
 				return operators.ExpressionTypeUnknown, err
 			}
 			if err := p.validateCompatibleObjectArrayScopes(left, right, path); err != nil {
 				return operators.ExpressionTypeUnknown, err
 			}
+		case operators.ExpressionTypeObject:
+			if err := p.validateCompatibleObjectValueScopes(left, right, path); err != nil {
+				return operators.ExpressionTypeUnknown, err
+			}
+		case operators.ExpressionTypeUnknown,
+			operators.ExpressionTypeNull,
+			operators.ExpressionTypeBoolean,
+			operators.ExpressionTypeString,
+			operators.ExpressionTypeNumber:
 		}
 		return leftType, nil
 	}
@@ -42,6 +52,9 @@ func (p *Parser) compatibleValueResult(left, right expressionResult, path string
 	}
 	res := valueResult("", typ)
 	if typ != operators.ExpressionTypeArray {
+		if typ == operators.ExpressionTypeObject {
+			res = withArrayElementSchemaScopes(res, compatibleArrayElementSchemaScopes(left, right)...)
+		}
 		return res, nil
 	}
 	elemTypes, known, err := p.mergedArrayElementTypes(left, right, path)
@@ -112,11 +125,21 @@ func (p *Parser) validateCompatibleObjectArrayScopes(left, right expressionResul
 	}
 	leftScopes := normalizeParserSchemaScopes(left.arrayElementSchemaScopes)
 	rightScopes := normalizeParserSchemaScopes(right.arrayElementSchemaScopes)
+	return p.validateCompatibleSchemaScopes(leftScopes, rightScopes, path,
+		"array value branches must have compatible object element schemas")
+}
+
+func (p *Parser) validateCompatibleObjectValueScopes(left, right expressionResult, path string) error {
+	leftScopes := normalizeParserSchemaScopes(left.arrayElementSchemaScopes)
+	rightScopes := normalizeParserSchemaScopes(right.arrayElementSchemaScopes)
+	return p.validateCompatibleSchemaScopes(leftScopes, rightScopes, path,
+		"object value branches must have compatible schemas")
+}
+
+func (p *Parser) validateCompatibleSchemaScopes(leftScopes, rightScopes []string, path, context string) error {
 	if len(leftScopes) == 0 || len(rightScopes) == 0 {
 		if len(leftScopes) != len(rightScopes) {
-			return tperrors.NewTypeMismatch("", path,
-				"array value branches must have compatible object element schemas",
-				"known object element schema and unknown object element schema")
+			return tperrors.NewTypeMismatch("", path, context, unknownObjectSchemaDetail(context))
 		}
 		return nil
 	}
@@ -125,20 +148,24 @@ func (p *Parser) validateCompatibleObjectArrayScopes(left, right expressionResul
 		if sameStringSets(leftScopes, rightScopes) {
 			return nil
 		}
-		return tperrors.NewTypeMismatch("", path,
-			"array value branches must have compatible object element schemas",
+		return tperrors.NewTypeMismatch("", path, context,
 			fmt.Sprintf("%s and %s", strings.Join(leftScopes, ","), strings.Join(rightScopes, ",")))
 	}
 	for _, leftScope := range leftScopes {
 		for _, rightScope := range rightScopes {
 			if err := comparator.ValidateArrayElementSchemasCompatible(leftScope, rightScope); err != nil {
-				return tperrors.NewTypeMismatch("", path,
-					"array value branches must have compatible object element schemas",
-					err.Error())
+				return tperrors.NewTypeMismatch("", path, context, err.Error())
 			}
 		}
 	}
 	return nil
+}
+
+func unknownObjectSchemaDetail(context string) string {
+	if strings.Contains(context, "object element schemas") {
+		return "known object element schema and unknown object element schema"
+	}
+	return "known object schema and unknown object schema"
 }
 
 func (p *Parser) validateCompatibleObjectArrayScopesForResult(res expressionResult, path string) error {

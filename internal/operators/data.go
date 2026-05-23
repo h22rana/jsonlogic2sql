@@ -82,6 +82,16 @@ func validateVarDefaultForFields(schema SchemaProvider, fieldNames []string, def
 	return nil
 }
 
+func validateProcessedValueDefault(schema SchemaProvider, pv ProcessedValue, defaultValue interface{}) error {
+	if fieldNames := pv.SchemaFieldNames(); len(fieldNames) > 0 {
+		return validateVarDefaultForFields(schema, fieldNames, defaultValue)
+	}
+	if pv.HasExpressionInfo && pv.Kind == ExpressionKindValue {
+		return validateVarDefaultForExpressionType(pv.Type, defaultValue, "array element")
+	}
+	return nil
+}
+
 func validateVarDefaultForField(schema SchemaProvider, fieldName string, defaultValue interface{}) error {
 	if schema == nil || fieldName == "" || defaultValue == nil {
 		return nil
@@ -330,7 +340,7 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 			if len(arr) > 1 {
 				defaultValue := arr[1]
 				if !pv.FieldHasDefault {
-					if err := validateVarDefaultForFields(d.schema(), pv.SchemaFieldNames(), defaultValue); err != nil {
+					if err := validateProcessedValueDefault(d.schema(), pv, defaultValue); err != nil {
 						return "", err
 					}
 				}
@@ -684,7 +694,7 @@ func (d *DataOperator) handleVarParam(args []interface{}, pc *params.ParamCollec
 			if len(arr) > 1 {
 				defaultValue := arr[1]
 				if !pv.FieldHasDefault {
-					if err := validateVarDefaultForFields(d.schema(), pv.SchemaFieldNames(), defaultValue); err != nil {
+					if err := validateProcessedValueDefault(d.schema(), pv, defaultValue); err != nil {
 						return "", err
 					}
 				}

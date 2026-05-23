@@ -474,7 +474,7 @@ func TestArrayOperator_ArrayFormVarRewrite(t *testing.T) {
 			name:     "array-form empty var with default in all",
 			operator: "all",
 			args: []any{
-				map[string]any{"var": "scores"},
+				map[string]any{"var": "amounts"},
 				map[string]any{">": []any{map[string]any{"var": []any{"", 0}}, 50}},
 			},
 			contains: "COALESCE(elem, 0)",

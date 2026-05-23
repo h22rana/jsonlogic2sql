@@ -2540,6 +2540,7 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaRequired(t
 		wantSQL    func(Dialect) string
 		wantParam  func(Dialect) string
 		wantParams []QueryParam
+		wantErr    string
 	}{
 		{
 			name:  "direct array literal",
@@ -2564,15 +2565,9 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaRequired(t
 			wantParams: []QueryParam{},
 		},
 		{
-			name:  "array literal with defaulted current",
-			logic: `{"map":[{"var":"arr"},[{"var":["","fallback"]}]]}`,
-			wantSQL: func(d Dialect) string {
-				return mapSQL(d, arrayLiteral(d, "COALESCE(elem, 'fallback')"))
-			},
-			wantParam: func(d Dialect) string {
-				return mapSQL(d, arrayLiteral(d, fmt.Sprintf("COALESCE(elem, %s)", testStringPlaceholder(d, 1))))
-			},
-			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
+			name:    "array literal with defaulted current",
+			logic:   `{"map":[{"var":"arr"},[{"var":["","fallback"]}]]}`,
+			wantErr: "default value for array element has incompatible type string; expected number or null",
 		},
 	}
 
@@ -2594,6 +2589,10 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaRequired(t
 
 					for _, tt := range tests {
 						t.Run(tt.name, func(t *testing.T) {
+							if tt.wantErr != "" {
+								expectValueAndParamErrorContains(t, tr, tt.logic, tt.wantErr)
+								return
+							}
 							if testRejectsNestedArrayValues(d) {
 								expectValueAndParamErrorContains(t, tr, tt.logic, nestedArrayErrorFragment(d))
 								return

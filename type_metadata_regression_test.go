@@ -512,6 +512,71 @@ func TestTypeMetadataRejectsNonEmptyObjectArrayDefaultsAllDialects(t *testing.T)
 	}
 }
 
+func TestTypeMetadataRejectsCurrentObjectElementScalarDefaultsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"map":[{"var":"items"},{"var":["","fallback"]}]}`
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, typeMetadataRegressionSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			expectValueAndParamErrorContains(t, tr, logic, "array element")
+		})
+	}
+}
+
+func TestTypeMetadataPreservesCurrentObjectScopesThroughValueBranchesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"filter":[{"map":[{"var":"items"},{"if":[{">":[{"var":"x"},0]},{"var":""},{"var":""}]}]},{">":[{"var":"x"},0]}]}`
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, typeMetadataRegressionSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			if sql, err := tr.TranspileValue(logic); err != nil {
+				t.Fatalf("TranspileValue() SQL = %q, error = %v", sql, err)
+			}
+			if sql, _, err := tr.TranspileParameterizedValue(logic); err != nil {
+				t.Fatalf("TranspileParameterizedValue() SQL = %q, error = %v", sql, err)
+			}
+		})
+	}
+}
+
+func TestTypeMetadataAllowsCurrentObjectElementNullDefaultsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"filter":[{"map":[{"var":"items"},{"var":["",null]}]},{">":[{"var":"x"},0]}]}`
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, typeMetadataRegressionSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			if sql, err := tr.TranspileValue(logic); err != nil {
+				t.Fatalf("TranspileValue() SQL = %q, error = %v", sql, err)
+			} else if strings.Contains(sql, "COALESCE(elem, NULL)") || strings.Contains(sql, "COALESCE(elem,NULL)") {
+				t.Fatalf("TranspileValue() SQL = %q, want current object null default simplified", sql)
+			}
+			if sql, _, err := tr.TranspileParameterizedValue(logic); err != nil {
+				t.Fatalf("TranspileParameterizedValue() SQL = %q, error = %v", sql, err)
+			} else if strings.Contains(sql, "COALESCE(elem, NULL)") || strings.Contains(sql, "COALESCE(elem,NULL)") {
+				t.Fatalf("TranspileParameterizedValue() SQL = %q, want current object null default simplified", sql)
+			}
+		})
+	}
+}
+
 func TestTypeMetadataPreservesArrayReduceResultSchemaScopes(t *testing.T) {
 	t.Parallel()
 

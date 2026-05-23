@@ -161,7 +161,8 @@ func withArrayElementTypes(res expressionResult, elemTypes ...operators.Expressi
 }
 
 func withArrayElementSchemaScopes(res expressionResult, scopes ...string) expressionResult {
-	if valueTypeOf(res) != operators.ExpressionTypeArray {
+	typ := valueTypeOf(res)
+	if typ != operators.ExpressionTypeArray && typ != operators.ExpressionTypeObject {
 		return res
 	}
 	scopes = normalizeParserSchemaScopes(scopes)

@@ -43,6 +43,9 @@ func (a *ArrayOperator) arrayScopeVarToSQLParam(varExpr interface{}, pc *params.
 		if defaultErr := a.validateArrayScopeVarDefault(varName, arr[1]); defaultErr != nil {
 			return "", true, defaultErr
 		}
+		if a.shouldSimplifyNullDefault(varName, arr[1]) {
+			return mapped, true, nil
+		}
 		defaultSQL, err := a.dataOp.defaultValueToSQLParam(arr[1], pc)
 		if err != nil {
 			return "", true, fmt.Errorf("invalid default value: %w", err)
@@ -84,6 +87,9 @@ func (a *ArrayOperator) rewriteArrayScopeVar(varExpr interface{}) (interface{}, 
 			return nil, false, nil
 		}
 		if len(arr) == 1 {
+			return a.scopedSQLFieldResult(mapped, a.scopedFieldNamesForVar(varName)...), true, nil
+		}
+		if a.shouldSimplifyNullDefault(varName, arr[1]) {
 			return a.scopedSQLFieldResult(mapped, a.scopedFieldNamesForVar(varName)...), true, nil
 		}
 		newArr := make([]interface{}, len(arr))
@@ -153,6 +159,9 @@ func (a *ArrayOperator) arrayInternalVarToSQLParam(varExpr interface{}, pc *para
 		}
 		if err := a.validateArrayScopeVarDefault(varName, arr[1]); err != nil {
 			return "", true, err
+		}
+		if a.shouldSimplifyNullDefault(varName, arr[1]) {
+			return mapped, true, nil
 		}
 		defaultSQL, err := a.dataOp.defaultValueToSQLParam(arr[1], pc)
 		if err != nil {

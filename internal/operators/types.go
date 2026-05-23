@@ -69,8 +69,9 @@ type OperatorResult struct {
 	// []ExpressionType{ExpressionTypeArray, ExpressionTypeNumber}.
 	ArrayElementTypes []ExpressionType
 	// ArrayElementSchemaScopes carries schema fields whose element schemas
-	// describe object-array values. It is used to reject CASE/merge/lambda
-	// compositions that would otherwise mix incompatible struct shapes.
+	// describe object-array values, and object values produced from those
+	// elements. It is used to reject CASE/merge/lambda compositions that would
+	// otherwise mix incompatible struct shapes.
 	ArrayElementSchemaScopes []string
 }
 
@@ -145,7 +146,8 @@ type ProcessedValue struct {
 	// ArrayElementTypes carries nested array element types, with the immediate
 	// element type first. ExpressionTypeUnknown or an empty slice means unknown.
 	ArrayElementTypes []ExpressionType
-	// ArrayElementSchemaScopes carries schema fields for object-array values.
+	// ArrayElementSchemaScopes carries schema fields for object-array values
+	// and object values produced from object-array elements.
 	ArrayElementSchemaScopes []string
 }
 

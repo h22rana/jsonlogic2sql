@@ -399,10 +399,11 @@ func (a *ArrayOperator) scopedSQLFieldResult(sql string, fieldNames ...string) P
 		fieldName = fieldNames[0]
 	}
 	if fieldName == "" {
-		if a.hasObjectArraySchemaScope(a.currentSchemaScopes()) {
+		if scopes := a.currentObjectElementSchemaScopes(); len(scopes) > 0 {
 			result.HasExpressionInfo = true
 			result.Kind = ExpressionKindValue
 			result.Type = ExpressionTypeObject
+			result.ArrayElementSchemaScopes = scopes
 			return result
 		}
 		if a.hasElementType && a.elementType != ExpressionTypeUnknown {
@@ -440,14 +441,44 @@ func (a *ArrayOperator) scopedSQLFieldResult(sql string, fieldNames ...string) P
 	return result
 }
 
+func (a *ArrayOperator) currentObjectElementSchemaScopes() []string {
+	scopes := normalizeSchemaScopes(a.currentSchemaScopes())
+	if len(scopes) == 0 || !a.hasObjectArraySchemaScope(scopes) {
+		return nil
+	}
+	return scopes
+}
+
 func (a *ArrayOperator) validateArrayScopeVarDefault(varName string, defaultValue interface{}) error {
 	if fieldNames := a.scopedFieldNamesForVar(varName); len(fieldNames) > 0 {
 		return validateVarDefaultForFields(a.schema(), fieldNames, defaultValue)
+	}
+	if a.isWholeCurrentElementVar(varName) && len(a.currentObjectElementSchemaScopes()) > 0 {
+		return validateVarDefaultForExpressionType(ExpressionTypeObject, defaultValue, "array element")
 	}
 	if a.hasElementType {
 		return validateVarDefaultForExpressionType(a.elementType, defaultValue, "array element")
 	}
 	return nil
+}
+
+func (a *ArrayOperator) isWholeCurrentElementVar(varName string) bool {
+	switch a.lambdaScope {
+	case arrayLambdaScopeElement, arrayLambdaScopeMap:
+		return varName == ""
+	case arrayLambdaScopeReduce:
+		return varName == CurrentVar
+	case arrayLambdaScopeNone:
+		return varName == "" && a.valueScope
+	default:
+		return false
+	}
+}
+
+func (a *ArrayOperator) shouldSimplifyNullDefault(varName string, defaultValue interface{}) bool {
+	return defaultValue == nil &&
+		a.isWholeCurrentElementVar(varName) &&
+		len(a.currentObjectElementSchemaScopes()) > 0
 }
 
 func inferLiteralValueExpressionType(expr interface{}) ExpressionType {
