@@ -1,4 +1,3 @@
-//nolint:goconst // JSONLogic operator and SQL token strings stay inline in parser switches for readability.
 package parser
 
 import (
@@ -62,14 +61,14 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 	// Handle different operator types
 	switch operator {
 	// Data access operators
-	case "var":
+	case operators.OpVar:
 		sql, err := p.dataOp.ToSQL(operator, []interface{}{args})
 		return sql, p.wrapOperatorError(operator, path, err)
-	case "missing":
+	case operators.OpMissing:
 		// missing takes a single string argument, wrap it in an array
 		sql, err := p.dataOp.ToSQL(operator, []interface{}{args})
 		return sql, p.wrapOperatorError(operator, path, err)
-	case "missing_some":
+	case operators.OpMissingSome:
 		if arr, ok := args.([]interface{}); ok {
 			sql, err := p.dataOp.ToSQL(operator, arr)
 			return sql, p.wrapOperatorError(operator, path, err)
@@ -77,7 +76,15 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// Comparison operators
-	case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
+	case operators.OpEqual,
+		operators.OpStrictEqual,
+		operators.OpNotEqual,
+		operators.OpStrictNotEqual,
+		operators.OpGreaterThan,
+		operators.OpGreaterThanOrEqual,
+		operators.OpLessThan,
+		operators.OpLessThanOrEqual,
+		operators.OpIn:
 		if arr, ok := args.([]interface{}); ok {
 			// Comparison operands are value expressions.
 			processedArgs, err := p.processValueArgs(arr, path)
@@ -90,7 +97,7 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// Logical operators
-	case "and", "or", "if":
+	case operators.OpAnd, operators.OpOr, operators.OpIf:
 		if arr, ok := args.([]interface{}); ok {
 			// Process arguments to handle custom operators in nested expressions
 			processedArgs, err := p.processArgs(arr, path)
@@ -101,7 +108,7 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 			return sql, p.wrapOperatorError(operator, path, err)
 		}
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
-	case "!", "!!":
+	case operators.OpNot, operators.OpDoubleBang:
 		// These unary operators can accept both array and non-array arguments
 		if arr, ok := args.([]interface{}); ok {
 			// Process arguments to handle custom operators
@@ -121,7 +128,13 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 		return sql, p.wrapOperatorError(operator, path, err)
 
 	// Numeric operators
-	case "+", "-", "*", "/", "%", "max", "min":
+	case operators.OpAdd,
+		operators.OpSubtract,
+		operators.OpMultiply,
+		operators.OpDivide,
+		operators.OpModulo,
+		operators.OpMax,
+		operators.OpMin:
 		if arr, ok := args.([]interface{}); ok {
 			// Process arguments to handle complex expressions
 			processedArgs, err := p.processArgs(arr, path)
@@ -142,7 +155,7 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 		return "", tperrors.NewOperatorRequiresArray(operator, path)
 
 	// String operators
-	case "cat", "substr":
+	case operators.OpCat, operators.OpSubstr:
 		if arr, ok := args.([]interface{}); ok {
 			sql, err := p.stringOp.ToSQL(operator, arr)
 			return sql, p.wrapOperatorError(operator, path, err)
@@ -158,12 +171,39 @@ func (p *Parser) parseOperator(operator string, args interface{}, path string) (
 // isBuiltInOperator checks if an operator is a built-in operator.
 func (p *Parser) isBuiltInOperator(operator string) bool {
 	switch operator {
-	case "var", "missing", "missing_some",
-		"==", "===", "!=", "!==", ">", ">=", "<", "<=", "in",
-		"and", "or", "!", "!!", "if",
-		"+", "-", "*", "/", "%", "max", "min",
-		"cat", "substr",
-		"map", "filter", "reduce", "all", "some", "none", "merge":
+	case operators.OpVar,
+		operators.OpMissing,
+		operators.OpMissingSome,
+		operators.OpEqual,
+		operators.OpStrictEqual,
+		operators.OpNotEqual,
+		operators.OpStrictNotEqual,
+		operators.OpGreaterThan,
+		operators.OpGreaterThanOrEqual,
+		operators.OpLessThan,
+		operators.OpLessThanOrEqual,
+		operators.OpIn,
+		operators.OpAnd,
+		operators.OpOr,
+		operators.OpNot,
+		operators.OpDoubleBang,
+		operators.OpIf,
+		operators.OpAdd,
+		operators.OpSubtract,
+		operators.OpMultiply,
+		operators.OpDivide,
+		operators.OpModulo,
+		operators.OpMax,
+		operators.OpMin,
+		operators.OpCat,
+		operators.OpSubstr,
+		operators.OpMap,
+		operators.OpFilter,
+		operators.OpReduce,
+		operators.OpAll,
+		operators.OpSome,
+		operators.OpNone,
+		operators.OpMerge:
 		return true
 	}
 	return false
@@ -225,7 +265,7 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 			return nil, tperrors.NewMultipleKeys(argPath)
 		}
 		for operator := range exprMap {
-			if operator != "var" {
+			if operator != operators.OpVar {
 				res, err := p.parseExpressionValue(arg, argPath)
 				if err != nil {
 					return nil, err

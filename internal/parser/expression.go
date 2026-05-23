@@ -118,9 +118,24 @@ func (p *Parser) parseExpressionAny(expr interface{}, path string) (expressionRe
 	if obj, ok := expr.(map[string]interface{}); ok && len(obj) == 1 {
 		for operator := range obj {
 			switch operator {
-			case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", operators.OpAll, operators.OpSome, operators.OpNone:
+			case operators.OpMissing,
+				operators.OpMissingSome,
+				operators.OpEqual,
+				operators.OpStrictEqual,
+				operators.OpNotEqual,
+				operators.OpStrictNotEqual,
+				operators.OpGreaterThan,
+				operators.OpGreaterThanOrEqual,
+				operators.OpLessThan,
+				operators.OpLessThanOrEqual,
+				operators.OpIn,
+				operators.OpNot,
+				operators.OpDoubleBang,
+				operators.OpAll,
+				operators.OpSome,
+				operators.OpNone:
 				return p.parseExpressionPredicate(expr, path)
-			case "and", "or", "if":
+			case operators.OpAnd, operators.OpOr, operators.OpIf:
 				if res, err := p.parseExpressionPredicate(expr, path); err == nil {
 					return res, nil
 				}
@@ -154,17 +169,25 @@ func (p *Parser) parseOperatorPredicate(operator string, args interface{}, path 
 	}
 
 	switch operator {
-	case "missing":
+	case operators.OpMissing:
 		sql, err := p.dataOp.ToSQL(operator, []interface{}{args})
 		return predicateResult(sql), p.wrapOperatorError(operator, path, err)
-	case "missing_some":
+	case operators.OpMissingSome:
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
 		sql, err := p.dataOp.ToSQL(operator, arr)
 		return predicateResult(sql), p.wrapOperatorError(operator, path, err)
-	case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
+	case operators.OpEqual,
+		operators.OpStrictEqual,
+		operators.OpNotEqual,
+		operators.OpStrictNotEqual,
+		operators.OpGreaterThan,
+		operators.OpGreaterThanOrEqual,
+		operators.OpLessThan,
+		operators.OpLessThanOrEqual,
+		operators.OpIn:
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
@@ -179,17 +202,17 @@ func (p *Parser) parseOperatorPredicate(operator string, args interface{}, path 
 		}
 		res, err := literalComparisonPredicateResult(operator, processedArgs, sql)
 		return res, p.wrapOperatorError(operator, path, err)
-	case "and", "or":
+	case operators.OpAnd, operators.OpOr:
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
 		return p.parsePredicateLogical(operator, arr, path)
-	case "!":
+	case operators.OpNot:
 		return p.parseNotPredicate(operator, args, path, false)
-	case "!!":
+	case operators.OpDoubleBang:
 		return p.parseNotPredicate(operator, args, path, true)
-	case "if":
+	case operators.OpIf:
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
@@ -202,7 +225,20 @@ func (p *Parser) parseOperatorPredicate(operator string, args interface{}, path 
 		}
 		sql, err := p.arrayOp.ToSQLAtPath(operator, arr, path)
 		return predicateResult(sql), p.wrapOperatorError(operator, path, err)
-	case "var", operators.OpMap, operators.OpFilter, operators.OpReduce, operators.OpMerge, "+", "-", "*", "/", "%", "max", "min", "cat", "substr":
+	case operators.OpVar,
+		operators.OpMap,
+		operators.OpFilter,
+		operators.OpReduce,
+		operators.OpMerge,
+		operators.OpAdd,
+		operators.OpSubtract,
+		operators.OpMultiply,
+		operators.OpDivide,
+		operators.OpModulo,
+		operators.OpMax,
+		operators.OpMin,
+		operators.OpCat,
+		operators.OpSubstr:
 		return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, "predicate", "value")
 	default:
 		return expressionResult{}, tperrors.NewUnsupportedOperator(operator, path)
@@ -227,7 +263,7 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 	}
 
 	switch operator {
-	case "var":
+	case operators.OpVar:
 		sql, err := p.dataOp.ToSQL(operator, []interface{}{args})
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
@@ -244,25 +280,44 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 			withVarDefaultMetadata(p.fieldValueExpressionResult(sql, fieldName), args),
 			path,
 		)
-	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", operators.OpAll, operators.OpSome, operators.OpNone:
+	case operators.OpMissing,
+		operators.OpMissingSome,
+		operators.OpEqual,
+		operators.OpStrictEqual,
+		operators.OpNotEqual,
+		operators.OpStrictNotEqual,
+		operators.OpGreaterThan,
+		operators.OpGreaterThanOrEqual,
+		operators.OpLessThan,
+		operators.OpLessThanOrEqual,
+		operators.OpIn,
+		operators.OpAll,
+		operators.OpSome,
+		operators.OpNone:
 		return p.parseOperatorPredicate(operator, args, path)
-	case "!":
+	case operators.OpNot:
 		return p.parseNotValue(operator, args, path, false)
-	case "!!":
+	case operators.OpDoubleBang:
 		return p.parseNotValue(operator, args, path, true)
-	case "and", "or":
+	case operators.OpAnd, operators.OpOr:
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
 		return p.parseValueLogical(operator, arr, path)
-	case "if":
+	case operators.OpIf:
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
 		return p.parseValueIf(arr, path)
-	case "+", "-", "*", "/", "%", "max", "min":
+	case operators.OpAdd,
+		operators.OpSubtract,
+		operators.OpMultiply,
+		operators.OpDivide,
+		operators.OpModulo,
+		operators.OpMax,
+		operators.OpMin:
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
@@ -276,13 +331,13 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
 		return valueResult(sql, operators.ExpressionTypeNumber), nil
-	case "cat":
+	case operators.OpCat:
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
 		}
 		return p.parseCatValue(arr, path)
-	case "substr":
+	case operators.OpSubstr:
 		arr, ok := args.([]interface{})
 		if !ok {
 			return expressionResult{}, tperrors.NewOperatorRequiresArray(operator, path)
@@ -340,30 +395,30 @@ func (p *Parser) parsePredicateLogical(operator string, args []interface{}, path
 			return expressionResult{}, err
 		}
 		if res.truthKnown {
-			if operator == "and" && res.truthy {
+			if operator == logicalOpAnd && res.truthy {
 				continue
 			}
-			if operator == "or" && !res.truthy {
+			if operator == logicalOpOr && !res.truthy {
 				continue
 			}
-			if operator == "and" && !res.truthy {
+			if operator == logicalOpAnd && !res.truthy {
 				return booleanPredicateResult(false), nil
 			}
-			if operator == "or" && res.truthy {
+			if operator == logicalOpOr && res.truthy {
 				return booleanPredicateResult(true), nil
 			}
 		}
 		parts = append(parts, res.SQL)
 	}
 	if len(parts) == 0 {
-		return booleanPredicateResult(operator == "and"), nil
+		return booleanPredicateResult(operator == logicalOpAnd), nil
 	}
 	if len(parts) == 1 {
 		return predicateResult(parts[0]), nil
 	}
-	joiner := " AND "
-	if operator == "or" {
-		joiner = " OR "
+	joiner := sqlAndJoiner
+	if operator == logicalOpOr {
+		joiner = sqlOrJoiner
 	}
 	return predicateResult(fmt.Sprintf("(%s)", strings.Join(parts, joiner))), nil
 }
@@ -566,8 +621,8 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 	argPath := tperrors.BuildArrayPath(path, index)
 	if current, ok := nonFiniteNativeFloatTruthResult(args[index]); ok {
 		if index == len(args)-1 ||
-			(operator == "or" && current.truthy) ||
-			(operator == "and" && !current.truthy) {
+			(operator == logicalOpOr && current.truthy) ||
+			(operator == logicalOpAnd && !current.truthy) {
 			return expressionResult{}, nonFiniteNativeFloatValueError(args[index], argPath)
 		}
 		return p.parseValueLogicalFrom(operator, args, index+1, path)
@@ -581,10 +636,10 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 		return current, nil
 	}
 	if current.truthKnown {
-		if operator == "or" && current.truthy {
+		if operator == logicalOpOr && current.truthy {
 			return current, nil
 		}
-		if operator == "and" && !current.truthy {
+		if operator == logicalOpAnd && !current.truthy {
 			return current, nil
 		}
 		return p.parseValueLogicalFrom(operator, args, index+1, path)
@@ -601,7 +656,7 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 	if err != nil {
 		return expressionResult{}, err
 	}
-	if operator == "or" {
+	if operator == logicalOpOr {
 		result := valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(current), valueSQL(rest)), valueTypeOf(resultRes))
 		if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
 			result = withArrayElementTypes(result, elemTypes...)
