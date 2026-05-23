@@ -119,7 +119,7 @@ func BenchmarkWithSchema(b *testing.B) {
 		{Name: "age", Type: FieldTypeInteger},
 		{Name: "name", Type: FieldTypeString},
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "inactive", "banned"}},
-		{Name: "scores", Type: FieldTypeArray},
+		{Name: "scores", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 	tr := mustBenchmarkTranspilerWithConfig(b, &TranspilerConfig{
 		Dialect: DialectBigQuery,

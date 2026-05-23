@@ -40,14 +40,14 @@ func (a *ArrayOperator) handleMapResult(args []interface{}) (OperatorResult, err
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 
 	valueScoped := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, true)
 	transformation, err := valueScoped.valueExpressionResultWithContextAndPath(
@@ -58,10 +58,29 @@ func (a *ArrayOperator) handleMapResult(args []interface{}) (OperatorResult, err
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid map transformation argument: %w", err)
 	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", err)
+	}
 
 	alias := a.elemAlias()
 	sql := a.renderMapSQL(alias, transformation.SQL, array)
-	return arrayValueSQLWithElementTypes(sql, mappedArrayElementTypes(transformation)...), nil
+	elementTypes := mappedArrayElementTypes(transformation)
+	if err := a.validateArrayResultElementTypes(elementTypes); err != nil {
+		return OperatorResult{}, err
+	}
+	var elementSchemaScopes []string
+	switch expressionTypeFromResultKind(transformation.Kind, transformation.Type) {
+	case ExpressionTypeObject:
+		if scopes := normalizeSchemaScopes(transformation.ArrayElementSchemaScopes); len(scopes) > 0 {
+			elementSchemaScopes = scopes
+		} else if isIdentityElementMapExpression(args[arrayExpressionArgIndex]) {
+			elementSchemaScopes = sourceScopes
+		}
+	case ExpressionTypeArray:
+		elementSchemaScopes = normalizeSchemaScopes(transformation.ArrayElementSchemaScopes)
+	case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeString, ExpressionTypeNumber:
+	}
+	return arrayValueSQLWithMetadata(sql, elementTypes, elementSchemaScopes), nil
 }
 
 // handleFilter converts filter operator to SQL.
@@ -100,14 +119,14 @@ func (a *ArrayOperator) handleFilterResult(args []interface{}) (OperatorResult, 
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
@@ -115,7 +134,14 @@ func (a *ArrayOperator) handleFilterResult(args []interface{}) (OperatorResult, 
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid filter condition argument: %w", err)
 	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", err)
+	}
 
 	alias := a.elemAlias()
-	return arrayValueSQLWithElementTypes(a.renderFilterSQL(alias, array, condition), typedValueElementTypes(arrayValue)...), nil
+	return arrayValueSQLWithMetadata(
+		a.renderFilterSQL(alias, array, condition),
+		typedValueElementTypes(arrayValue),
+		typedValueSchemaScopes(arrayValue),
+	), nil
 }

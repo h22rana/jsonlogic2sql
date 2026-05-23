@@ -239,7 +239,7 @@ func TestNumericOperator_generateComplexSQL(t *testing.T) {
 			name:     "modulo two args",
 			operator: "%",
 			args:     []string{"a", "b"},
-			expected: "(a % b)",
+			expected: "MOD(CAST(a AS NUMERIC), CAST(b AS NUMERIC))",
 			hasError: false,
 		},
 		{

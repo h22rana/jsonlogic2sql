@@ -7,10 +7,73 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
 
+type elementRefSchemaProvider struct {
+	fieldOnlySchemaProvider
+}
+
+func (p *elementRefSchemaProvider) GetFieldType(fieldName string) string {
+	if p.IsArrayType(fieldName) {
+		return "array"
+	}
+	switch fieldName {
+	case "currently":
+		return "boolean"
+	case "base", "current_balance", "amount", "score", "item_count", "items":
+		return "number"
+	default:
+		return ""
+	}
+}
+
+func (p *elementRefSchemaProvider) IsArrayType(fieldName string) bool {
+	switch fieldName {
+	case "data", "groups", "numbers", "orders", "records", "results", "scores", "values", "amounts", "nums", "vals":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *elementRefSchemaProvider) IsNumericType(fieldName string) bool {
+	switch p.GetFieldType(fieldName) {
+	case "number", "integer":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *elementRefSchemaProvider) IsBooleanType(fieldName string) bool {
+	return p.GetFieldType(fieldName) == "boolean"
+}
+
+func (p *elementRefSchemaProvider) IsStringType(fieldName string) bool {
+	return p.GetFieldType(fieldName) == "string"
+}
+
+func (p *elementRefSchemaProvider) HasArrayElementFields(fieldName string) bool {
+	switch fieldName {
+	case "data", "groups", "orders", "records", "results", "scores":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *elementRefSchemaProvider) GetArrayElementType(fieldName string) string {
+	if p.HasArrayElementFields(fieldName) {
+		return "object"
+	}
+	if p.IsArrayType(fieldName) {
+		return "number"
+	}
+	return ""
+}
+
 // TestArrayOperator_ElementRefNoCorruption verifies that field names containing
 // "item" or "current" as substrings are NOT corrupted by array-scope mapping.
 func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
+	config := NewOperatorConfig(dialect.DialectBigQuery, &elementRefSchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -118,7 +181,7 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 // TestArrayOperator_DottedIdentifierPreservation verifies that dotted identifiers
 // like "account.current" and "order.item" are NOT corrupted by the post-SQL safety net.
 func TestArrayOperator_DottedIdentifierPreservation(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
+	config := NewOperatorConfig(dialect.DialectBigQuery, &elementRefSchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		if m, ok := expr.(map[string]interface{}); ok {
 			for _, args := range m {
@@ -181,7 +244,7 @@ func TestArrayOperator_DottedIdentifierPreservation(t *testing.T) {
 // TestArrayOperator_CustomOpLiteralSQL verifies that custom operators emitting
 // literal legacy alias SQL are no longer rewritten after SQL generation.
 func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
+	config := NewOperatorConfig(dialect.DialectBigQuery, &elementRefSchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		if m, ok := expr.(map[string]interface{}); ok {
 			for op := range m {
@@ -223,13 +286,13 @@ func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
 		{
 			name:     "literal current.price preserved in some",
 			operator: "some",
-			args:     []any{map[string]any{"var": "items"}, map[string]any{">": []any{map[string]any{"emit_current_dot": []any{}}, 0}}},
+			args:     []any{map[string]any{"var": "nums"}, map[string]any{">": []any{map[string]any{"emit_current_dot": []any{}}, 0}}},
 			contains: "current.price",
 		},
 		{
 			name:     "literal current numeric-leading path preserved in some",
 			operator: "some",
-			args:     []any{map[string]any{"var": "items"}, map[string]any{">": []any{map[string]any{"emit_current_numeric_dot": []any{}}, 0}}},
+			args:     []any{map[string]any{"var": "nums"}, map[string]any{">": []any{map[string]any{"emit_current_numeric_dot": []any{}}, 0}}},
 			contains: "current.24h",
 		},
 	}
@@ -260,6 +323,7 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 		args     []any
 		contains string
 		absent   string
+		wantErr  string
 	}{
 		{
 			name:     "standalone reduce initial current.amount preserved",
@@ -290,7 +354,7 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 			contains: "elem.base",
 		},
 		{
-			name:     "reduce initial with dollar sign preserved",
+			name:     "reduce aggregate rejects non-numeric string initial",
 			dialect:  dialect.DialectBigQuery,
 			operator: "reduce",
 			args: []any{
@@ -298,15 +362,21 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 				map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
 				"$0.00",
 			},
-			contains: "'$0.00'",
+			wantErr: "numeric reduce aggregate initial must be numeric",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := NewOperatorConfig(tt.dialect, &fieldOnlySchemaProvider{})
+			config := NewOperatorConfig(tt.dialect, &elementRefSchemaProvider{})
 			op := NewArrayOperator(config)
 			result, err := op.ToSQL(tt.operator, tt.args)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want containing %q (SQL %q)", err, tt.wantErr, result)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -323,7 +393,7 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 // TestArrayOperator_ClickHouseElementRefRewrite verifies element reference
 // rewriting works correctly with ClickHouse-specific array syntax.
 func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectClickHouse, &fieldOnlySchemaProvider{})
+	config := NewOperatorConfig(dialect.DialectClickHouse, &elementRefSchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -379,7 +449,7 @@ func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
 
 // TestArrayOperator_ArrayFormVarRewrite verifies scoped defaulted var expressions.
 func TestArrayOperator_ArrayFormVarRewrite(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
+	config := NewOperatorConfig(dialect.DialectBigQuery, &elementRefSchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -393,7 +463,7 @@ func TestArrayOperator_ArrayFormVarRewrite(t *testing.T) {
 			name:     "array-form current with default in reduce",
 			operator: "reduce",
 			args: []any{
-				map[string]any{"var": "items"},
+				map[string]any{"var": "amounts"},
 				map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": []any{"current", 0}}}},
 				0,
 			},

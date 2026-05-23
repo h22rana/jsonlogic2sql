@@ -114,7 +114,7 @@ func TestLogicalOperator_expressionToSQL_Extended(t *testing.T) {
 		{
 			name:     "missing_some operator",
 			input:    map[string]interface{}{"missing_some": []interface{}{1, []interface{}{"a", "b"}}},
-			expected: "(a IS NULL OR b IS NULL)",
+			expected: "(a IS NULL AND b IS NULL)",
 			hasError: false,
 		},
 		// missing_some non-array error

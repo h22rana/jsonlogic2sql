@@ -55,6 +55,391 @@ func (c *ComparisonOperator) validateEqualityFieldOperand(field equalityFieldOpe
 	return nil
 }
 
+func (c *ComparisonOperator) defaultedFieldLiteralEqualitySQL(
+	operator string,
+	leftArg, rightArg interface{},
+	pc *params.ParamCollector,
+) (string, bool, error) {
+	if !isEqualityOperator(operator) {
+		return "", false, nil
+	}
+
+	fieldArg, literal, ok := c.defaultedFieldLiteralOperands(leftArg, rightArg)
+	if !ok {
+		return "", false, nil
+	}
+	if err := c.validateEqualityFieldOperand(fieldArg.field); err != nil {
+		return "", true, err
+	}
+	if !c.defaultedFieldNeedsNullSplit(fieldArg.field) {
+		return "", false, nil
+	}
+	fieldOnlyArg := fieldArg.withoutDefault()
+	fieldSQL, err := c.valueToSQL(fieldOnlyArg)
+	if err != nil {
+		return "", true, fmt.Errorf("invalid field operand: %w", err)
+	}
+
+	fieldBranchSQL, fieldBranchConstant, err := c.fieldLiteralEqualityBranchSQL(operator, fieldOnlyArg, literal, pc)
+	if err != nil {
+		return "", true, err
+	}
+	defaultBranch := defaultLiteralEqualityResult(operator, fieldArg.field.defaultLiteral, literal)
+
+	predicates := make([]string, 0, 2)
+	if fieldBranchConstant != nil {
+		if *fieldBranchConstant {
+			predicates = append(predicates, fmt.Sprintf("%s IS NOT NULL", fieldSQL))
+		}
+	} else if fieldBranchSQL != "" {
+		predicates = append(predicates, fmt.Sprintf("(%s IS NOT NULL AND %s)", fieldSQL, fieldBranchSQL))
+	}
+	if defaultBranch {
+		predicates = append(predicates, fmt.Sprintf("%s IS NULL", fieldSQL))
+	}
+	return combineOrPredicates(predicates), true, nil
+}
+
+func (c *ComparisonOperator) defaultedFieldFieldEqualitySQL(
+	operator string,
+	leftArg, rightArg interface{},
+	pc *params.ParamCollector,
+) (string, bool, error) {
+	if !isEqualityOperator(operator) {
+		return "", false, nil
+	}
+	leftField, leftOK := c.extractEqualityFieldOperand(leftArg)
+	rightField, rightOK := c.extractEqualityFieldOperand(rightArg)
+	if !leftOK || !rightOK || (!leftField.hasDefault && !rightField.hasDefault) {
+		return "", false, nil
+	}
+	if err := c.validateEqualityFieldOperand(leftField); err != nil {
+		return "", true, err
+	}
+	if err := c.validateEqualityFieldOperand(rightField); err != nil {
+		return "", true, err
+	}
+	if !c.defaultedFieldNeedsNullSplit(leftField) && !c.defaultedFieldNeedsNullSplit(rightField) {
+		return "", false, nil
+	}
+
+	leftSQL, err := c.valueToSQL(defaultedFieldLiteralOperand{original: leftArg, field: leftField}.withoutDefault())
+	if err != nil {
+		return "", true, fmt.Errorf("invalid left field operand: %w", err)
+	}
+	rightSQL, err := c.valueToSQL(defaultedFieldLiteralOperand{original: rightArg, field: rightField}.withoutDefault())
+	if err != nil {
+		return "", true, fmt.Errorf("invalid right field operand: %w", err)
+	}
+
+	leftStates := defaultedEqualityStates(leftField)
+	rightStates := defaultedEqualityStates(rightField)
+	predicates := make([]string, 0, len(leftStates)*len(rightStates))
+	for _, leftState := range leftStates {
+		leftBranchArg := c.defaultedEqualityBranchArg(leftArg, leftField, leftState.useDefault)
+		leftNullPredicate := defaultedEqualityNullPredicate(leftSQL, leftState.useDefault)
+		for _, rightState := range rightStates {
+			rightBranchArg := c.defaultedEqualityBranchArg(rightArg, rightField, rightState.useDefault)
+			branchSQL, branchConstant, err := c.equalityBranchSQL(operator, leftBranchArg, rightBranchArg, pc)
+			if err != nil {
+				return "", true, err
+			}
+			conditions := make([]string, 0, 3)
+			conditions = append(conditions, leftNullPredicate, defaultedEqualityNullPredicate(rightSQL, rightState.useDefault))
+			if branchConstant != nil {
+				if !*branchConstant {
+					continue
+				}
+				predicates = append(predicates, combineAndPredicates(conditions))
+				continue
+			}
+			if branchSQL == "" {
+				continue
+			}
+			conditions = append(conditions, branchSQL)
+			predicates = append(predicates, combineAndPredicates(conditions))
+		}
+	}
+	return combineOrPredicates(predicates), true, nil
+}
+
+type defaultedEqualityState struct {
+	useDefault bool
+}
+
+func defaultedEqualityStates(field equalityFieldOperand) []defaultedEqualityState {
+	if field.hasDefault && field.defaultLiteralKnown {
+		return []defaultedEqualityState{{useDefault: false}, {useDefault: true}}
+	}
+	return []defaultedEqualityState{{useDefault: false}}
+}
+
+func (c *ComparisonOperator) defaultedEqualityBranchArg(
+	original interface{},
+	field equalityFieldOperand,
+	useDefault bool,
+) interface{} {
+	if useDefault {
+		return field.defaultLiteral
+	}
+	return defaultedFieldLiteralOperand{original: original, field: field}.withoutDefault()
+}
+
+func defaultedEqualityNullPredicate(fieldSQL string, useDefault bool) string {
+	if useDefault {
+		return fmt.Sprintf("%s IS NULL", fieldSQL)
+	}
+	return fmt.Sprintf("%s IS NOT NULL", fieldSQL)
+}
+
+type defaultedFieldLiteralOperand struct {
+	original interface{}
+	field    equalityFieldOperand
+}
+
+func (c *ComparisonOperator) defaultedFieldLiteralOperands(
+	leftArg, rightArg interface{},
+) (defaultedFieldLiteralOperand, interface{}, bool) {
+	leftField, leftIsField := c.extractEqualityFieldOperand(leftArg)
+	rightField, rightIsField := c.extractEqualityFieldOperand(rightArg)
+	if leftIsField == rightIsField {
+		return defaultedFieldLiteralOperand{}, nil, false
+	}
+
+	if leftIsField {
+		literal, ok := equalityLiteralValue(rightArg)
+		return defaultedFieldLiteralOperand{original: leftArg, field: leftField}, literal, ok &&
+			leftField.hasDefault && leftField.defaultLiteralKnown
+	}
+
+	literal, ok := equalityLiteralValue(leftArg)
+	return defaultedFieldLiteralOperand{original: rightArg, field: rightField}, literal, ok &&
+		rightField.hasDefault && rightField.defaultLiteralKnown
+}
+
+func (c *ComparisonOperator) defaultedFieldNeedsNullSplit(field equalityFieldOperand) bool {
+	fieldKind, ok := c.schemaEqualityKind(field.fieldName)
+	if !ok {
+		return false
+	}
+	defaultKind := equalityLiteralKind(field.defaultLiteral)
+	return defaultKind != "" && defaultKind != "null" && defaultKind != fieldKind
+}
+
+func (o defaultedFieldLiteralOperand) withoutDefault() interface{} {
+	if pv, ok := o.original.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+		return processedFieldWithoutDefault(pv)
+	}
+	if varExpr, ok := o.original.(map[string]interface{}); ok && len(varExpr) == 1 {
+		if varName, hasVar := varExpr[OpVar]; hasVar {
+			switch v := varName.(type) {
+			case []interface{}:
+				if len(v) > 0 {
+					if pv, ok := v[0].(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+						return processedFieldWithoutDefault(pv)
+					}
+				}
+			case ProcessedValue:
+				if v.IsSQL && v.IsField {
+					return processedFieldWithoutDefault(v)
+				}
+			}
+		}
+	}
+	return map[string]interface{}{OpVar: o.field.fieldName}
+}
+
+func processedFieldWithoutDefault(pv ProcessedValue) ProcessedValue {
+	pv.FieldHasDefault = false
+	pv.FieldDefaultLiteralKnown = false
+	pv.FieldDefaultLiteral = nil
+	return pv
+}
+
+func (c *ComparisonOperator) fieldLiteralEqualityBranchSQL(
+	operator string,
+	fieldArg interface{},
+	literal interface{},
+	pc *params.ParamCollector,
+) (string, *bool, error) {
+	decision := c.applyEqualitySemantics(operator, fieldArg, literal)
+	if decision.unsupported != nil {
+		return "", nil, decision.unsupported
+	}
+	if decision.constant != nil {
+		return "", decision.constant, nil
+	}
+
+	leftArg := fieldArg
+	rightArg := literal
+	if decision.handled {
+		leftArg = decision.left
+		rightArg = decision.right
+	} else {
+		var err error
+		leftArg, rightArg, err = c.applySchemaComparisonCoercion(leftArg, rightArg)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	leftArg = materializePredicateValueOperand(leftArg)
+	rightArg = materializePredicateValueOperand(rightArg)
+
+	var (
+		leftSQL  string
+		rightSQL string
+		err      error
+	)
+	if pc == nil {
+		leftSQL, err = c.valueToSQL(leftArg)
+	} else {
+		leftSQL, err = c.valueToSQLParam(leftArg, pc)
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid left operand: %w", err)
+	}
+	if pc == nil {
+		rightSQL, err = c.valueToSQL(rightArg)
+	} else {
+		rightSQL, err = c.valueToSQLParam(rightArg, pc)
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid right operand: %w", err)
+	}
+
+	switch operator {
+	case "==", "===":
+		return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil, nil
+	case "!=":
+		return fmt.Sprintf("%s != %s", leftSQL, rightSQL), nil, nil
+	case "!==":
+		return fmt.Sprintf("%s <> %s", leftSQL, rightSQL), nil, nil
+	default:
+		return "", nil, fmt.Errorf("unsupported equality operator: %s", operator)
+	}
+}
+
+func (c *ComparisonOperator) equalityBranchSQL(
+	operator string,
+	leftArg interface{},
+	rightArg interface{},
+	pc *params.ParamCollector,
+) (string, *bool, error) {
+	if leftLiteral, leftOK := equalityLiteralValue(leftArg); leftOK {
+		if rightLiteral, rightOK := equalityLiteralValue(rightArg); rightOK {
+			if err := validateEqualityJSONNumberLiteral(leftLiteral); err != nil {
+				return "", nil, err
+			}
+			if err := validateEqualityJSONNumberLiteral(rightLiteral); err != nil {
+				return "", nil, err
+			}
+			result := defaultLiteralEqualityResult(operator, leftLiteral, rightLiteral)
+			return "", &result, nil
+		}
+	}
+
+	decision := c.applyEqualitySemantics(operator, leftArg, rightArg)
+	if decision.unsupported != nil {
+		return "", nil, decision.unsupported
+	}
+	if decision.constant != nil {
+		return "", decision.constant, nil
+	}
+	if decision.handled {
+		leftArg = decision.left
+		rightArg = decision.right
+	} else {
+		var err error
+		leftArg, rightArg, err = c.applySchemaComparisonCoercion(leftArg, rightArg)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	leftArg = materializePredicateValueOperand(leftArg)
+	rightArg = materializePredicateValueOperand(rightArg)
+
+	var (
+		leftSQL  string
+		rightSQL string
+		err      error
+	)
+	if pc == nil {
+		leftSQL, err = c.valueToSQL(leftArg)
+	} else {
+		leftSQL, err = c.valueToSQLParam(leftArg, pc)
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid left operand: %w", err)
+	}
+	if pc == nil {
+		rightSQL, err = c.valueToSQL(rightArg)
+	} else {
+		rightSQL, err = c.valueToSQLParam(rightArg, pc)
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid right operand: %w", err)
+	}
+
+	isLeftNull := leftArg == nil || leftSQL == "NULL"
+	isRightNull := rightArg == nil || rightSQL == "NULL"
+
+	if !isLeftNull && !isRightNull {
+		if leftBool, ok := sqlBooleanConstant(leftSQL); ok {
+			if rightBool, ok := sqlBooleanConstant(rightSQL); ok {
+				result := equalityPredicateConstant(operator, leftBool, rightBool)
+				return "", &result, nil
+			}
+		}
+		if sql, ok := c.strictIncompatibleFieldEqualitySQL(operator, leftArg, rightArg, leftSQL, rightSQL); ok {
+			return sql, nil, nil
+		}
+		if c.shouldUseNullSafeFieldEquality(operator, leftArg, rightArg) {
+			return nullSafeFieldEqualitySQL(operator, leftSQL, rightSQL), nil, nil
+		}
+	}
+
+	switch operator {
+	case "==", "===":
+		switch {
+		case isLeftNull && isRightNull:
+			result := true
+			return "", &result, nil
+		case isLeftNull:
+			return fmt.Sprintf("%s IS NULL", rightSQL), nil, nil
+		case isRightNull:
+			return fmt.Sprintf("%s IS NULL", leftSQL), nil, nil
+		default:
+			return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil, nil
+		}
+	case "!=", "!==":
+		switch {
+		case isLeftNull && isRightNull:
+			result := false
+			return "", &result, nil
+		case isLeftNull:
+			return fmt.Sprintf("%s IS NOT NULL", rightSQL), nil, nil
+		case isRightNull:
+			return fmt.Sprintf("%s IS NOT NULL", leftSQL), nil, nil
+		case operator == "!=":
+			return fmt.Sprintf("%s != %s", leftSQL, rightSQL), nil, nil
+		default:
+			return fmt.Sprintf("%s <> %s", leftSQL, rightSQL), nil, nil
+		}
+	default:
+		return "", nil, fmt.Errorf("unsupported equality operator: %s", operator)
+	}
+}
+
+func defaultLiteralEqualityResult(operator string, defaultLiteral, literal interface{}) bool {
+	var equal bool
+	if isStrictEqualityOperator(operator) {
+		equal = equalityLiteralsStrictEqual(defaultLiteral, literal)
+	} else {
+		equal = equalityLiteralsLooseEqual(defaultLiteral, literal)
+	}
+	return (operator == "==" || operator == "===") == equal
+}
+
 func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, rightArg interface{}) equalityDecision {
 	dec := equalityDecision{left: leftArg, right: rightArg}
 	if !isEqualityOperator(operator) {
@@ -78,6 +463,11 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 		}
 	}
 	if leftIsField && rightIsField {
+		if err := c.validateFieldEqualityArrayCompatibility(leftField, rightField); err != nil {
+			dec.unsupported = err
+			dec.handled = true
+			return dec
+		}
 		if err := c.looseIncompatibleFieldEqualityError(operator, leftField, rightField); err != nil {
 			dec.unsupported = err
 			dec.handled = true
@@ -413,6 +803,8 @@ func expressionEqualityKind(value interface{}) (string, bool) {
 		return "number", true
 	case ExpressionTypeArray:
 		return "array", true
+	case ExpressionTypeObject:
+		return objectFieldType, true
 	case ExpressionTypeUnknown:
 		return "", false
 	}
@@ -429,8 +821,8 @@ func (c *ComparisonOperator) schemaEqualityKind(fieldName string) (string, bool)
 		return "boolean", true
 	case c.schema().IsArrayType(fieldName):
 		return "array", true
-	case c.schema().GetFieldType(fieldName) == "object":
-		return "object", true
+	case c.schema().GetFieldType(fieldName) == objectFieldType:
+		return objectFieldType, true
 	default:
 		return "", false
 	}
@@ -479,6 +871,12 @@ func (c *ComparisonOperator) strictArrayMembershipItems(
 
 	filtered := make([]interface{}, 0, len(items))
 	for _, item := range items {
+		if itemKind, ok := expressionEqualityKind(item); ok {
+			if _, ok := leftKinds[itemKind]; itemKind == "null" || itemKind == "" || ok {
+				filtered = append(filtered, item)
+			}
+			continue
+		}
 		literal, ok := equalityLiteralValue(item)
 		if !ok {
 			filtered = append(filtered, item)
@@ -518,7 +916,7 @@ func (c *ComparisonOperator) defaultedFieldArrayLiteralMembershipSQL(
 		predicates = append(predicates, fmt.Sprintf("(%s IS NOT NULL AND %s)", fieldSQL, arrayLiteralMembershipSQL(fieldSQL, fieldItemSQLs)))
 	}
 	if len(defaultItems) > 0 {
-		defaultSQL, err := c.dataOp.valueToSQL(field.defaultLiteral)
+		defaultSQL, err := c.dataOp.defaultValueToSQL(field.defaultLiteral)
 		if err != nil {
 			return "", true, fmt.Errorf("invalid default value: %w", err)
 		}
@@ -558,7 +956,7 @@ func (c *ComparisonOperator) defaultedFieldArrayLiteralMembershipSQLParam(
 		predicates = append(predicates, fmt.Sprintf("(%s IS NOT NULL AND %s)", fieldSQL, arrayLiteralMembershipSQL(fieldSQL, fieldItemSQLs)))
 	}
 	if len(defaultItems) > 0 {
-		defaultSQL, err := c.dataOp.valueToSQLParam(field.defaultLiteral, pc)
+		defaultSQL, err := c.dataOp.defaultValueToSQLParam(field.defaultLiteral, pc)
 		if err != nil {
 			return "", true, fmt.Errorf("invalid default value: %w", err)
 		}

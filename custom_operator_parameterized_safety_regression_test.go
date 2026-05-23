@@ -9,9 +9,10 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 	t.Parallel()
 
 	cases := []struct {
-		name      string
-		logic     string
-		valueMode bool
+		name                         string
+		logic                        string
+		valueMode                    bool
+		skipArrayLiteralElemDialects bool
 	}{
 		{
 			name:  "direct predicate",
@@ -111,6 +112,23 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 			logic:     `{"!!":{"if":[{"always":["x"]},true,false]}}`,
 			valueMode: true,
 		},
+		{
+			name:      "value filter lambda preserves custom predicate marker",
+			logic:     `{"filter":[[1],{"always":["x"]}]}`,
+			valueMode: true,
+		},
+		{
+			name:  "some lambda preserves custom predicate marker",
+			logic: `{"some":[[1],{"always":["x"]}]}`,
+		},
+		{
+			name:  "all lambda preserves custom predicate marker",
+			logic: `{"all":[[1],{"always":["x"]}]}`,
+		},
+		{
+			name:  "none lambda preserves custom predicate marker",
+			logic: `{"none":[[1],{"always":["x"]}]}`,
+		},
 	}
 
 	for _, d := range allDialects() {
@@ -131,17 +149,18 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 
 					var sql string
 					var params []QueryParam
+					var transpileErr error
 					if tc.valueMode {
-						sql, params, err = tr.TranspileParameterizedValue(tc.logic)
+						sql, params, transpileErr = tr.TranspileParameterizedValue(tc.logic)
 					} else {
-						sql, params, err = tr.TranspileParameterizedCondition(tc.logic)
+						sql, params, transpileErr = tr.TranspileParameterizedCondition(tc.logic)
 					}
-					if !IsErrorCode(err, ErrUnreferencedPlaceholder) {
+					if !IsErrorCode(transpileErr, ErrUnreferencedPlaceholder) {
 						t.Fatalf("parameterized transpilation error = %v, want %s (SQL %q params %#v)",
-							err, ErrUnreferencedPlaceholder, sql, params)
+							transpileErr, ErrUnreferencedPlaceholder, sql, params)
 					}
-					if !strings.Contains(err.Error(), "custom operator may have dropped an argument") {
-						t.Fatalf("error missing custom-operator safety message: %v", err)
+					if !strings.Contains(transpileErr.Error(), "custom operator may have dropped an argument") {
+						t.Fatalf("error missing custom-operator safety message: %v", transpileErr)
 					}
 				})
 			}
@@ -197,9 +216,10 @@ func TestParameterizedCustomNullValueFoldedComparisonPreservesDroppedParamDetect
 	t.Parallel()
 
 	cases := []struct {
-		name      string
-		logic     string
-		valueMode bool
+		name                         string
+		logic                        string
+		valueMode                    bool
+		skipArrayLiteralElemDialects bool
 	}{
 		{
 			name:  "condition strict null equality",
@@ -241,17 +261,18 @@ func TestParameterizedCustomNullValueFoldedComparisonPreservesDroppedParamDetect
 
 					var sql string
 					var params []QueryParam
+					var transpileErr error
 					if tc.valueMode {
-						sql, params, err = tr.TranspileParameterizedValue(tc.logic)
+						sql, params, transpileErr = tr.TranspileParameterizedValue(tc.logic)
 					} else {
-						sql, params, err = tr.TranspileParameterizedCondition(tc.logic)
+						sql, params, transpileErr = tr.TranspileParameterizedCondition(tc.logic)
 					}
-					if !IsErrorCode(err, ErrUnreferencedPlaceholder) {
+					if !IsErrorCode(transpileErr, ErrUnreferencedPlaceholder) {
 						t.Fatalf("parameterized transpilation error = %v, want %s (SQL %q params %#v)",
-							err, ErrUnreferencedPlaceholder, sql, params)
+							transpileErr, ErrUnreferencedPlaceholder, sql, params)
 					}
-					if !strings.Contains(err.Error(), "custom operator may have dropped an argument") {
-						t.Fatalf("error missing custom-operator safety message: %v", err)
+					if !strings.Contains(transpileErr.Error(), "custom operator may have dropped an argument") {
+						t.Fatalf("error missing custom-operator safety message: %v", transpileErr)
 					}
 				})
 			}
@@ -282,7 +303,7 @@ func TestCustomNullValueShortCircuitsValueModeAllDialects(t *testing.T) {
 			logic:   `{"or":[{"nuller":[]},"fallback"]}`,
 			wantSQL: "'fallback'",
 			wantParamFn: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
@@ -291,7 +312,7 @@ func TestCustomNullValueShortCircuitsValueModeAllDialects(t *testing.T) {
 			logic:   `{"if":[{"nuller":[]},{"var":"missing"},"fallback"]}`,
 			wantSQL: "'fallback'",
 			wantParamFn: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
@@ -398,6 +419,108 @@ func TestParameterizedCustomNullValueShortCircuitPreservesDroppedParamDetection(
 					}
 					if !strings.Contains(err.Error(), "custom operator may have dropped an argument") {
 						t.Fatalf("error missing custom-operator safety message: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestParameterizedCustomDroppedParamsInsideArrayLiteralsAreDetected(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name                         string
+		logic                        string
+		valueMode                    bool
+		skipArrayLiteralElemDialects bool
+	}{
+		{
+			name:      "value logical array literal truthiness",
+			logic:     `{"and":[[{"always":["secret"]}],"fallback"]}`,
+			valueMode: true,
+		},
+		{
+			name:  "condition double bang array literal truthiness",
+			logic: `{"!!":[[{"always":["secret"]}]]}`,
+		},
+		{
+			name:  "condition not array literal truthiness",
+			logic: `{"!":[[{"always":["secret"]}]]}`,
+		},
+		{
+			name:      "value if array literal condition",
+			logic:     `{"if":[[{"always":["secret"]}],"yes","no"]}`,
+			valueMode: true,
+		},
+		{
+			name:      "value logical array literal with cat-preserved custom value",
+			logic:     `{"and":[[{"cat":[{"dropstr":["secret"]}]}],"fallback"]}`,
+			valueMode: true,
+		},
+		{
+			name:      "value logical array literal with numeric-preserved custom value",
+			logic:     `{"and":[[{"+":[{"dropnum":["secret"]},1]}],"fallback"]}`,
+			valueMode: true,
+		},
+		{
+			name:      "value logical array literal with substr-preserved custom value",
+			logic:     `{"and":[[{"substr":["abcdef",{"dropnum":["secret"]},2]}],"fallback"]}`,
+			valueMode: true,
+		},
+		{
+			name:                         "value logical array literal with map-preserved custom value",
+			logic:                        `{"and":[[{"map":[[1],{"dropstr":["secret"]}]}],"fallback"]}`,
+			valueMode:                    true,
+			skipArrayLiteralElemDialects: true,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: defaultTestSchema()})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error: %v", err)
+			}
+			if regErr := tr.RegisterOperatorFunc("always", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return PredicateSQL("TRUE"), nil
+			}); regErr != nil {
+				t.Fatalf("RegisterOperatorFunc(always) error: %v", regErr)
+			}
+			if regErr := tr.RegisterOperatorFunc("dropstr", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return ValueSQL("'safe'", ExpressionTypeString), nil
+			}); regErr != nil {
+				t.Fatalf("RegisterOperatorFunc(dropstr) error: %v", regErr)
+			}
+			if regErr := tr.RegisterOperatorFunc("dropnum", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return ValueSQL("1", ExpressionTypeNumber), nil
+			}); regErr != nil {
+				t.Fatalf("RegisterOperatorFunc(dropnum) error: %v", regErr)
+			}
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					if tc.skipArrayLiteralElemDialects && dialectRejectsArrayLiteralElements(d) {
+						t.Skipf("%s rejects array literals containing array-valued elements before placeholder validation", d)
+					}
+
+					var sql string
+					var params []QueryParam
+					var transpileErr error
+					if tc.valueMode {
+						sql, params, transpileErr = tr.TranspileParameterizedValue(tc.logic)
+					} else {
+						sql, params, transpileErr = tr.TranspileParameterizedCondition(tc.logic)
+					}
+					if !IsErrorCode(transpileErr, ErrUnreferencedPlaceholder) {
+						t.Fatalf("parameterized transpilation error = %v, want %s (SQL %q params %#v)",
+							transpileErr, ErrUnreferencedPlaceholder, sql, params)
+					}
+					if !strings.Contains(transpileErr.Error(), "custom operator may have dropped an argument") {
+						t.Fatalf("error missing custom-operator safety message: %v", transpileErr)
 					}
 				})
 			}

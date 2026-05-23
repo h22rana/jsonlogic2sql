@@ -98,6 +98,20 @@ func TestParamCollectorAddQuestion(t *testing.T) {
 	}
 }
 
+func TestParamCollectorAddClickHouse(t *testing.T) {
+	pc := NewParamCollector(PlaceholderClickHouse)
+
+	if got := pc.Add("alice"); got != "{p1:String}" {
+		t.Fatalf("string placeholder = %q, want {p1:String}", got)
+	}
+	if got := pc.Add(42); got != "{p2:Int64}" {
+		t.Fatalf("integer placeholder = %q, want {p2:Int64}", got)
+	}
+	if got := pc.Add(3.14); got != "{p3:Float64}" {
+		t.Fatalf("float placeholder = %q, want {p3:Float64}", got)
+	}
+}
+
 func TestParamCollectorOrdering(t *testing.T) {
 	pc := NewParamCollector(PlaceholderNamed)
 	pc.Add("first")
@@ -124,7 +138,7 @@ func TestStyleForDialect(t *testing.T) {
 	}{
 		{dialect.DialectBigQuery, PlaceholderNamed},
 		{dialect.DialectSpanner, PlaceholderNamed},
-		{dialect.DialectClickHouse, PlaceholderNamed},
+		{dialect.DialectClickHouse, PlaceholderClickHouse},
 		{dialect.DialectPostgreSQL, PlaceholderPositional},
 		{dialect.DialectDuckDB, PlaceholderPositional},
 	}
@@ -411,6 +425,55 @@ func TestValidatePlaceholderRefsQuestion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidatePlaceholderRefs(tt.sql, tt.params, PlaceholderQuestion)
+			if (err != nil) != tt.expectErr {
+				t.Errorf("ValidatePlaceholderRefs() error = %v, wantErr %v", err, tt.expectErr)
+			}
+		})
+	}
+}
+
+func TestValidatePlaceholderRefsClickHouse(t *testing.T) {
+	tests := []struct {
+		name      string
+		sql       string
+		params    []QueryParam
+		expectErr bool
+	}{
+		{
+			name:      "single typed param found",
+			sql:       "WHERE email = {p1:String}",
+			params:    []QueryParam{{Name: "p1", Value: "alice"}},
+			expectErr: false,
+		},
+		{
+			name:      "numeric param found",
+			sql:       "WHERE age > {p1:Int64}",
+			params:    []QueryParam{{Name: "p1", Value: int64(30)}},
+			expectErr: false,
+		},
+		{
+			name:      "wrong type does not match",
+			sql:       "WHERE age > {p1:String}",
+			params:    []QueryParam{{Name: "p1", Value: int64(30)}},
+			expectErr: true,
+		},
+		{
+			name:      "quoted typed placeholder is ignored",
+			sql:       "WHERE note = '{p1:String}' AND email = {p2:String}",
+			params:    []QueryParam{{Name: "p1", Value: "inside-string"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
+		{
+			name:      "backtick quoted typed placeholder is ignored",
+			sql:       "WHERE ident = `{p1:String}` AND email = {p2:String}",
+			params:    []QueryParam{{Name: "p1", Value: "inside-identifier"}, {Name: "p2", Value: "actual"}},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePlaceholderRefs(tt.sql, tt.params, PlaceholderClickHouse)
 			if (err != nil) != tt.expectErr {
 				t.Errorf("ValidatePlaceholderRefs() error = %v, wantErr %v", err, tt.expectErr)
 			}

@@ -565,7 +565,7 @@ func TestComparisonOperator_processArithmeticExpression(t *testing.T) {
 			name:     "modulo",
 			operator: "%",
 			args:     []interface{}{7, 3},
-			expected: "(7 % 3)",
+			expected: "MOD(CAST(7 AS NUMERIC), CAST(3 AS NUMERIC))",
 			hasError: false,
 		},
 		{

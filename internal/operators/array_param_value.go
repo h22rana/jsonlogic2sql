@@ -61,11 +61,20 @@ func (a *ArrayOperator) predicateExpressionToSQLParamWithContextAndPath(
 	pc *params.ParamCollector,
 	path string,
 ) (string, error) {
+	paramStart := len(pc.Params())
 	if a.config == nil || !a.config.HasParamPredicateExpressionParser() {
-		return a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
+		sql, err := a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
+		if err != nil {
+			return "", err
+		}
+		return sql, validateNewParamRefs(sql, pc, paramStart)
 	}
 	if a.shouldParseScopedArrayExpressionLocally(expr) {
-		return a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
+		sql, err := a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
+		if err != nil {
+			return "", err
+		}
+		return sql, validateNewParamRefs(sql, pc, paramStart)
 	}
 	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, false, path)
 	if err != nil {
@@ -75,7 +84,7 @@ func (a *ArrayOperator) predicateExpressionToSQLParamWithContextAndPath(
 	if err != nil {
 		return "", err
 	}
-	return res.SQL, nil
+	return res.SQL, validateNewParamRefs(res.SQL, pc, paramStart)
 }
 
 func (a *ArrayOperator) truthinessExpressionToSQLParamWithContextAndPath(
@@ -83,6 +92,7 @@ func (a *ArrayOperator) truthinessExpressionToSQLParamWithContextAndPath(
 	pc *params.ParamCollector,
 	path string,
 ) (string, error) {
+	paramStart := len(pc.Params())
 	if a.config == nil || !a.config.HasParamTruthinessExpressionParser() {
 		return a.predicateExpressionToSQLParamWithContextAndPath(expr, pc, path)
 	}
@@ -91,13 +101,49 @@ func (a *ArrayOperator) truthinessExpressionToSQLParamWithContextAndPath(
 		if err != nil {
 			return "", err
 		}
-		return a.localTruthinessExpressionSQL(expr, sql, path)
+		truthSQL, err := a.localTruthinessExpressionSQL(expr, sql, path)
+		if err != nil {
+			return "", err
+		}
+		return truthSQL, validateNewParamRefs(truthSQL, pc, paramStart)
 	}
 	rewritten, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(expr, false, path)
 	if err != nil {
 		return "", err
 	}
-	return a.config.ParseTruthinessExpressionParam(rewritten, path, pc)
+	sql, err := a.config.ParseTruthinessExpressionParam(rewritten, path, pc)
+	if err != nil {
+		return "", err
+	}
+	return sql, validateNewParamRefs(sql, pc, paramStart)
+}
+
+func validateNewParamRefs(sql string, pc *params.ParamCollector, start int) error {
+	collected := pc.Params()
+	for i := start; i < len(collected); i++ {
+		if params.ContainsParamRef(sql, i+1, collected[i], pc.Style()) {
+			continue
+		}
+		placeholder := formatCollectedPlaceholder(i+1, collected[i], pc.Style())
+		return tperrors.New(tperrors.ErrUnreferencedPlaceholder, "", "",
+			fmt.Sprintf("placeholder %s (param %q) is not referenced in generated SQL; a custom operator may have dropped an argument",
+				placeholder, collected[i].Name))
+	}
+	return nil
+}
+
+func formatCollectedPlaceholder(index int, param params.QueryParam, style params.PlaceholderStyle) string {
+	switch style {
+	case params.PlaceholderNamed:
+		return "@" + param.Name
+	case params.PlaceholderPositional:
+		return fmt.Sprintf("$%d", index)
+	case params.PlaceholderQuestion:
+		return "?"
+	case params.PlaceholderClickHouse:
+		return "{" + param.Name + "}"
+	}
+	return "@" + param.Name
 }
 
 func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.ParamCollector, path string) (string, error) {
@@ -113,11 +159,12 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		if pv.IsSQL {
 			if pv.HasExpressionInfo {
 				return typedSQLFromOperatorResult(OperatorResult{
-					SQL:               pv.Value,
-					Kind:              pv.Kind,
-					Type:              pv.Type,
-					ArrayElementType:  pv.ArrayElementType,
-					ArrayElementTypes: pv.ArrayElementTypes,
+					SQL:                      pv.Value,
+					Kind:                     pv.Kind,
+					Type:                     pv.Type,
+					ArrayElementType:         pv.ArrayElementType,
+					ArrayElementTypes:        pv.ArrayElementTypes,
+					ArrayElementSchemaScopes: pv.ArrayElementSchemaScopes,
 				}), nil
 			}
 			return typedValueSQL{sql: pv.Value, typ: ExpressionTypeUnknown}, nil
@@ -138,6 +185,10 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 				if err != nil {
 					return typedValueSQL{}, err
 				}
+				pv := a.scopedSQLFieldResult(sql, a.scopedFieldNamesFromVarExpr(varExpr)...)
+				if pv.HasExpressionInfo {
+					return typedSQLFromProcessedValue(pv), nil
+				}
 				return typedValueSQL{sql: sql, typ: a.inferValueExpressionType(value)}, nil
 			}
 			sql, err := a.dataOp.ToSQLParam(OpVar, []interface{}{varExpr}, pc)
@@ -148,7 +199,7 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 			if fieldType == ExpressionTypeUnknown {
 				fieldType = a.inferValueExpressionType(value)
 			}
-			return typedValueSQL{sql: sql, typ: fieldType}, nil
+			return a.typedFieldSQL(sql, a.extractFieldName(varExpr), fieldType), nil
 		}
 		res, err := a.valueExpressionResultParamWithContextAndPath(value, pc, false, path)
 		if err != nil {
@@ -158,13 +209,18 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 	}
 
 	if arr, ok := value.([]interface{}); ok {
+		if err := a.config.ValidateArrayLiteralValue(arr); err != nil {
+			return typedValueSQL{}, err
+		}
 		elements := make([]string, len(arr))
 		var commonTypes []ExpressionType
+		var schemaScopes []string
 		for i, elem := range arr {
 			element, err := a.valueToTypedSQLParamAtPath(elem, pc, tperrors.BuildArrayPath(path, i))
 			if err != nil {
 				return typedValueSQL{}, fmt.Errorf("invalid array element %d: %w", i, err)
 			}
+			schemaScopes = append(schemaScopes, typedValueSchemaScopes(element)...)
 			commonTypes, err = updateArrayLiteralElementTypes(commonTypes, element, i)
 			if err != nil {
 				return typedValueSQL{}, err
@@ -173,6 +229,10 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 		}
 		elementTypes := normalizeArrayElementTypes(commonTypes)
 		if err := a.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
+			return typedValueSQL{}, err
+		}
+		schemaScopes = normalizeSchemaScopes(schemaScopes)
+		if err := a.validateCompatibleArrayElementScopes(schemaScopes); err != nil {
 			return typedValueSQL{}, err
 		}
 		sql, err := a.arrayLiteral(elements)
@@ -184,6 +244,7 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 			typ:               ExpressionTypeArray,
 			elemType:          firstArrayElementType(elementTypes),
 			elemTypes:         elementTypes,
+			schemaScopes:      schemaScopes,
 			emptyArrayLiteral: len(arr) == 0,
 		}, nil
 	}
@@ -208,6 +269,8 @@ func typedSQLFromOperatorResult(res OperatorResult) typedValueSQL {
 		sql:               res.SQL,
 		typ:               typ,
 		emptyArrayLiteral: res.EmptyArrayLiteral,
+		schemaScopes:      normalizeSchemaScopes(res.ArrayElementSchemaScopes),
+		preserveParamRefs: res.PreserveParamRefs,
 	}
 	if typ == ExpressionTypeArray {
 		elemTypes := operatorResultElementTypes(res)
@@ -217,6 +280,22 @@ func typedSQLFromOperatorResult(res OperatorResult) typedValueSQL {
 		}
 	}
 	return out
+}
+
+func typedSQLFromProcessedValue(pv ProcessedValue) typedValueSQL {
+	if !pv.HasExpressionInfo {
+		return typedValueSQL{sql: pv.Value, typ: ExpressionTypeUnknown}
+	}
+	return typedSQLFromOperatorResult(OperatorResult{
+		SQL:                      pv.Value,
+		Kind:                     pv.Kind,
+		Type:                     pv.Type,
+		EmptyArrayLiteral:        false,
+		PreserveParamRefs:        pv.PreserveParamRefs,
+		ArrayElementType:         pv.ArrayElementType,
+		ArrayElementTypes:        pv.ArrayElementTypes,
+		ArrayElementSchemaScopes: pv.ArrayElementSchemaScopes,
+	})
 }
 
 func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(

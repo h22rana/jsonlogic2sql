@@ -15,7 +15,7 @@ func reduceAggregateSchema(t *testing.T) *Schema {
 				{Name: "price", Type: FieldTypeNumber},
 				{Name: "name", Type: FieldTypeString},
 				{Name: "active", Type: FieldTypeBoolean},
-				{Name: "tags", Type: FieldTypeArray},
+				{Name: "tags", Type: FieldTypeArray, ElementType: FieldTypeString},
 				{
 					Name: "profile",
 					Type: FieldTypeObject,
@@ -25,7 +25,8 @@ func reduceAggregateSchema(t *testing.T) *Schema {
 				},
 			},
 		},
-		{Name: "numbers", Type: FieldTypeArray},
+		{Name: "numbers", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "names", Type: FieldTypeArray, ElementType: FieldTypeString},
 	})
 }
 
@@ -49,6 +50,10 @@ func TestReduceAggregateRejectsNonNumericSchemaElementValuesAllDialects(t *testi
 		{
 			name:  "array element field",
 			logic: `{"reduce":[{"var":"items"},{"+":[{"var":"accumulator"},{"var":"current.tags"}]},0]}`,
+		},
+		{
+			name:  "string scalar array current",
+			logic: `{"reduce":[{"var":"names"},{"+":[{"var":"accumulator"},{"var":"current"}]},0]}`,
 		},
 		{
 			name:  "object element field",

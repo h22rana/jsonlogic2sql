@@ -179,14 +179,14 @@ func TestNumericOperator_ToSQL(t *testing.T) {
 			name:     "modulo with two numbers",
 			operator: "%",
 			args:     []interface{}{17, 5},
-			expected: "(17 % 5)",
+			expected: "MOD(CAST(17 AS NUMERIC), CAST(5 AS NUMERIC))",
 			hasError: false,
 		},
 		{
 			name:     "modulo with var and number",
 			operator: "%",
 			args:     []interface{}{map[string]interface{}{"var": "count"}, 3},
-			expected: "(count % 3)",
+			expected: "MOD(CAST(count AS NUMERIC), CAST(3 AS NUMERIC))",
 			hasError: false,
 		},
 		{

@@ -74,7 +74,9 @@ func NewParser(config *operators.OperatorConfig) *Parser {
 	})
 	config.SetPredicateExpressionParser(func(expr any, path string) (operators.OperatorResult, error) {
 		res, err := p.parseExpressionPredicate(expr, path)
-		return res.OperatorResult, err
+		out := res.OperatorResult
+		out.PreserveParamRefs = res.preserveParamRefs
+		return out, err
 	})
 	config.SetTruthinessExpressionParser(func(expr any, path string) (string, error) {
 		_, condition, err := p.parseTruthinessResult(expr, path)
@@ -89,7 +91,9 @@ func NewParser(config *operators.OperatorConfig) *Parser {
 	})
 	config.SetParamPredicateExpressionParser(func(expr any, path string, pc *params.ParamCollector) (operators.OperatorResult, error) {
 		res, err := p.parseExpressionPredicateParam(expr, path, pc)
-		return res.OperatorResult, err
+		out := res.OperatorResult
+		out.PreserveParamRefs = res.preserveParamRefs
+		return out, err
 	})
 	config.SetParamTruthinessExpressionParser(func(expr any, path string, pc *params.ParamCollector) (string, error) {
 		_, condition, err := p.parseTruthinessResultParam(expr, path, pc)
@@ -173,6 +177,9 @@ func (p *Parser) ParseValue(logic interface{}) (string, error) {
 		return "", err
 	}
 	if err := p.rejectUnsupportedPostgreSQLEmptyArrayResult(res); err != nil {
+		return "", err
+	}
+	if err := p.validateCompatibleObjectArrayScopesForResult(res, "$"); err != nil {
 		return "", err
 	}
 	return valueSQL(res), nil

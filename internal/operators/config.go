@@ -197,6 +197,43 @@ func (c *OperatorConfig) ArrayLiteral(elements []string) (string, error) {
 	return fmt.Sprintf("[%s]", body), nil
 }
 
+// FunctionName returns the canonical spelling for portable SQL functions used
+// across dialects. Dialect-specific functions are rendered at their call sites.
+func (c *OperatorConfig) FunctionName(name string) string {
+	return strings.ToUpper(name)
+}
+
+// ConcatSQL renders a portable CONCAT call.
+func (c *OperatorConfig) ConcatSQL(args []string) string {
+	return fmt.Sprintf("%s(%s)", c.FunctionName("CONCAT"), strings.Join(args, ", "))
+}
+
+// CoalesceSQL renders a portable COALESCE call.
+func (c *OperatorConfig) CoalesceSQL(expr, fallback string) string {
+	return fmt.Sprintf("%s(%s, %s)", c.FunctionName("COALESCE"), expr, fallback)
+}
+
+// GreatestSQL renders a portable GREATEST call.
+func (c *OperatorConfig) GreatestSQL(args []string) string {
+	return fmt.Sprintf("%s(%s)", c.FunctionName("GREATEST"), strings.Join(args, ", "))
+}
+
+// LeastSQL renders a portable LEAST call.
+func (c *OperatorConfig) LeastSQL(args []string) string {
+	return fmt.Sprintf("%s(%s)", c.FunctionName("LEAST"), strings.Join(args, ", "))
+}
+
+// ModuloSQL renders modulo with the dialect-supported operator or function.
+func (c *OperatorConfig) ModuloSQL(left, right string) string {
+	switch c.GetDialect() {
+	case dialect.DialectBigQuery, dialect.DialectSpanner:
+		return fmt.Sprintf("MOD(CAST(%s AS NUMERIC), CAST(%s AS NUMERIC))", left, right)
+	case dialect.DialectUnspecified, dialect.DialectPostgreSQL, dialect.DialectDuckDB, dialect.DialectClickHouse:
+		return fmt.Sprintf("(%s %% %s)", left, right)
+	}
+	return fmt.Sprintf("(%s %% %s)", left, right)
+}
+
 // ValidateArrayLiteralElementTypes rejects array literal shapes that the target
 // dialect cannot represent directly.
 func (c *OperatorConfig) ValidateArrayLiteralElementTypes(elementTypes []ExpressionType) error {
@@ -210,6 +247,60 @@ func (c *OperatorConfig) ValidateArrayLiteralElementTypes(elementTypes []Express
 		return nil
 	}
 	return nil
+}
+
+// ValidateArrayLiteralValue rejects direct array literal shapes that a dialect
+// cannot represent. PostgreSQL multidimensional array constructors must be
+// rectangular; DuckDB and ClickHouse permit ragged nested lists, while
+// BigQuery/Spanner reject array-of-array literals earlier by element type.
+func (c *OperatorConfig) ValidateArrayLiteralValue(arr []interface{}) error {
+	if c.GetDialect() != dialect.DialectPostgreSQL {
+		return nil
+	}
+	if _, err := postgreSQLArrayLiteralDimensions(arr); err != nil {
+		return err
+	}
+	return nil
+}
+
+func postgreSQLArrayLiteralDimensions(arr []interface{}) ([]int, error) {
+	dims := []int{len(arr)}
+	var childDims []int
+	childSeen := false
+	for _, elem := range arr {
+		child, ok := elem.([]interface{})
+		if !ok {
+			continue
+		}
+		dim, err := postgreSQLArrayLiteralDimensions(child)
+		if err != nil {
+			return nil, err
+		}
+		if !childSeen {
+			childSeen = true
+			childDims = dim
+			continue
+		}
+		if !sameIntSlice(childDims, dim) {
+			return nil, fmt.Errorf("PostgreSQL multidimensional array literals must be rectangular")
+		}
+	}
+	if childSeen {
+		dims = append(dims, childDims...)
+	}
+	return dims, nil
+}
+
+func sameIntSlice(left, right []int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // StringCast renders a dialect-specific cast to a SQL string type.

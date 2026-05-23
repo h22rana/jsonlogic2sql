@@ -31,6 +31,9 @@ func (p *Parser) truthinessSQL(res expressionResult, path string) (string, error
 	case operators.ExpressionTypeArray:
 		lengthCheck := p.config.ArrayLengthFunc(res.SQL)
 		return fmt.Sprintf("(%s IS NOT NULL AND %s > 0)", res.SQL, lengthCheck), nil
+	case operators.ExpressionTypeObject:
+		return "", tperrors.New(tperrors.ErrInvalidExpressionContext, "", path,
+			"truthiness of object values is not supported; reference a nested field instead")
 	case operators.ExpressionTypeUnknown:
 		if res.requiresKnownTruthiness {
 			return "", tperrors.New(tperrors.ErrInvalidExpressionContext, "", path,
@@ -63,7 +66,7 @@ func (p *Parser) parseTruthinessExpression(expr interface{}, path string) (expre
 		for operator, args := range obj {
 			operatorPath := tperrors.BuildPath(path, operator, -1)
 			switch operator {
-			case "and", "or":
+			case logicalOpAnd, logicalOpOr:
 				arr, ok := args.([]interface{})
 				if !ok {
 					return expressionResult{}, "", tperrors.NewOperatorRequiresArray(operator, operatorPath)
@@ -100,32 +103,32 @@ func (p *Parser) parseTruthinessLogical(operator string, args []interface{}, pat
 			return expressionResult{}, "", err
 		}
 		if res.truthKnown {
-			if operator == "and" && res.truthy {
+			if operator == logicalOpAnd && res.truthy {
 				continue
 			}
-			if operator == "or" && !res.truthy {
+			if operator == logicalOpOr && !res.truthy {
 				continue
 			}
-			if operator == "and" && !res.truthy {
+			if operator == logicalOpAnd && !res.truthy {
 				return booleanPredicateResult(false), sqlFalse, nil
 			}
-			if operator == "or" && res.truthy {
+			if operator == logicalOpOr && res.truthy {
 				return booleanPredicateResult(true), sqlTrue, nil
 			}
 		}
 		parts = append(parts, condition)
 	}
 	if len(parts) == 0 {
-		res := booleanPredicateResult(operator == "and")
+		res := booleanPredicateResult(operator == logicalOpAnd)
 		return res, res.SQL, nil
 	}
 	if len(parts) == 1 {
 		res := predicateResult(parts[0])
 		return res, res.SQL, nil
 	}
-	joiner := " AND "
-	if operator == "or" {
-		joiner = " OR "
+	joiner := sqlAndJoiner
+	if operator == logicalOpOr {
+		joiner = sqlOrJoiner
 	}
 	sql := fmt.Sprintf("(%s)", strings.Join(parts, joiner))
 	return predicateResult(sql), sql, nil
@@ -210,7 +213,7 @@ func (p *Parser) parseTruthinessExpressionParam(
 		for operator, args := range obj {
 			operatorPath := tperrors.BuildPath(path, operator, -1)
 			switch operator {
-			case "and", "or":
+			case logicalOpAnd, logicalOpOr:
 				arr, ok := args.([]interface{})
 				if !ok {
 					return expressionResult{}, "", tperrors.NewOperatorRequiresArray(operator, operatorPath)
@@ -255,19 +258,19 @@ func (p *Parser) parseTruthinessLogicalParam(
 			return expressionResult{}, "", err
 		}
 		if res.truthKnown && canRollbackParamRefs(res) {
-			if operator == "and" && res.truthy {
+			if operator == logicalOpAnd && res.truthy {
 				pc.Restore(operandCheckpoint)
 				continue
 			}
-			if operator == "or" && !res.truthy {
+			if operator == logicalOpOr && !res.truthy {
 				pc.Restore(operandCheckpoint)
 				continue
 			}
-			if operator == "and" && !res.truthy {
+			if operator == logicalOpAnd && !res.truthy {
 				pc.Restore(checkpoint)
 				return booleanPredicateResult(false), sqlFalse, nil
 			}
-			if operator == "or" && res.truthy {
+			if operator == logicalOpOr && res.truthy {
 				pc.Restore(checkpoint)
 				return booleanPredicateResult(true), sqlTrue, nil
 			}
@@ -276,16 +279,16 @@ func (p *Parser) parseTruthinessLogicalParam(
 		partResults = append(partResults, res)
 	}
 	if len(parts) == 0 {
-		res := booleanPredicateResult(operator == "and")
+		res := booleanPredicateResult(operator == logicalOpAnd)
 		return res, res.SQL, nil
 	}
 	if len(parts) == 1 {
 		res := preserveParamRefsIfNeeded(predicateResult(parts[0]), partResults[0])
 		return res, res.SQL, nil
 	}
-	joiner := " AND "
-	if operator == "or" {
-		joiner = " OR "
+	joiner := sqlAndJoiner
+	if operator == logicalOpOr {
+		joiner = sqlOrJoiner
 	}
 	sql := fmt.Sprintf("(%s)", strings.Join(parts, joiner))
 	res := preserveParamRefsIfNeeded(predicateResult(sql), partResults...)

@@ -50,7 +50,7 @@ func TestTranspileParameterized_Comparison(t *testing.T) {
 			name:       "equal clickhouse",
 			dialect:    DialectClickHouse,
 			jsonLogic:  `{"==": [{"var": "email"}, "alice"]}`,
-			wantSQL:    "email = @p1",
+			wantSQL:    "email = {p1:String}",
 			wantParams: []QueryParam{{Name: "p1", Value: "alice"}},
 		},
 		{
@@ -217,7 +217,7 @@ func TestTranspile_DefaultedVarEqualityWithSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileCondition() error = %v", err)
 	}
-	if wantSQL := "COALESCE(amount, 'abc') = 'abc'"; gotSQL != wantSQL {
+	if wantSQL := "amount IS NULL"; gotSQL != wantSQL {
 		t.Fatalf("TranspileCondition() SQL = %q, want %q", gotSQL, wantSQL)
 	}
 
@@ -225,13 +225,10 @@ func TestTranspile_DefaultedVarEqualityWithSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 	}
-	if wantSQL := "COALESCE(amount, @p1) = @p2"; gotParamSQL != wantSQL {
+	if wantSQL := "amount IS NULL"; gotParamSQL != wantSQL {
 		t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", gotParamSQL, wantSQL)
 	}
-	assertParams(t, gotParams, []QueryParam{
-		{Name: "p1", Value: "abc"},
-		{Name: "p2", Value: "abc"},
-	})
+	assertParams(t, gotParams, nil)
 }
 
 func TestTranspile_EqualityBoundaryAndNestedSemanticsAcrossDialects(t *testing.T) {
@@ -625,7 +622,7 @@ func TestTranspileParameterized_AllDialects(t *testing.T) {
 	}{
 		{DialectBigQuery, "@p"},
 		{DialectSpanner, "@p"},
-		{DialectClickHouse, "@p"},
+		{DialectClickHouse, "{p"},
 		{DialectPostgreSQL, "$"},
 		{DialectDuckDB, "$"},
 	}
@@ -720,7 +717,7 @@ func TestTranspileParameterized_NullSafeFieldEquality(t *testing.T) {
 	}
 	assertParams(t, params, nil)
 
-	sql, params, err = tp.TranspileParameterizedCondition(`{"==": [{"var": ["x", "left"]}, {"var": ["y", "right"]}]}`)
+	sql, params, err = tp.TranspileParameterizedCondition(`{"==": [{"var": ["x", 1]}, {"var": ["y", 2]}]}`)
 	if err != nil {
 		t.Fatalf("TranspileParameterizedCondition() defaulted vars error = %v", err)
 	}
@@ -728,8 +725,8 @@ func TestTranspileParameterized_NullSafeFieldEquality(t *testing.T) {
 		t.Fatalf("TranspileParameterizedCondition() defaulted SQL = %q, want %q", sql, want)
 	}
 	assertParams(t, params, []QueryParam{
-		{Name: "p1", Value: "left"},
-		{Name: "p2", Value: "right"},
+		{Name: "p1", Value: float64(1)},
+		{Name: "p2", Value: float64(2)},
 	})
 }
 
@@ -1219,7 +1216,7 @@ func TestTranspileParameterized_InStringExpressionContainment_SchemaRequired(t *
 			wantSQL: testRuntimeStringContainmentSQL(
 				DialectClickHouse,
 				"profile.name",
-				"COALESCE(CONCAT(COALESCE(substring(profile.first, (@p1 + 1), @p2), ''), @p3), 'null')",
+				"COALESCE(CONCAT(COALESCE(substring(profile.first, ({p1:Float64} + 1), {p2:Float64}), ''), {p3:String}), 'null')",
 			),
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
@@ -1368,7 +1365,7 @@ func TestTranspileParameterized_CustomOperatorPlaceholderSemantics_AllDialects(t
 	}{
 		{name: "bigquery", dialect: DialectBigQuery, placeholder: "@p1", identifierQuote: "`"},
 		{name: "spanner", dialect: DialectSpanner, placeholder: "@p1", identifierQuote: "`"},
-		{name: "clickhouse", dialect: DialectClickHouse, placeholder: "@p1", identifierQuote: "`"},
+		{name: "clickhouse", dialect: DialectClickHouse, placeholder: "{p1:String}", identifierQuote: "`"},
 		{name: "postgresql", dialect: DialectPostgreSQL, placeholder: "$1", identifierQuote: `"`},
 		{name: "duckdb", dialect: DialectDuckDB, placeholder: "$1", identifierQuote: `"`},
 	}

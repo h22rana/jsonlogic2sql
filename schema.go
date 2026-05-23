@@ -30,6 +30,7 @@ const (
 type FieldSchema struct {
 	Name          string        `json:"name"`
 	Type          FieldType     `json:"type"`
+	ElementType   FieldType     `json:"elementType,omitempty"`   // For array types: scalar/object element type
 	AllowedValues []string      `json:"allowedValues,omitempty"` // For enum types: list of valid values
 	Fields        []FieldSchema `json:"fields,omitempty"`        // Nested object fields
 	ElementFields []FieldSchema `json:"elementFields,omitempty"` // Nested fields on array elements
@@ -178,7 +179,18 @@ func validateSchemaField(prefix string, field FieldSchema, seen map[string]struc
 	if len(field.ElementFields) > 0 && field.Type != FieldTypeArray {
 		return fmt.Errorf("schema field %q uses elementFields but has type %q; elementFields require array type", fieldName, field.Type)
 	}
-	if field.Type == FieldTypeEnum {
+	if field.ElementType != "" {
+		if field.Type != FieldTypeArray {
+			return fmt.Errorf("schema field %q uses elementType but has type %q; elementType requires array type", fieldName, field.Type)
+		}
+		if !isSupportedFieldType(field.ElementType) {
+			return fmt.Errorf("schema field %q has unsupported elementType %q", fieldName, field.ElementType)
+		}
+	}
+	if len(field.ElementFields) > 0 && field.ElementType != "" && field.ElementType != FieldTypeObject {
+		return fmt.Errorf("schema field %q uses elementFields with elementType %q; elementFields require object elements", fieldName, field.ElementType)
+	}
+	if field.Type == FieldTypeEnum || (field.Type == FieldTypeArray && field.ElementType == FieldTypeEnum) {
 		if len(field.AllowedValues) == 0 {
 			return fmt.Errorf("schema enum field %q requires at least one allowedValues entry", fieldName)
 		}
@@ -334,6 +346,165 @@ func (s *Schema) HasArrayElementFields(fieldName string) bool {
 	}
 	field, exists := s.fields[fieldName]
 	return exists && field.Type == FieldTypeArray && len(field.ElementFields) > 0
+}
+
+// GetArrayElementType returns the declared element type for an array field.
+// Object arrays with elementFields are object-typed even when elementType is
+// omitted for concise schemas.
+func (s *Schema) GetArrayElementType(fieldName string) string {
+	if s == nil {
+		return ""
+	}
+	field, exists := s.fields[fieldName]
+	if !exists || field.Type != FieldTypeArray {
+		return ""
+	}
+	if len(field.ElementFields) > 0 {
+		return string(FieldTypeObject)
+	}
+	return string(field.ElementType)
+}
+
+// ArrayElementSchemaSignature returns a stable structural signature for an
+// array field's element schema. Empty string means the array has scalar or
+// otherwise unspecified elements.
+func (s *Schema) ArrayElementSchemaSignature(fieldName string) string {
+	if s == nil || !s.HasArrayElementFields(fieldName) {
+		return ""
+	}
+	scoped := s.scopedFields[fieldName]
+	if len(scoped) == 0 {
+		return ""
+	}
+	relativeNames := make([]string, 0, len(scoped))
+	for relativeName := range scoped {
+		relativeNames = append(relativeNames, relativeName)
+	}
+	slices.Sort(relativeNames)
+
+	var b strings.Builder
+	for _, relativeName := range relativeNames {
+		fullName := scoped[relativeName]
+		field := s.fields[fullName]
+		b.WriteString(relativeName)
+		b.WriteByte(':')
+		b.WriteString(string(field.Type))
+		if len(field.AllowedValues) > 0 {
+			allowed := slices.Clone(field.AllowedValues)
+			slices.Sort(allowed)
+			b.WriteByte('[')
+			b.WriteString(strings.Join(allowed, ","))
+			b.WriteByte(']')
+		}
+		if field.Type == FieldTypeArray {
+			b.WriteByte('{')
+			b.WriteString(s.ArrayElementSchemaSignature(fullName))
+			b.WriteByte('}')
+		}
+		b.WriteByte(';')
+	}
+	return b.String()
+}
+
+// ValidateArrayElementSchemasCompatible compares two array element schemas and
+// returns the first concrete field-level mismatch.
+func (s *Schema) ValidateArrayElementSchemasCompatible(leftField, rightField string) error {
+	if s == nil {
+		return fmt.Errorf("schema is required")
+	}
+	return s.validateArrayElementSchemasCompatible(leftField, rightField)
+}
+
+func (s *Schema) validateArrayElementSchemasCompatible(leftField, rightField string) error {
+	leftFields := s.scopedFields[leftField]
+	rightFields := s.scopedFields[rightField]
+	if len(leftFields) == 0 && len(rightFields) == 0 {
+		return nil
+	}
+
+	relativeNames := make([]string, 0, len(leftFields)+len(rightFields))
+	seen := make(map[string]struct{}, len(leftFields)+len(rightFields))
+	for relativeName := range leftFields {
+		seen[relativeName] = struct{}{}
+		relativeNames = append(relativeNames, relativeName)
+	}
+	for relativeName := range rightFields {
+		if _, ok := seen[relativeName]; ok {
+			continue
+		}
+		relativeNames = append(relativeNames, relativeName)
+	}
+	slices.Sort(relativeNames)
+
+	var missingLeft []string
+	var missingRight []string
+	for _, relativeName := range relativeNames {
+		leftFull, leftOK := leftFields[relativeName]
+		rightFull, rightOK := rightFields[relativeName]
+		switch {
+		case !leftOK:
+			missingLeft = append(missingLeft, relativeName)
+			continue
+		case !rightOK:
+			missingRight = append(missingRight, relativeName)
+			continue
+		}
+
+		leftSchema := s.fields[leftFull]
+		rightSchema := s.fields[rightFull]
+		if leftSchema.Type != rightSchema.Type {
+			return fmt.Errorf("field '%s' has incompatible schema types across array source scopes", relativeName)
+		}
+		if !sameStringSetSchema(leftSchema.AllowedValues, rightSchema.AllowedValues) {
+			return fmt.Errorf("field '%s' has incompatible enum values across array source scopes", relativeName)
+		}
+		if leftSchema.Type == FieldTypeArray {
+			if err := s.validateArrayElementSchemasCompatible(leftFull, rightFull); err != nil {
+				return err
+			}
+		}
+	}
+	if len(missingLeft) > 0 {
+		return fmt.Errorf("field '%s' is not defined in schema scope '%s'", mostSpecificMissingSchemaField(missingLeft), leftField)
+	}
+	if len(missingRight) > 0 {
+		return fmt.Errorf("field '%s' is not defined in schema scope '%s'", mostSpecificMissingSchemaField(missingRight), rightField)
+	}
+	return nil
+}
+
+func mostSpecificMissingSchemaField(relativeNames []string) string {
+	if len(relativeNames) == 0 {
+		return ""
+	}
+	best := relativeNames[0]
+	for _, candidate := range relativeNames[1:] {
+		if strings.HasPrefix(candidate, best+".") ||
+			(!strings.HasPrefix(best, candidate+".") && strings.Count(candidate, ".") > strings.Count(best, ".")) {
+			best = candidate
+		}
+	}
+	return best
+}
+
+func sameStringSetSchema(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	if len(left) == 0 {
+		return true
+	}
+	counts := make(map[string]int, len(left))
+	for _, value := range left {
+		counts[value]++
+	}
+	for _, value := range right {
+		counts[value]--
+		if counts[value] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // IsStringType checks if a field is of string type.

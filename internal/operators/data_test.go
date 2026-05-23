@@ -177,7 +177,7 @@ func TestDataOperator_ToSQL(t *testing.T) {
 			name:     "missing_some with dotted fields",
 			operator: "missing_some",
 			args:     []interface{}{1, []interface{}{"user.name", "user.email"}},
-			expected: "(user.name IS NULL OR user.email IS NULL)",
+			expected: "(user.name IS NULL AND user.email IS NULL)",
 			hasError: false,
 		},
 		{
@@ -332,13 +332,30 @@ func TestDataOperator_ToSQL_rejectsPreQuotedBeforeSchemaValidation(t *testing.T)
 // dataSchemaProvider is a minimal schema provider for data operator tests.
 type dataSchemaProvider struct{}
 
-func (m *dataSchemaProvider) HasField(_ string) bool              { return true }
-func (m *dataSchemaProvider) GetFieldType(_ string) string        { return "string" }
-func (m *dataSchemaProvider) ValidateField(_ string) error        { return nil }
-func (m *dataSchemaProvider) IsArrayType(_ string) bool           { return false }
-func (m *dataSchemaProvider) IsStringType(_ string) bool          { return true }
-func (m *dataSchemaProvider) IsNumericType(_ string) bool         { return false }
-func (m *dataSchemaProvider) IsBooleanType(_ string) bool         { return false }
+func (m *dataSchemaProvider) HasField(_ string) bool { return true }
+func (m *dataSchemaProvider) GetFieldType(fieldName string) string {
+	switch fieldName {
+	case "amount":
+		return "number"
+	case "verified":
+		return "boolean"
+	default:
+		return "string"
+	}
+}
+func (m *dataSchemaProvider) ValidateField(_ string) error { return nil }
+func (m *dataSchemaProvider) IsArrayType(_ string) bool    { return false }
+func (m *dataSchemaProvider) IsStringType(fieldName string) bool {
+	return m.GetFieldType(fieldName) == "string"
+}
+
+func (m *dataSchemaProvider) IsNumericType(fieldName string) bool {
+	return m.GetFieldType(fieldName) == "number"
+}
+
+func (m *dataSchemaProvider) IsBooleanType(fieldName string) bool {
+	return m.GetFieldType(fieldName) == "boolean"
+}
 func (m *dataSchemaProvider) IsEnumType(_ string) bool            { return false }
 func (m *dataSchemaProvider) GetAllowedValues(_ string) []string  { return nil }
 func (m *dataSchemaProvider) ValidateEnumValue(_, _ string) error { return nil }
@@ -684,7 +701,7 @@ func TestDataOperator_ToSQLParam(t *testing.T) {
 			name:        "missing_some with count 1",
 			operator:    "missing_some",
 			args:        []interface{}{1, []interface{}{"field1", "field2", "field3"}},
-			expectedSQL: "(field1 IS NULL OR field2 IS NULL OR field3 IS NULL)",
+			expectedSQL: "(field1 IS NULL AND field2 IS NULL AND field3 IS NULL)",
 			wantParams:  nil,
 			hasError:    false,
 		},

@@ -1395,7 +1395,7 @@ func TestTranspileCondition_InRightHandValueExpressionsAllDialects(t *testing.T)
 				return stringContainmentSQL(d, "CONCAT('abc')", "'b'")
 			},
 			wantParam: func(d Dialect) string {
-				return stringContainmentSQL(d, fmt.Sprintf("CONCAT(%s)", testPlaceholder(d, 1)), testPlaceholder(d, 2))
+				return stringContainmentSQL(d, fmt.Sprintf("CONCAT(%s)", testStringPlaceholder(d, 1)), testStringPlaceholder(d, 2))
 			},
 			wantParams: []QueryParam{
 				{Name: "p1", Value: "abc"},
@@ -1531,7 +1531,7 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 				return stringContainmentSQL(d, "'12345'", jsonStringCastSQL(d, "amount"))
 			},
 			wantParam: func(d Dialect) string {
-				return runtimeNeedleStringContainmentSQL(d, testPlaceholder(d, 1), jsonStringCastSQL(d, "amount"))
+				return runtimeNeedleStringContainmentSQL(d, testStringPlaceholder(d, 1), jsonStringCastSQL(d, "amount"))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "12345"}},
 		},
@@ -1542,7 +1542,7 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 				return stringContainmentSQL(d, "'true'", boolStringSQL("flag"))
 			},
 			wantParam: func(d Dialect) string {
-				return runtimeNeedleStringContainmentSQL(d, testPlaceholder(d, 1), boolStringSQL("flag"))
+				return runtimeNeedleStringContainmentSQL(d, testStringPlaceholder(d, 1), boolStringSQL("flag"))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "true"}},
 		},
@@ -1553,7 +1553,7 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 				return stringContainmentSQL(d, "'null'", "COALESCE(name, 'null')")
 			},
 			wantParam: func(d Dialect) string {
-				return runtimeNeedleStringContainmentSQL(d, testPlaceholder(d, 1), "COALESCE(name, 'null')")
+				return runtimeNeedleStringContainmentSQL(d, testStringPlaceholder(d, 1), "COALESCE(name, 'null')")
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "null"}},
 		},
@@ -1575,7 +1575,7 @@ func TestTranspileCondition_InStringHaystackStringifiesNeedlesAllDialects(t *tes
 				return stringContainmentSQL(d, "CONCAT('12345')", "'3'")
 			},
 			wantParam: func(d Dialect) string {
-				return stringContainmentSQL(d, fmt.Sprintf("CONCAT(%s)", testPlaceholder(d, 1)), testPlaceholder(d, 2))
+				return stringContainmentSQL(d, fmt.Sprintf("CONCAT(%s)", testStringPlaceholder(d, 1)), testStringPlaceholder(d, 2))
 			},
 			wantParams: []QueryParam{
 				{Name: "p1", Value: "12345"},
@@ -1666,7 +1666,7 @@ func TestTranspileCondition_InDefaultedVarKeepsDefaultCompatibleLiteralsAllDiale
 			logic:   `{"in":[{"var":["age","missing"]},["missing"]]}`,
 			wantSQL: "(age IS NULL AND 'missing' IN ('missing'))",
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("(age IS NULL AND %s IN (%s))", testPlaceholder(d, 1), testPlaceholder(d, 2))
+				return fmt.Sprintf("(age IS NULL AND %s IN (%s))", testStringPlaceholder(d, 1), testStringPlaceholder(d, 2))
 			},
 			wantParams:  []QueryParam{{Name: "p1", Value: "missing"}, {Name: "p2", Value: "missing"}},
 			notContains: "COALESCE(age",
@@ -1679,8 +1679,8 @@ func TestTranspileCondition_InDefaultedVarKeepsDefaultCompatibleLiteralsAllDiale
 				return fmt.Sprintf(
 					"((age IS NOT NULL AND age IN (%s)) OR (age IS NULL AND %s IN (%s)))",
 					testPlaceholder(d, 1),
-					testPlaceholder(d, 2),
-					testPlaceholder(d, 3),
+					testStringPlaceholder(d, 2),
+					testStringPlaceholder(d, 3),
 				)
 			},
 			wantParams:  []QueryParam{{Name: "p1", Value: float64(18)}, {Name: "p2", Value: "missing"}, {Name: "p3", Value: "missing"}},
@@ -1839,7 +1839,7 @@ func TestTranspileParameterizedCondition_InUnknownRHSStringContainmentDoesNotLea
 			},
 			wantParam: func(d Dialect) string {
 				rhs := fmt.Sprintf("CASE WHEN a > %s THEN s ELSE t END", testPlaceholder(d, 1))
-				return stringContainmentSQL(d, rhs, testPlaceholder(d, 2))
+				return stringContainmentSQL(d, rhs, testStringPlaceholder(d, 2))
 			},
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
@@ -1870,7 +1870,7 @@ func TestTranspileParameterizedCondition_InUnknownRHSStringContainmentDoesNotLea
 				return stringContainmentSQL(d, "custom_haystack", "'x'")
 			},
 			wantParam: func(d Dialect) string {
-				return stringContainmentSQL(d, "custom_haystack", testPlaceholder(d, 1))
+				return stringContainmentSQL(d, "custom_haystack", testStringPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
 		},
@@ -2092,7 +2092,7 @@ func TestTranspileCondition_SchemaRequiredComparisonUsesFoldedValueLiterals(t *t
 			logic:   `{"==":[{"var":"code"},{"or":[0,5]}]}`,
 			wantSQL: "code = '5'",
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("code = %s", testPlaceholder(d, 1))
+				return fmt.Sprintf("code = %s", testStringPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "5"}},
 		},
@@ -2101,7 +2101,7 @@ func TestTranspileCondition_SchemaRequiredComparisonUsesFoldedValueLiterals(t *t
 			logic:   `{"==":[{"var":"amount"},{"or":["","5"]}]}`,
 			wantSQL: "amount = 5",
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("amount = %s", testPlaceholder(d, 1))
+				return fmt.Sprintf("amount = %s", testIntPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: int64(5)}},
 		},
@@ -2164,7 +2164,7 @@ func TestTranspileCondition_NestedValueOperandPreservesFieldMetadata(t *testing.
 			logic:   `{"==":[{"if":[true,{"var":"code"},"x"]},5]}`,
 			wantSQL: "code = '5'",
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("code = %s", testPlaceholder(d, 1))
+				return fmt.Sprintf("code = %s", testStringPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "5"}},
 		},
@@ -2174,7 +2174,7 @@ func TestTranspileCondition_NestedValueOperandPreservesFieldMetadata(t *testing.
 			wantSQL: "CASE WHEN flag IS TRUE THEN code ELSE '5' END = '5'",
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf("CASE WHEN flag IS TRUE THEN code ELSE %s END = %s",
-					testPlaceholder(d, 1), testPlaceholder(d, 2))
+					testStringPlaceholder(d, 1), testStringPlaceholder(d, 2))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "5"}, {Name: "p2", Value: "5"}},
 		},
@@ -2589,6 +2589,52 @@ func TestTranspile_RejectsMalformedNestedValueOperandsAllDialectsSchemaRequired(
 						})
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestConditionModeInArrayLiteralEvaluatesNestedValueElementsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, emptyTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			sql, err := tr.TranspileCondition(`{"in":[1,[{"map":[[1],{"var":""}]}]]}`)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
+			}
+			if sql != "FALSE" {
+				t.Fatalf("TranspileCondition() = %q, want FALSE", sql)
+			}
+
+			paramSQL, params, err := tr.TranspileParameterizedCondition(`{"in":[1,[{"map":[[1],{"var":""}]}]]}`)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			if paramSQL != "FALSE" {
+				t.Fatalf("TranspileParameterizedCondition() = %q params = %#v, want FALSE with no params", paramSQL, params)
+			}
+			if len(params) != 0 {
+				t.Fatalf("params = %#v, want none", params)
+			}
+
+			sql, err = tr.TranspileCondition(`{"in":["x",[{"cat":["x"]}]]}`)
+			if err != nil {
+				t.Fatalf("TranspileCondition() string nested value error = %v", err)
+			}
+			if !strings.Contains(sql, "CONCAT") {
+				t.Fatalf("TranspileCondition() = %q, want nested cat SQL", sql)
+			}
+
+			if _, _, err := tr.TranspileParameterizedCondition(`{"in":["x",[{"cat":["x"]}]]}`); err != nil {
+				t.Fatalf("TranspileParameterizedCondition() string nested value error = %v", err)
 			}
 		})
 	}

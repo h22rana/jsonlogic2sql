@@ -23,45 +23,56 @@ import (
 // reducers. Other standard SQL dialects reject arbitrary reducer expressions
 // that cannot be lowered to SUM, MIN, or MAX.
 func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
+	res, err := a.handleReduceResult(args)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
+func (a *ArrayOperator) handleReduceResult(args []interface{}) (OperatorResult, error) {
 	if len(args) != reduceOperatorArgCount {
-		return "", fmt.Errorf("reduce requires exactly 3 arguments")
+		return OperatorResult{}, fmt.Errorf("reduce requires exactly 3 arguments")
 	}
 
 	// Validate dialect support
 	if a.config != nil {
 		if err := a.config.ValidateDialect("reduce"); err != nil {
-			return "", err
+			return OperatorResult{}, err
 		}
 	}
 
 	// Validate that first argument is an array type
 	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
-		return "", err
+		return OperatorResult{}, err
 	}
 
 	// Third argument: initial value
 	initialValue, err := a.valueToTypedSQLAtPath(args[arrayReduceInitialArgIndex], a.argPath(arrayReduceInitialArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid reduce initial argument: %w", err)
 	}
 	initial := initialValue.sql
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return initial, nil
+		return operatorResultFromTypedValue(initialValue), nil
 	}
 
 	// First argument: array
 	arrayValue, err := a.valueToTypedSQLAtPath(args[arraySourceArgIndex], a.argPath(arraySourceArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid reduce array argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid reduce array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
-		return "", fmt.Errorf("invalid reduce array argument: %w", arraySourceErr)
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return OperatorResult{}, fmt.Errorf("invalid reduce array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return initial, nil
+		return operatorResultFromTypedValue(initialValue), nil
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
+	if scopeErr := a.validateCompatibleArrayElementScopes(sourceScopes); scopeErr != nil {
+		return OperatorResult{}, fmt.Errorf("invalid reduce array argument: %w", scopeErr)
+	}
 
 	// Second argument: reducer expression
 	reducerExpr := args[arrayExpressionArgIndex]
@@ -71,8 +82,12 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	// Check for common reduction patterns and optimize
 	reduceScoped := a.withArrayLambdaSource(arrayLambdaScopeReduce, sourceScopes, arrayValue, false)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
+		numericInitial, initialErr := a.numericAggregateInitialSQL(args[arrayReduceInitialArgIndex], initialValue)
+		if initialErr != nil {
+			return OperatorResult{}, fmt.Errorf("invalid reduce initial argument: %w", initialErr)
+		}
 		if aggregateErr := reduceScoped.validateAggregatePattern(pattern); aggregateErr != nil {
-			return "", aggregateErr
+			return OperatorResult{}, aggregateErr
 		}
 		// Generate optimized aggregate SQL based on dialect
 		switch a.getDialect() {
@@ -89,29 +104,29 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 					if errors.Is(quoteErr, errUnsupportedGeneralReduce) {
 						goto generalReduce
 					}
-					return "", quoteErr
+					return OperatorResult{}, quoteErr
 				}
 				aggregateInput = fmt.Sprintf("arrayMap(%s -> %s, %s)", mapAlias, mappedRef, array)
 			}
 			aggregateSQL := fmt.Sprintf("arrayReduce('%s', %s)", strings.ToLower(pattern.function), aggregateInput)
-			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, true, array), nil
+			return ValueSQL(renderReduceAggregateResult(pattern.function, numericInitial, aggregateSQL, true, array), ExpressionTypeNumber), nil
 		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
 			// Standard SQL: aggregate the array once and combine it with the
 			// initial accumulator according to the reducer operator.
 			elemRef, quoteErr := reduceScoped.aggregateElementSQL(alias, pattern)
 			if quoteErr != nil {
-				return "", quoteErr
+				return OperatorResult{}, quoteErr
 			}
 			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
-			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
+			return ValueSQL(renderReduceAggregateResult(pattern.function, numericInitial, aggregateSQL, false, ""), ExpressionTypeNumber), nil
 		}
 		// Fallback for any future dialects
 		elemRef, quoteErr := reduceScoped.aggregateElementSQL(alias, pattern)
 		if quoteErr != nil {
-			return "", quoteErr
+			return OperatorResult{}, quoteErr
 		}
 		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
-		return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
+		return ValueSQL(renderReduceAggregateResult(pattern.function, numericInitial, aggregateSQL, false, ""), ExpressionTypeNumber), nil
 	}
 
 generalReduce:
@@ -119,12 +134,33 @@ generalReduce:
 	if a.getDialect() == dialect.DialectClickHouse || a.getDialect() == dialect.DialectDuckDB {
 		accumulatorSQL = "acc"
 	}
-	valueScoped := reduceScoped.withReduceValueScope(initialValue.typ, accumulatorSQL)
-	reducerWithElem, err := valueScoped.expressionToSQLWithContextAndPath(reducerExpr, true, a.argPath(arrayExpressionArgIndex))
+	valueScoped := reduceScoped.withReduceValueScope(initialValue, accumulatorSQL)
+	reducerResult, err := valueScoped.valueExpressionResultWithContextAndPath(reducerExpr, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid reduce expression: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid reduce expression: %w", err)
 	}
-	return a.renderGeneralReduceSQL(alias, array, reducerWithElem, initial, initialValue.typ)
+	sql, err := a.renderGeneralReduceSQL(alias, array, reducerResult.SQL, initial, initialValue.typ)
+	if err != nil {
+		return OperatorResult{}, err
+	}
+	return operatorResultWithSQL(reducerResult, sql), nil
+}
+
+func operatorResultFromTypedValue(value typedValueSQL) OperatorResult {
+	if value.typ == ExpressionTypeArray {
+		res := arrayValueSQLWithMetadata(value.sql, typedValueElementTypes(value), typedValueSchemaScopes(value))
+		res.EmptyArrayLiteral = value.emptyArrayLiteral
+		res.PreserveParamRefs = value.preserveParamRefs
+		return res
+	}
+	res := ValueSQL(value.sql, value.typ)
+	res.PreserveParamRefs = value.preserveParamRefs
+	return res
+}
+
+func operatorResultWithSQL(result OperatorResult, sql string) OperatorResult {
+	result.SQL = sql
+	return result
 }
 
 // aggregatePattern represents a detected aggregate pattern with optional field suffix.
@@ -179,7 +215,7 @@ func (a *ArrayOperator) aggregateElementRef(alias string, pattern *aggregatePatt
 	if err != nil {
 		return "", fmt.Errorf("invalid current default value: %w", err)
 	}
-	return fmt.Sprintf("COALESCE(%s, %s)", elemRef, defaultSQL), nil
+	return a.config.CoalesceSQL(elemRef, defaultSQL), nil
 }
 
 func (a *ArrayOperator) aggregateElementRefParam(
@@ -206,14 +242,18 @@ func (a *ArrayOperator) aggregateElementRefParam(
 	if err != nil {
 		return "", fmt.Errorf("invalid current default value: %w", err)
 	}
-	return fmt.Sprintf("COALESCE(%s, %s)", elemRef, defaultSQL), nil
+	return a.config.CoalesceSQL(elemRef, defaultSQL), nil
 }
 
 func (a *ArrayOperator) validateAggregatePattern(pattern *aggregatePattern) error {
 	if pattern.hasTermExpr {
 		return nil
 	}
-	if _, err := a.aggregateElementType(pattern); err != nil {
+	elemType, err := a.aggregateElementType(pattern)
+	if err != nil {
+		return err
+	}
+	if _, err := numericAggregateElementSQL(a.elemAlias(), elemType); err != nil {
 		return err
 	}
 	if pattern.hasDefault {
@@ -261,7 +301,9 @@ func (a *ArrayOperator) aggregateElementType(pattern *aggregatePattern) (Express
 	if a.hasElementType {
 		return a.elementType, nil
 	}
-	return ExpressionTypeUnknown, nil
+	return ExpressionTypeUnknown, fmt.Errorf(
+		"numeric reduce aggregate over current requires a known numeric array element type; define elementType or use current.<numeric-field>",
+	)
 }
 
 func (a *ArrayOperator) hasObjectArraySchemaScope(scopes []string) bool {
@@ -285,7 +327,7 @@ func numericAggregateElementSQL(sql string, typ ExpressionType) (string, error) 
 		return BooleanValueNumberSQL(sql), nil
 	case ExpressionTypeNull:
 		return predicateNumberFalse, nil
-	case ExpressionTypeString, ExpressionTypeArray:
+	case ExpressionTypeString, ExpressionTypeArray, ExpressionTypeObject:
 		return "", fmt.Errorf("numeric reduce aggregate requires numeric current value, got %s", expressionTypeName(typ))
 	default:
 		return "", fmt.Errorf("numeric reduce aggregate has unsupported current value type %s", expressionTypeName(typ))
@@ -306,6 +348,40 @@ func (a *ArrayOperator) numericAggregateDefaultSQLParam(value interface{}, pc *p
 	return a.numericOp.valueToSQLParam(value, pc)
 }
 
+func (a *ArrayOperator) numericAggregateInitialSQL(value interface{}, initial typedValueSQL) (string, error) {
+	if str, ok := value.(string); ok && isNumericString(str) {
+		return a.numericOp.valueToSQL(str)
+	}
+	switch initial.typ {
+	case ExpressionTypeNumber:
+		return initial.sql, nil
+	case ExpressionTypeBoolean:
+		return BooleanValueNumberSQL(initial.sql), nil
+	case ExpressionTypeNull:
+		return predicateNumberFalse, nil
+	case ExpressionTypeUnknown:
+		return initial.sql, nil
+	case ExpressionTypeString:
+		return "", fmt.Errorf("numeric reduce aggregate initial must be numeric, boolean, or null, got string")
+	case ExpressionTypeArray:
+		return "", fmt.Errorf("numeric reduce aggregate initial cannot be array-valued")
+	case ExpressionTypeObject:
+		return "", fmt.Errorf("numeric reduce aggregate initial cannot be object-valued")
+	default:
+		return "", fmt.Errorf("numeric reduce aggregate initial has unsupported type %s", expressionTypeName(initial.typ))
+	}
+}
+
+func (a *ArrayOperator) numericAggregateInitialSQLParam(
+	value interface{},
+	initial typedValueSQL,
+) (string, error) {
+	if str, ok := value.(string); ok && isNumericString(str) {
+		return fmt.Sprintf("CAST(%s AS NUMERIC)", initial.sql), nil
+	}
+	return a.numericAggregateInitialSQL(value, initial)
+}
+
 func validateNumericAggregateDefault(value interface{}) error {
 	if str, ok := value.(string); ok {
 		if isNumericString(str) {
@@ -317,7 +393,7 @@ func validateNumericAggregateDefault(value interface{}) error {
 	switch typ {
 	case ExpressionTypeNumber, ExpressionTypeBoolean, ExpressionTypeNull:
 		return nil
-	case ExpressionTypeUnknown, ExpressionTypeString, ExpressionTypeArray:
+	case ExpressionTypeUnknown, ExpressionTypeString, ExpressionTypeArray, ExpressionTypeObject:
 		return fmt.Errorf(
 			"numeric reduce aggregate default must be numeric, boolean, or null, got %s",
 			expressionTypeName(typ),
@@ -382,7 +458,9 @@ func (a *ArrayOperator) aggregateTermResultParam(expr interface{}, pc *params.Pa
 		if err != nil {
 			return OperatorResult{}, err
 		}
-		return PredicateSQL(res.SQL), nil
+		out := PredicateSQL(res.SQL)
+		out.PreserveParamRefs = res.PreserveParamRefs
+		return out, nil
 	}
 	return a.withValueSemantics(true).valueExpressionResultParamWithContextAndPath(expr, pc, true, path)
 }
@@ -417,6 +495,8 @@ func (a *ArrayOperator) aggregateNumericTermSQL(result OperatorResult) (string, 
 		})
 	case ExpressionTypeArray:
 		return "", fmt.Errorf("numeric aggregate term cannot be array-valued")
+	case ExpressionTypeObject:
+		return "", fmt.Errorf("numeric aggregate term cannot be object-valued")
 	default:
 		return "", fmt.Errorf("numeric aggregate term has unsupported type %s", expressionTypeName(result.Type))
 	}

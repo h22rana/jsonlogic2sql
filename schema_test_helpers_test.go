@@ -33,6 +33,10 @@ func testSupportsGeneralReduce(d Dialect) bool {
 	return d == DialectDuckDB || d == DialectClickHouse
 }
 
+func testRejectsNestedArrayValues(d Dialect) bool {
+	return d == DialectBigQuery || d == DialectSpanner || d == DialectPostgreSQL
+}
+
 func testStringContainmentSQL(d Dialect, haystack, needle string) string {
 	switch d {
 	case DialectPostgreSQL:
@@ -305,33 +309,33 @@ func defaultTestSchema() *Schema {
 		{Name: "verified", Type: FieldTypeBoolean},
 		{Name: "is_active", Type: FieldTypeBoolean},
 		{Name: "is_verified", Type: FieldTypeBoolean},
-		{Name: "arr", Type: FieldTypeArray},
-		{Name: "arr1", Type: FieldTypeArray},
-		{Name: "arr2", Type: FieldTypeArray},
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "arr1", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "arr2", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 		{Name: "array1", Type: FieldTypeArray},
 		{Name: "array2", Type: FieldTypeArray},
 		{Name: "items", Type: FieldTypeArray, ElementFields: elementTestFields()},
-		{Name: "numbers", Type: FieldTypeArray},
-		{Name: "scores", Type: FieldTypeArray},
-		{Name: "ages", Type: FieldTypeArray},
-		{Name: "emails", Type: FieldTypeArray},
-		{Name: "names", Type: FieldTypeArray},
-		{Name: "statuses", Type: FieldTypeArray},
-		{Name: "prices", Type: FieldTypeArray},
+		{Name: "numbers", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "scores", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "ages", Type: FieldTypeArray, ElementType: FieldTypeInteger},
+		{Name: "emails", Type: FieldTypeArray, ElementType: FieldTypeString},
+		{Name: "names", Type: FieldTypeArray, ElementType: FieldTypeString},
+		{Name: "statuses", Type: FieldTypeArray, ElementType: FieldTypeString},
+		{Name: "prices", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 		{Name: "readings", Type: FieldTypeArray, ElementFields: elementTestFields()},
 		{Name: "transactions", Type: FieldTypeArray, ElementFields: elementTestFields()},
 		{Name: "logs", Type: FieldTypeArray, ElementFields: elementTestFields()},
-		{Name: "flags", Type: FieldTypeArray},
-		{Name: "temperatures", Type: FieldTypeArray},
-		{Name: "moreNumbers", Type: FieldTypeArray},
-		{Name: "amounts", Type: FieldTypeArray},
-		{Name: "totals", Type: FieldTypeArray},
+		{Name: "flags", Type: FieldTypeArray, ElementType: FieldTypeBoolean},
+		{Name: "temperatures", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "moreNumbers", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "amounts", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "totals", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 		{Name: "cars", Type: FieldTypeArray, ElementFields: elementTestFields()},
 		{Name: "results", Type: FieldTypeArray, ElementFields: elementTestFields()},
 		{Name: "errors", Type: FieldTypeArray, ElementFields: elementTestFields()},
-		{Name: "nums", Type: FieldTypeArray},
-		{Name: "tags", Type: FieldTypeArray},
-		{Name: "values", Type: FieldTypeArray},
+		{Name: "nums", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "tags", Type: FieldTypeArray, ElementType: FieldTypeString},
+		{Name: "values", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 		{Name: "data", Type: FieldTypeArray, ElementFields: elementTestFields()},
 		{Name: "groups", Type: FieldTypeArray, ElementFields: elementTestFields()},
 		{Name: "records", Type: FieldTypeArray, ElementFields: elementTestFields()},
@@ -339,8 +343,8 @@ func defaultTestSchema() *Schema {
 		{Name: "products", Type: FieldTypeArray, ElementFields: elementTestFields()},
 		{Name: "payments", Type: FieldTypeArray, ElementFields: elementTestFields()},
 		{Name: "accounts", Type: FieldTypeArray, ElementFields: elementTestFields()},
-		{Name: "bag.numbers", Type: FieldTypeArray},
-		{Name: "bag.words", Type: FieldTypeArray},
+		{Name: "bag.numbers", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "bag.words", Type: FieldTypeArray, ElementType: FieldTypeString},
 		{Name: "bag.records", Type: FieldTypeArray, ElementFields: elementTestFields()},
 		{Name: "fixture.windowed_metrics.24h.events.total", Type: FieldTypeNumber},
 		{Name: "stats.7d.10m.count", Type: FieldTypeNumber},
@@ -412,7 +416,7 @@ func elementTestFields() []FieldSchema {
 		{Name: "base", Type: FieldTypeNumber},
 		{Name: "active", Type: FieldTypeBoolean},
 		{Name: "flag", Type: FieldTypeBoolean},
-		{Name: "tags", Type: FieldTypeArray},
+		{Name: "tags", Type: FieldTypeArray, ElementType: FieldTypeString},
 		{Name: "values", Type: FieldTypeArray, ElementFields: []FieldSchema{
 			{Name: "type", Type: FieldTypeString},
 			{Name: "name", Type: FieldTypeString},
@@ -428,7 +432,7 @@ func elementTestFields() []FieldSchema {
 		{Name: "members", Type: FieldTypeArray, ElementFields: []FieldSchema{
 			{Name: "role", Type: FieldTypeString},
 		}},
-		{Name: "subitems", Type: FieldTypeArray},
+		{Name: "subitems", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	}
 }
 

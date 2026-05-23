@@ -20,15 +20,15 @@ func testArrayScopeSchema() *Schema {
 				{Name: "phone", Type: FieldTypeString},
 			},
 		},
-		{Name: "scores", Type: FieldTypeArray},
+		{Name: "scores", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 		{
 			Name: "groups",
 			Type: FieldTypeArray,
 			ElementFields: []FieldSchema{
 				{Name: "base", Type: FieldTypeNumber},
 				{Name: "flag", Type: FieldTypeBoolean},
-				{Name: "tags", Type: FieldTypeArray},
-				{Name: "values", Type: FieldTypeArray},
+				{Name: "tags", Type: FieldTypeArray, ElementType: FieldTypeString},
+				{Name: "values", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 			},
 		},
 	})
@@ -53,7 +53,7 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 	}{
 		{
 			name:      "map uses empty var",
-			jsonLogic: `{"map":[{"var":"numbers"},{"*":[{"var":""},2]}]}`,
+			jsonLogic: `{"map":[{"var":"scores"},{"*":[{"var":""},2]}]}`,
 			valueRoot: true,
 			mustContain: []string{
 				"elem",
@@ -61,7 +61,7 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 		},
 		{
 			name:      "filter uses empty var",
-			jsonLogic: `{"filter":[{"var":"numbers"},{">":[{"var":""},1]}]}`,
+			jsonLogic: `{"filter":[{"var":"scores"},{">":[{"var":""},1]}]}`,
 			valueRoot: true,
 			mustContain: []string{
 				"elem",
@@ -135,7 +135,7 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 	}{
 		{
 			name:           "map uses empty var",
-			jsonLogic:      `{"map":[{"var":"numbers"},{"*":[{"var":""},2]}]}`,
+			jsonLogic:      `{"map":[{"var":"scores"},{"*":[{"var":""},2]}]}`,
 			valueRoot:      true,
 			mustContainSQL: "elem",
 			wantParamCount: 1,
@@ -333,24 +333,29 @@ func TestArrayScopedDefaultedVarsPreserveSchemaEqualityMetadata(t *testing.T) {
 	})
 
 	cases := []struct {
-		name  string
-		logic string
+		name         string
+		logic        string
+		wantFragment string
 	}{
 		{
-			name:  "loose equality",
-			logic: `{"some":[{"var":"items"},{"==":[{"var":["amount","abc"]},"abc"]}]}`,
+			name:         "loose equality",
+			logic:        `{"some":[{"var":"items"},{"==":[{"var":["amount","abc"]},"abc"]}]}`,
+			wantFragment: "elem.amount IS NULL",
 		},
 		{
-			name:  "strict equality",
-			logic: `{"some":[{"var":"items"},{"===":[{"var":["amount","abc"]},"abc"]}]}`,
+			name:         "strict equality",
+			logic:        `{"some":[{"var":"items"},{"===":[{"var":["amount","abc"]},"abc"]}]}`,
+			wantFragment: "elem.amount IS NULL",
 		},
 		{
-			name:  "loose inequality",
-			logic: `{"some":[{"var":"items"},{"!=":[{"var":["amount","abc"]},"abc"]}]}`,
+			name:         "loose inequality",
+			logic:        `{"some":[{"var":"items"},{"!=":[{"var":["amount","abc"]},"abc"]}]}`,
+			wantFragment: "elem.amount IS NOT NULL",
 		},
 		{
-			name:  "strict inequality",
-			logic: `{"some":[{"var":"items"},{"!==":[{"var":["amount","abc"]},"abc"]}]}`,
+			name:         "strict inequality",
+			logic:        `{"some":[{"var":"items"},{"!==":[{"var":["amount","abc"]},"abc"]}]}`,
+			wantFragment: "elem.amount IS NOT NULL",
 		},
 	}
 
@@ -377,8 +382,8 @@ func TestArrayScopedDefaultedVarsPreserveSchemaEqualityMetadata(t *testing.T) {
 					if strings.Contains(sql, "WHERE FALSE") || strings.Contains(sql, "WHERE TRUE") {
 						t.Fatalf("inline scoped default comparison folded away: %s", sql)
 					}
-					if !strings.Contains(sql, "COALESCE(elem.amount, 'abc')") {
-						t.Fatalf("inline SQL did not preserve scoped default comparison, got: %s", sql)
+					if !strings.Contains(sql, tc.wantFragment) {
+						t.Fatalf("inline SQL did not split scoped default comparison correctly, got: %s", sql)
 					}
 
 					paramSQL, params, err := tr.TranspileParameterizedCondition(tc.logic)
@@ -388,11 +393,11 @@ func TestArrayScopedDefaultedVarsPreserveSchemaEqualityMetadata(t *testing.T) {
 					if strings.Contains(paramSQL, "WHERE FALSE") || strings.Contains(paramSQL, "WHERE TRUE") {
 						t.Fatalf("parameterized scoped default comparison folded away: %s params=%#v", paramSQL, params)
 					}
-					if !strings.Contains(paramSQL, "COALESCE(elem.amount, ") {
-						t.Fatalf("parameterized SQL did not preserve scoped default comparison, got: %s params=%#v", paramSQL, params)
+					if !strings.Contains(paramSQL, tc.wantFragment) {
+						t.Fatalf("parameterized SQL did not split scoped default comparison correctly, got: %s params=%#v", paramSQL, params)
 					}
-					if len(params) != 2 {
-						t.Fatalf("params = %#v, want default and comparison literal", params)
+					if len(params) != 0 {
+						t.Fatalf("params = %#v, want no params after static default split", params)
 					}
 				})
 			}
@@ -438,7 +443,7 @@ func TestArrayScopedDefaultedVarInUsesRawFieldForNullBranchAllDialects(t *testin
 			if err != nil {
 				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}
-			wantParamFragment := "(elem.age IS NULL AND " + testPlaceholder(d, 1) + " IN (" + testPlaceholder(d, 2) + "))"
+			wantParamFragment := "(elem.age IS NULL AND " + testStringPlaceholder(d, 1) + " IN (" + testStringPlaceholder(d, 2) + "))"
 			if !strings.Contains(paramSQL, wantParamFragment) {
 				t.Fatalf("parameterized SQL did not preserve raw scoped field in default branch: %s params=%#v", paramSQL, params)
 			}
@@ -857,6 +862,10 @@ func TestTranspile_ArrayNestedElementFieldsRequireNestedScope_AllDialects(t *tes
 			for _, tc := range valid {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
+					if testRejectsNestedArrayValues(d) && strings.Contains(tc.name, "nested") {
+						expectValueAndParamErrorContains(t, tr, tc.logic, nestedArrayErrorFragment(d))
+						return
+					}
 					assertArrayElementScopedSQLContainsAll(t, tr, tc.logic, tc.want)
 				})
 			}

@@ -12,6 +12,17 @@ func dialectRejectsArrayLiteralElements(d Dialect) bool {
 	return d == DialectBigQuery || d == DialectSpanner
 }
 
+func dialectRejectsNestedArraySources(d Dialect) bool {
+	return d == DialectBigQuery || d == DialectSpanner || d == DialectPostgreSQL
+}
+
+func nestedArrayErrorFragment(d Dialect) string {
+	if d == DialectPostgreSQL {
+		return "support"
+	}
+	return "does not support array literals whose elements are arrays"
+}
+
 func TestTranspileValue_EmptyArrayLiteralAllDialects(t *testing.T) {
 	t.Parallel()
 
@@ -83,7 +94,7 @@ func TestTranspileValue_RejectsMalformedVarOperandsAllDialectsSchemaRequired(t *
 
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "x", Type: FieldTypeNumber},
-		{Name: "items", Type: FieldTypeArray},
+		{Name: "items", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 
 	tests := []struct {
@@ -284,7 +295,7 @@ func TestTranspileValue_EmptyArrayFoldableContextsAllDialects(t *testing.T) {
 					if paramErr != nil {
 						t.Fatalf("TranspileParameterizedValue() error = %v", paramErr)
 					}
-					if want := testPlaceholder(d, 1); gotParam != want {
+					if want := testStringPlaceholder(d, 1); gotParam != want {
 						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, want)
 					}
 					if want := []QueryParam{{Name: "p1", Value: "fallback"}}; !reflect.DeepEqual(gotParams, want) {
@@ -348,7 +359,7 @@ func TestArrayOperators_FoldedEmptyArraySourcesAllDialectsSchemaRequired(t *test
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "items", Type: FieldTypeArray},
+		{Name: "items", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 
 	predicateTests := []struct {
@@ -398,7 +409,7 @@ func TestArrayOperators_FoldedEmptyArraySourcesAllDialectsSchemaRequired(t *test
 				return "'seed'"
 			},
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "seed"}},
 		},
@@ -652,9 +663,9 @@ func TestTranspileValue_MergeCastsScalarsToArraysAllDialects(t *testing.T) {
 		{
 			dialect:          DialectClickHouse,
 			wantInline:       "arrayConcat([1], [2])",
-			wantParamSQL:     "arrayConcat([@p1], [@p2])",
+			wantParamSQL:     "arrayConcat([{p1:Float64}], [{p2:Float64}])",
 			wantNullInline:   "arrayConcat([1, NULL], [2])",
-			wantNullParamSQL: "arrayConcat([@p1, NULL], [@p2])",
+			wantNullParamSQL: "arrayConcat([{p1:Float64}, NULL], [{p2:Float64}])",
 		},
 	}
 
@@ -766,7 +777,7 @@ func TestTranspileValue_EmptyArrayUnaryAndReduceShortCircuitAllDialectsSchemaReq
 			logic:   `{"or":[{"reduce":[[],{"var":"missing"},""]},"fallback"]}`,
 			wantSQL: "'fallback'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
@@ -775,7 +786,7 @@ func TestTranspileValue_EmptyArrayUnaryAndReduceShortCircuitAllDialectsSchemaReq
 			logic:   `{"or":[{"reduce":[[],{"var":"missing"},"seed"]},"fallback"]}`,
 			wantSQL: "'seed'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "seed"}},
 		},
@@ -837,6 +848,17 @@ func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
 		wantParamSQL        func(Dialect) string
 		wantParams          []QueryParam
 	}{
+		{
+			name:           "merge zero arguments",
+			logic:          `{"merge":[]}`,
+			rejectPostgres: true,
+			wantSQL: func(Dialect) string {
+				return "[]"
+			},
+			wantParamSQL: func(Dialect) string {
+				return "[]"
+			},
+		},
 		{
 			name:           "merge all empty",
 			logic:          `{"merge":[[]]}`,
@@ -914,7 +936,7 @@ func TestTranspileValue_EmptyArrayEmissionsAllDialects(t *testing.T) {
 				return "'init'"
 			},
 			wantParamSQL: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "init"}},
 		},
@@ -968,7 +990,7 @@ func TestTranspileValue_ReduceTruthinessUsesInferredTypeAllDialectsSchemaRequire
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "arr", Type: FieldTypeArray},
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 
 	reduceSumSQL := func(d Dialect, initial string) string {
@@ -1024,7 +1046,7 @@ func TestTranspileValue_ReduceTruthinessUsesInferredTypeAllDialectsSchemaRequire
 			wantParam: func(d Dialect) string {
 				reduce := reduceSumSQL(d, testPlaceholder(d, 1))
 				return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END",
-					numericTruthiness(reduce), testPlaceholder(d, 2), testPlaceholder(d, 3))
+					numericTruthiness(reduce), testStringPlaceholder(d, 2), testStringPlaceholder(d, 3))
 			},
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
@@ -1253,7 +1275,7 @@ func TestTranspileValue_ReduceStringTruthinessUsesInferredTypeAllDialectsSchemaR
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "arr", Type: FieldTypeArray},
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeString},
 	})
 	logic := `{"or":[{"reduce":[{"var":"arr"},{"cat":[{"var":"accumulator"},{"var":"current"}]},""]},"fallback"]}`
 
@@ -1319,25 +1341,31 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "arr", Type: FieldTypeArray},
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "arrString", Type: FieldTypeArray, ElementType: FieldTypeString},
+		{Name: "arrBool", Type: FieldTypeArray, ElementType: FieldTypeBoolean},
 	})
 
-	renderReduce := func(d Dialect, reducer, initial string, initialType ExpressionType) string {
+	renderReduce := func(d Dialect, source, reducer, initial string, initialType ExpressionType) string {
+		if source == "" {
+			source = "arr"
+		}
 		if d == DialectClickHouse {
 			if initialType == ExpressionTypeNumber {
 				initial = fmt.Sprintf("toFloat64(%s)", initial)
 			}
-			return fmt.Sprintf("arrayFold((acc, elem) -> %s, arr, %s)", reducer, initial)
+			return fmt.Sprintf("arrayFold((acc, elem) -> %s, %s, %s)", reducer, source, initial)
 		}
 		if d == DialectDuckDB {
-			return fmt.Sprintf("list_reduce(arr, lambda acc, elem : %s, %s)", reducer, initial)
+			return fmt.Sprintf("list_reduce(%s, lambda acc, elem : %s, %s)", source, reducer, initial)
 		}
-		return testDuckDBUnnestSourceAliases(d, fmt.Sprintf("(SELECT %s FROM UNNEST(arr) AS elem)", reducer))
+		return testDuckDBUnnestSourceAliases(d, fmt.Sprintf("(SELECT %s FROM UNNEST(%s) AS elem)", reducer, source))
 	}
 
 	tests := []struct {
 		name             string
 		logic            string
+		source           string
 		wantReducer      func(initial string) string
 		wantInitial      string
 		wantParamReducer func(Dialect) string
@@ -1382,8 +1410,9 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 			forbidden: []string{"!= FALSE", "!= ''"},
 		},
 		{
-			name:  "if tests string accumulator with string truthiness",
-			logic: `{"reduce":[{"var":"arr"},{"if":[{"var":"accumulator"},{"var":"accumulator"},{"var":"current"}]},""]}`,
+			name:   "if tests string accumulator with string truthiness",
+			logic:  `{"reduce":[{"var":"arrString"},{"if":[{"var":"accumulator"},{"var":"accumulator"},{"var":"current"}]},""]}`,
+			source: "arrString",
 			wantReducer: func(initial string) string {
 				return fmt.Sprintf("CASE WHEN (%s IS NOT NULL AND %s != '') THEN %s ELSE elem END", initial, initial, initial)
 			},
@@ -1391,14 +1420,15 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 			wantParamReducer: func(d Dialect) string {
 				return "CASE WHEN (acc IS NOT NULL AND acc != '') THEN acc ELSE elem END"
 			},
-			wantParamInitial: func(d Dialect) string { return testPlaceholder(d, 1) },
+			wantParamInitial: func(d Dialect) string { return testStringPlaceholder(d, 1) },
 			initialType:      ExpressionTypeString,
 			wantParams:       []QueryParam{{Name: "p1", Value: ""}},
 			forbidden:        []string{"!= FALSE", "!= 0"},
 		},
 		{
-			name:  "if tests boolean accumulator with boolean truthiness",
-			logic: `{"reduce":[{"var":"arr"},{"if":[{"var":"accumulator"},{"var":"accumulator"},{"var":"current"}]},false]}`,
+			name:   "if tests boolean accumulator with boolean truthiness",
+			logic:  `{"reduce":[{"var":"arrBool"},{"if":[{"var":"accumulator"},{"var":"accumulator"},{"var":"current"}]},false]}`,
+			source: "arrBool",
 			wantReducer: func(initial string) string {
 				return fmt.Sprintf("CASE WHEN %s IS TRUE THEN %s ELSE elem END", initial, initial)
 			},
@@ -1445,7 +1475,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 							if err != nil {
 								t.Fatalf("TranspileValue() error = %v", err)
 							}
-							want := renderReduce(d, tt.wantReducer("acc"), tt.wantInitial, tt.initialType)
+							want := renderReduce(d, tt.source, tt.wantReducer("acc"), tt.wantInitial, tt.initialType)
 							if got != want {
 								t.Fatalf("TranspileValue() = %q, want %q", got, want)
 							}
@@ -1459,7 +1489,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesInitialTypeAllDialectsSch
 							if err != nil {
 								t.Fatalf("TranspileParameterizedValue() error = %v", err)
 							}
-							wantParam := renderReduce(d, tt.wantParamReducer(d), tt.wantParamInitial(d), tt.initialType)
+							wantParam := renderReduce(d, tt.source, tt.wantParamReducer(d), tt.wantParamInitial(d), tt.initialType)
 							if gotParam != wantParam {
 								t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
 							}
@@ -1528,7 +1558,7 @@ func TestOrderingComparisonRejectsArrayValuedExpressionsAllDialects(t *testing.T
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "numbers", Type: FieldTypeArray},
+		{Name: "numbers", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 	logic := `{">":[{"map":[{"var":"numbers"},{"*":[{"var":""},2]}]},10]}`
 
@@ -1625,7 +1655,7 @@ func TestTranspileValue_ReduceAccumulatorTruthinessUsesSchemaInitialTypeAllDiale
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "arr", Type: FieldTypeArray},
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 		{Name: "seed", Type: FieldTypeNumber},
 	})
 	logic := `{"reduce":[{"var":"arr"},{"or":[{"var":"accumulator"},{"var":"current"}]},{"var":"seed"}]}`
@@ -1719,7 +1749,7 @@ func TestTranspileValue_PostgreSQLEmptyArrayScannerAllowsTypedSQL(t *testing.T) 
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "arr", Type: FieldTypeArray},
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 	schemaRequiredModes := schemaRequiredModes(schema)
 
@@ -1818,7 +1848,7 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 			logic: `{"or":[1e-400,"fallback"]}`,
 			want:  "'fallback'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
@@ -1827,7 +1857,7 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 			logic: `{"or":[1e-9999,"fallback"]}`,
 			want:  "'fallback'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
@@ -1845,7 +1875,7 @@ func TestTranspileValue_UnderflowJSONNumberTruthinessAllDialects(t *testing.T) {
 			logic: `{"if":[1e-400,"yes","no"]}`,
 			want:  "'no'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "no"}},
 		},
@@ -1977,10 +2007,10 @@ func TestTranspileValue_OverflowJSONNumberComparisonsDoNotShortCircuitAllDialect
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf(
 					"CASE WHEN %s = %s THEN %s ELSE %s END",
-					testPlaceholder(d, 1),
-					testPlaceholder(d, 2),
-					testPlaceholder(d, 3),
-					testPlaceholder(d, 4),
+					testStringPlaceholder(d, 1),
+					testStringPlaceholder(d, 2),
+					testStringPlaceholder(d, 3),
+					testStringPlaceholder(d, 4),
 				)
 			},
 			wantParams: []QueryParam{
@@ -1997,10 +2027,10 @@ func TestTranspileValue_OverflowJSONNumberComparisonsDoNotShortCircuitAllDialect
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf(
 					"CASE WHEN %s != %s THEN %s ELSE %s END",
-					testPlaceholder(d, 1),
-					testPlaceholder(d, 2),
-					testPlaceholder(d, 3),
-					testPlaceholder(d, 4),
+					testStringPlaceholder(d, 1),
+					testStringPlaceholder(d, 2),
+					testStringPlaceholder(d, 3),
+					testStringPlaceholder(d, 4),
 				)
 			},
 			wantParams: []QueryParam{
@@ -2017,10 +2047,10 @@ func TestTranspileValue_OverflowJSONNumberComparisonsDoNotShortCircuitAllDialect
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf(
 					"CASE WHEN %s > %s THEN %s ELSE %s END",
-					testPlaceholder(d, 1),
+					testStringPlaceholder(d, 1),
 					testPlaceholder(d, 2),
-					testPlaceholder(d, 3),
-					testPlaceholder(d, 4),
+					testStringPlaceholder(d, 3),
+					testStringPlaceholder(d, 4),
 				)
 			},
 			wantParams: []QueryParam{
@@ -2156,7 +2186,7 @@ func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 					if err != nil {
 						t.Fatalf("TranspileParameterizedValueFromInterface() error = %v", err)
 					}
-					if want := testPlaceholder(d, 1); gotParam != want {
+					if want := testStringPlaceholder(d, 1); gotParam != want {
 						t.Fatalf("TranspileParameterizedValueFromInterface() = %q, want %q", gotParam, want)
 					}
 					wantParams := []QueryParam{{Name: "p1", Value: "fallback"}}
@@ -2176,7 +2206,7 @@ func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 					if err != nil {
 						t.Fatalf("TranspileParameterizedValueFromInterface(and Inf) error = %v", err)
 					}
-					if want := testPlaceholder(d, 1); gotParam != want {
+					if want := testStringPlaceholder(d, 1); gotParam != want {
 						t.Fatalf("TranspileParameterizedValueFromInterface(and Inf) = %q, want %q", gotParam, want)
 					}
 					if wantParams := []QueryParam{{Name: "p1", Value: "fallback"}}; !reflect.DeepEqual(gotParams, wantParams) {
@@ -2215,7 +2245,7 @@ func TestTranspileValue_NativeNaNTruthinessAllDialects(t *testing.T) {
 							if err != nil {
 								t.Fatalf("TranspileParameterizedValueFromInterface() error = %v", err)
 							}
-							if want := testPlaceholder(d, 1); gotParam != want {
+							if want := testStringPlaceholder(d, 1); gotParam != want {
 								t.Fatalf("TranspileParameterizedValueFromInterface() = %q, want %q", gotParam, want)
 							}
 							if !reflect.DeepEqual(gotParams, tt.wantParams) {
@@ -2394,7 +2424,7 @@ func TestTranspileValue_ArrayValueFallbackStringLiteralsNotRewritten(t *testing.
 					if err != nil {
 						t.Fatalf("TranspileParameterizedValue() error = %v", err)
 					}
-					placeholder := testPlaceholder(d, 1)
+					placeholder := testStringPlaceholder(d, 1)
 					wantParam := fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(arr) AS elem)", placeholder)
 					if d == DialectClickHouse {
 						wantParam = fmt.Sprintf("arrayMap(elem -> %s, arr)", placeholder)
@@ -2447,7 +2477,7 @@ func TestTranspileValue_ArrayOperatorArrayLiteralElementsAsExpressions(t *testin
 		{
 			dialect:   DialectClickHouse,
 			want:      "arrayMap(elem -> elem, [amount, 5])",
-			wantParam: "arrayMap(elem -> elem, [amount, @p1])",
+			wantParam: "arrayMap(elem -> elem, [amount, {p1:Float64}])",
 		},
 	}
 
@@ -2488,7 +2518,7 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaRequired(t
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "arr", Type: FieldTypeArray},
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 
 	arrayLiteral := func(d Dialect, elem string) string {
@@ -2540,7 +2570,7 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaRequired(t
 				return mapSQL(d, arrayLiteral(d, "COALESCE(elem, 'fallback')"))
 			},
 			wantParam: func(d Dialect) string {
-				return mapSQL(d, arrayLiteral(d, fmt.Sprintf("COALESCE(elem, %s)", testPlaceholder(d, 1))))
+				return mapSQL(d, arrayLiteral(d, fmt.Sprintf("COALESCE(elem, %s)", testStringPlaceholder(d, 1))))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
@@ -2564,6 +2594,11 @@ func TestTranspileValue_MapTransformationArrayLiteralAllDialectsSchemaRequired(t
 
 					for _, tt := range tests {
 						t.Run(tt.name, func(t *testing.T) {
+							if testRejectsNestedArrayValues(d) {
+								expectValueAndParamErrorContains(t, tr, tt.logic, nestedArrayErrorFragment(d))
+								return
+							}
+
 							got, err := tr.TranspileValue(tt.logic)
 							if err != nil {
 								t.Fatalf("TranspileValue() error = %v", err)
@@ -2645,7 +2680,7 @@ func TestTranspileValue_NumericOperandsCoercePredicatesAllDialectsSchemaRequired
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "arr", Type: FieldTypeArray},
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 		{Name: "flag", Type: FieldTypeBoolean},
 		{Name: "x", Type: FieldTypeNumber},
 	})
@@ -2951,7 +2986,7 @@ func TestTranspileValue_TruthinessOnlyExpressionsAllowMixedValueBranchesAllDiale
 			logic: `{"if":[{"or":[{"var":"flag"},"x"]},"yes","no"]}`,
 			want:  "'yes'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "yes"}},
 		},
@@ -3021,7 +3056,7 @@ func TestTranspileValue_FoldedPredicateConditionsShortCircuit(t *testing.T) {
 			logic: `{"if":[{"==":[true,false]},{"var":"missing"},"ok"]}`,
 			want:  "'ok'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
 		},
@@ -3030,7 +3065,7 @@ func TestTranspileValue_FoldedPredicateConditionsShortCircuit(t *testing.T) {
 			logic: `{"if":[{"===":[{"var":"code"},5]},{"var":"missing"},"ok"]}`,
 			want:  "'ok'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
 		},
@@ -3048,7 +3083,7 @@ func TestTranspileValue_FoldedPredicateConditionsShortCircuit(t *testing.T) {
 			logic: `{"if":[{"!":"x"},{"var":"missing"},"ok"]}`,
 			want:  "'ok'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
 		},
@@ -3103,7 +3138,7 @@ func TestTranspileValue_IfConstantTestsShortCircuit(t *testing.T) {
 			logic:   `{"if":[true,"ok",0]}`,
 			wantSQL: "'ok'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
 		},
@@ -3112,7 +3147,7 @@ func TestTranspileValue_IfConstantTestsShortCircuit(t *testing.T) {
 			logic:   `{"if":[false,{"var":"bad-name"},"ok"]}`,
 			wantSQL: "'ok'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
 		},
@@ -3122,7 +3157,7 @@ func TestTranspileValue_IfConstantTestsShortCircuit(t *testing.T) {
 			wantSQL: "CASE WHEN x > 0 THEN 'positive' ELSE 'fallback' END",
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf("CASE WHEN x > %s THEN %s ELSE %s END",
-					testPlaceholder(d, 1), testPlaceholder(d, 2), testPlaceholder(d, 3))
+					testPlaceholder(d, 1), testStringPlaceholder(d, 2), testStringPlaceholder(d, 3))
 			},
 			wantParams: []QueryParam{
 				{Name: "p1", Value: float64(0)},
@@ -3183,7 +3218,7 @@ func TestTranspileValue_DynamicLogicalTruthinessWithSchema(t *testing.T) {
 			logic:   `{"or":[{"var":"name"},"fallback"]}`,
 			wantSQL: "CASE WHEN (name IS NOT NULL AND name != '') THEN name ELSE 'fallback' END",
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("CASE WHEN (name IS NOT NULL AND name != '') THEN name ELSE %s END", testPlaceholder(d, 1))
+				return fmt.Sprintf("CASE WHEN (name IS NOT NULL AND name != '') THEN name ELSE %s END", testStringPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
@@ -3247,7 +3282,7 @@ func TestTranspileValue_LiteralPredicateFallbacksAllDialects(t *testing.T) {
 			logic:   `{"or":[{"!=":[null,null]},"x"]}`,
 			wantSQL: "'x'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
 		},
@@ -3256,7 +3291,7 @@ func TestTranspileValue_LiteralPredicateFallbacksAllDialects(t *testing.T) {
 			logic:   `{"and":[{"==":[1,1]},"x"]}`,
 			wantSQL: "'x'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
 		},
@@ -3265,7 +3300,7 @@ func TestTranspileValue_LiteralPredicateFallbacksAllDialects(t *testing.T) {
 			logic:   `{"or":[{">":[1,2]},"x"]}`,
 			wantSQL: "'x'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
 		},
@@ -3423,7 +3458,7 @@ func TestTranspileValue_EmptySchemaFieldTruthinessRejectedAllDialects(t *testing
 			if err != nil {
 				t.Fatalf("schema-required TranspileParameterizedValue(or) error = %v", err)
 			}
-			if want := fmt.Sprintf("CASE WHEN (nickname IS NOT NULL AND nickname != '') THEN nickname ELSE %s END", testPlaceholder(d, 1)); gotParam != want {
+			if want := fmt.Sprintf("CASE WHEN (nickname IS NOT NULL AND nickname != '') THEN nickname ELSE %s END", testStringPlaceholder(d, 1)); gotParam != want {
 				t.Fatalf("schema-required TranspileParameterizedValue(or) = %q, want %q", gotParam, want)
 			}
 			if want := []QueryParam{{Name: "p1", Value: "unknown"}}; !reflect.DeepEqual(gotParams, want) {
@@ -3511,13 +3546,23 @@ func TestTranspileValue_CatNullSafeStringificationAllDialects(t *testing.T) {
 		wantParams []QueryParam
 	}{
 		{
+			name:  "empty cat returns empty string",
+			logic: `{"cat":[]}`,
+			want: func(_ Dialect) string {
+				return "''"
+			},
+			wantParam: func(_ Dialect) string {
+				return "''"
+			},
+		},
+		{
 			name:  "literal null stringifies to empty",
 			logic: `{"cat":[null,"y"]}`,
 			want: func(_ Dialect) string {
 				return "CONCAT('', 'y')"
 			},
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("CONCAT('', %s)", testPlaceholder(d, 1))
+				return fmt.Sprintf("CONCAT('', %s)", testStringPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "y"}},
 		},
@@ -3528,7 +3573,7 @@ func TestTranspileValue_CatNullSafeStringificationAllDialects(t *testing.T) {
 				return "CONCAT('', 'y')"
 			},
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("CONCAT('', %s)", testPlaceholder(d, 1))
+				return fmt.Sprintf("CONCAT('', %s)", testStringPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "y"}},
 		},
@@ -3539,7 +3584,7 @@ func TestTranspileValue_CatNullSafeStringificationAllDialects(t *testing.T) {
 				return "CONCAT(COALESCE(name, ''), 'y')"
 			},
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("CONCAT(COALESCE(name, ''), %s)", testPlaceholder(d, 1))
+				return fmt.Sprintf("CONCAT(COALESCE(name, ''), %s)", testStringPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "y"}},
 		},
@@ -3616,7 +3661,7 @@ func TestTranspileValue_CatNullSafeBehaviorAllDialects(t *testing.T) {
 				return "CONCAT(COALESCE(name, ''), '-x')"
 			},
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("CONCAT(COALESCE(name, ''), %s)", testPlaceholder(d, 1))
+				return fmt.Sprintf("CONCAT(COALESCE(name, ''), %s)", testStringPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "-x"}},
 		},
@@ -3627,7 +3672,7 @@ func TestTranspileValue_CatNullSafeBehaviorAllDialects(t *testing.T) {
 				return fmt.Sprintf("CONCAT('#', COALESCE(%s, ''))", testStringCastSQL(d, "amount"))
 			},
 			wantParam: func(d Dialect) string {
-				return fmt.Sprintf("CONCAT(%s, COALESCE(%s, ''))", testPlaceholder(d, 1), testStringCastSQL(d, "amount"))
+				return fmt.Sprintf("CONCAT(%s, COALESCE(%s, ''))", testStringPlaceholder(d, 1), testStringCastSQL(d, "amount"))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "#"}},
 		},
@@ -3664,8 +3709,8 @@ func TestTranspileValue_CatNullSafeBehaviorAllDialects(t *testing.T) {
 				return fmt.Sprintf(
 					"CONCAT(COALESCE(CASE WHEN %s THEN %s ELSE NULL END, ''), %s)",
 					condition,
-					testPlaceholder(d, 2),
-					testPlaceholder(d, 3),
+					testStringPlaceholder(d, 2),
+					testStringPlaceholder(d, 3),
 				)
 			},
 			wantParams: []QueryParam{
@@ -3829,6 +3874,8 @@ func customStringArgSQL(d Dialect, arg OperatorArg) string {
 		return fmt.Sprintf("COALESCE(%s, '')", testStringCastSQL(d, arg.SQL))
 	case ExpressionTypeArray:
 		return arg.SQL
+	case ExpressionTypeObject:
+		return arg.SQL
 	}
 	return arg.SQL
 }
@@ -3839,10 +3886,10 @@ func catDeepNestingSQL(d Dialect, parameterized bool) string {
 	fallback := "'-fallback'"
 	bang := "'!'"
 	if parameterized {
-		prefixOne = testPlaceholder(d, 1)
-		prefixTwo = testPlaceholder(d, 2)
-		fallback = testPlaceholder(d, 3)
-		bang = testPlaceholder(d, 4)
+		prefixOne = testStringPlaceholder(d, 1)
+		prefixTwo = testStringPlaceholder(d, 2)
+		fallback = testStringPlaceholder(d, 3)
+		bang = testStringPlaceholder(d, 4)
 	}
 
 	firstSQL := "COALESCE(first, '')"
@@ -3885,7 +3932,7 @@ func TestTranspileValue_CatStringifiesMixedLogicalBranchesAllDialectsSchemaRequi
 			want:  "CONCAT(CASE WHEN x = 1 THEN 'yes' ELSE 'false' END)",
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf("CONCAT(CASE WHEN x = %s THEN %s ELSE 'false' END)",
-					testPlaceholder(d, 1), testPlaceholder(d, 2))
+					testPlaceholder(d, 1), testStringPlaceholder(d, 2))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}, {Name: "p2", Value: "yes"}},
 		},
@@ -3896,7 +3943,7 @@ func TestTranspileValue_CatStringifiesMixedLogicalBranchesAllDialectsSchemaRequi
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf(
 					"CONCAT(CASE WHEN x = %s THEN CASE WHEN x = %s THEN 'true' ELSE 'false' END ELSE %s END)",
-					testPlaceholder(d, 1), testPlaceholder(d, 2), testPlaceholder(d, 3),
+					testPlaceholder(d, 1), testPlaceholder(d, 2), testStringPlaceholder(d, 3),
 				)
 			},
 			wantParams: []QueryParam{
@@ -3912,7 +3959,7 @@ func TestTranspileValue_CatStringifiesMixedLogicalBranchesAllDialectsSchemaRequi
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf(
 					"CONCAT(CASE WHEN x = %s THEN %s ELSE CASE WHEN x = %s THEN 'true' ELSE 'false' END END)",
-					testPlaceholder(d, 1), testPlaceholder(d, 3), testPlaceholder(d, 2),
+					testPlaceholder(d, 1), testStringPlaceholder(d, 3), testPlaceholder(d, 2),
 				)
 			},
 			wantParams: []QueryParam{
@@ -4005,7 +4052,7 @@ func TestTranspileValue_CatRejectsStaticArrayValuesAllDialectsSchemaRequired(t *
 
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "flag", Type: FieldTypeBoolean},
-		{Name: "items", Type: FieldTypeArray},
+		{Name: "items", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 
 	tests := []struct {
@@ -4099,7 +4146,7 @@ func TestTranspileValue_PredicateResultsAreTwoValuedBooleansAllDialectsSchemaReq
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "x", Type: FieldTypeNumber},
 		{Name: "flag", Type: FieldTypeBoolean},
-		{Name: "arr", Type: FieldTypeArray},
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 
 	predicateValue := "CASE WHEN x = 1 THEN TRUE ELSE FALSE END"
@@ -4176,13 +4223,13 @@ func TestTranspileValue_PredicateResultsAreTwoValuedBooleansAllDialectsSchemaReq
 				return testDuckDBUnnestSourceAliases(d, "ARRAY(SELECT CASE WHEN elem = 1 THEN TRUE ELSE FALSE END FROM UNNEST(arr) AS elem)")
 			},
 			wantParam: func(d Dialect) string {
-				placeholder := testPlaceholder(d, 1)
+				placeholder := testIntPlaceholder(d, 1)
 				if d == DialectClickHouse {
 					return fmt.Sprintf("arrayMap(elem -> CASE WHEN elem = %s THEN TRUE ELSE FALSE END, arr)", placeholder)
 				}
 				return testDuckDBUnnestSourceAliases(d, fmt.Sprintf("ARRAY(SELECT CASE WHEN elem = %s THEN TRUE ELSE FALSE END FROM UNNEST(arr) AS elem)", placeholder))
 			},
-			wantParams: []QueryParam{{Name: "p1", Value: float64(1)}},
+			wantParams: []QueryParam{{Name: "p1", Value: int64(1)}},
 		},
 	}
 
@@ -4598,9 +4645,12 @@ func TestTranspileValue_ArrayLiteralsRejectKnownMixedElementTypesAllDialects(t *
 func TestTranspileValue_NestedArrayLiteralsRejectUnsupportedDialects(t *testing.T) {
 	t.Parallel()
 
-	tests := []string{
-		`[[1]]`,
-		`{"map":[[[1]],{"var":""}]}`,
+	tests := []struct {
+		logic              string
+		rejectNestedSource bool
+	}{
+		{logic: `[[1]]`},
+		{logic: `{"map":[[[1]],{"var":""}]}`, rejectNestedSource: true},
 	}
 
 	for _, d := range allDialects() {
@@ -4612,11 +4662,12 @@ func TestTranspileValue_NestedArrayLiteralsRejectUnsupportedDialects(t *testing.
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
 
-			for _, logic := range tests {
-				t.Run(logic, func(t *testing.T) {
-					_, err := tr.TranspileValue(logic)
-					paramSQL, params, paramErr := tr.TranspileParameterizedValue(logic)
-					if dialectRejectsArrayLiteralElements(d) {
+			for _, tc := range tests {
+				t.Run(tc.logic, func(t *testing.T) {
+					_, err := tr.TranspileValue(tc.logic)
+					paramSQL, params, paramErr := tr.TranspileParameterizedValue(tc.logic)
+					if dialectRejectsArrayLiteralElements(d) ||
+						(tc.rejectNestedSource && dialectRejectsNestedArraySources(d)) {
 						if !IsErrorCode(err, ErrInvalidArgument) {
 							t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
 						}
@@ -4916,7 +4967,7 @@ func TestTranspileValue_ArrayExpressionSourcesPreserveElementTypesAllDialects(t 
 					}
 
 					got, err := tr.TranspileValue(tt.logic)
-					if tt.rejectArrayElements && dialectRejectsArrayLiteralElements(d) {
+					if tt.rejectArrayElements && dialectRejectsNestedArraySources(d) {
 						if !IsErrorCode(err, ErrInvalidArgument) {
 							t.Fatalf("TranspileValue() error = %v, want %s", err, ErrInvalidArgument)
 						}
@@ -4980,8 +5031,8 @@ func TestTranspileParameterizedValue_ReduceAggregatePredicateBindsScopedDefaults
 			if strings.Contains(sql, "'fallback'") {
 				t.Fatalf("TranspileParameterizedValue() inlined scoped default: %s", sql)
 			}
-			assertContains(t, sql, fmt.Sprintf("COALESCE(elem.x, %s)", testPlaceholder(d, 2)))
-			assertContains(t, sql, fmt.Sprintf("= %s", testPlaceholder(d, 3)))
+			assertContains(t, sql, fmt.Sprintf("COALESCE(elem.x, %s)", testStringPlaceholder(d, 2)))
+			assertContains(t, sql, fmt.Sprintf("= %s", testStringPlaceholder(d, 3)))
 			wantParams := []QueryParam{
 				{Name: "p1", Value: float64(0)},
 				{Name: "p2", Value: "fallback"},
@@ -5123,7 +5174,7 @@ func TestTranspileValue_IfUsesTypedCustomPredicateCondition(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TranspileParameterizedValue() error = %v", err)
 			}
-			wantParam := fmt.Sprintf("CASE WHEN amount > 0 THEN %s ELSE %s END", testPlaceholder(d, 1), testPlaceholder(d, 2))
+			wantParam := fmt.Sprintf("CASE WHEN amount > 0 THEN %s ELSE %s END", testStringPlaceholder(d, 1), testStringPlaceholder(d, 2))
 			if gotParam != wantParam {
 				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
 			}
@@ -5185,7 +5236,7 @@ func TestTranspileParameterizedValue_NestedValueLogicalsRollbackSkippedParams(t 
 			name:  "or skips falsy numeric literal before fallback string",
 			logic: `{"or":[0,"fallback"]}`,
 			wantSQL: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
@@ -5193,7 +5244,7 @@ func TestTranspileParameterizedValue_NestedValueLogicalsRollbackSkippedParams(t 
 			name:  "and skips truthy numeric literal before fallback string",
 			logic: `{"and":[1,"x"]}`,
 			wantSQL: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
 		},
@@ -5201,7 +5252,7 @@ func TestTranspileParameterizedValue_NestedValueLogicalsRollbackSkippedParams(t 
 			name:  "or keeps returned truthy string literal",
 			logic: `{"or":["x","fallback"]}`,
 			wantSQL: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "x"}},
 		},
@@ -5238,7 +5289,7 @@ func TestTranspileParameterizedValue_NestedValueLogicalsRollbackSkippedParams(t 
 			name:  "nested string operand preserves emitted parameter order",
 			logic: `{"cat":[{"or":[false,"fallback"]}]}`,
 			wantSQL: func(d Dialect) string {
-				return fmt.Sprintf("CONCAT(%s)", testPlaceholder(d, 1))
+				return fmt.Sprintf("CONCAT(%s)", testStringPlaceholder(d, 1))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "fallback"}},
 		},
@@ -5482,7 +5533,7 @@ func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *te
 	if err != nil {
 		t.Fatalf("TranspileParameterizedValue() ClickHouse cat reduce error = %v", err)
 	}
-	if want := "CONCAT(COALESCE(arrayFold((acc, elem) -> CONCAT(COALESCE(acc, ''), COALESCE(toString(elem), '')), arr, @p1), ''))"; gotSQL != want {
+	if want := "CONCAT(COALESCE(arrayFold((acc, elem) -> CONCAT(COALESCE(acc, ''), COALESCE(toString(elem), '')), arr, {p1:String}), ''))"; gotSQL != want {
 		t.Fatalf("TranspileParameterizedValue() ClickHouse cat reduce SQL = %q, want %q", gotSQL, want)
 	}
 	if wantParams := []QueryParam{{Name: "p1", Value: ""}}; !reflect.DeepEqual(gotParams, wantParams) {
@@ -5553,7 +5604,7 @@ func TestTranspileValue_ArrayPredicateContextsUseTruthinessLogicals(t *testing.T
 }
 
 func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing.T) {
-	logic := `{"map":[{"var":"items"},{"cat":[{"var":["","fallback"]}]}]}`
+	logic := `{"map":[{"var":"names"},{"cat":[{"var":["","fallback"]}]}]}`
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
@@ -5569,7 +5620,7 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultUsesBindParams(t *testing
 			if strings.Contains(gotSQL, "'fallback'") {
 				t.Fatalf("SQL inlined scoped var default: %s", gotSQL)
 			}
-			if want := fmt.Sprintf("COALESCE(elem, %s)", testPlaceholder(d, 1)); !strings.Contains(gotSQL, want) {
+			if want := fmt.Sprintf("COALESCE(elem, %s)", testStringPlaceholder(d, 1)); !strings.Contains(gotSQL, want) {
 				t.Fatalf("SQL = %q, want to contain %q", gotSQL, want)
 			}
 			wantParams := []QueryParam{
@@ -5596,7 +5647,7 @@ func TestTranspileParameterizedValue_ArrayScopedDefaultSkippedByValueLogical(t *
 			if err != nil {
 				t.Fatalf("TranspileParameterizedValue() error = %v", err)
 			}
-			wantValue := testPlaceholder(d, 1)
+			wantValue := testStringPlaceholder(d, 1)
 			wantSQL := fmt.Sprintf("ARRAY(SELECT %s FROM UNNEST(items) AS elem)", wantValue)
 			if d == DialectClickHouse {
 				wantSQL = fmt.Sprintf("arrayMap(elem -> %s, items)", wantValue)
@@ -5687,7 +5738,7 @@ func TestTranspileValue_CustomPredicateBooleanConstantsShortCircuitAllDialectsSc
 			logic: `{"if":[{"alwaysTrue":[]},"ok",{"var":"bad-name"}]}`,
 			want:  "'ok'",
 			wantParam: func(d Dialect) string {
-				return testPlaceholder(d, 1)
+				return testStringPlaceholder(d, 1)
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "ok"}},
 		},
@@ -5738,10 +5789,205 @@ func TestTranspileValue_CustomPredicateBooleanConstantsShortCircuitAllDialectsSc
 	}
 }
 
+func TestTranspileValue_RejectsDefaultedScopedObjectFieldsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "items", Type: FieldTypeArray, ElementFields: []FieldSchema{
+			{Name: "profile", Type: FieldTypeObject, Fields: []FieldSchema{
+				{Name: "tier", Type: FieldTypeString},
+			}},
+		}},
+	})
+	logic := `{"map":[{"var":"items"},{"var":["profile",null]}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			expectValueAndParamErrorContains(t, tr, logic, "object field 'items.profile' cannot be used as a value expression")
+		})
+	}
+}
+
+func TestTranspileValue_SubstrRejectsKnownInvalidValueOperandTypesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		logic   string
+		wantErr string
+	}{
+		{
+			name:    "array-valued source",
+			logic:   `{"substr":[{"map":[[1,2],{"var":""}]},0]}`,
+			wantErr: "substring source argument must be string or number, got array",
+		},
+		{
+			name:    "string-valued start",
+			logic:   `{"substr":["abcdef",{"cat":["x"]}]}`,
+			wantErr: "substring start argument must be numeric, got string",
+		},
+		{
+			name:    "predicate length",
+			logic:   `{"substr":["abcdef",0,{">":[1,0]}]}`,
+			wantErr: "substring length argument must be numeric, got predicate",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, emptyTestSchema())
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+					expectValueAndParamErrorContains(t, tr, tt.logic, tt.wantErr)
+				})
+			}
+		})
+	}
+}
+
+func TestTranspileValue_SubstrNegativeIndexesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{{Name: "text", Type: FieldTypeString}})
+	tests := []struct {
+		name      string
+		logic     string
+		want      func(Dialect) string
+		wantParam func(Dialect) string
+		params    []QueryParam
+	}{
+		{
+			name:  "negative start counts from end",
+			logic: `{"substr":[{"var":"text"},-5,3]}`,
+			want: func(d Dialect) string {
+				return fmt.Sprintf("%s(text, %s, 3)",
+					testSubstrFunc(d),
+					testGreatest(fmt.Sprintf("(%s + -5 + 1)", testStringLength(d)), "1"),
+				)
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("%s(text, %s, %s)",
+					testSubstrFunc(d),
+					testGreatest(fmt.Sprintf("(%s + %s + 1)", testStringLength(d), testPlaceholder(d, 1)), "1"),
+					testPlaceholder(d, 2),
+				)
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(-5)}, {Name: "p2", Value: float64(3)}},
+		},
+		{
+			name:  "negative length stops before end",
+			logic: `{"substr":[{"var":"text"},4,-2]}`,
+			want: func(d Dialect) string {
+				return fmt.Sprintf("%s(text, 5, %s)",
+					testSubstrFunc(d),
+					testGreatest(
+						fmt.Sprintf("(%s - 4)", testGreatest(fmt.Sprintf("(%s + -2)", testStringLength(d)), "0")),
+						"0",
+					),
+				)
+			},
+			wantParam: func(d Dialect) string {
+				return fmt.Sprintf("%s(text, (%s + 1), %s)",
+					testSubstrFunc(d),
+					testPlaceholder(d, 1),
+					testGreatest(
+						fmt.Sprintf("(%s - %s)",
+							testGreatest(fmt.Sprintf("(%s + %s)", testStringLength(d), testPlaceholder(d, 2)), "0"),
+							testPlaceholder(d, 1),
+						),
+						"0",
+					),
+				)
+			},
+			params: []QueryParam{{Name: "p1", Value: float64(4)}, {Name: "p2", Value: float64(-2)}},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+					got, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if want := tt.want(d); got != want {
+						t.Fatalf("TranspileValue() = %q, want %q", got, want)
+					}
+
+					gotSQL, gotParams, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if want := tt.wantParam(d); gotSQL != want {
+						t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotSQL, want)
+					}
+					if !reflect.DeepEqual(gotParams, tt.params) {
+						t.Fatalf("params = %#v, want %#v", gotParams, tt.params)
+					}
+				})
+			}
+		})
+	}
+}
+
 func testPlaceholder(d Dialect, index int) string {
+	return testTypedPlaceholder(d, index, "Float64")
+}
+
+func testStringPlaceholder(d Dialect, index int) string {
+	return testTypedPlaceholder(d, index, "String")
+}
+
+func testIntPlaceholder(d Dialect, index int) string {
+	return testTypedPlaceholder(d, index, "Int64")
+}
+
+func testSubstrFunc(d Dialect) string {
+	if d == DialectClickHouse {
+		return "substring"
+	}
+	return "SUBSTR"
+}
+
+func testStringLength(d Dialect) string {
+	if d == DialectClickHouse {
+		return "length(text)"
+	}
+	return "LENGTH(text)"
+}
+
+func testGreatest(args ...string) string {
+	return fmt.Sprintf("GREATEST(%s)", strings.Join(args, ", "))
+}
+
+func testTypedPlaceholder(d Dialect, index int, typ string) string {
 	switch d {
 	case DialectPostgreSQL, DialectDuckDB:
 		return fmt.Sprintf("$%d", index)
+	case DialectClickHouse:
+		return fmt.Sprintf("{p%d:%s}", index, typ)
 	default:
 		return fmt.Sprintf("@p%d", index)
 	}

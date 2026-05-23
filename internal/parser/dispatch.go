@@ -216,8 +216,11 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 	if p.isPrimitive(arg) {
 		return arg, nil
 	}
+	argPath := tperrors.BuildArrayPath(path, index)
+	if arr, ok := arg.([]interface{}); ok {
+		return p.processValueArrayLiteral(arr, argPath)
+	}
 	if exprMap, ok := arg.(map[string]interface{}); ok {
-		argPath := tperrors.BuildArrayPath(path, index)
 		if len(exprMap) != 1 {
 			return nil, tperrors.NewMultipleKeys(argPath)
 		}
@@ -239,6 +242,46 @@ func (p *Parser) processValueArg(arg interface{}, path string, index int) (inter
 		}
 	}
 	return p.processArg(arg, path, index)
+}
+
+func (p *Parser) processValueArrayLiteral(arr []interface{}, path string) ([]interface{}, error) {
+	processed := make([]interface{}, len(arr))
+	for i, item := range arr {
+		itemPath := tperrors.BuildArrayPath(path, i)
+		processedItem, err := p.processValueArrayLiteralItem(item, itemPath)
+		if err != nil {
+			return nil, err
+		}
+		processed[i] = processedItem
+	}
+	return processed, nil
+}
+
+func (p *Parser) processValueArrayLiteralItem(item interface{}, path string) (interface{}, error) {
+	if p.isPrimitive(item) {
+		return item, nil
+	}
+	if arr, ok := item.([]interface{}); ok {
+		return p.processValueArrayLiteral(arr, path)
+	}
+	if exprMap, ok := item.(map[string]interface{}); ok {
+		if len(exprMap) != 1 {
+			return nil, tperrors.NewMultipleKeys(path)
+		}
+		res, err := p.parseExpressionValue(item, path)
+		if err != nil {
+			return nil, err
+		}
+		if res.rawLiteralKnown {
+			return res.rawLiteral, nil
+		}
+		if res.Kind == operators.ExpressionKindValue && valueTypeOf(res) == operators.ExpressionTypeNull {
+			var nullLiteral interface{}
+			return nullLiteral, nil
+		}
+		return typedValueOperand(res), nil
+	}
+	return item, nil
 }
 
 // processArg processes a single argument, recursively handling custom operators.
@@ -339,5 +382,5 @@ func (p *Parser) processArgToOperatorArg(arg interface{}, path string) (operator
 	if err != nil {
 		return operators.OperatorArg{}, err
 	}
-	return operators.OperatorArg{SQL: res.SQL, Kind: res.Kind, Type: valueTypeOf(res)}, nil
+	return operatorArgFromExpressionResult(res), nil
 }

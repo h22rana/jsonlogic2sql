@@ -1,4 +1,3 @@
-//nolint:goconst // JSONLogic operator and SQL token strings stay inline in parser switches for readability.
 package parser
 
 import (
@@ -85,14 +84,16 @@ func (p *Parser) parseExpressionValue(expr interface{}, path string) (expression
 		return p.parsePrimitiveValue(expr, path)
 	}
 	if arr, ok := expr.([]interface{}); ok {
-		sql, elemTypes, err := p.arrayLiteralToSQL(arr, path)
+		sql, elemTypes, schemaScopes, err := p.arrayLiteralToSQL(arr, path)
 		if err != nil {
 			return expressionResult{}, tperrors.Wrap(tperrors.ErrInvalidArgument, "", path, "invalid array literal", err)
 		}
-		return withArrayElementTypes(
+		res := withArrayElementTypes(
 			literalValueResultWithRaw(sql, operators.ExpressionTypeArray, len(arr) > 0, expr),
 			elemTypes...,
-		), nil
+		)
+		res = withArrayElementSchemaScopes(res, schemaScopes...)
+		return res, p.validateCompatibleObjectArrayScopesForResult(res, path)
 	}
 	if obj, ok := expr.(map[string]interface{}); ok {
 		if len(obj) != 1 {
@@ -236,11 +237,11 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 			res := resultFromOperator(operatorResultFromProcessedValue(pv))
 			copyProcessedFieldMetadata(&res, pv)
 			res.requiresKnownTruthiness = pv.RequiresKnownTruthiness
-			return withVarDefaultMetadata(res, args), nil
+			return p.supportedValueResult(withVarDefaultMetadata(res, args), path)
 		}
 		fieldName := varFieldName(args)
 		return p.supportedValueResult(
-			withVarDefaultMetadata(fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName), args),
+			withVarDefaultMetadata(p.fieldValueExpressionResult(sql, fieldName), args),
 			path,
 		)
 	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", operators.OpAll, operators.OpSome, operators.OpNone:
@@ -317,11 +318,11 @@ func (p *Parser) parseOperatorValue(operator string, args interface{}, path stri
 		if len(arr) == 3 && isEmptyArrayLiteralValue(arr[0]) {
 			return p.parseExpressionValue(arr[2], tperrors.BuildArrayPath(path, 2))
 		}
-		sql, err := p.arrayOp.ToSQLAtPath(operator, arr, path)
+		res, err := p.arrayOp.ToValueResultAtPath(operator, arr, path)
 		if err != nil {
 			return expressionResult{}, p.wrapOperatorError(operator, path, err)
 		}
-		return valueResult(sql, p.inferReduceResultType(arr)), nil
+		return resultFromOperator(res), nil
 	default:
 		return expressionResult{}, tperrors.NewUnsupportedOperator(operator, path)
 	}
@@ -489,7 +490,7 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 			typeSet = true
 			return nil
 		}
-		merged, err := compatibleValueResult(resultRes, res, path)
+		merged, err := p.compatibleValueResult(resultRes, res, path)
 		if err != nil {
 			return err
 		}
@@ -524,6 +525,7 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 			if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
 				result = withArrayElementTypes(result, elemTypes...)
 			}
+			result = withArrayElementSchemaScopes(result, resultRes.arrayElementSchemaScopes...)
 			return result, nil
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, valueSQL(thenRes)))
@@ -549,6 +551,7 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 	if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
 		result = withArrayElementTypes(result, elemTypes...)
 	}
+	result = withArrayElementSchemaScopes(result, resultRes.arrayElementSchemaScopes...)
 	return result, nil
 }
 
@@ -594,7 +597,7 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 	if err != nil {
 		return expressionResult{}, err
 	}
-	resultRes, err := compatibleValueResult(current, rest, path)
+	resultRes, err := p.compatibleValueResult(current, rest, path)
 	if err != nil {
 		return expressionResult{}, err
 	}
@@ -603,18 +606,20 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 		if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
 			result = withArrayElementTypes(result, elemTypes...)
 		}
+		result = withArrayElementSchemaScopes(result, resultRes.arrayElementSchemaScopes...)
 		return result, nil
 	}
 	result := valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(rest), valueSQL(current)), valueTypeOf(resultRes))
 	if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
 		result = withArrayElementTypes(result, elemTypes...)
 	}
+	result = withArrayElementSchemaScopes(result, resultRes.arrayElementSchemaScopes...)
 	return result, nil
 }
 
 func (p *Parser) parseCatValue(args []interface{}, path string) (expressionResult, error) {
 	if len(args) == 0 {
-		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpCat, path, 1, 0)
+		return valueResult("''", operators.ExpressionTypeString), nil
 	}
 	operands := make([]string, len(args))
 	for i, arg := range args {
@@ -624,7 +629,7 @@ func (p *Parser) parseCatValue(args []interface{}, path string) (expressionResul
 		}
 		operands[i] = res.SQL
 	}
-	return valueResult(fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), operators.ExpressionTypeString), nil
+	return valueResult(p.config.ConcatSQL(operands), operators.ExpressionTypeString), nil
 }
 
 func (p *Parser) parseCatStringExpression(expr interface{}, path string) (expressionResult, error) {
@@ -657,7 +662,7 @@ func (p *Parser) stringifiedCatResult(res expressionResult, path string) (expres
 	if err := p.validateCatStringifiableResult(res, path); err != nil {
 		return expressionResult{}, err
 	}
-	return valueResult(p.catStringSQL(res), operators.ExpressionTypeString), nil
+	return preserveParamRefsIfNeeded(valueResult(p.catStringSQL(res), operators.ExpressionTypeString), res), nil
 }
 
 func (p *Parser) validateCatStringifiableResult(res expressionResult, path string) error {
@@ -667,7 +672,7 @@ func (p *Parser) validateCatStringifiableResult(res expressionResult, path strin
 			if p.config.Schema.IsStringType(res.fieldName) || p.config.Schema.IsNumericType(res.fieldName) {
 				return nil
 			}
-			if p.config.Schema.IsArrayType(res.fieldName) || fieldType == "object" {
+			if p.config.Schema.IsArrayType(res.fieldName) || fieldType == objectTypeSQL {
 				return tperrors.New(tperrors.ErrInvalidArgument, operators.OpCat, path,
 					fmt.Sprintf("string operation on incompatible field '%s' (type: %s)", res.fieldName, fieldType))
 			}
@@ -676,6 +681,10 @@ func (p *Parser) validateCatStringifiableResult(res expressionResult, path strin
 	if valueTypeOf(res) == operators.ExpressionTypeArray {
 		return tperrors.New(tperrors.ErrInvalidArgument, operators.OpCat, path,
 			"string operation on incompatible array value")
+	}
+	if valueTypeOf(res) == operators.ExpressionTypeObject {
+		return tperrors.New(tperrors.ErrInvalidArgument, operators.OpCat, path,
+			"string operation on incompatible object value")
 	}
 	return nil
 }

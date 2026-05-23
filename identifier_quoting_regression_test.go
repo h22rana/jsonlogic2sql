@@ -58,7 +58,7 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 				DialectSpanner:    "profile.status = @p1",
 				DialectPostgreSQL: "profile.status = $1",
 				DialectDuckDB:     "profile.status = $1",
-				DialectClickHouse: "profile.status = @p1",
+				DialectClickHouse: "profile.status = {p1:String}",
 			},
 			expectedParam: []QueryParam{{Name: "p1", Value: "active"}},
 		},
@@ -77,7 +77,7 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 				DialectSpanner:    "metrics.`24h`.count >= @p1",
 				DialectPostgreSQL: `metrics."24h".count >= $1`,
 				DialectDuckDB:     `metrics."24h".count >= $1`,
-				DialectClickHouse: "metrics.`24h`.count >= @p1",
+				DialectClickHouse: "metrics.`24h`.count >= {p1:Float64}",
 			},
 			expectedParam: []QueryParam{{Name: "p1", Value: float64(50000)}},
 		},
@@ -96,7 +96,7 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 				DialectSpanner:    "(fixture.windowed_metrics.`24h`.events.total >= @p1 AND fixture.windowed_metrics.`7d`.events.count < @p2)",
 				DialectPostgreSQL: `(fixture.windowed_metrics."24h".events.total >= $1 AND fixture.windowed_metrics."7d".events.count < $2)`,
 				DialectDuckDB:     `(fixture.windowed_metrics."24h".events.total >= $1 AND fixture.windowed_metrics."7d".events.count < $2)`,
-				DialectClickHouse: "(fixture.windowed_metrics.`24h`.events.total >= @p1 AND fixture.windowed_metrics.`7d`.events.count < @p2)",
+				DialectClickHouse: "(fixture.windowed_metrics.`24h`.events.total >= {p1:Float64} AND fixture.windowed_metrics.`7d`.events.count < {p2:Float64})",
 			},
 			expectedParam: []QueryParam{
 				{Name: "p1", Value: float64(50000)},
@@ -118,7 +118,7 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 				DialectSpanner:    "((fixture.windowed_metrics.`24h`.events.total BETWEEN @p1 AND @p2) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
 				DialectPostgreSQL: `((fixture.windowed_metrics."24h".events.total BETWEEN $1 AND $2) AND (fixture.windowed_metrics."7d".events.count != 0))`,
 				DialectDuckDB:     `((fixture.windowed_metrics."24h".events.total BETWEEN $1 AND $2) AND (fixture.windowed_metrics."7d".events.count != 0))`,
-				DialectClickHouse: "((fixture.windowed_metrics.`24h`.events.total BETWEEN @p1 AND @p2) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
+				DialectClickHouse: "((fixture.windowed_metrics.`24h`.events.total BETWEEN {p1:Float64} AND {p2:Float64}) AND (fixture.windowed_metrics.`7d`.events.count != 0))",
 			},
 			expectedParam: []QueryParam{
 				{Name: "p1", Value: float64(50000)},
@@ -159,7 +159,7 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 				DialectSpanner:    "ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem.`24h` >= @p1)",
 				DialectPostgreSQL: `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= $1)`,
 				DialectDuckDB:     `ARRAY(SELECT elem FROM UNNEST(events) AS elem WHERE elem."24h" >= $1)`,
-				DialectClickHouse: "arrayFilter(elem -> elem.`24h` >= @p1, events)",
+				DialectClickHouse: "arrayFilter(elem -> elem.`24h` >= {p1:Float64}, events)",
 			},
 			expectedParam: []QueryParam{{Name: "p1", Value: float64(1)}},
 		},
@@ -197,7 +197,7 @@ func TestIdentifierQuotingRegression_NormalAndDeep_AllDialects(t *testing.T) {
 				DialectSpanner:    "@p1 + COALESCE((SELECT SUM(elem.`24h`) FROM UNNEST(events) AS elem), 0)",
 				DialectPostgreSQL: `$1 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
 				DialectDuckDB:     `$1 + COALESCE((SELECT SUM(elem."24h") FROM UNNEST(events) AS elem), 0)`,
-				DialectClickHouse: "@p1 + coalesce(arrayReduce('sum', arrayMap(x -> x.`24h`, events)), 0)",
+				DialectClickHouse: "{p1:Float64} + coalesce(arrayReduce('sum', arrayMap(x -> x.`24h`, events)), 0)",
 			},
 			expectedParam: []QueryParam{{Name: "p1", Value: float64(0)}},
 		},
@@ -286,7 +286,7 @@ func TestIdentifierQuotingRegression_NonASCIIDigitLeadingSchemaSegment(t *testin
 		{
 			dialect: DialectClickHouse,
 			inline:  "metrics.`\uff124h`.count >= 10",
-			param:   "metrics.`\uff124h`.count >= @p1",
+			param:   "metrics.`\uff124h`.count >= {p1:Float64}",
 		},
 	}
 
@@ -359,7 +359,7 @@ func TestIdentifierQuotingRegression_UnicodeSchemaSegments_AllDialects(t *testin
 		{
 			dialect:     DialectClickHouse,
 			rootInline:  "metrics.`café`.count >= 10",
-			rootParam:   "metrics.`café`.count >= @p1",
+			rootParam:   "metrics.`café`.count >= {p1:Float64}",
 			arrayInline: "arrayMap(elem -> elem.`café`, events)",
 			arrayParam:  "arrayMap(elem -> elem.`café`, events)",
 		},

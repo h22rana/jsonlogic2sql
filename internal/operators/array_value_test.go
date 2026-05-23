@@ -314,7 +314,7 @@ func TestArrayOperator_EdgeCases(t *testing.T) {
 					},
 				},
 			},
-			expected: "EXISTS (SELECT 1 FROM UNNEST(flags) AS elem WHERE (elem = TRUE OR elem = 1))",
+			expected: "EXISTS (SELECT 1 FROM UNNEST(flags) AS elem WHERE (elem = TRUE OR elem = TRUE))",
 			hasError: false,
 		},
 		{
@@ -434,8 +434,8 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 		{
 			name:     "reduce with SUM pattern on current.price (ClickHouse)",
 			operator: "reduce",
-			args:     []any{map[string]any{"var": "items"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.price"}}}, 0},
-			expected: "0 + coalesce(arrayReduce('sum', arrayMap(x -> x.price, items)), 0)",
+			args:     []any{map[string]any{"var": "objectItems"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.price"}}}, 0},
+			expected: "0 + coalesce(arrayReduce('sum', arrayMap(x -> x.price, objectItems)), 0)",
 			hasError: false,
 		},
 		{
@@ -471,8 +471,8 @@ func TestArrayOperator_ClickHouse(t *testing.T) {
 		{
 			name:     "some with condition",
 			operator: "some",
-			args:     []any{map[string]any{"var": "items"}, map[string]any{"==": []any{map[string]any{"var": ""}, "active"}}},
-			expected: "arrayExists(elem -> elem = 'active', items)",
+			args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": ""}, "active"}}},
+			expected: "arrayExists(elem -> elem = 'active', statuses)",
 			hasError: false,
 		},
 		// None - uses NOT arrayExists

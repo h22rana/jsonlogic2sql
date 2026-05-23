@@ -172,13 +172,13 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 		},
 		{
 			name:  "none elements check",
-			input: `{"none": [{"var": "values"}, {"==": [{"var": ""}, "error"]}]}`,
+			input: `{"none": [{"var": "statuses"}, {"==": [{"var": ""}, "error"]}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",
-				DialectSpanner:    "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",
-				DialectPostgreSQL: "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",
-				DialectDuckDB:     "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",
-				DialectClickHouse: "NOT arrayExists(elem -> elem = 'error', values)",
+				DialectBigQuery:   "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'error')",
+				DialectSpanner:    "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'error')",
+				DialectPostgreSQL: "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'error')",
+				DialectDuckDB:     "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'error')",
+				DialectClickHouse: "NOT arrayExists(elem -> elem = 'error', statuses)",
 			},
 		},
 		{
@@ -239,8 +239,8 @@ func TestDialectSpecificInArrayField(t *testing.T) {
 	}
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "test.tags", Type: FieldTypeArray},
-		{Name: "test.scores", Type: FieldTypeArray},
+		{Name: "test.tags", Type: FieldTypeArray, ElementType: FieldTypeString},
+		{Name: "test.scores", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 
 	tests := []testCase{
@@ -546,7 +546,7 @@ func TestEdgeCasesEmptyInputs(t *testing.T) {
 		{"primitive at root number", `42`, true},
 		{"and with empty array", `{"and": []}`, true},
 		{"or with empty array", `{"or": []}`, true},
-		{"cat with empty array", `{"cat": []}`, true},
+		{"value-root cat rejected in condition mode", `{"cat": []}`, true},
 		{"in with empty array", `{"in": [{"var": "x"}, []]}`, false},
 		{"missing with empty array", `{"missing": []}`, true},
 	}

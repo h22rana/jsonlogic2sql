@@ -2,6 +2,8 @@ package operators
 
 import (
 	"fmt"
+
+	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
 
 // validateOrderingOperand checks if a field used in an ordering comparison is of a valid type
@@ -25,11 +27,92 @@ func (c *ComparisonOperator) validateOrderingOperand(value interface{}, operator
 	}
 
 	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.HasExpressionInfo &&
-		pv.Kind == ExpressionKindValue && pv.Type == ExpressionTypeArray {
-		return fmt.Errorf("ordering comparison '%s' on array-valued expression is not supported", operator)
+		pv.Kind == ExpressionKindValue &&
+		(pv.Type == ExpressionTypeArray || pv.Type == ExpressionTypeObject) {
+		return fmt.Errorf("ordering comparison '%s' on %s-valued expression is not supported", operator, expressionTypeName(pv.Type))
 	}
 
 	return nil
+}
+
+func (c *ComparisonOperator) validateOrderingOperandsCompatible(left, right interface{}, operator string) error {
+	leftKind, leftKnown, err := c.orderingOperandKind(left, operator)
+	if err != nil {
+		return err
+	}
+	rightKind, rightKnown, err := c.orderingOperandKind(right, operator)
+	if err != nil {
+		return err
+	}
+	if !leftKnown || !rightKnown || leftKind == rightKind {
+		return nil
+	}
+	return fmt.Errorf(
+		"ordering comparison '%s' between incompatible operand types %s and %s is not supported",
+		operator,
+		expressionTypeName(leftKind),
+		expressionTypeName(rightKind),
+	)
+}
+
+func (c *ComparisonOperator) orderingOperandKind(value interface{}, operator string) (ExpressionType, bool, error) {
+	if err := c.validateOrderingOperand(value, operator); err != nil {
+		return ExpressionTypeUnknown, false, err
+	}
+	if fieldName := c.extractFieldNameFromValue(value); fieldName != "" {
+		switch {
+		case c.schema().IsNumericType(fieldName):
+			return ExpressionTypeNumber, true, nil
+		case c.schema().IsStringType(fieldName), c.schema().IsEnumType(fieldName):
+			return ExpressionTypeString, true, nil
+		case c.schema().IsBooleanType(fieldName):
+			return ExpressionTypeBoolean, true, nil
+		case c.schema().IsArrayType(fieldName):
+			return ExpressionTypeArray, true, nil
+		case c.schema().GetFieldType(fieldName) == objectFieldType:
+			return ExpressionTypeObject, true, nil
+		default:
+			return ExpressionTypeUnknown, false, nil
+		}
+	}
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.HasExpressionInfo {
+			if pv.Kind == ExpressionKindPredicate {
+				return ExpressionTypeNumber, true, nil
+			}
+			switch pv.Type {
+			case ExpressionTypeBoolean:
+				return ExpressionTypeNumber, true, nil
+			case ExpressionTypeNumber, ExpressionTypeString, ExpressionTypeArray, ExpressionTypeObject:
+				return pv.Type, true, nil
+			case ExpressionTypeNull, ExpressionTypeUnknown:
+				return ExpressionTypeUnknown, false, nil
+			default:
+				return ExpressionTypeUnknown, false, nil
+			}
+		}
+		if !pv.IsSQL {
+			return literalOrderingKind(pv.Value)
+		}
+		return ExpressionTypeUnknown, false, nil
+	}
+	return literalOrderingKind(value)
+}
+
+func literalOrderingKind(value interface{}) (ExpressionType, bool, error) {
+	typ := inferLiteralValueExpressionType(value)
+	switch typ {
+	case ExpressionTypeBoolean:
+		return ExpressionTypeNumber, true, nil
+	case ExpressionTypeNumber, ExpressionTypeString:
+		return typ, true, nil
+	case ExpressionTypeNull, ExpressionTypeUnknown:
+		return ExpressionTypeUnknown, false, nil
+	case ExpressionTypeArray, ExpressionTypeObject:
+		return typ, true, nil
+	default:
+		return ExpressionTypeUnknown, false, nil
+	}
 }
 
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.
@@ -52,6 +135,141 @@ func (c *ComparisonOperator) isKnownArrayOperand(value interface{}) bool {
 	}
 	fieldName := c.extractFieldNameFromValue(value)
 	return fieldName != "" && c.schema().IsArrayType(fieldName)
+}
+
+func (c *ComparisonOperator) fieldHasObjectArrayElements(fieldName string) bool {
+	provider, ok := c.schema().(ArrayElementSchemaProvider)
+	return ok && provider.HasArrayElementFields(fieldName)
+}
+
+func (c *ComparisonOperator) arrayElementEqualityKind(fieldName string) (string, bool) {
+	if fieldName == "" {
+		return "", false
+	}
+	provider, ok := c.schema().(ArrayElementTypeProvider)
+	if !ok {
+		return "", false
+	}
+	switch schemaFieldTypeExpressionType(provider.GetArrayElementType(fieldName)) {
+	case ExpressionTypeString:
+		return "string", true
+	case ExpressionTypeNumber:
+		return "number", true
+	case ExpressionTypeBoolean:
+		return "boolean", true
+	case ExpressionTypeArray:
+		return "array", true
+	case ExpressionTypeObject:
+		return objectFieldType, true
+	case ExpressionTypeUnknown, ExpressionTypeNull:
+		return "", false
+	}
+	return "", false
+}
+
+func (c *ComparisonOperator) arrayMembershipCompatibleWithNeedle(fieldName string, needle interface{}) bool {
+	elemKind, elemKnown := c.arrayElementEqualityKind(fieldName)
+	if !elemKnown {
+		return true
+	}
+	needleKinds, needleKnown := c.strictArrayMembershipLeftKinds(needle)
+	if !needleKnown {
+		return true
+	}
+	_, ok := needleKinds[elemKind]
+	return ok
+}
+
+func (c *ComparisonOperator) validateFieldEqualityArrayCompatibility(
+	leftField equalityFieldOperand,
+	rightField equalityFieldOperand,
+) error {
+	if leftField.fieldName == "" || rightField.fieldName == "" ||
+		!c.schema().IsArrayType(leftField.fieldName) ||
+		!c.schema().IsArrayType(rightField.fieldName) {
+		return nil
+	}
+	if c.config.GetDialect() == dialect.DialectBigQuery {
+		return fmt.Errorf(
+			"equality between array fields %q and %q is not supported for BigQuery",
+			leftField.fieldName,
+			rightField.fieldName,
+		)
+	}
+	leftObject := c.fieldHasObjectArrayElements(leftField.fieldName)
+	rightObject := c.fieldHasObjectArrayElements(rightField.fieldName)
+	if !leftObject && !rightObject {
+		return nil
+	}
+	if leftField.fieldName == rightField.fieldName {
+		return nil
+	}
+	if !leftObject || !rightObject {
+		return fmt.Errorf(
+			"equality between array field %q and array field %q has incompatible element schemas",
+			leftField.fieldName,
+			rightField.fieldName,
+		)
+	}
+	comparator, ok := c.schema().(ArrayElementSchemaComparator)
+	if !ok {
+		return fmt.Errorf(
+			"equality between object-array fields %q and %q requires comparable element schemas",
+			leftField.fieldName,
+			rightField.fieldName,
+		)
+	}
+	if err := comparator.ValidateArrayElementSchemasCompatible(leftField.fieldName, rightField.fieldName); err != nil {
+		return fmt.Errorf("equality between object-array fields %q and %q is not supported: %w",
+			leftField.fieldName,
+			rightField.fieldName,
+			err)
+	}
+	return nil
+}
+
+func (c *ComparisonOperator) objectArrayHaystackMembershipSQL(
+	leftOriginal interface{},
+	right ProcessedValue,
+) (string, bool, error) {
+	if right.FieldName != "" {
+		if !c.fieldHasObjectArrayElements(right.FieldName) {
+			return "", false, nil
+		}
+	} else if !processedArrayHasObjectElements(right) {
+		return "", false, nil
+	}
+	kind, known := c.membershipNeedleEqualityKind(leftOriginal)
+	if known && kind != objectFieldType {
+		return boolSQL(false), true, nil
+	}
+	return "", true, fmt.Errorf("in operator against object-array values is not supported for object or unknown needles")
+}
+
+func processedArrayHasObjectElements(value ProcessedValue) bool {
+	if !value.IsSQL || !value.HasExpressionInfo ||
+		value.Kind != ExpressionKindValue || value.Type != ExpressionTypeArray {
+		return false
+	}
+	if len(value.ArrayElementTypes) > 0 {
+		return value.ArrayElementTypes[0] == ExpressionTypeObject
+	}
+	return value.ArrayElementType == ExpressionTypeObject
+}
+
+func (c *ComparisonOperator) membershipNeedleEqualityKind(value interface{}) (string, bool) {
+	if field, ok := c.extractEqualityFieldOperand(value); ok {
+		return c.schemaEqualityKind(field.fieldName)
+	}
+	if kind, ok := expressionEqualityKind(value); ok {
+		return kind, true
+	}
+	literal, ok := equalityLiteralValue(value)
+	if !ok {
+		return "", false
+	}
+	kind := equalityLiteralKind(literal)
+	return kind, kind != ""
 }
 
 // extractFieldName extracts the field name from a var argument.

@@ -323,5 +323,8 @@ func firstPlaceholder(d Dialect) string {
 	if d == DialectPostgreSQL || d == DialectDuckDB {
 		return "$1"
 	}
+	if d == DialectClickHouse {
+		return "{p1:Float64}"
+	}
 	return "@p1"
 }

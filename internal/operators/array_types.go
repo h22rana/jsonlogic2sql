@@ -10,7 +10,9 @@ type typedValueSQL struct {
 	typ               ExpressionType
 	elemType          ExpressionType
 	elemTypes         []ExpressionType
+	schemaScopes      []string
 	emptyArrayLiteral bool
+	preserveParamRefs bool
 }
 
 func normalizeArrayElementTypes(types []ExpressionType) []ExpressionType {
@@ -35,6 +37,29 @@ func typedValueElementTypes(value typedValueSQL) []ExpressionType {
 		return []ExpressionType{value.elemType}
 	}
 	return nil
+}
+
+func typedValueSchemaScopes(value typedValueSQL) []string {
+	return normalizeSchemaScopes(value.schemaScopes)
+}
+
+func typedValuesPreserveParamRefs(values []typedValueSQL) bool {
+	for _, value := range values {
+		if value.preserveParamRefs {
+			return true
+		}
+	}
+	return false
+}
+
+func preserveParamRefsFromTypedValues(result OperatorResult, values ...typedValueSQL) OperatorResult {
+	for _, value := range values {
+		if value.preserveParamRefs {
+			result.PreserveParamRefs = true
+			return result
+		}
+	}
+	return result
 }
 
 func typedValueTypeChain(value typedValueSQL) []ExpressionType {
@@ -131,6 +156,12 @@ func arrayValueSQLWithElementTypes(sql string, elemTypes ...ExpressionType) Oper
 	}
 	res := ArrayValueSQL(sql, normalized[0])
 	res.ArrayElementTypes = normalized
+	return res
+}
+
+func arrayValueSQLWithMetadata(sql string, elemTypes []ExpressionType, schemaScopes []string) OperatorResult {
+	res := arrayValueSQLWithElementTypes(sql, elemTypes...)
+	res.ArrayElementSchemaScopes = normalizeSchemaScopes(schemaScopes)
 	return res
 }
 

@@ -123,7 +123,7 @@ func TestStringOperator_convertStartIndex_ComplexExpression(t *testing.T) {
 	if err != nil {
 		t.Errorf("ToSQL() unexpected error = %v", err)
 	}
-	expected := "SUBSTR(name, (start_pos + 1))"
+	expected := "SUBSTR(name, (CASE WHEN start_pos < 0 THEN GREATEST((LENGTH(name) + start_pos + 1), 1) ELSE (start_pos + 1) END))"
 	if result != expected {
 		t.Errorf("ToSQL() = %v, want %v", result, expected)
 	}

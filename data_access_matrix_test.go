@@ -229,7 +229,7 @@ func validateDataAccessCase(
 		}
 
 	case "missing_some_1":
-		requireContains("profile.email IS NULL", "profile.phone IS NULL", " OR ")
+		requireContains("profile.email IS NULL", "profile.phone IS NULL", " AND ")
 		if len(params) != 0 {
 			t.Fatalf("missing_some min1 should not allocate params: %#v", params)
 		}
@@ -285,6 +285,9 @@ func parseDataAccessLogicMap(t *testing.T, logic string) map[string]interface{} 
 func firstDataAccessPlaceholder(d Dialect) string {
 	if d == DialectPostgreSQL || d == DialectDuckDB {
 		return "$1"
+	}
+	if d == DialectClickHouse {
+		return "{p1:Float64}"
 	}
 	return "@p1"
 }

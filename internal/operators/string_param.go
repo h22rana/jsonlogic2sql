@@ -10,13 +10,13 @@ import (
 
 // ToSQLParam is the parameterized variant of ToSQL.
 func (s *StringOperator) ToSQLParam(operator string, args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("string operator %s requires at least one argument", operator)
-	}
 	switch operator {
 	case "cat":
 		return s.handleConcatenationParam(args, pc)
 	case "substr":
+		if len(args) == 0 {
+			return "", fmt.Errorf("string operator %s requires at least one argument", operator)
+		}
 		return s.handleSubstringParam(args, pc)
 	default:
 		return "", fmt.Errorf("unsupported string operator: %s", operator)
@@ -25,8 +25,8 @@ func (s *StringOperator) ToSQLParam(operator string, args []interface{}, pc *par
 
 // handleConcatenationParam is the parameterized variant of handleConcatenation. Keep in sync.
 func (s *StringOperator) handleConcatenationParam(args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) < 1 {
-		return "", fmt.Errorf("concatenation requires at least 1 argument")
+	if len(args) == 0 {
+		return "''", nil
 	}
 	for _, arg := range args {
 		if err := s.validateStringOperand(arg); err != nil {
@@ -41,7 +41,7 @@ func (s *StringOperator) handleConcatenationParam(args []interface{}, pc *params
 		}
 		operands[i] = operand
 	}
-	return fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), nil
+	return s.config.ConcatSQL(operands), nil
 }
 
 func (s *StringOperator) valueToSQLForConcatParam(value interface{}, pc *params.ParamCollector) (string, error) {
@@ -121,18 +121,21 @@ func (s *StringOperator) handleSubstringParam(args []interface{}, pc *params.Par
 	if len(args) < 2 || len(args) > 3 {
 		return "", fmt.Errorf("substring requires 2 or 3 arguments")
 	}
-	if err := s.validateStringOperand(args[0]); err != nil {
+	if err := s.validateSubstringSourceOperand(args[0]); err != nil {
 		return "", err
 	}
 	str, err := s.valueToSQLParam(args[0], pc)
 	if err != nil {
 		return "", fmt.Errorf("invalid substring string argument: %w", err)
 	}
+	if validationErr := s.validateSubstringIndexOperand(args[1], "start"); validationErr != nil {
+		return "", validationErr
+	}
 	start, err := s.valueToSQLParam(args[1], pc)
 	if err != nil {
 		return "", fmt.Errorf("invalid substring start argument: %w", err)
 	}
-	startSQL := s.convertStartIndex(start)
+	startSQL := s.substringStartSQL(args[1], str, start, true)
 
 	d := dialect.DialectUnspecified
 	if s.config != nil {
@@ -147,10 +150,14 @@ func (s *StringOperator) handleSubstringParam(args []interface{}, pc *params.Par
 	}
 
 	if len(args) == 3 {
+		if err := s.validateSubstringIndexOperand(args[2], "length"); err != nil {
+			return "", err
+		}
 		length, err := s.valueToSQLParam(args[2], pc)
 		if err != nil {
 			return "", fmt.Errorf("invalid substring length argument: %w", err)
 		}
+		length = s.substringLengthSQL(args[1], args[2], str, start, length, true)
 		return fmt.Sprintf("%s(%s, %s, %s)", substrFunc, str, startSQL, length), nil
 	}
 	return fmt.Sprintf("%s(%s, %s)", substrFunc, str, startSQL), nil

@@ -40,6 +40,24 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 				return c.stringContainmentSQL(rightSQL, leftArg, needleSQL)
 			}
 		}
+		if arr, ok := args[1].([]interface{}); ok {
+			filtered := c.strictArrayMembershipItems(leftArg, arr)
+			if len(filtered) == 0 {
+				return boolSQL(false), nil
+			}
+			leftFieldName := c.extractFieldNameFromValue(leftArg)
+			if leftFieldName != "" && c.schema().IsEnumType(leftFieldName) {
+				if err := c.validateEnumArrayMembershipItems(leftFieldName, filtered); err != nil {
+					return "", err
+				}
+			}
+			if err := c.validateDefaultedEnumFieldOperand(leftArg); err != nil {
+				return "", err
+			}
+			if sql, handled, err := c.defaultedFieldArrayLiteralMembershipSQL(leftArg, filtered); handled || err != nil {
+				return sql, err
+			}
+		}
 		leftSQL, err := c.valueToSQL(leftArg)
 		if err != nil {
 			return "", fmt.Errorf("invalid left operand: %w", err)
@@ -54,6 +72,12 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 	rightArg := args[1]
 
 	if isEqualityOperator(operator) {
+		if sql, handled, err := c.defaultedFieldFieldEqualitySQL(operator, leftArg, rightArg, nil); handled || err != nil {
+			return sql, err
+		}
+		if sql, handled, err := c.defaultedFieldLiteralEqualitySQL(operator, leftArg, rightArg, nil); handled || err != nil {
+			return sql, err
+		}
 		decision := c.applyEqualitySemantics(operator, leftArg, rightArg)
 		if decision.unsupported != nil {
 			return "", decision.unsupported
@@ -81,6 +105,14 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 	if isEqualityOperator(operator) {
 		leftArg = materializePredicateValueOperand(leftArg)
 		rightArg = materializePredicateValueOperand(rightArg)
+	}
+
+	if isOrderingOperator(operator) {
+		leftArg = numericOrderingOperand(leftArg)
+		rightArg = numericOrderingOperand(rightArg)
+		if err := c.validateOrderingOperandsCompatible(leftArg, rightArg, operator); err != nil {
+			return "", err
+		}
 	}
 
 	leftSQL, err := c.valueToSQL(leftArg)
@@ -166,16 +198,20 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 		return fmt.Sprintf("%s <> %s", leftSQL, rightSQL), nil
 	case ">", ">=", "<", "<=":
 		// Validate operands for ordering comparisons
-		if err := c.validateOrderingOperand(args[0], operator); err != nil {
+		if err := c.validateOrderingOperand(leftArg, operator); err != nil {
 			return "", err
 		}
-		if err := c.validateOrderingOperand(args[1], operator); err != nil {
+		if err := c.validateOrderingOperand(rightArg, operator); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("%s %s %s", leftSQL, operator, rightSQL), nil
 	default:
 		return "", fmt.Errorf("unsupported comparison operator: %s", operator)
 	}
+}
+
+func isOrderingOperator(operator string) bool {
+	return operator == ">" || operator == ">=" || operator == "<" || operator == "<="
 }
 
 // valueToSQL converts a value to SQL, handling both literals and var expressions.
@@ -428,6 +464,20 @@ func (c *ComparisonOperator) handleIn(leftSQL string, rightValue, leftOriginal i
 			// Use schema to determine type if available
 			if fieldName != "" {
 				if c.schema().IsArrayType(fieldName) {
+					if sql, handled, err := c.objectArrayHaystackMembershipSQL(leftOriginal, ProcessedValue{
+						Value:             rightSQL,
+						IsSQL:             true,
+						IsField:           true,
+						FieldName:         fieldName,
+						HasExpressionInfo: true,
+						Kind:              ExpressionKindValue,
+						Type:              ExpressionTypeArray,
+					}); handled || err != nil {
+						return sql, err
+					}
+					if !c.arrayMembershipCompatibleWithNeedle(fieldName, leftOriginal) {
+						return boolSQL(false), nil
+					}
 					// Array type: use null-safe JSONLogic element membership.
 					return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 				} else if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
@@ -593,7 +643,7 @@ func (c *ComparisonOperator) handleInStringifiableLiteralNeedleSQLRight(
 		case ExpressionTypeString:
 			sql, err := c.stringContainmentSQL(rightSQL, leftArg, needleSQL)
 			return sql, true, err
-		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber, ExpressionTypeObject:
 			return boolSQL(false), true, nil
 		case ExpressionTypeArray, ExpressionTypeUnknown:
 		}
@@ -611,6 +661,20 @@ func (c *ComparisonOperator) handleInSQLRight(
 ) (string, error) {
 	if fieldName != "" {
 		if c.schema().IsArrayType(fieldName) {
+			if sql, handled, err := c.objectArrayHaystackMembershipSQL(leftOriginal, ProcessedValue{
+				Value:             rightSQL,
+				IsSQL:             true,
+				IsField:           true,
+				FieldName:         fieldName,
+				HasExpressionInfo: true,
+				Kind:              ExpressionKindValue,
+				Type:              ExpressionTypeArray,
+			}); handled || err != nil {
+				return sql, err
+			}
+			if !c.arrayMembershipCompatibleWithNeedle(fieldName, leftOriginal) {
+				return boolSQL(false), nil
+			}
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 		}
 		if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
@@ -634,8 +698,17 @@ func (c *ComparisonOperator) handleInSQLRight(
 			}
 			return c.stringContainmentSQL(rightSQL, leftOriginal, needleSQL)
 		case ExpressionTypeArray:
+			if sql, handled, err := c.objectArrayHaystackMembershipSQL(leftOriginal, ProcessedValue{
+				Value:             rightSQL,
+				IsSQL:             true,
+				HasExpressionInfo: true,
+				Kind:              ExpressionKindValue,
+				Type:              ExpressionTypeArray,
+			}); handled || err != nil {
+				return sql, err
+			}
 			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
-		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+		case ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber, ExpressionTypeObject:
 			return boolSQL(false), nil
 		case ExpressionTypeUnknown:
 		}
@@ -689,6 +762,11 @@ func (c *ComparisonOperator) handleChainedComparison(operator string, args []int
 	}
 	for i, arg := range coercedArgs {
 		coercedArgs[i] = numericOrderingOperand(arg)
+	}
+	for i := 0; i < len(coercedArgs)-1; i++ {
+		if err := c.validateOrderingOperandsCompatible(coercedArgs[i], coercedArgs[i+1], operator); err != nil {
+			return "", err
+		}
 	}
 
 	// Convert all arguments to SQL
@@ -766,7 +844,10 @@ func (c *ComparisonOperator) processArithmeticExpression(op string, args interfa
 	case "/":
 		return fmt.Sprintf("(%s)", strings.Join(operands, " / ")), nil
 	case "%":
-		return fmt.Sprintf("(%s)", strings.Join(operands, " % ")), nil
+		if len(operands) != 2 {
+			return "", fmt.Errorf("modulo requires exactly 2 arguments")
+		}
+		return c.config.ModuloSQL(operands[0], operands[1]), nil
 	default:
 		return "", fmt.Errorf("unsupported arithmetic operation: %s", op)
 	}
@@ -817,9 +898,9 @@ func (c *ComparisonOperator) processMinMaxExpression(op string, args interface{}
 	// Generate SQL based on operation
 	switch op {
 	case "max":
-		return fmt.Sprintf("GREATEST(%s)", strings.Join(operands, ", ")), nil
+		return c.config.GreatestSQL(operands), nil
 	case "min":
-		return fmt.Sprintf("LEAST(%s)", strings.Join(operands, ", ")), nil
+		return c.config.LeastSQL(operands), nil
 	default:
 		return "", fmt.Errorf("unsupported min/max operation: %s", op)
 	}

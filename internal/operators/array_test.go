@@ -144,8 +144,8 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 		{
 			name:     "none with var array",
 			operator: "none",
-			args:     []interface{}{map[string]interface{}{"var": "values"}, map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": ""}, "invalid"}}},
-			expected: "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
+			args:     []interface{}{map[string]interface{}{"var": "statuses"}, map[string]interface{}{"==": []interface{}{map[string]interface{}{"var": ""}, "invalid"}}},
+			expected: "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'invalid')",
 			hasError: false,
 		},
 		{
@@ -189,8 +189,8 @@ func TestArrayOperator_ToSQL(t *testing.T) {
 			name:     "merge with no arguments",
 			operator: "merge",
 			args:     []interface{}{},
-			expected: "",
-			hasError: true,
+			expected: "[]",
+			hasError: false,
 		},
 
 		// Unsupported operator
@@ -351,8 +351,8 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 				{
 					name:     "reduce with SUM pattern on current.price",
 					operator: "reduce",
-					args:     []any{map[string]any{"var": "items"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.price"}}}, 0},
-					expected: "0 + COALESCE((SELECT SUM(elem.price) FROM UNNEST(items) AS elem), 0)",
+					args:     []any{map[string]any{"var": "objectItems"}, map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.price"}}}, 0},
+					expected: "0 + COALESCE((SELECT SUM(elem.price) FROM UNNEST(objectItems) AS elem), 0)",
 					hasError: false,
 				},
 				{
@@ -411,8 +411,8 @@ func TestArrayOperator_DialectSupport(t *testing.T) {
 				{
 					name:     "none with condition",
 					operator: "none",
-					args:     []any{map[string]any{"var": "values"}, map[string]any{"==": []any{map[string]any{"var": ""}, "invalid"}}},
-					expected: "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
+					args:     []any{map[string]any{"var": "statuses"}, map[string]any{"==": []any{map[string]any{"var": ""}, "invalid"}}},
+					expected: "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'invalid')",
 					hasError: false,
 				},
 
@@ -447,7 +447,7 @@ func TestArrayOperator_DuckDBGeneralReduceRejectsLambdaSubquery(t *testing.T) {
 	op := NewArrayOperator(config)
 
 	_, err := op.ToSQL("reduce", []any{
-		map[string]any{"var": "items"},
+		map[string]any{"var": "objectItems"},
 		map[string]any{"map": []any{map[string]any{"var": "current.values"}, map[string]any{"var": ""}}},
 		[]any{},
 	})

@@ -195,10 +195,10 @@ func TestComparisonOperator_ToSQL_EqualitySemanticsWithSchema(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name:     "defaulted numeric var skips equality folding",
+			name:     "defaulted numeric var splits fallback equality",
 			operator: "==",
 			args:     []interface{}{map[string]interface{}{"var": []interface{}{"amount", "abc"}}, "abc"},
-			wantSQL:  "COALESCE(amount, 'abc') = 'abc'",
+			wantSQL:  "amount IS NULL",
 		},
 		{
 			name:     "defaulted numeric var coerces numeric string",
@@ -237,16 +237,16 @@ func TestComparisonOperator_ToSQL_EqualitySemanticsWithSchema(t *testing.T) {
 			wantSQL:  "FALSE",
 		},
 		{
-			name:     "defaulted strict numeric mismatch preserves expression when default can match",
+			name:     "defaulted strict numeric mismatch matches only missing field when default can match",
 			operator: "===",
 			args:     []interface{}{map[string]interface{}{"var": []interface{}{"amount", "50"}}, "50"},
-			wantSQL:  "COALESCE(amount, '50') = '50'",
+			wantSQL:  "amount IS NULL",
 		},
 		{
-			name:     "defaulted strict numeric mismatch preserves expression with field on right when default can match",
+			name:     "defaulted strict numeric mismatch matches only missing field with field on right when default can match",
 			operator: "===",
 			args:     []interface{}{"50", map[string]interface{}{"var": []interface{}{"amount", "50"}}},
-			wantSQL:  "'50' = COALESCE(amount, '50')",
+			wantSQL:  "amount IS NULL",
 		},
 		{
 			name:      "defaulted string field boolean literal errors",

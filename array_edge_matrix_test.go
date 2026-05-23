@@ -14,12 +14,13 @@ func matrixSchema() *Schema {
 			Type: FieldTypeArray,
 			ElementFields: []FieldSchema{
 				{Name: "base", Type: FieldTypeNumber},
-				{Name: "values", Type: FieldTypeArray},
+				{Name: "values", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 			},
 		},
-		{Name: "bag.numbers", Type: FieldTypeArray},
-		{Name: "bag.words", Type: FieldTypeArray},
-		{Name: "bag.flags", Type: FieldTypeArray},
+		{Name: "bag.numbers", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "bag.moreNumbers", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "bag.words", Type: FieldTypeArray, ElementType: FieldTypeString},
+		{Name: "bag.flags", Type: FieldTypeArray, ElementType: FieldTypeBoolean},
 		{Name: "metrics.amount", Type: FieldTypeNumber},
 		{Name: "profile.name", Type: FieldTypeString},
 	})
@@ -213,6 +214,10 @@ func assertPlaceholderStyle(t *testing.T, d Dialect, sql string, paramCount int)
 		if !strings.Contains(sql, "$1") {
 			t.Fatalf("expected $ placeholders for %s, got: %s", d, sql)
 		}
+	case DialectClickHouse:
+		if !strings.Contains(sql, "{p1:") {
+			t.Fatalf("expected ClickHouse typed placeholders for %s, got: %s", d, sql)
+		}
 	default:
 		if !strings.Contains(sql, "@p1") {
 			t.Fatalf("expected @p placeholders for %s, got: %s", d, sql)
@@ -259,10 +264,10 @@ func TestLiteralScalarArrayLambdaTruthiness_AllDialectsAndModes(t *testing.T) {
 			return fmt.Sprintf("ARRAY_LENGTH(%s)", array)
 		}
 	}
-	paramArray := func(d Dialect, count int) string {
+	paramArray := func(d Dialect, count int, placeholder func(Dialect, int) string) string {
 		elems := make([]string, count)
 		for i := range elems {
-			elems[i] = testPlaceholder(d, i+1)
+			elems[i] = placeholder(d, i+1)
 		}
 		return literalArray(d, elems...)
 	}
@@ -299,7 +304,7 @@ func TestLiteralScalarArrayLambdaTruthiness_AllDialectsAndModes(t *testing.T) {
 				return fmt.Sprintf("ARRAY(SELECT elem FROM %s WHERE %s)", unnest(d, array), condition)
 			},
 			wantParam: func(d Dialect) string {
-				array := paramArray(d, 3)
+				array := paramArray(d, 3, testPlaceholder)
 				condition := "(elem IS NOT NULL AND elem != 0)"
 				if d == DialectClickHouse {
 					return fmt.Sprintf("arrayFilter(elem -> %s, %s)", condition, array)
@@ -339,7 +344,7 @@ func TestLiteralScalarArrayLambdaTruthiness_AllDialectsAndModes(t *testing.T) {
 				return fmt.Sprintf("(%s > 0 AND NOT EXISTS (SELECT 1 FROM %s WHERE NOT (%s)))", arrayLength(d, array), unnest(d, array), condition)
 			},
 			wantParam: func(d Dialect) string {
-				array := paramArray(d, 2)
+				array := paramArray(d, 2, testStringPlaceholder)
 				condition := "(elem IS NOT NULL AND elem != '')"
 				if d == DialectClickHouse {
 					return fmt.Sprintf("(%s > 0 AND arrayAll(elem -> %s, %s))", arrayLength(d, array), condition, array)
@@ -482,10 +487,11 @@ func TestLiteralScalarArrayLambdaTruthiness_AllDialectsAndModes(t *testing.T) {
 
 func TestArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 	type matrixCase struct {
-		name      string
-		logic     string
-		wantParam int
-		validate  func(t *testing.T, d Dialect, out apiOutput)
+		name                         string
+		logic                        string
+		wantParam                    int
+		rejectGoogleNestedArrayValue bool
+		validate                     func(t *testing.T, d Dialect, out apiOutput)
 	}
 
 	cases := []matrixCase{
@@ -523,18 +529,18 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 		},
 		{
 			name:      "merge dialect behavior",
-			logic:     `{"merge":[{"var":"bag.numbers"},{"var":"bag.words"}]}`,
+			logic:     `{"merge":[{"var":"bag.numbers"},{"var":"bag.moreNumbers"}]}`,
 			wantParam: 0,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
 				switch d {
 				case DialectPostgreSQL:
-					assertContains(t, inline, "bag.numbers || bag.words")
+					assertContains(t, inline, "bag.numbers || bag.moreNumbers")
 				case DialectClickHouse:
-					assertContains(t, inline, "arrayConcat(bag.numbers, bag.words)")
+					assertContains(t, inline, "arrayConcat(bag.numbers, bag.moreNumbers)")
 				default:
-					assertContains(t, inline, "ARRAY_CONCAT(bag.numbers, bag.words)")
+					assertContains(t, inline, "ARRAY_CONCAT(bag.numbers, bag.moreNumbers)")
 				}
 			},
 		},
@@ -553,9 +559,10 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 			},
 		},
 		{
-			name:      "nested map with outer scoped source",
-			logic:     `{"map":[{"var":"bag.records"},{"map":[{"var":"values"},{"var":""}]}]}`,
-			wantParam: 0,
+			name:                         "nested map with outer scoped source",
+			logic:                        `{"map":[{"var":"bag.records"},{"map":[{"var":"values"},{"var":""}]}]}`,
+			wantParam:                    0,
+			rejectGoogleNestedArrayValue: true,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
@@ -569,9 +576,10 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 			},
 		},
 		{
-			name:      "nested filter with outer scoped source",
-			logic:     `{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{">=":[{"var":""},0]}]}]}`,
-			wantParam: 1,
+			name:                         "nested filter with outer scoped source",
+			logic:                        `{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{">=":[{"var":""},0]}]}]}`,
+			wantParam:                    1,
+			rejectGoogleNestedArrayValue: true,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
@@ -647,9 +655,10 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 			},
 		},
 		{
-			name:      "very deep mixed nesting",
-			logic:     `{"and":[{"some":[{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{">=":[{"var":""},0]}]}]},{"all":[{"var":""},{">=":[{"var":""},0]}]}]},{">=":[{"var":"metrics.amount"},100]}]}`,
-			wantParam: 3,
+			name:                         "very deep mixed nesting",
+			logic:                        `{"and":[{"some":[{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{">=":[{"var":""},0]}]}]},{"all":[{"var":""},{">=":[{"var":""},0]}]}]},{">=":[{"var":"metrics.amount"},100]}]}`,
+			wantParam:                    3,
+			rejectGoogleNestedArrayValue: true,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
@@ -693,6 +702,14 @@ func TestArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 
 					for _, c := range cases {
 						t.Run(c.name, func(t *testing.T) {
+							if c.rejectGoogleNestedArrayValue && testRejectsNestedArrayValues(d) {
+								if d == DialectPostgreSQL {
+									assertAllAPIVariantsErrorContains(t, tr, c.logic, "PostgreSQL")
+								} else {
+									assertAllAPIVariantsErrorContains(t, tr, c.logic, "does not support array literals whose elements are arrays")
+								}
+								return
+							}
 							out := runAllAPIVariants(t, tr, c.logic)
 							if len(out.params) != c.wantParam {
 								t.Fatalf("param count mismatch: got=%d want=%d sql=%s", len(out.params), c.wantParam, out.paramSQL)
@@ -839,7 +856,7 @@ func TestArrayEdgeMatrix_PackageFunctionsSmoke(t *testing.T) {
 }
 
 func BenchmarkArrayEdgeMatrix_DeepNesting(b *testing.B) {
-	logic := `{"and":[{"some":[{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{">=":[{"var":""},0]}]}]},{"all":[{"var":""},{">=":[{"var":""},0]}]}]},{">=":[{"var":"metrics.amount"},100]}]}`
+	logic := `{"and":[{"some":[{"var":"bag.records"},{"all":[{"var":"values"},{">=":[{"var":""},0]}]}]},{">=":[{"var":"metrics.amount"},100]}]}`
 	tr, err := NewTranspilerWithConfig(&TranspilerConfig{
 		Dialect: DialectBigQuery,
 		Schema:  matrixSchema(),
@@ -880,14 +897,21 @@ func TestArrayEdgeMatrix_NoPanicOnComplexInputs(t *testing.T) {
 		t.Fatalf("failed to init transpiler: %v", err)
 	}
 
-	inputs := []string{
-		`{"map":[{"var":"bag.records"},{"map":[{"var":"values"},{"if":[{">":[{"var":""},10]},{"var":""},0]}]}]}`,
-		`{"filter":[{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]},{">":[{"var":""},0]}]}`,
-		`{"all":[{"filter":[{"var":"bag.numbers"},{">":[{"var":""},0]}]},{">":[{"var":""},0]}]}`,
+	inputs := []struct {
+		logic        string
+		wantValueErr bool
+	}{
+		{
+			logic:        `{"map":[{"var":"bag.records"},{"map":[{"var":"values"},{"if":[{">":[{"var":""},10]},{"var":""},0]}]}]}`,
+			wantValueErr: true,
+		},
+		{logic: `{"filter":[{"map":[{"var":"bag.records"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]},{">":[{"var":""},0]}]}`},
+		{logic: `{"all":[{"filter":[{"var":"bag.numbers"},{">":[{"var":""},0]}]},{">":[{"var":""},0]}]}`},
 	}
 
-	for i, logic := range inputs {
+	for i, input := range inputs {
 		t.Run(fmt.Sprintf("case_%d", i), func(t *testing.T) {
+			logic := input.logic
 			if strings.HasPrefix(logic, `{"all"`) {
 				if _, err := tr.TranspileCondition(logic); err != nil {
 					t.Fatalf("TranspileCondition() failed for complex input: %v", err)
@@ -898,7 +922,13 @@ func TestArrayEdgeMatrix_NoPanicOnComplexInputs(t *testing.T) {
 				return
 			}
 			if _, err := tr.TranspileValue(logic); err != nil {
+				if input.wantValueErr && strings.Contains(err.Error(), "does not support array literals whose elements are arrays") {
+					return
+				}
 				t.Fatalf("TranspileValue() failed for complex input: %v", err)
+			}
+			if input.wantValueErr {
+				t.Fatal("TranspileValue() succeeded, want nested-array dialect error")
 			}
 			if _, _, err := tr.TranspileParameterizedValue(logic); err != nil {
 				t.Fatalf("TranspileParameterizedValue() failed for complex input: %v", err)

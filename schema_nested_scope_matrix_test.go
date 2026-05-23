@@ -136,12 +136,13 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 	t.Parallel()
 
 	validCases := []struct {
-		name      string
-		logic     string
-		valueRoot bool
-		want      []string
-		wantNot   []string
-		paramLen  int
+		name                         string
+		logic                        string
+		valueRoot                    bool
+		want                         []string
+		wantNot                      []string
+		paramLen                     int
+		rejectGoogleNestedArrayValue bool
 	}{
 		{
 			name:     "root object enum",
@@ -184,11 +185,12 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			paramLen:  1,
 		},
 		{
-			name:      "three-level nested array source keeps scoped schema",
-			logic:     `{"map":[{"var":"accounts"},{"map":[{"var":"transactions"},{"filter":[{"var":"flags"},{"==":[{"var":"code"},"risk"]}]}]}]}`,
-			valueRoot: true,
-			want:      []string{"elem.transactions", "elem1.flags", "elem2.code ="},
-			paramLen:  1,
+			name:                         "three-level nested array source keeps scoped schema",
+			logic:                        `{"map":[{"var":"accounts"},{"map":[{"var":"transactions"},{"filter":[{"var":"flags"},{"==":[{"var":"code"},"risk"]}]}]}]}`,
+			valueRoot:                    true,
+			want:                         []string{"elem.transactions", "elem1.flags", "elem2.code ="},
+			paramLen:                     1,
+			rejectGoogleNestedArrayValue: true,
 		},
 		{
 			name:      "map over filtered array preserves element schema",
@@ -205,17 +207,18 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 		},
 		{
 			name:      "filter over identity map preserves element schema",
-			logic:     `{"filter":[{"map":[{"var":"accounts"},{"var":""}]},{"==":[{"var":"profile.region"},"JP"]}]}`,
+			logic:     `{"filter":[{"map":[{"var":"accounts"},{"var":""}]},{"==":[{"var":"profile.region"},"US"]}]}`,
 			valueRoot: true,
 			want:      []string{"elem.profile.region ="},
 			paramLen:  1,
 		},
 		{
-			name:      "nested map over filtered scoped array preserves element schema",
-			logic:     `{"map":[{"var":"accounts"},{"map":[{"filter":[{"var":"transactions"},{">":[{"var":"amount"},0]}]},{"var":"method.type"}]}]}`,
-			valueRoot: true,
-			want:      []string{"elem2.amount >", "elem1.method.type"},
-			paramLen:  1,
+			name:                         "nested map over filtered scoped array preserves element schema",
+			logic:                        `{"map":[{"var":"accounts"},{"map":[{"filter":[{"var":"transactions"},{">":[{"var":"amount"},0]}]},{"var":"method.type"}]}]}`,
+			valueRoot:                    true,
+			want:                         []string{"elem2.amount >", "elem1.method.type"},
+			paramLen:                     1,
+			rejectGoogleNestedArrayValue: true,
 		},
 		{
 			name:      "map over constant if array source preserves element schema",
@@ -274,10 +277,19 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			paramLen:  2,
 		},
 		{
-			name:      "nested map over dynamic if array source without else preserves nested element schema",
-			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"}]},{"map":[{"var":"transactions"},{"var":"amount"}]}]}`,
-			valueRoot: true,
-			want:      []string{"elem.transactions", "elem1.amount"},
+			name:                         "nested map over dynamic if array source without else preserves nested element schema",
+			logic:                        `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"}]},{"map":[{"var":"transactions"},{"var":"amount"}]}]}`,
+			valueRoot:                    true,
+			want:                         []string{"elem.transactions", "elem1.amount"},
+			rejectGoogleNestedArrayValue: true,
+		},
+		{
+			name:                         "array literal source preserves nested object-array schema",
+			logic:                        `{"map":[[{"var":"accounts"}],{"filter":[{"var":""},{"==":[{"var":"status"},"active"]}]}]}`,
+			valueRoot:                    true,
+			want:                         []string{"elem1.status ="},
+			paramLen:                     1,
+			rejectGoogleNestedArrayValue: true,
 		},
 		{
 			name:      "map over dynamic if array source with explicit null else preserves element schema",
@@ -292,10 +304,11 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			want:      []string{"CASE WHEN useBackup IS TRUE THEN accounts WHEN useAlt IS TRUE THEN backupAccounts ELSE NULL END", "elem.profile.tier"},
 		},
 		{
-			name:      "nested map over dynamic if compatible array sources preserves nested element schema",
-			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"map":[{"var":"transactions"},{"var":"method.type"}]}]}`,
-			valueRoot: true,
-			want:      []string{"elem.transactions", "elem1.method.type"},
+			name:                         "nested map over dynamic if compatible array sources preserves nested element schema",
+			logic:                        `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"backupAccounts"}]},{"map":[{"var":"transactions"},{"var":"method.type"}]}]}`,
+			valueRoot:                    true,
+			want:                         []string{"elem.transactions", "elem1.method.type"},
+			rejectGoogleNestedArrayValue: true,
 		},
 		{
 			name:     "some over dynamic if compatible array sources validates scoped enum",
@@ -342,6 +355,11 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 					for _, tc := range validCases {
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
+
+							if tc.rejectGoogleNestedArrayValue && testRejectsNestedArrayValues(d) {
+								assertAllAPIVariantsErrorContains(t, tr, tc.logic, nestedArrayErrorFragment(d))
+								return
+							}
 
 							sql, params, inlineErr := transpileAuditCase(t, tr, tc.logic, tc.valueRoot, false)
 							if inlineErr != nil {
@@ -401,7 +419,7 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaRequiredCases_AllDialects(t *
 		},
 		{
 			name:      "unknown nested object field is rejected",
-			logic:     `{"some":[{"var":"accounts"},{"==":[{"var":"profile.unknown"},"JP"]}]}`,
+			logic:     `{"some":[{"var":"accounts"},{"==":[{"var":"profile.unknown"},"US"]}]}`,
 			wantError: "field 'profile.unknown' is not defined in schema scope 'accounts'",
 		},
 		{
@@ -441,7 +459,7 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaRequiredCases_AllDialects(t *
 			name:      "dynamic array source rejects field missing from one source scope",
 			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"accounts"},{"var":"lightAccounts"}]},{"var":"profile.tier"}]}`,
 			valueRoot: true,
-			wantError: "field 'profile.tier' is not defined in schema scope 'lightAccounts'",
+			wantError: "field 'profile.region' is not defined in schema scope 'lightAccounts'",
 		},
 		{
 			name:      "dynamic array source rejects object branch even when scoped field exists",
@@ -453,7 +471,7 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaRequiredCases_AllDialects(t *
 			name:      "dynamic nested array source rejects field missing from later source scope",
 			logic:     `{"map":[{"if":[{"var":"useBackup"},{"var":"parentGroupA"},{"var":"parentGroupB"}]},{"map":[{"var":"children"},{"var":"y"}]}]}`,
 			valueRoot: true,
-			wantError: "field 'y' is not defined in schema scope 'parentGroupB.children'",
+			wantError: "field 'z' is not defined in schema scope 'parentGroupA.children'",
 		},
 		{
 			name:      "scoped value branch rejects object field result",
@@ -497,6 +515,40 @@ func TestNestedSchemaScopeAuditRejectsInvalidSchemaRequiredCases_AllDialects(t *
 					if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 						t.Fatalf("parameterized error = %v, want containing %q (SQL %q params %#v)",
 							err, tc.wantError, sql, params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestMapDoesNotInventSchemaScopeForCustomObjectResults_AllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"map":[{"map":[{"var":"accounts"},{"externalObj":[]}]},{"var":"status"}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: nestedScopeAuditSchema()})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+			if regErr := tr.RegisterOperatorFunc("externalObj", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return ValueSQL("STRUCT(1 AS status)", ExpressionTypeObject), nil
+			}); regErr != nil {
+				t.Fatalf("RegisterOperatorFunc(externalObj) error = %v", regErr)
+			}
+
+			for _, parameterized := range []bool{false, true} {
+				t.Run(fmt.Sprintf("parameterized_%t", parameterized), func(t *testing.T) {
+					t.Parallel()
+
+					sql, params, err := transpileAuditCase(t, tr, logic, true, parameterized)
+					if err == nil || !strings.Contains(err.Error(), "array element schema is unknown") {
+						t.Fatalf("transpilation SQL = %q params = %#v error = %v, want unknown element-schema error",
+							sql, params, err)
 					}
 				})
 			}
@@ -654,23 +706,23 @@ func TestNestedSchemaScopedFieldsInsideCustomOperators_AllDialects(t *testing.T)
 			}
 			registerNestedScopeAuditCustomOperators(t, tr)
 
-			logic := `{"some":[{"var":"accounts"},{"==":[{"upper":[{"var":"profile.region"}]},"JP"]}]}`
+			logic := `{"some":[{"var":"accounts"},{"==":[{"upper":[{"var":"profile.region"}]},"US"]}]}`
 			sql, err := tr.TranspileCondition(logic)
 			if err != nil {
 				t.Fatalf("TranspileCondition() error = %v", err)
 			}
-			assertSQLContainsAll(t, sql, []string{"UPPER(elem.profile.region)", "= 'JP'"})
+			assertSQLContainsAll(t, sql, []string{"UPPER(elem.profile.region)", "= 'US'"})
 
 			paramSQL, params, err := tr.TranspileParameterizedCondition(logic)
 			if err != nil {
 				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
 			}
 			assertSQLContainsAll(t, paramSQL, []string{"UPPER(elem.profile.region)", "="})
-			if len(params) != 1 || params[0].Value != "JP" {
-				t.Fatalf("params = %#v, want one JP parameter", params)
+			if len(params) != 1 || params[0].Value != "US" {
+				t.Fatalf("params = %#v, want one US parameter", params)
 			}
 
-			invalid := `{"some":[{"var":"accounts"},{"==":[{"upper":[{"var":"profile.unknown"}]},"JP"]}]}`
+			invalid := `{"some":[{"var":"accounts"},{"==":[{"upper":[{"var":"profile.unknown"}]},"US"]}]}`
 			if _, err := tr.TranspileCondition(invalid); err == nil ||
 				!strings.Contains(err.Error(), "field 'profile.unknown' is not defined in schema scope 'accounts'") {
 				t.Fatalf("custom operator invalid scoped field error = %v", err)

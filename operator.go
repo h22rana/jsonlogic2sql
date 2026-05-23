@@ -38,6 +38,8 @@ const (
 	ExpressionTypeNumber = operators.ExpressionTypeNumber
 	// ExpressionTypeArray identifies array values.
 	ExpressionTypeArray = operators.ExpressionTypeArray
+	// ExpressionTypeObject identifies object/struct values.
+	ExpressionTypeObject = operators.ExpressionTypeObject
 )
 
 // OperatorArg is the typed SQL representation passed to custom operators.

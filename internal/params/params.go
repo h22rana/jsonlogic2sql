@@ -15,13 +15,16 @@ import (
 type PlaceholderStyle int
 
 const (
-	// PlaceholderNamed uses @p1, @p2, ... (BigQuery, Spanner, ClickHouse).
+	// PlaceholderNamed uses @p1, @p2, ... (BigQuery, Spanner).
 	PlaceholderNamed PlaceholderStyle = iota
 	// PlaceholderPositional uses $1, $2, ... (PostgreSQL, DuckDB).
 	PlaceholderPositional
 	// PlaceholderQuestion uses sequential ? placeholders.
 	// Reserved for future opt-in; no dialect maps here by default.
 	PlaceholderQuestion
+	// PlaceholderClickHouse uses ClickHouse query parameters: {p1:String},
+	// {p2:Float64}, and so on.
+	PlaceholderClickHouse
 )
 
 // QueryParam represents a single bind parameter collected during parameterized transpilation.
@@ -72,7 +75,9 @@ func StyleForDialect(d dialect.Dialect) PlaceholderStyle {
 	switch d {
 	case dialect.DialectPostgreSQL, dialect.DialectDuckDB:
 		return PlaceholderPositional
-	case dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectClickHouse, dialect.DialectUnspecified:
+	case dialect.DialectClickHouse:
+		return PlaceholderClickHouse
+	case dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectUnspecified:
 		return PlaceholderNamed
 	}
 	return PlaceholderNamed
@@ -92,6 +97,8 @@ func (pc *ParamCollector) Add(value interface{}) string {
 		return "$" + strconv.Itoa(pc.count)
 	case PlaceholderQuestion:
 		return "?"
+	case PlaceholderClickHouse:
+		return clickHousePlaceholder(name, value)
 	default:
 		return "@" + name
 	}
@@ -119,7 +126,7 @@ func (pc *ParamCollector) Style() PlaceholderStyle {
 // distinguishing string containment from array membership in the "in" operator).
 func (pc *ParamCollector) ValueForPlaceholder(placeholder string) (interface{}, bool) {
 	for i, p := range pc.params {
-		if formatPlaceholder(i+1, p.Name, pc.style) == placeholder {
+		if formatPlaceholderForParam(i+1, p, pc.style) == placeholder {
 			return p.Value, true
 		}
 	}
@@ -145,7 +152,7 @@ func ValidatePlaceholderRefs(sql string, params []QueryParam, style PlaceholderS
 	}
 
 	for i, p := range params {
-		placeholder := formatPlaceholder(i+1, p.Name, style)
+		placeholder := formatPlaceholderForParam(i+1, p, style)
 		if !containsPlaceholderRef(sql, placeholder, style) {
 			return tperrors.New(tperrors.ErrUnreferencedPlaceholder, "", "",
 				fmt.Sprintf("placeholder %s (param %q) is not referenced in generated SQL; "+
@@ -159,7 +166,7 @@ func ValidatePlaceholderRefs(sql string, params []QueryParam, style PlaceholderS
 // outside quoted strings and comments. Index is one-based, matching generated
 // positional placeholders such as $1.
 func ContainsParamRef(sql string, index int, param QueryParam, style PlaceholderStyle) bool {
-	return containsPlaceholderRef(sql, formatPlaceholder(index, param.Name, style), style)
+	return containsPlaceholderRef(sql, formatPlaceholderForParam(index, param, style), style)
 }
 
 func containsPlaceholderRef(sql, placeholder string, style PlaceholderStyle) bool {
@@ -325,7 +332,7 @@ func FindQuotedPlaceholderRefAfter(sql string, params []QueryParam, style Placeh
 	placeholders := make([]string, 0, len(params)-previousCount)
 	for i := previousCount; i < len(params); i++ {
 		p := params[i]
-		placeholders = append(placeholders, formatPlaceholder(i+1, p.Name, style))
+		placeholders = append(placeholders, formatPlaceholderForParam(i+1, p, style))
 	}
 
 	for i := 0; i < len(sql); i++ {
@@ -402,16 +409,40 @@ func isPlaceholderBoundaryChar(ch byte, style PlaceholderStyle) bool {
 	return style == PlaceholderPositional && ch == '$'
 }
 
-// formatPlaceholder returns the placeholder string for a given index/name/style.
-func formatPlaceholder(index int, name string, style PlaceholderStyle) string {
+func formatPlaceholderForParam(index int, param QueryParam, style PlaceholderStyle) string {
 	switch style {
 	case PlaceholderNamed:
-		return "@" + name
+		return "@" + param.Name
 	case PlaceholderPositional:
 		return "$" + strconv.Itoa(index)
 	case PlaceholderQuestion:
 		return "?"
+	case PlaceholderClickHouse:
+		return clickHousePlaceholder(param.Name, param.Value)
 	default:
-		return "@" + name
+		return "@" + param.Name
+	}
+}
+
+func clickHousePlaceholder(name string, value interface{}) string {
+	return "{" + name + ":" + clickHouseParamType(value) + "}"
+}
+
+func clickHouseParamType(value interface{}) string {
+	switch value.(type) {
+	case string:
+		return "String"
+	case int, int8, int16, int32, int64:
+		return "Int64"
+	case uint, uint8, uint16, uint32, uint64:
+		return "UInt64"
+	case float32:
+		return "Float32"
+	case float64:
+		return "Float64"
+	case bool:
+		return "Bool"
+	default:
+		return "String"
 	}
 }

@@ -42,19 +42,54 @@ func (n *NumericOperator) schema() SchemaProvider {
 func (n *NumericOperator) validateNumericOperand(value interface{}) error {
 	fieldName := n.extractFieldNameFromValue(value)
 	if fieldName == "" {
-		return nil // Can't determine field name, skip validation
+		return validateNumericExpressionOperand(value)
 	}
 
 	fieldType := n.schema().GetFieldType(fieldName)
 	if fieldType == "" {
-		return nil // Field not in schema, skip validation (existence checked by DataOperator)
+		return validateNumericExpressionOperand(value)
 	}
 
 	if !n.schema().IsNumericType(fieldName) {
 		return fmt.Errorf("numeric operation on non-numeric field '%s' (type: %s)", fieldName, fieldType)
 	}
 
+	return validateNumericExpressionOperand(value)
+}
+
+func validateNumericExpressionOperand(value interface{}) error {
+	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.HasExpressionInfo {
+		return validateNumericExpressionShape(pv.Kind, pv.Type)
+	}
+	if expr, ok := value.(map[string]interface{}); ok && len(expr) == 1 {
+		for operator := range expr {
+			switch operator {
+			case OpCat, OpSubstr:
+				return numericExpressionTypeError(ExpressionTypeString)
+			case OpMap, OpFilter, OpMerge:
+				return numericExpressionTypeError(ExpressionTypeArray)
+			}
+		}
+	}
 	return nil
+}
+
+func validateNumericExpressionShape(kind ExpressionKind, typ ExpressionType) error {
+	if kind == ExpressionKindPredicate {
+		return nil
+	}
+	switch typ {
+	case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeNumber:
+		return nil
+	case ExpressionTypeString, ExpressionTypeArray, ExpressionTypeObject:
+		return numericExpressionTypeError(typ)
+	default:
+		return fmt.Errorf("numeric operation has unsupported value expression type %s", expressionTypeName(typ))
+	}
+}
+
+func numericExpressionTypeError(typ ExpressionType) error {
+	return fmt.Errorf("numeric operation on incompatible value expression (type: %s)", expressionTypeName(typ))
 }
 
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.
@@ -256,7 +291,7 @@ func (n *NumericOperator) handleModulo(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid modulo right argument: %w", err)
 	}
 
-	return fmt.Sprintf("(%s %% %s)", left, right), nil
+	return n.config.ModuloSQL(left, right), nil
 }
 
 // handleMax converts max operator to SQL.
@@ -281,7 +316,7 @@ func (n *NumericOperator) handleMax(args []interface{}) (string, error) {
 		operands[i] = operand
 	}
 
-	return fmt.Sprintf("GREATEST(%s)", strings.Join(operands, ", ")), nil
+	return n.config.GreatestSQL(operands), nil
 }
 
 // handleMin converts min operator to SQL.
@@ -306,7 +341,7 @@ func (n *NumericOperator) handleMin(args []interface{}) (string, error) {
 		operands[i] = operand
 	}
 
-	return fmt.Sprintf("LEAST(%s)", strings.Join(operands, ", ")), nil
+	return n.config.LeastSQL(operands), nil
 }
 
 func numericBoolLiteral(value bool) string {
@@ -316,17 +351,20 @@ func numericBoolLiteral(value bool) string {
 	return "0"
 }
 
-func numericSQLFromProcessedValue(pv ProcessedValue) string {
+func numericSQLFromProcessedValue(pv ProcessedValue) (string, error) {
 	if !pv.HasExpressionInfo {
-		return pv.Value
+		return pv.Value, nil
+	}
+	if err := validateNumericExpressionShape(pv.Kind, pv.Type); err != nil {
+		return "", err
 	}
 	if pv.Kind == ExpressionKindPredicate {
-		return PredicateNumberSQL(pv.Value)
+		return PredicateNumberSQL(pv.Value), nil
 	}
 	if pv.Type == ExpressionTypeBoolean {
-		return BooleanValueNumberSQL(pv.Value)
+		return BooleanValueNumberSQL(pv.Value), nil
 	}
-	return pv.Value
+	return pv.Value, nil
 }
 
 // valueToSQL converts a value to SQL, handling var expressions and literals.
@@ -334,7 +372,7 @@ func (n *NumericOperator) valueToSQL(value interface{}) (string, error) {
 	// Handle ProcessedValue (pre-processed SQL from parser)
 	if pv, ok := value.(ProcessedValue); ok {
 		if pv.IsSQL {
-			return numericSQLFromProcessedValue(pv), nil
+			return numericSQLFromProcessedValue(pv)
 		}
 		// It's a literal, convert it
 		return n.dataOp.valueToSQL(pv.Value)
@@ -505,20 +543,20 @@ func (n *NumericOperator) generateComplexSQL(operator string, args []string) (st
 		}
 		return fmt.Sprintf("(%s)", strings.Join(args, " / ")), nil
 	case "%":
-		if len(args) < 2 {
-			return "", fmt.Errorf("modulo requires at least 2 arguments")
+		if len(args) != 2 {
+			return "", fmt.Errorf("modulo requires exactly 2 arguments")
 		}
-		return fmt.Sprintf("(%s)", strings.Join(args, " % ")), nil
+		return n.config.ModuloSQL(args[0], args[1]), nil
 	case "max":
 		if len(args) < 2 {
 			return "", fmt.Errorf("max requires at least 2 arguments")
 		}
-		return fmt.Sprintf("GREATEST(%s)", strings.Join(args, ", ")), nil
+		return n.config.GreatestSQL(args), nil
 	case "min":
 		if len(args) < 2 {
 			return "", fmt.Errorf("min requires at least 2 arguments")
 		}
-		return fmt.Sprintf("LEAST(%s)", strings.Join(args, ", ")), nil
+		return n.config.LeastSQL(args), nil
 	default:
 		// For other operators (array, logical, etc.), they should have been pre-processed
 		// If we see them here, it means they weren't processed correctly
@@ -668,7 +706,7 @@ func (n *NumericOperator) handleModuloParam(args []interface{}, pc *params.Param
 	if err != nil {
 		return "", fmt.Errorf("invalid modulo right argument: %w", err)
 	}
-	return fmt.Sprintf("(%s %% %s)", left, right), nil
+	return n.config.ModuloSQL(left, right), nil
 }
 
 // handleMaxParam is the parameterized variant of handleMax. Keep in sync.
@@ -689,7 +727,7 @@ func (n *NumericOperator) handleMaxParam(args []interface{}, pc *params.ParamCol
 		}
 		operands[i] = operand
 	}
-	return fmt.Sprintf("GREATEST(%s)", strings.Join(operands, ", ")), nil
+	return n.config.GreatestSQL(operands), nil
 }
 
 // handleMinParam is the parameterized variant of handleMin. Keep in sync.
@@ -710,14 +748,14 @@ func (n *NumericOperator) handleMinParam(args []interface{}, pc *params.ParamCol
 		}
 		operands[i] = operand
 	}
-	return fmt.Sprintf("LEAST(%s)", strings.Join(operands, ", ")), nil
+	return n.config.LeastSQL(operands), nil
 }
 
 // valueToSQLParam is the parameterized variant of valueToSQL. Keep in sync.
 func (n *NumericOperator) valueToSQLParam(value interface{}, pc *params.ParamCollector) (string, error) {
 	if pv, ok := value.(ProcessedValue); ok {
 		if pv.IsSQL {
-			return numericSQLFromProcessedValue(pv), nil
+			return numericSQLFromProcessedValue(pv)
 		}
 		return n.dataOp.valueToSQLParam(pv.Value, pc)
 	}

@@ -57,6 +57,8 @@ func firstPlaceholderForDialect(d Dialect) string {
 	switch d {
 	case DialectPostgreSQL, DialectDuckDB:
 		return "$1"
+	case DialectClickHouse:
+		return "{p1:Float64}"
 	default:
 		return "@p1"
 	}

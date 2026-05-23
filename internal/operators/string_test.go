@@ -104,8 +104,8 @@ func TestStringOperator_ToSQL(t *testing.T) {
 			name:     "concatenation with no arguments",
 			operator: "cat",
 			args:     []interface{}{},
-			expected: "",
-			hasError: true,
+			expected: "''",
+			hasError: false,
 		},
 
 		// Substring tests
@@ -337,7 +337,7 @@ func TestStringOperator_NestedOperations(t *testing.T) {
 				"****",
 				map[string]interface{}{"substr": []interface{}{map[string]interface{}{"var": "card"}, -4}},
 			},
-			expected: "CONCAT(COALESCE(SUBSTR(card, 1, 4), ''), '****', COALESCE(SUBSTR(card, -3), ''))",
+			expected: "CONCAT(COALESCE(SUBSTR(card, 1, 4), ''), '****', COALESCE(SUBSTR(card, GREATEST((LENGTH(card) + -4 + 1), 1)), ''))",
 			hasError: false,
 		},
 		// Max inside cat
@@ -470,7 +470,7 @@ func TestStringOperator_processArithmeticExpression(t *testing.T) {
 			name:     "modulo",
 			operator: "%",
 			args:     []interface{}{map[string]interface{}{"var": "a"}, 3},
-			expected: "(a % 3)",
+			expected: "MOD(CAST(a AS NUMERIC), CAST(3 AS NUMERIC))",
 			hasError: false,
 		},
 		{

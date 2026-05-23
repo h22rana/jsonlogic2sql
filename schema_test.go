@@ -441,6 +441,48 @@ func TestNestedSchemaShapeValidation(t *testing.T) {
 			wantError: `schema field "tags" uses allowedValues but has type "array"; allowedValues require enum type`,
 		},
 		{
+			name: "non-array elementType is rejected",
+			fields: []FieldSchema{
+				{Name: "status", Type: FieldTypeString, ElementType: FieldTypeString},
+			},
+			wantError: `schema field "status" uses elementType but has type "string"; elementType requires array type`,
+		},
+		{
+			name: "unsupported elementType is rejected",
+			fields: []FieldSchema{
+				{Name: "values", Type: FieldTypeArray, ElementType: FieldType("decimal")},
+			},
+			wantError: `schema field "values" has unsupported elementType "decimal"`,
+		},
+		{
+			name: "elementFields require object elementType when both are set",
+			fields: []FieldSchema{
+				{
+					Name:        "items",
+					Type:        FieldTypeArray,
+					ElementType: FieldTypeString,
+					ElementFields: []FieldSchema{
+						{Name: "name", Type: FieldTypeString},
+					},
+				},
+			},
+			wantError: `schema field "items" uses elementFields with elementType "string"; elementFields require object elements`,
+		},
+		{
+			name: "enum array elementType requires allowedValues",
+			fields: []FieldSchema{
+				{Name: "statuses", Type: FieldTypeArray, ElementType: FieldTypeEnum},
+			},
+			wantError: `schema enum field "statuses" requires at least one allowedValues entry`,
+		},
+		{
+			name: "enum array duplicate allowedValues are rejected",
+			fields: []FieldSchema{
+				{Name: "statuses", Type: FieldTypeArray, ElementType: FieldTypeEnum, AllowedValues: []string{"active", "active"}},
+			},
+			wantError: `schema enum field "statuses" has duplicate allowed value "active"`,
+		},
+		{
 			name: "fields require object type",
 			fields: []FieldSchema{
 				{
@@ -494,6 +536,44 @@ func TestNestedSchemaShapeValidation(t *testing.T) {
 			}
 			if _, err := NewSchema(tt.fields); err == nil || err.Error() != tt.wantError {
 				t.Fatalf("NewSchema() error = %v, want %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestSchemaArrayElementTypeMetadata(t *testing.T) {
+	schema, err := NewSchema([]FieldSchema{
+		{Name: "values", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "statuses", Type: FieldTypeArray, ElementType: FieldTypeEnum, AllowedValues: []string{"active", "blocked"}},
+		{
+			Name:        "items",
+			Type:        FieldTypeArray,
+			ElementType: FieldTypeObject,
+			ElementFields: []FieldSchema{
+				{Name: "name", Type: FieldTypeString},
+			},
+		},
+		{Name: "unknownItems", Type: FieldTypeArray},
+	})
+	if err != nil {
+		t.Fatalf("NewSchema() error = %v", err)
+	}
+
+	tests := []struct {
+		field string
+		want  string
+	}{
+		{field: "values", want: string(FieldTypeNumber)},
+		{field: "statuses", want: string(FieldTypeEnum)},
+		{field: "items", want: string(FieldTypeObject)},
+		{field: "unknownItems", want: ""},
+		{field: "items.name", want: ""},
+		{field: "missing", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.field, func(t *testing.T) {
+			if got := schema.GetArrayElementType(tt.field); got != tt.want {
+				t.Fatalf("GetArrayElementType(%q) = %q, want %q", tt.field, got, tt.want)
 			}
 		})
 	}

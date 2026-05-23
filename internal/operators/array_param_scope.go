@@ -40,11 +40,14 @@ func (a *ArrayOperator) arrayScopeVarToSQLParam(varExpr interface{}, pc *params.
 		if len(arr) == 1 {
 			return mapped, true, nil
 		}
-		defaultSQL, err := a.dataOp.valueToSQLParam(arr[1], pc)
+		if defaultErr := a.validateArrayScopeVarDefault(varName, arr[1]); defaultErr != nil {
+			return "", true, defaultErr
+		}
+		defaultSQL, err := a.dataOp.defaultValueToSQLParam(arr[1], pc)
 		if err != nil {
 			return "", true, fmt.Errorf("invalid default value: %w", err)
 		}
-		return fmt.Sprintf("COALESCE(%s, %s)", mapped, defaultSQL), true, nil
+		return a.config.CoalesceSQL(mapped, defaultSQL), true, nil
 	}
 
 	return "", false, nil
@@ -148,11 +151,14 @@ func (a *ArrayOperator) arrayInternalVarToSQLParam(varExpr interface{}, pc *para
 		if len(arr) == 1 {
 			return mapped, true, nil
 		}
-		defaultSQL, err := a.dataOp.valueToSQLParam(arr[1], pc)
+		if err := a.validateArrayScopeVarDefault(varName, arr[1]); err != nil {
+			return "", true, err
+		}
+		defaultSQL, err := a.dataOp.defaultValueToSQLParam(arr[1], pc)
 		if err != nil {
 			return "", true, fmt.Errorf("invalid default value: %w", err)
 		}
-		return fmt.Sprintf("COALESCE(%s, %s)", mapped, defaultSQL), true, nil
+		return a.config.CoalesceSQL(mapped, defaultSQL), true, nil
 	}
 
 	return "", false, nil

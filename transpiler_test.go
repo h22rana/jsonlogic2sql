@@ -670,7 +670,7 @@ func TestTranspiler_Transpile(t *testing.T) {
 		{
 			name:     "missing_some operation",
 			input:    `{"missing_some": [1, ["field1", "field2"]]}`,
-			expected: "(field1 IS NULL OR field2 IS NULL)",
+			expected: "(field1 IS NULL AND field2 IS NULL)",
 			hasError: false,
 		},
 		{
@@ -1317,7 +1317,7 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "missing some fields",
 			input:    `{"missing_some": [1, ["field1", "field2"]]}`,
-			expected: "(field1 IS NULL OR field2 IS NULL)",
+			expected: "(field1 IS NULL AND field2 IS NULL)",
 			hasError: false,
 		},
 		{
@@ -1471,7 +1471,7 @@ func TestAllOperators(t *testing.T) {
 		{
 			name:     "modulo",
 			input:    `{"%": [{"var": "count"}, 3]}`,
-			expected: "(count % 3)",
+			expected: "MOD(CAST(count AS NUMERIC), CAST(3 AS NUMERIC))",
 			hasError: false,
 		},
 
@@ -1514,8 +1514,8 @@ func TestAllOperators(t *testing.T) {
 		},
 		{
 			name:     "none elements",
-			input:    `{"none": [{"var": "values"}, {"==": [{"var": ""}, "invalid"]}]}`,
-			expected: "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
+			input:    `{"none": [{"var": "statuses"}, {"==": [{"var": ""}, "invalid"]}]}`,
+			expected: "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'invalid')",
 			hasError: false,
 		},
 		{
@@ -1742,7 +1742,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested arithmetic with multiple operations",
 			input:    `{"+": [{"*": [{"var": "price"}, {"var": "quantity"}]}, {"-": [{"var": "discount"}, {"%": [{"var": "tax"}, 10]}]}]}`,
-			expected: "((price * quantity) + (discount - (tax % 10)))",
+			expected: "((price * quantity) + (discount - MOD(CAST(tax AS NUMERIC), CAST(10 AS NUMERIC))))",
 			hasError: false,
 		},
 		{
@@ -1766,7 +1766,7 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		{
 			name:     "nested missing operations",
 			input:    `{"and": [{"!": [{"missing": "email"}]}, {"missing_some": [1, ["phone", "address"]]}]}`,
-			expected: "(NOT (email IS NULL) AND (phone IS NULL OR address IS NULL))",
+			expected: "(NOT (email IS NULL) AND (phone IS NULL AND address IS NULL))",
 			hasError: false,
 		},
 		// Additional NULL comparison edge cases
@@ -2003,7 +2003,7 @@ func TestAdditionalEdgeCases(t *testing.T) {
 		{
 			name:     "negative index in substr",
 			input:    `{"substr": [{"var": "text"}, -5, 3]}`,
-			expected: "SUBSTR(text, -4, 3)",
+			expected: "SUBSTR(text, GREATEST((LENGTH(text) + -5 + 1), 1), 3)",
 			hasError: false,
 		},
 
@@ -2246,8 +2246,8 @@ func TestArrayOperatorsDialectSupport(t *testing.T) {
 				// None operator tests
 				{
 					name:     "no elements satisfy condition",
-					input:    `{"none": [{"var": "values"}, {"==": [{"var": ""}, "invalid"]}]}`,
-					expected: "NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')",
+					input:    `{"none": [{"var": "statuses"}, {"==": [{"var": ""}, "invalid"]}]}`,
+					expected: "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'invalid')",
 				},
 
 				// Note: merge tests are in TestMergeOperatorDialectSpecific due to dialect-specific output

@@ -49,7 +49,74 @@ func (a *ArrayOperator) localValueExpressionResult(expr interface{}, sql string)
 	if isPredicateArrayExpression(expr) {
 		return ValueSQL(PredicateValueSQL(sql), ExpressionTypeBoolean)
 	}
+	if result, ok := a.localArrayExpressionMetadata(expr, sql); ok {
+		return result
+	}
 	return ValueSQL(sql, a.inferValueExpressionType(expr))
+}
+
+func (a *ArrayOperator) localArrayExpressionMetadata(expr interface{}, sql string) (OperatorResult, bool) {
+	operator, args, ok := arrayOperatorArgs(expr)
+	if !ok {
+		return OperatorResult{}, false
+	}
+	switch operator {
+	case OpMap:
+		return a.localMapExpressionMetadata(args, sql)
+	case OpFilter:
+		return a.localFilterExpressionMetadata(args, sql)
+	case OpMerge:
+		return a.localMergeExpressionMetadata(args, sql)
+	default:
+		return OperatorResult{}, false
+	}
+}
+
+func (a *ArrayOperator) localMapExpressionMetadata(args []interface{}, sql string) (OperatorResult, bool) {
+	if len(args) != 2 {
+		return OperatorResult{}, false
+	}
+	source, err := a.valueToTypedSQLAtPath(args[0], a.argPath(0))
+	if err != nil {
+		return OperatorResult{}, false
+	}
+	elementOp := a.withArrayLambdaSource(arrayLambdaScopeMap, typedValueSchemaScopes(source), source, true)
+	res, err := elementOp.valueExpressionResultWithContextAndPath(args[1], false, a.argPath(1))
+	if err != nil {
+		return OperatorResult{}, false
+	}
+	return arrayValueSQLWithMetadata(sql, mappedArrayElementTypes(res), res.ArrayElementSchemaScopes), true
+}
+
+func (a *ArrayOperator) localFilterExpressionMetadata(args []interface{}, sql string) (OperatorResult, bool) {
+	if len(args) != 2 {
+		return OperatorResult{}, false
+	}
+	source, err := a.valueToTypedSQLAtPath(args[0], a.argPath(0))
+	if err != nil {
+		return OperatorResult{}, false
+	}
+	return arrayValueSQLWithMetadata(sql, typedValueElementTypes(source), typedValueSchemaScopes(source)), true
+}
+
+func (a *ArrayOperator) localMergeExpressionMetadata(args []interface{}, sql string) (OperatorResult, bool) {
+	values := make([]typedValueSQL, 0, len(args))
+	for i, arg := range args {
+		if isEmptyArrayLiteral(arg) {
+			values = append(values, typedValueSQL{typ: ExpressionTypeArray, emptyArrayLiteral: true})
+			continue
+		}
+		value, err := a.valueToTypedSQLAtPath(arg, a.argPath(i))
+		if err != nil {
+			return OperatorResult{}, false
+		}
+		values = append(values, value)
+	}
+	common, err := validateMergeElementCompatibility(values)
+	if err != nil {
+		return OperatorResult{}, false
+	}
+	return arrayValueSQLWithMetadata(sql, mergeElementTypes(values, common), a.arraySourceSchemaScopesForValues(args, values)), true
 }
 
 func isPredicateArrayExpression(expr interface{}) bool {
@@ -121,6 +188,13 @@ func (a *ArrayOperator) localTruthinessExpressionSQL(expr interface{}, sql, path
 	case ExpressionTypeArray:
 		lengthCheck := a.arrayLengthSQL(result.SQL)
 		return fmt.Sprintf("(%s IS NOT NULL AND %s > 0)", result.SQL, lengthCheck), nil
+	case ExpressionTypeObject:
+		return "", tperrors.New(
+			tperrors.ErrInvalidExpressionContext,
+			"",
+			path,
+			"object-valued expression cannot be used as a locally scoped array condition",
+		)
 	case ExpressionTypeUnknown:
 		return "", tperrors.New(
 			tperrors.ErrInvalidExpressionContext,
@@ -152,11 +226,13 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		if pv.IsSQL {
 			if pv.HasExpressionInfo {
 				return typedSQLFromOperatorResult(OperatorResult{
-					SQL:               pv.Value,
-					Kind:              pv.Kind,
-					Type:              pv.Type,
-					ArrayElementType:  pv.ArrayElementType,
-					ArrayElementTypes: pv.ArrayElementTypes,
+					SQL:                      pv.Value,
+					Kind:                     pv.Kind,
+					Type:                     pv.Type,
+					PreserveParamRefs:        pv.PreserveParamRefs,
+					ArrayElementType:         pv.ArrayElementType,
+					ArrayElementTypes:        pv.ArrayElementTypes,
+					ArrayElementSchemaScopes: pv.ArrayElementSchemaScopes,
 				}), nil
 			}
 			return typedValueSQL{sql: pv.Value, typ: ExpressionTypeUnknown}, nil
@@ -179,6 +255,10 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 				if err != nil {
 					return typedValueSQL{}, err
 				}
+				pv := a.scopedSQLFieldResult(sql, a.scopedFieldNamesFromVarExpr(varExpr)...)
+				if pv.HasExpressionInfo {
+					return typedSQLFromProcessedValue(pv), nil
+				}
 				return typedValueSQL{sql: sql, typ: a.inferValueExpressionType(value)}, nil
 			}
 			sql, err := a.dataOp.ToSQL(OpVar, []interface{}{varExpr})
@@ -189,7 +269,7 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 			if fieldType == ExpressionTypeUnknown {
 				fieldType = a.inferValueExpressionType(value)
 			}
-			return typedValueSQL{sql: sql, typ: fieldType}, nil
+			return a.typedFieldSQL(sql, a.extractFieldName(varExpr), fieldType), nil
 		}
 		// Otherwise, it's a complex value expression.
 		res, err := a.valueExpressionResultWithContextAndPath(value, false, path)
@@ -201,13 +281,18 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 
 	// Handle arrays
 	if arr, ok := value.([]interface{}); ok {
+		if err := a.config.ValidateArrayLiteralValue(arr); err != nil {
+			return typedValueSQL{}, err
+		}
 		elements := make([]string, len(arr))
 		var commonTypes []ExpressionType
+		var schemaScopes []string
 		for i, elem := range arr {
 			element, err := a.valueToTypedSQLAtPath(elem, tperrors.BuildArrayPath(path, i))
 			if err != nil {
 				return typedValueSQL{}, fmt.Errorf("invalid array element %d: %w", i, err)
 			}
+			schemaScopes = append(schemaScopes, typedValueSchemaScopes(element)...)
 			commonTypes, err = updateArrayLiteralElementTypes(commonTypes, element, i)
 			if err != nil {
 				return typedValueSQL{}, err
@@ -216,6 +301,10 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 		}
 		elementTypes := normalizeArrayElementTypes(commonTypes)
 		if err := a.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
+			return typedValueSQL{}, err
+		}
+		schemaScopes = normalizeSchemaScopes(schemaScopes)
+		if err := a.validateCompatibleArrayElementScopes(schemaScopes); err != nil {
 			return typedValueSQL{}, err
 		}
 		sql, err := a.arrayLiteral(elements)
@@ -227,6 +316,7 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 			typ:               ExpressionTypeArray,
 			elemType:          firstArrayElementType(elementTypes),
 			elemTypes:         elementTypes,
+			schemaScopes:      schemaScopes,
 			emptyArrayLiteral: len(arr) == 0,
 		}, nil
 	}

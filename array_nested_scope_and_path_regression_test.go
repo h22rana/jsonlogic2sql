@@ -29,6 +29,15 @@ func TestNestedBareFieldUsesInnerAlias_AllDialects(t *testing.T) {
 			}
 
 			sql, err := tr.TranspileValue(logic)
+			if testRejectsNestedArrayValues(d) {
+				if err == nil {
+					t.Fatalf("TranspileValue() SQL = %q, want nested-array dialect error", sql)
+				}
+				if !strings.Contains(err.Error(), nestedArrayErrorFragment(d)) {
+					t.Fatalf("TranspileValue() error = %v, want nested-array dialect error", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("TranspileValue() error: %v", err)
 			}
@@ -75,26 +84,26 @@ func TestNestedArrayPredicatePreservesOuterScope_AllDialects(t *testing.T) {
 	}{
 		{
 			name:       "all predicate",
-			logic:      `{"all":[{"var":"bag.records"},{"some":[{"var":"values"},{">=":[{"var":""},0]}]}]}`,
-			want:       "UNNEST(elem.values) AS elem1",
-			notWant:    "UNNEST(elem.values) AS elem WHERE elem >= 0",
+			logic:      `{"all":[{"var":"bag.records"},{"some":[{"var":"subitems"},{">=":[{"var":""},0]}]}]}`,
+			want:       "UNNEST(elem.subitems) AS elem1",
+			notWant:    "UNNEST(elem.subitems) AS elem WHERE elem >= 0",
 			clickWant:  "arrayExists(elem1 -> elem1 >=",
 			clickAvoid: "arrayExists(elem -> elem >=",
 		},
 		{
 			name:       "all logical predicate",
-			logic:      `{"all":[{"var":"bag.records"},{"and":[{"some":[{"var":"values"},{">=":[{"var":""},0]}]},true]}]}`,
-			want:       "UNNEST(elem.values) AS elem1",
-			notWant:    "UNNEST(elem.values) AS elem WHERE elem >= 0",
+			logic:      `{"all":[{"var":"bag.records"},{"and":[{"some":[{"var":"subitems"},{">=":[{"var":""},0]}]},true]}]}`,
+			want:       "UNNEST(elem.subitems) AS elem1",
+			notWant:    "UNNEST(elem.subitems) AS elem WHERE elem >= 0",
 			clickWant:  "arrayExists(elem1 -> elem1 >=",
 			clickAvoid: "arrayExists(elem -> elem >=",
 		},
 		{
 			name:       "filter predicate",
-			logic:      `{"filter":[{"var":"bag.records"},{"some":[{"var":"values"},{">=":[{"var":""},0]}]}]}`,
+			logic:      `{"filter":[{"var":"bag.records"},{"some":[{"var":"subitems"},{">=":[{"var":""},0]}]}]}`,
 			valueMode:  true,
-			want:       "UNNEST(elem.values) AS elem1",
-			notWant:    "UNNEST(elem.values) AS elem WHERE elem >= 0",
+			want:       "UNNEST(elem.subitems) AS elem1",
+			notWant:    "UNNEST(elem.subitems) AS elem WHERE elem >= 0",
 			clickWant:  "arrayExists(elem1 -> elem1 >=",
 			clickAvoid: "arrayExists(elem -> elem >=",
 		},
@@ -219,7 +228,7 @@ func TestScopedNestedArrayValuesUseTruthinessInArrayLambdaPredicates_AllDialects
 			Name: "records",
 			Type: FieldTypeArray,
 			ElementFields: []FieldSchema{
-				{Name: "values", Type: FieldTypeArray},
+				{Name: "values", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 			},
 		},
 	})
@@ -564,6 +573,18 @@ func TestReduceNestedArrayOperatorsUseChildAliases_AllDialectsSchemaRequired(t *
 						t.Run(tc.name, func(t *testing.T) {
 							t.Parallel()
 							sql, inlineErr := tr.TranspileValue(tc.logic)
+							if testRejectsNestedArrayValues(d) && inlineErr != nil &&
+								(strings.Contains(inlineErr.Error(), "does not support array literals whose elements are arrays") ||
+									strings.Contains(inlineErr.Error(), "does not support array values whose elements are arrays")) {
+								paramSQL, params, paramErr := tr.TranspileParameterizedValue(tc.logic)
+								if paramErr == nil ||
+									(!strings.Contains(paramErr.Error(), "does not support array literals whose elements are arrays") &&
+										!strings.Contains(paramErr.Error(), "does not support array values whose elements are arrays")) {
+									t.Fatalf("TranspileParameterizedValue() = %q params %#v, error = %v, want nested-array dialect rejection",
+										paramSQL, params, paramErr)
+								}
+								return
+							}
 							if d == DialectDuckDB && tc.standardUnsupported {
 								if inlineErr == nil || !strings.Contains(inlineErr.Error(), "DuckDB list_reduce does not support subqueries") {
 									t.Fatalf("TranspileValue() = %q, error = %v, want DuckDB lambda subquery rejection", sql, inlineErr)

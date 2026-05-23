@@ -188,7 +188,7 @@ func TestParser_Parse(t *testing.T) {
 		{
 			name:     "missing_some operation",
 			input:    map[string]interface{}{"missing_some": []interface{}{1, []interface{}{"field1", "field2"}}},
-			expected: "(field1 IS NULL OR field2 IS NULL)",
+			expected: "(field1 IS NULL AND field2 IS NULL)",
 			hasError: false,
 		},
 

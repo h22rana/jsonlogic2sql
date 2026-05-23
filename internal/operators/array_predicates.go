@@ -33,20 +33,23 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
+	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
 
 	// JSONLogic spec: {"all": [[], condition]} returns false (empty array = false).
@@ -85,20 +88,23 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
+	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
 
 	alias := a.elemAlias()
@@ -134,20 +140,23 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "TRUE", nil
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 
 	// Second argument: truthiness expression - rewrite element vars before SQL generation
 	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLWithContextAndPath(args[arrayExpressionArgIndex], a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
+	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
 
 	alias := a.elemAlias()

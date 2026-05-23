@@ -11,7 +11,7 @@ import (
 
 // ToSQLParam is the parameterized variant of ToSQL.
 func (a *ArrayOperator) ToSQLParam(operator string, args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) == 0 {
+	if len(args) == 0 && operator != OpMerge {
 		return "", fmt.Errorf("array operator %s requires at least one argument", operator)
 	}
 	switch operator {
@@ -63,7 +63,7 @@ func (a *ArrayOperator) ToValueResultParam(
 	args []interface{},
 	pc *params.ParamCollector,
 ) (OperatorResult, error) {
-	if len(args) == 0 {
+	if len(args) == 0 && operator != OpMerge {
 		return OperatorResult{}, fmt.Errorf("array operator %s requires at least one argument", operator)
 	}
 
@@ -72,6 +72,8 @@ func (a *ArrayOperator) ToValueResultParam(
 		return a.handleMapResultParam(args, pc)
 	case OpFilter:
 		return a.handleFilterResultParam(args, pc)
+	case OpReduce:
+		return a.handleReduceResultParam(args, pc)
 	case OpMerge:
 		return a.handleMergeResultParam(args, pc)
 	default:
@@ -107,14 +109,14 @@ func (a *ArrayOperator) handleMapResultParam(args []interface{}, pc *params.Para
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 	valueScoped := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, true)
 	transformation, err := valueScoped.valueExpressionResultParamWithContextAndPath(
 		args[arrayExpressionArgIndex],
@@ -125,9 +127,30 @@ func (a *ArrayOperator) handleMapResultParam(args []interface{}, pc *params.Para
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid map transformation argument: %w", err)
 	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return OperatorResult{}, fmt.Errorf("invalid map array argument: %w", err)
+	}
 	alias := a.elemAlias()
 	sql := a.renderMapSQL(alias, transformation.SQL, array)
-	return arrayValueSQLWithElementTypes(sql, mappedArrayElementTypes(transformation)...), nil
+	elementTypes := mappedArrayElementTypes(transformation)
+	if err := a.validateArrayResultElementTypes(elementTypes); err != nil {
+		return OperatorResult{}, err
+	}
+	var elementSchemaScopes []string
+	switch expressionTypeFromResultKind(transformation.Kind, transformation.Type) {
+	case ExpressionTypeObject:
+		if scopes := normalizeSchemaScopes(transformation.ArrayElementSchemaScopes); len(scopes) > 0 {
+			elementSchemaScopes = scopes
+		} else if isIdentityElementMapExpression(args[arrayExpressionArgIndex]) {
+			elementSchemaScopes = sourceScopes
+		}
+	case ExpressionTypeArray:
+		elementSchemaScopes = normalizeSchemaScopes(transformation.ArrayElementSchemaScopes)
+	case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeString, ExpressionTypeNumber:
+	}
+	result := arrayValueSQLWithMetadata(sql, elementTypes, elementSchemaScopes)
+	result.PreserveParamRefs = arrayValue.preserveParamRefs || transformation.PreserveParamRefs
+	return result, nil
 }
 
 // handleFilterParam is the parameterized variant of handleFilter. Keep in sync.
@@ -158,63 +181,87 @@ func (a *ArrayOperator) handleFilterResultParam(args []interface{}, pc *params.P
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return emptyArrayResult(a.emptyArrayLiteralSQL())
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid filter condition argument: %w", err)
 	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return OperatorResult{}, fmt.Errorf("invalid filter array argument: %w", err)
+	}
 	alias := a.elemAlias()
-	return arrayValueSQLWithElementTypes(a.renderFilterSQL(alias, array, condition), typedValueElementTypes(arrayValue)...), nil
+	result := arrayValueSQLWithMetadata(
+		a.renderFilterSQL(alias, array, condition),
+		typedValueElementTypes(arrayValue),
+		typedValueSchemaScopes(arrayValue),
+	)
+	result.PreserveParamRefs = arrayValue.preserveParamRefs
+	return result, nil
 }
 
 // handleReduceParam is the parameterized variant of handleReduce. Keep in sync.
 func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCollector) (string, error) {
+	res, err := a.handleReduceResultParam(args, pc)
+	if err != nil {
+		return "", err
+	}
+	return res.SQL, nil
+}
+
+func (a *ArrayOperator) handleReduceResultParam(args []interface{}, pc *params.ParamCollector) (OperatorResult, error) {
 	if len(args) != reduceOperatorArgCount {
-		return "", fmt.Errorf("reduce requires exactly 3 arguments")
+		return OperatorResult{}, fmt.Errorf("reduce requires exactly 3 arguments")
 	}
 	if a.config != nil {
 		if err := a.config.ValidateDialect("reduce"); err != nil {
-			return "", err
+			return OperatorResult{}, err
 		}
 	}
 	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
-		return "", err
+		return OperatorResult{}, err
 	}
 	initialValue, err := a.valueToTypedSQLParamAtPath(args[arrayReduceInitialArgIndex], pc, a.argPath(arrayReduceInitialArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid reduce initial argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid reduce initial argument: %w", err)
 	}
 	initial := initialValue.sql
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return initial, nil
+		return operatorResultFromTypedValue(initialValue), nil
 	}
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid reduce array argument: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid reduce array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
-		return "", fmt.Errorf("invalid reduce array argument: %w", arraySourceErr)
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
+		return OperatorResult{}, fmt.Errorf("invalid reduce array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return initial, nil
+		return operatorResultFromTypedValue(initialValue), nil
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
+	if scopeErr := a.validateCompatibleArrayElementScopes(sourceScopes); scopeErr != nil {
+		return OperatorResult{}, fmt.Errorf("invalid reduce array argument: %w", scopeErr)
+	}
 	reducerExpr := args[arrayExpressionArgIndex]
 	alias := a.elemAlias()
 
 	reduceScoped := a.withArrayLambdaSource(arrayLambdaScopeReduce, sourceScopes, arrayValue, false)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
+		numericInitial, initialErr := a.numericAggregateInitialSQLParam(args[arrayReduceInitialArgIndex], initialValue)
+		if initialErr != nil {
+			return OperatorResult{}, fmt.Errorf("invalid reduce initial argument: %w", initialErr)
+		}
 		if aggregateErr := reduceScoped.validateAggregatePattern(pattern); aggregateErr != nil {
-			return "", aggregateErr
+			return OperatorResult{}, aggregateErr
 		}
 		switch a.getDialect() {
 		case dialect.DialectClickHouse:
@@ -229,26 +276,35 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 					if errors.Is(quoteErr, errUnsupportedGeneralReduce) {
 						goto generalReduceParam
 					}
-					return "", quoteErr
+					return OperatorResult{}, quoteErr
 				}
 				aggregateInput = fmt.Sprintf("arrayMap(%s -> %s, %s)", mapAlias, mappedRef, array)
 			}
 			aggregateSQL := fmt.Sprintf("arrayReduce('%s', %s)", strings.ToLower(pattern.function), aggregateInput)
-			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, true, array), nil
+			return preserveParamRefsFromTypedValues(
+				ValueSQL(renderReduceAggregateResult(pattern.function, numericInitial, aggregateSQL, true, array), ExpressionTypeNumber),
+				initialValue, arrayValue,
+			), nil
 		case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
 			elemRef, quoteErr := reduceScoped.aggregateElementSQLParam(alias, pattern, pc)
 			if quoteErr != nil {
-				return "", quoteErr
+				return OperatorResult{}, quoteErr
 			}
 			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
-			return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
+			return preserveParamRefsFromTypedValues(
+				ValueSQL(renderReduceAggregateResult(pattern.function, numericInitial, aggregateSQL, false, ""), ExpressionTypeNumber),
+				initialValue, arrayValue,
+			), nil
 		}
 		elemRef, quoteErr := reduceScoped.aggregateElementSQLParam(alias, pattern, pc)
 		if quoteErr != nil {
-			return "", quoteErr
+			return OperatorResult{}, quoteErr
 		}
 		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
-		return renderReduceAggregateResult(pattern.function, initial, aggregateSQL, false, ""), nil
+		return preserveParamRefsFromTypedValues(
+			ValueSQL(renderReduceAggregateResult(pattern.function, numericInitial, aggregateSQL, false, ""), ExpressionTypeNumber),
+			initialValue, arrayValue,
+		), nil
 	}
 
 generalReduceParam:
@@ -256,12 +312,16 @@ generalReduceParam:
 	if a.getDialect() == dialect.DialectClickHouse || a.getDialect() == dialect.DialectDuckDB {
 		accumulatorSQL = "acc"
 	}
-	valueScoped := reduceScoped.withReduceValueScope(initialValue.typ, accumulatorSQL)
-	reducerWithElem, err := valueScoped.expressionToSQLParamWithContextAndPath(reducerExpr, pc, true, a.argPath(arrayExpressionArgIndex))
+	valueScoped := reduceScoped.withReduceValueScope(initialValue, accumulatorSQL)
+	reducerResult, err := valueScoped.valueExpressionResultParamWithContextAndPath(reducerExpr, pc, true, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
-		return "", fmt.Errorf("invalid reduce expression: %w", err)
+		return OperatorResult{}, fmt.Errorf("invalid reduce expression: %w", err)
 	}
-	return a.renderGeneralReduceSQL(alias, array, reducerWithElem, initial, initialValue.typ)
+	sql, err := a.renderGeneralReduceSQL(alias, array, reducerResult.SQL, initial, initialValue.typ)
+	if err != nil {
+		return OperatorResult{}, err
+	}
+	return preserveParamRefsFromTypedValues(operatorResultWithSQL(reducerResult, sql), initialValue, arrayValue), nil
 }
 
 // handleAllParam is the parameterized variant of handleAll. Keep in sync.
@@ -284,18 +344,21 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all condition argument: %w", err)
+	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return "", fmt.Errorf("invalid all array argument: %w", err)
 	}
 
 	alias := a.elemAlias()
@@ -322,18 +385,21 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "FALSE", nil
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some condition argument: %w", err)
+	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return "", fmt.Errorf("invalid some array argument: %w", err)
 	}
 	alias := a.elemAlias()
 	return a.renderSomeSQL(alias, array, condition), nil
@@ -359,18 +425,21 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
-	if arraySourceErr := validateArraySourceValue(arrayValue); arraySourceErr != nil {
+	if arraySourceErr := a.validateArraySourceValue(arrayValue); arraySourceErr != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
 		return "TRUE", nil
 	}
 	array := arrayValue.sql
-	sourceScopes := a.arraySourceSchemaScopes(args[arraySourceArgIndex])
+	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
 	condition, err := a.withArrayLambdaSource(arrayLambdaScopeElement, sourceScopes, arrayValue, false).
 		truthinessExpressionToSQLParamWithContextAndPath(args[arrayExpressionArgIndex], pc, a.argPath(arrayExpressionArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none condition argument: %w", err)
+	}
+	if err := a.validateCompatibleArrayElementScopes(sourceScopes); err != nil {
+		return "", fmt.Errorf("invalid none array argument: %w", err)
 	}
 	alias := a.elemAlias()
 	return a.renderNoneSQL(alias, array, condition), nil
@@ -386,9 +455,6 @@ func (a *ArrayOperator) handleMergeParam(args []interface{}, pc *params.ParamCol
 }
 
 func (a *ArrayOperator) handleMergeResultParam(args []interface{}, pc *params.ParamCollector) (OperatorResult, error) {
-	if len(args) < 1 {
-		return OperatorResult{}, fmt.Errorf("merge requires at least 1 argument")
-	}
 	if a.config != nil {
 		if err := a.config.ValidateDialect("merge"); err != nil {
 			return OperatorResult{}, err
@@ -410,6 +476,10 @@ func (a *ArrayOperator) handleMergeResultParam(args []interface{}, pc *params.Pa
 	if err != nil {
 		return OperatorResult{}, err
 	}
+	sourceScopes := a.arraySourceSchemaScopesForValues(args, values)
+	if scopeErr := a.validateCompatibleArrayElementScopes(sourceScopes); scopeErr != nil {
+		return OperatorResult{}, fmt.Errorf("invalid merge argument schemas: %w", scopeErr)
+	}
 
 	arrays := make([]string, 0, len(values))
 	for i, value := range values {
@@ -428,7 +498,13 @@ func (a *ArrayOperator) handleMergeResultParam(args []interface{}, pc *params.Pa
 	if err != nil {
 		return OperatorResult{}, err
 	}
-	return arrayValueSQLWithElementTypes(sql, mergeElementTypes(values, common)...), nil
+	elementTypes := mergeElementTypes(values, common)
+	if err := a.validateArrayResultElementTypes(elementTypes); err != nil {
+		return OperatorResult{}, err
+	}
+	result := arrayValueSQLWithMetadata(sql, elementTypes, sourceScopes)
+	result.PreserveParamRefs = typedValuesPreserveParamRefs(values)
+	return result, nil
 }
 
 // valueToSQLParam is the parameterized variant of valueToSQL. Keep in sync.

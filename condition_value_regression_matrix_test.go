@@ -53,7 +53,7 @@ func TestRegressionMatrix_ConditionValue_AllDialectsSchemaRequired(t *testing.T)
 			},
 			wantParam: func(d Dialect) string {
 				condition := "flag IS TRUE"
-				return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, testPlaceholder(d, 1), testPlaceholder(d, 2))
+				return fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, testStringPlaceholder(d, 1), testStringPlaceholder(d, 2))
 			},
 			wantParams: []QueryParam{{Name: "p1", Value: "yes"}, {Name: "p2", Value: "no"}},
 		},

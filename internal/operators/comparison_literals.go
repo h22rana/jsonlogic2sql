@@ -200,6 +200,23 @@ func combineOrPredicates(predicates []string) string {
 	}
 }
 
+func combineAndPredicates(predicates []string) string {
+	filtered := make([]string, 0, len(predicates))
+	for _, predicate := range predicates {
+		if strings.TrimSpace(predicate) != "" {
+			filtered = append(filtered, predicate)
+		}
+	}
+	switch len(filtered) {
+	case 0:
+		return boolSQL(true)
+	case 1:
+		return filtered[0]
+	default:
+		return fmt.Sprintf("(%s)", strings.Join(filtered, " AND "))
+	}
+}
+
 func boolSQL(value bool) string {
 	if value {
 		return "TRUE"

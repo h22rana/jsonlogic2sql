@@ -80,8 +80,11 @@ func isSQLStringLiteral(s string) bool {
 // even when the bind parameter is numeric.
 func castToString(expr string, d jsonlogic2sql.Dialect) string {
 	castType := "STRING"
-	if d == jsonlogic2sql.DialectPostgreSQL || d == jsonlogic2sql.DialectDuckDB {
+	switch d {
+	case jsonlogic2sql.DialectPostgreSQL, jsonlogic2sql.DialectDuckDB:
 		castType = "TEXT"
+	case jsonlogic2sql.DialectClickHouse:
+		castType = "String"
 	}
 	return fmt.Sprintf("CAST(%s AS %s)", expr, castType)
 }
@@ -101,7 +104,8 @@ func escapeLikeExpr(expr string, d jsonlogic2sql.Dialect) string {
 //
 // Three pattern argument forms are handled:
 //  1. SQL string literal ('hello'): unquote, escape LIKE wildcards, inline.
-//  2. Bind placeholder (@p1, $1): CAST to string, wrap with REPLACE for runtime escaping.
+//  2. Bind placeholder (@p1, $1, or a typed ClickHouse custom placeholder):
+//     CAST to string, wrap with REPLACE for runtime escaping.
 //  3. Unquoted primitive (1000, TRUE): treat as a literal value, escape and inline.
 func buildLikeSQL(column, patternArg, prefix, suffix string, negate bool, d jsonlogic2sql.Dialect) string {
 	keyword := "LIKE"
@@ -146,9 +150,9 @@ func normalizeWaveDashSQL(expr string, d jsonlogic2sql.Dialect) (string, error) 
 	}
 }
 
-// placeholderRe matches bind-parameter placeholders across all supported dialects:
-// @p1, @p2, ... (BigQuery, Spanner, ClickHouse) and $1, $2, ... (PostgreSQL, DuckDB).
-var placeholderRe = regexp.MustCompile(`^(?:@p\d+|\$\d+)$`)
+// placeholderRe matches generated placeholders plus ClickHouse's typed
+// placeholder form for custom operator interoperability.
+var placeholderRe = regexp.MustCompile(`^(?:@p\d+|\$\d+|\{p\d+:[A-Za-z][A-Za-z0-9_]*(?:\([^{}]*\))?\})$`)
 
 // isPlaceholder reports whether s looks like a bind-parameter placeholder.
 func isPlaceholder(s string) bool {

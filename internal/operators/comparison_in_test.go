@@ -79,7 +79,7 @@ func TestComparisonOperator_valueToSQL_Extended(t *testing.T) {
 		{
 			name:     "modulo expression",
 			input:    map[string]interface{}{"%": []interface{}{map[string]interface{}{"var": "x"}, 3}},
-			expected: "(x % 3)",
+			expected: "MOD(CAST(x AS NUMERIC), CAST(3 AS NUMERIC))",
 			hasError: false,
 		},
 		// Comparison expression inside comparison

@@ -99,12 +99,13 @@ func assertNoWholeWordToken(t *testing.T, sql, token string) {
 
 func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *testing.T) {
 	type matrixCase struct {
-		name                string
-		logic               string
-		wantParam           int
-		clickHouseOnly      bool
-		duckDBGeneralReduce bool
-		validate            func(t *testing.T, d Dialect, out apiOutput)
+		name                         string
+		logic                        string
+		wantParam                    int
+		clickHouseOnly               bool
+		duckDBGeneralReduce          bool
+		rejectGoogleNestedArrayValue bool
+		validate                     func(t *testing.T, d Dialect, out apiOutput)
 	}
 
 	cases := []matrixCase{
@@ -189,9 +190,10 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 			},
 		},
 		{
-			name:      "nested filter mixed scope with direct vars",
-			logic:     `{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{"gte":[{"var":""},0]}]}]}`,
-			wantParam: 1,
+			name:                         "nested filter mixed scope with direct vars",
+			logic:                        `{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{"gte":[{"var":""},0]}]}]}`,
+			wantParam:                    1,
+			rejectGoogleNestedArrayValue: true,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
@@ -205,9 +207,10 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 			},
 		},
 		{
-			name:      "nested filter with custom operator",
-			logic:     `{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{"gte":[{"var":""},0]}]}]}`,
-			wantParam: 1,
+			name:                         "nested filter with custom operator",
+			logic:                        `{"map":[{"var":"bag.records"},{"filter":[{"var":"values"},{"gte":[{"var":""},0]}]}]}`,
+			wantParam:                    1,
+			rejectGoogleNestedArrayValue: true,
 			validate: func(t *testing.T, d Dialect, out apiOutput) {
 				t.Helper()
 				inline := out.inlineSQL
@@ -365,6 +368,10 @@ func TestCustomOperatorArrayEdgeMatrix_AllDialects_SchemaAndSchemaRequired(t *te
 						t.Run(c.name, func(t *testing.T) {
 							if c.clickHouseOnly && d != DialectClickHouse && (!c.duckDBGeneralReduce || d != DialectDuckDB) {
 								assertAllAPIVariantsErrorContains(t, tr, c.logic, "general reduce expressions are only supported")
+								return
+							}
+							if c.rejectGoogleNestedArrayValue && testRejectsNestedArrayValues(d) {
+								assertAllAPIVariantsErrorContains(t, tr, c.logic, nestedArrayErrorFragment(d))
 								return
 							}
 							out := runAllAPIVariants(t, tr, c.logic)

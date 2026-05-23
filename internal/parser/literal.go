@@ -53,52 +53,66 @@ func (p *Parser) literalToSQLParam(value interface{}, pc *params.ParamCollector)
 	return p.dataOp.ValueToSQLParam(value, pc)
 }
 
-func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, []operators.ExpressionType, error) {
+func (p *Parser) arrayLiteralToSQL(arr []interface{}, path string) (string, []operators.ExpressionType, []string, error) {
+	if err := p.config.ValidateArrayLiteralValue(arr); err != nil {
+		return "", nil, nil, err
+	}
 	parts := make([]string, len(arr))
 	var commonTypes []operators.ExpressionType
+	var schemaScopes []string
 	for i, elem := range arr {
 		res, err := p.parseExpressionValue(elem, tperrors.BuildArrayPath(path, i))
 		if err != nil {
-			return "", nil, fmt.Errorf("invalid array element %d: %w", i, err)
+			return "", nil, nil, fmt.Errorf("invalid array element %d: %w", i, err)
 		}
+		schemaScopes = append(schemaScopes, res.arrayElementSchemaScopes...)
 		commonTypes, err = updateArrayLiteralElementTypes(commonTypes, res, i)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		parts[i] = valueSQL(res)
 	}
 	elementTypes := normalizeExpressionTypes(commonTypes)
 	if err := p.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	sql, err := p.config.ArrayLiteral(parts)
-	return sql, elementTypes, err
+	return sql, elementTypes, normalizeParserSchemaScopes(schemaScopes), err
 }
 
 func (p *Parser) arrayLiteralToSQLParam(
 	arr []interface{},
 	path string,
 	pc *params.ParamCollector,
-) (string, []operators.ExpressionType, error) {
+) (string, []operators.ExpressionType, []string, bool, error) {
+	if err := p.config.ValidateArrayLiteralValue(arr); err != nil {
+		return "", nil, nil, false, err
+	}
 	parts := make([]string, len(arr))
 	var commonTypes []operators.ExpressionType
+	var schemaScopes []string
+	preserveParamRefs := false
 	for i, elem := range arr {
 		res, err := p.parseExpressionValueParam(elem, tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
-			return "", nil, fmt.Errorf("invalid array element %d: %w", i, err)
+			return "", nil, nil, false, fmt.Errorf("invalid array element %d: %w", i, err)
 		}
+		if !canRollbackParamRefs(res) {
+			preserveParamRefs = true
+		}
+		schemaScopes = append(schemaScopes, res.arrayElementSchemaScopes...)
 		commonTypes, err = updateArrayLiteralElementTypes(commonTypes, res, i)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, false, err
 		}
 		parts[i] = valueSQL(res)
 	}
 	elementTypes := normalizeExpressionTypes(commonTypes)
 	if err := p.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
-		return "", nil, err
+		return "", nil, nil, false, err
 	}
 	sql, err := p.config.ArrayLiteral(parts)
-	return sql, elementTypes, err
+	return sql, elementTypes, normalizeParserSchemaScopes(schemaScopes), preserveParamRefs, err
 }
 
 func expressionResultTypeChain(res expressionResult) []operators.ExpressionType {

@@ -137,7 +137,7 @@ func TestParser_parseOperator_AdditionalBranches(t *testing.T) {
 			name:     "missing_some with valid args",
 			operator: "missing_some",
 			args:     []interface{}{1, []interface{}{"f1", "f2"}},
-			expected: "(f1 IS NULL OR f2 IS NULL)",
+			expected: "(f1 IS NULL AND f2 IS NULL)",
 			hasError: false,
 		},
 		// missing_some with non-array args
@@ -327,7 +327,7 @@ func TestParser_parseOperator_AdditionalBranches(t *testing.T) {
 			name:     "modulo operator",
 			operator: "%",
 			args:     []interface{}{map[string]interface{}{"var": "count"}, 3},
-			expected: "(count % 3)",
+			expected: "MOD(CAST(count AS NUMERIC), CAST(3 AS NUMERIC))",
 			hasError: false,
 		},
 		{

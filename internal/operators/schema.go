@@ -37,3 +37,24 @@ type ArrayElementSchemaProvider interface {
 	SchemaProvider
 	HasArrayElementFields(fieldName string) bool
 }
+
+// ArrayElementTypeProvider is implemented by schemas that declare scalar array
+// element types for array-column membership and reduce aggregate validation.
+type ArrayElementTypeProvider interface {
+	SchemaProvider
+	GetArrayElementType(fieldName string) string
+}
+
+// ArrayElementSchemaSignatureProvider is implemented by schemas that can
+// compare full array-element object schemas, not just individual field names.
+type ArrayElementSchemaSignatureProvider interface {
+	SchemaProvider
+	ArrayElementSchemaSignature(fieldName string) string
+}
+
+// ArrayElementSchemaComparator is implemented by schemas that can report the
+// exact field-level reason two array-element schemas are incompatible.
+type ArrayElementSchemaComparator interface {
+	SchemaProvider
+	ValidateArrayElementSchemasCompatible(leftField, rightField string) error
+}

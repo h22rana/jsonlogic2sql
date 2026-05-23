@@ -131,13 +131,13 @@ func ConcatStringSQL(config *OperatorConfig, sql string, kind ExpressionKind, ty
 	case ExpressionTypeBoolean:
 		return BooleanCatStringSQL(expr)
 	case ExpressionTypeString:
-		return fmt.Sprintf("COALESCE(%s, '')", expr)
+		return config.CoalesceSQL(expr, "''")
 	case ExpressionTypeNumber, ExpressionTypeUnknown:
-		return fmt.Sprintf("COALESCE(%s, '')", config.StringCast(expr))
-	case ExpressionTypeArray:
-		return fmt.Sprintf("COALESCE(%s, '')", expr)
+		return config.CoalesceSQL(config.StringCast(expr), "''")
+	case ExpressionTypeArray, ExpressionTypeObject:
+		return config.CoalesceSQL(expr, "''")
 	}
-	return fmt.Sprintf("COALESCE(%s, '')", expr)
+	return config.CoalesceSQL(expr, "''")
 }
 
 func isSingleQuotedSQLLiteral(sql string) bool {

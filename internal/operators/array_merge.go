@@ -17,10 +17,6 @@ func (a *ArrayOperator) handleMerge(args []interface{}) (string, error) {
 }
 
 func (a *ArrayOperator) handleMergeResult(args []interface{}) (OperatorResult, error) {
-	if len(args) < 1 {
-		return OperatorResult{}, fmt.Errorf("merge requires at least 1 argument")
-	}
-
 	// Validate dialect support
 	if a.config != nil {
 		if err := a.config.ValidateDialect("merge"); err != nil {
@@ -44,6 +40,10 @@ func (a *ArrayOperator) handleMergeResult(args []interface{}) (OperatorResult, e
 	if err != nil {
 		return OperatorResult{}, err
 	}
+	sourceScopes := a.arraySourceSchemaScopesForValues(args, values)
+	if scopeErr := a.validateCompatibleArrayElementScopes(sourceScopes); scopeErr != nil {
+		return OperatorResult{}, fmt.Errorf("invalid merge argument schemas: %w", scopeErr)
+	}
 
 	arrays := make([]string, 0, len(values))
 	for i, value := range values {
@@ -62,5 +62,9 @@ func (a *ArrayOperator) handleMergeResult(args []interface{}) (OperatorResult, e
 	if err != nil {
 		return OperatorResult{}, err
 	}
-	return arrayValueSQLWithElementTypes(sql, mergeElementTypes(values, common)...), nil
+	elementTypes := mergeElementTypes(values, common)
+	if err := a.validateArrayResultElementTypes(elementTypes); err != nil {
+		return OperatorResult{}, err
+	}
+	return arrayValueSQLWithMetadata(sql, elementTypes, sourceScopes), nil
 }

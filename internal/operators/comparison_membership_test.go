@@ -309,7 +309,7 @@ func TestComparisonOperator_validateEnumValue(t *testing.T) {
 		"age":     "integer",
 	})
 	schema.enumValues["status"] = []string{"active", "inactive", "pending"}
-	schema.enumValues["country"] = []string{"US", "UK", "JP"}
+	schema.enumValues["country"] = []string{"US", "UK", "US"}
 
 	config := NewOperatorConfig(dialect.DialectBigQuery, schema)
 	op := NewComparisonOperator(config)

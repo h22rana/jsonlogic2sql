@@ -14,6 +14,8 @@ const (
 // ExpressionType carries coarse result type metadata for context validation.
 type ExpressionType int
 
+const objectFieldType = "object"
+
 const (
 	// ExpressionTypeUnknown means the value type is not known statically.
 	ExpressionTypeUnknown ExpressionType = iota
@@ -27,13 +29,20 @@ const (
 	ExpressionTypeNumber
 	// ExpressionTypeArray identifies array values.
 	ExpressionTypeArray
+	// ExpressionTypeObject identifies object/struct values. Object fields are
+	// not generally renderable as scalar SQL values, but the marker lets array
+	// element metadata distinguish array<object> from scalar arrays.
+	ExpressionTypeObject
 )
 
 // OperatorArg is the typed SQL representation passed to custom operators.
 type OperatorArg struct {
-	SQL  string
-	Kind ExpressionKind
-	Type ExpressionType
+	SQL                      string
+	Kind                     ExpressionKind
+	Type                     ExpressionType
+	ArrayElementType         ExpressionType
+	ArrayElementTypes        []ExpressionType
+	ArrayElementSchemaScopes []string
 }
 
 func (a OperatorArg) String() string {
@@ -47,6 +56,10 @@ type OperatorResult struct {
 	Kind              ExpressionKind
 	Type              ExpressionType
 	EmptyArrayLiteral bool
+	// PreserveParamRefs marks parameterized SQL whose collected params must
+	// survive parser constant folding so placeholder validation can catch
+	// custom operators that dropped argument placeholders.
+	PreserveParamRefs bool
 	// ArrayElementType optionally carries the immediate element type when Type
 	// is ExpressionTypeArray. ExpressionTypeUnknown means the element type is
 	// not statically known.
@@ -55,6 +68,10 @@ type OperatorResult struct {
 	// element type first. For example, array<array<number>> is represented as
 	// []ExpressionType{ExpressionTypeArray, ExpressionTypeNumber}.
 	ArrayElementTypes []ExpressionType
+	// ArrayElementSchemaScopes carries schema fields whose element schemas
+	// describe object-array values. It is used to reject CASE/merge/lambda
+	// compositions that would otherwise mix incompatible struct shapes.
+	ArrayElementSchemaScopes []string
 }
 
 // PredicateSQL creates a custom-operator result that can be used in predicate
@@ -128,6 +145,8 @@ type ProcessedValue struct {
 	// ArrayElementTypes carries nested array element types, with the immediate
 	// element type first. ExpressionTypeUnknown or an empty slice means unknown.
 	ArrayElementTypes []ExpressionType
+	// ArrayElementSchemaScopes carries schema fields for object-array values.
+	ArrayElementSchemaScopes []string
 }
 
 // SQLResult creates a ProcessedValue marked as SQL.

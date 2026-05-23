@@ -58,7 +58,7 @@ func TestSQLInjectionSecurity_LiteralPayloadsEscapedOrParameterized_AllDialects(
 				DialectSpanner:    "name IN (@p1, @p2)",
 				DialectPostgreSQL: "name IN ($1, $2)",
 				DialectDuckDB:     "name IN ($1, $2)",
-				DialectClickHouse: "name IN (@p1, @p2)",
+				DialectClickHouse: "name IN ({p1:String}, {p2:String})",
 			},
 			paramsWant: []QueryParam{
 				{Name: "p1", Value: "safe"},
@@ -89,7 +89,7 @@ func TestSQLInjectionSecurity_LiteralPayloadsEscapedOrParameterized_AllDialects(
 				DialectSpanner:    "ARRAY(SELECT COALESCE(elem.name, @p1) FROM UNNEST(items) AS elem)",
 				DialectPostgreSQL: "ARRAY(SELECT COALESCE(elem.name, $1) FROM UNNEST(items) AS elem)",
 				DialectDuckDB:     "ARRAY(SELECT COALESCE(elem.name, $1) FROM UNNEST(items) AS elem)",
-				DialectClickHouse: "arrayMap(elem -> COALESCE(elem.name, @p1), items)",
+				DialectClickHouse: "arrayMap(elem -> COALESCE(elem.name, {p1:String}), items)",
 			},
 			paramsWant: []QueryParam{{Name: "p1", Value: injectionPayload}},
 		},
@@ -273,7 +273,7 @@ func placeholderSQLByDialect(parts ...string) map[Dialect]string {
 		DialectSpanner:    parts[0] + "@p1" + strings.Join(parts[1:], ""),
 		DialectPostgreSQL: parts[0] + "$1" + strings.Join(parts[1:], ""),
 		DialectDuckDB:     parts[0] + "$1" + strings.Join(parts[1:], ""),
-		DialectClickHouse: parts[0] + "@p1" + strings.Join(parts[1:], ""),
+		DialectClickHouse: parts[0] + "{p1:String}" + strings.Join(parts[1:], ""),
 	}
 }
 
@@ -283,7 +283,7 @@ func catPayloadSQLByDialect() map[Dialect]string {
 		DialectSpanner:    "CONCAT(@p1, @p2, COALESCE(name, ''))",
 		DialectPostgreSQL: "CONCAT($1, $2, COALESCE(name, ''))",
 		DialectDuckDB:     "CONCAT($1, $2, COALESCE(name, ''))",
-		DialectClickHouse: "CONCAT(@p1, @p2, COALESCE(name, ''))",
+		DialectClickHouse: "CONCAT({p1:String}, {p2:String}, COALESCE(name, ''))",
 	}
 }
 

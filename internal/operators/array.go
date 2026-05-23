@@ -10,6 +10,7 @@ type arrayLambdaScope int
 const (
 	arrayLambdaScopeNone arrayLambdaScope = iota
 	arrayLambdaScopeElement
+	arrayLambdaScopeMap
 	arrayLambdaScopeReduce
 )
 
@@ -35,13 +36,16 @@ type ArrayOperator struct {
 	schemaScopes  []string
 	// valueSemantics means the current expression position returns a JSONLogic
 	// value, so and/or/if must preserve fallback values instead of boolean SQL.
-	valueSemantics     bool
-	accumulatorType    ExpressionType
-	hasAccumulatorType bool
-	accumulatorSQL     string
-	elementType        ExpressionType
-	elementNestedTypes []ExpressionType
-	hasElementType     bool
+	valueSemantics           bool
+	accumulatorType          ExpressionType
+	hasAccumulatorType       bool
+	accumulatorSQL           string
+	accumulatorElemTypes     []ExpressionType
+	accumulatorSchemaScopes  []string
+	elementType              ExpressionType
+	elementNestedTypes       []ExpressionType
+	elementArraySchemaScopes []string
+	hasElementType           bool
 }
 
 // NewArrayOperator creates a new ArrayOperator instance.
@@ -65,7 +69,7 @@ func NewArrayOperator(config *OperatorConfig) *ArrayOperator {
 
 // ToSQL converts an array operation to SQL.
 func (a *ArrayOperator) ToSQL(operator string, args []interface{}) (string, error) {
-	if len(args) == 0 {
+	if len(args) == 0 && operator != OpMerge {
 		return "", fmt.Errorf("array operator %s requires at least one argument", operator)
 	}
 
@@ -112,7 +116,7 @@ func (a *ArrayOperator) ToValueResultAtPath(operator string, args []interface{},
 // ToValueResult converts value-producing array operations to typed SQL while
 // preserving array element metadata for downstream array expressions.
 func (a *ArrayOperator) ToValueResult(operator string, args []interface{}) (OperatorResult, error) {
-	if len(args) == 0 {
+	if len(args) == 0 && operator != OpMerge {
 		return OperatorResult{}, fmt.Errorf("array operator %s requires at least one argument", operator)
 	}
 
@@ -121,6 +125,8 @@ func (a *ArrayOperator) ToValueResult(operator string, args []interface{}) (Oper
 		return a.handleMapResult(args)
 	case OpFilter:
 		return a.handleFilterResult(args)
+	case OpReduce:
+		return a.handleReduceResult(args)
 	case OpMerge:
 		return a.handleMergeResult(args)
 	default:

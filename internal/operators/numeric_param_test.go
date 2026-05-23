@@ -118,7 +118,7 @@ func TestNumericOperator_ToSQLParam(t *testing.T) {
 			name:     "modulo",
 			operator: "%",
 			args:     []interface{}{17, 5},
-			wantSQL:  "(@p1 % @p2)",
+			wantSQL:  "MOD(CAST(@p1 AS NUMERIC), CAST(@p2 AS NUMERIC))",
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: 17},
 				{Name: "p2", Value: 5},

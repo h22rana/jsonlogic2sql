@@ -65,7 +65,7 @@ func (a *ArrayOperator) quoteArrayScopeIdentifier(name string) (string, error) {
 // reduce lambdas only expose the official current/accumulator bindings.
 func (a *ArrayOperator) mapArrayScopeVar(varName string) (string, bool, error) {
 	switch a.lambdaScope {
-	case arrayLambdaScopeElement:
+	case arrayLambdaScopeElement, arrayLambdaScopeMap:
 		return a.mapElementScopeVar(varName)
 	case arrayLambdaScopeReduce:
 		return a.mapReduceScopeVar(varName)
@@ -202,7 +202,7 @@ func (a *ArrayOperator) scopedFieldNamesFromVarExpr(varExpr interface{}) []strin
 
 func (a *ArrayOperator) scopedFieldNamesForVar(varName string) []string {
 	switch a.lambdaScope {
-	case arrayLambdaScopeElement:
+	case arrayLambdaScopeElement, arrayLambdaScopeMap:
 		if varName == "" || a.isUnsupportedElementScopeVar(varName) {
 			return nil
 		}
@@ -347,11 +347,16 @@ func (a *ArrayOperator) rewriteAccumulatorVar(varExpr interface{}) (ProcessedVal
 	if len(arr) == 1 {
 		return a.accumulatorSQLResult(), true, nil
 	}
-	defaultSQL, err := a.dataOp.valueToSQL(arr[1])
+	if a.hasAccumulatorType {
+		if err := validateVarDefaultForExpressionType(a.accumulatorType, arr[1], "reduce accumulator"); err != nil {
+			return ProcessedValue{}, true, err
+		}
+	}
+	defaultSQL, err := a.dataOp.defaultValueToSQL(arr[1])
 	if err != nil {
 		return ProcessedValue{}, true, fmt.Errorf("invalid default value: %w", err)
 	}
-	return a.accumulatorSQLResultWithSQL(fmt.Sprintf("COALESCE(%s, %s)", a.accumulatorSQLResult().Value, defaultSQL)), true, nil
+	return a.accumulatorSQLResultWithSQL(a.config.CoalesceSQL(a.accumulatorSQLResult().Value, defaultSQL)), true, nil
 }
 
 func (a *ArrayOperator) rewriteAccumulatorVarParam(varExpr interface{}) (interface{}, bool, error) {
@@ -378,6 +383,11 @@ func (a *ArrayOperator) rewriteAccumulatorVarParam(varExpr interface{}) (interfa
 	}
 	if len(arr) == 1 {
 		return a.accumulatorSQLResult(), true, nil
+	}
+	if a.hasAccumulatorType {
+		if err := validateVarDefaultForExpressionType(a.accumulatorType, arr[1], "reduce accumulator"); err != nil {
+			return nil, true, err
+		}
 	}
 	rewritten := make([]interface{}, len(arr))
 	copy(rewritten, arr)
@@ -421,11 +431,14 @@ func (a *ArrayOperator) arrayScopeVarToSQL(varExpr interface{}) (string, bool, e
 		if len(arr) == 1 {
 			return mapped, true, nil
 		}
-		defaultSQL, err := a.dataOp.valueToSQL(arr[1])
+		if defaultErr := a.validateArrayScopeVarDefault(varName, arr[1]); defaultErr != nil {
+			return "", true, defaultErr
+		}
+		defaultSQL, err := a.dataOp.defaultValueToSQL(arr[1])
 		if err != nil {
 			return "", true, fmt.Errorf("invalid default value: %w", err)
 		}
-		return fmt.Sprintf("COALESCE(%s, %s)", mapped, defaultSQL), true, nil
+		return a.config.CoalesceSQL(mapped, defaultSQL), true, nil
 	}
 
 	return "", false, nil
@@ -485,11 +498,14 @@ func (a *ArrayOperator) arrayInternalVarToSQL(varExpr interface{}) (string, bool
 		if len(arr) == 1 {
 			return mapped, true, nil
 		}
-		defaultSQL, err := a.dataOp.valueToSQL(arr[1])
+		if err := a.validateArrayScopeVarDefault(varName, arr[1]); err != nil {
+			return "", true, err
+		}
+		defaultSQL, err := a.dataOp.defaultValueToSQL(arr[1])
 		if err != nil {
 			return "", true, fmt.Errorf("invalid default value: %w", err)
 		}
-		return fmt.Sprintf("COALESCE(%s, %s)", mapped, defaultSQL), true, nil
+		return a.config.CoalesceSQL(mapped, defaultSQL), true, nil
 	}
 
 	return "", false, nil
