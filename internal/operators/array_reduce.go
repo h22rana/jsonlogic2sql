@@ -3,6 +3,8 @@ package operators
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
@@ -69,6 +71,9 @@ func (a *ArrayOperator) handleReduce(args []interface{}) (string, error) {
 	// Check for common reduction patterns and optimize
 	reduceScoped := a.withArrayLambdaSource(arrayLambdaScopeReduce, sourceScopes, arrayValue, false)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
+		if aggregateErr := reduceScoped.validateAggregatePattern(pattern); aggregateErr != nil {
+			return "", aggregateErr
+		}
 		// Generate optimized aggregate SQL based on dialect
 		switch a.getDialect() {
 		case dialect.DialectClickHouse:
@@ -155,14 +160,22 @@ func (a *ArrayOperator) aggregateElementSQL(alias string, pattern *aggregatePatt
 }
 
 func (a *ArrayOperator) aggregateElementRef(alias string, pattern *aggregatePattern) (string, error) {
+	elemType, err := a.aggregateElementType(pattern)
+	if err != nil {
+		return "", err
+	}
 	elemRef, err := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
+	if err != nil {
+		return "", err
+	}
+	elemRef, err = numericAggregateElementSQL(elemRef, elemType)
 	if err != nil {
 		return "", err
 	}
 	if !pattern.hasDefault {
 		return elemRef, nil
 	}
-	defaultSQL, err := a.dataOp.valueToSQL(pattern.defaultValue)
+	defaultSQL, err := a.numericAggregateDefaultSQL(pattern.defaultValue)
 	if err != nil {
 		return "", fmt.Errorf("invalid current default value: %w", err)
 	}
@@ -174,18 +187,156 @@ func (a *ArrayOperator) aggregateElementRefParam(
 	pattern *aggregatePattern,
 	pc *params.ParamCollector,
 ) (string, error) {
+	elemType, err := a.aggregateElementType(pattern)
+	if err != nil {
+		return "", err
+	}
 	elemRef, err := a.quoteArrayScopePath(alias, pattern.fieldSuffix)
+	if err != nil {
+		return "", err
+	}
+	elemRef, err = numericAggregateElementSQL(elemRef, elemType)
 	if err != nil {
 		return "", err
 	}
 	if !pattern.hasDefault {
 		return elemRef, nil
 	}
-	defaultSQL, err := a.dataOp.valueToSQLParam(pattern.defaultValue, pc)
+	defaultSQL, err := a.numericAggregateDefaultSQLParam(pattern.defaultValue, pc)
 	if err != nil {
 		return "", fmt.Errorf("invalid current default value: %w", err)
 	}
 	return fmt.Sprintf("COALESCE(%s, %s)", elemRef, defaultSQL), nil
+}
+
+func (a *ArrayOperator) validateAggregatePattern(pattern *aggregatePattern) error {
+	if pattern.hasTermExpr {
+		return nil
+	}
+	if _, err := a.aggregateElementType(pattern); err != nil {
+		return err
+	}
+	if pattern.hasDefault {
+		return validateNumericAggregateDefault(pattern.defaultValue)
+	}
+	return nil
+}
+
+func (a *ArrayOperator) aggregateElementType(pattern *aggregatePattern) (ExpressionType, error) {
+	if pattern.fieldSuffix != "" {
+		scopes := a.currentSchemaScopes()
+		if len(scopes) == 0 {
+			return ExpressionTypeUnknown, fmt.Errorf(
+				"numeric reduce aggregate current field %q cannot be validated because the array element schema is unknown",
+				pattern.fieldSuffix,
+			)
+		}
+		fields, err := a.resolveFieldNamesInScopes(scopes, pattern.fieldSuffix)
+		if err != nil {
+			return ExpressionTypeUnknown, err
+		}
+		for _, field := range fields {
+			fieldType := a.schema().GetFieldType(field)
+			if fieldType == "" {
+				continue
+			}
+			if !a.schema().IsNumericType(field) {
+				return ExpressionTypeUnknown, fmt.Errorf(
+					"numeric reduce aggregate requires numeric current field %q, got field %q of type %s",
+					pattern.fieldSuffix,
+					field,
+					fieldType,
+				)
+			}
+		}
+		return ExpressionTypeNumber, nil
+	}
+
+	if a.hasObjectArraySchemaScope(a.currentSchemaScopes()) {
+		return ExpressionTypeUnknown, fmt.Errorf(
+			"numeric reduce aggregate over current requires scalar array elements or current.<numeric-field>, got object array scope %q",
+			strings.Join(a.currentSchemaScopes(), ","),
+		)
+	}
+	if a.hasElementType {
+		return a.elementType, nil
+	}
+	return ExpressionTypeUnknown, nil
+}
+
+func (a *ArrayOperator) hasObjectArraySchemaScope(scopes []string) bool {
+	provider, ok := a.schema().(ArrayElementSchemaProvider)
+	if !ok {
+		return false
+	}
+	for _, scope := range scopes {
+		if provider.HasArrayElementFields(scope) {
+			return true
+		}
+	}
+	return false
+}
+
+func numericAggregateElementSQL(sql string, typ ExpressionType) (string, error) {
+	switch typ {
+	case ExpressionTypeUnknown, ExpressionTypeNumber:
+		return sql, nil
+	case ExpressionTypeBoolean:
+		return BooleanValueNumberSQL(sql), nil
+	case ExpressionTypeNull:
+		return predicateNumberFalse, nil
+	case ExpressionTypeString, ExpressionTypeArray:
+		return "", fmt.Errorf("numeric reduce aggregate requires numeric current value, got %s", expressionTypeName(typ))
+	default:
+		return "", fmt.Errorf("numeric reduce aggregate has unsupported current value type %s", expressionTypeName(typ))
+	}
+}
+
+func (a *ArrayOperator) numericAggregateDefaultSQL(value interface{}) (string, error) {
+	if err := validateNumericAggregateDefault(value); err != nil {
+		return "", err
+	}
+	return a.numericOp.valueToSQL(value)
+}
+
+func (a *ArrayOperator) numericAggregateDefaultSQLParam(value interface{}, pc *params.ParamCollector) (string, error) {
+	if err := validateNumericAggregateDefault(value); err != nil {
+		return "", err
+	}
+	return a.numericOp.valueToSQLParam(value, pc)
+}
+
+func validateNumericAggregateDefault(value interface{}) error {
+	if str, ok := value.(string); ok {
+		if isNumericString(str) {
+			return nil
+		}
+		return fmt.Errorf("numeric reduce aggregate default must be numeric, boolean, or null, got string")
+	}
+	typ := inferLiteralValueExpressionType(value)
+	switch typ {
+	case ExpressionTypeNumber, ExpressionTypeBoolean, ExpressionTypeNull:
+		return nil
+	case ExpressionTypeUnknown, ExpressionTypeString, ExpressionTypeArray:
+		return fmt.Errorf(
+			"numeric reduce aggregate default must be numeric, boolean, or null, got %s",
+			expressionTypeName(typ),
+		)
+	default:
+		return fmt.Errorf("numeric reduce aggregate default has unsupported type %s", expressionTypeName(typ))
+	}
+}
+
+func isNumericString(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	if isIntegerLiteral(trimmed) {
+		return true
+	}
+	num, err := strconv.ParseFloat(trimmed, 64)
+	return err == nil && !math.IsNaN(num) && !math.IsInf(num, 0)
 }
 
 func (a *ArrayOperator) aggregateElementSQLParam(

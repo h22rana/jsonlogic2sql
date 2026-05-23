@@ -76,7 +76,7 @@ func TestTranspile_ArrayScopeVarsWithSchema(t *testing.T) {
 		},
 		{
 			name:      "reduce supports array-form current default",
-			jsonLogic: `{"reduce":[{"var":"numbers"},{"+":[{"var":"accumulator"},{"var":["current",0]}]},1]}`,
+			jsonLogic: `{"reduce":[{"var":"scores"},{"+":[{"var":"accumulator"},{"var":["current",0]}]},1]}`,
 			valueRoot: true,
 			mustContain: []string{
 				"COALESCE(",
@@ -148,7 +148,7 @@ func TestTranspileParameterized_ArrayScopeVarsWithSchema(t *testing.T) {
 		},
 		{
 			name:           "reduce supports array-form current default",
-			jsonLogic:      `{"reduce":[{"var":"numbers"},{"+":[{"var":"accumulator"},{"var":["current",0]}]},1]}`,
+			jsonLogic:      `{"reduce":[{"var":"scores"},{"+":[{"var":"accumulator"},{"var":["current",0]}]},1]}`,
 			valueRoot:      true,
 			mustContainSQL: "COALESCE(",
 			wantParamCount: 2,

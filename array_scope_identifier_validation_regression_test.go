@@ -140,7 +140,7 @@ func TestArrayScopeIdentifierValidationAllowsSafeDottedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
-	logic := `{"map":[{"var":"bag.numbers"},{"var":"safe_field"}]}`
+	logic := `{"map":[{"var":"bag.records"},{"var":"safe_field"}]}`
 
 	sql, err := tr.TranspileValue(logic)
 	if err != nil {
@@ -217,13 +217,13 @@ func TestNestedArrayOperandUsesBareOuterFieldsInChildScope(t *testing.T) {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
 
-	logic := `{"map":[{"var":"groups"},{"reduce":[{"var":"values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`
+	logic := `{"map":[{"var":"groups"},{"reduce":[{"var":"subitems"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`
 
 	sql, err := tr.TranspileValue(logic)
 	if err != nil {
 		t.Fatalf("unexpected inline error: %v", err)
 	}
-	if !strings.Contains(sql, "UNNEST(elem.values)") {
+	if !strings.Contains(sql, "UNNEST(elem.subitems)") {
 		t.Fatalf("expected nested outer elem alias in array operand, got: %s", sql)
 	}
 
@@ -231,7 +231,7 @@ func TestNestedArrayOperandUsesBareOuterFieldsInChildScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected parameterized error: %v", err)
 	}
-	if !strings.Contains(psql, "UNNEST(elem.values)") {
+	if !strings.Contains(psql, "UNNEST(elem.subitems)") {
 		t.Fatalf("expected nested outer elem alias in parameterized array operand, got: %s", psql)
 	}
 }

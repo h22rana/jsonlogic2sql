@@ -1622,8 +1622,8 @@ func TestComprehensiveNestedExpressions(t *testing.T) {
 		},
 		{
 			name:     "nested filter in reduce",
-			input:    `{"reduce": [{"filter": [{"var": "items"}, {">": [{"var": "price"}, 100]}]}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`,
-			expected: "0 + COALESCE((SELECT SUM(elem) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE elem.price > 100)) AS elem), 0)",
+			input:    `{"reduce": [{"filter": [{"var": "items"}, {">": [{"var": "price"}, 100]}]}, {"+": [{"var": "accumulator"}, {"var": "current.price"}]}, 0]}`,
+			expected: "0 + COALESCE((SELECT SUM(elem.price) FROM UNNEST(ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE elem.price > 100)) AS elem), 0)",
 			hasError: false,
 		},
 		{

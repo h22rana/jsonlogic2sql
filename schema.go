@@ -326,6 +326,16 @@ func (s *Schema) IsArrayType(fieldName string) bool {
 	return s.GetFieldTypeFieldType(fieldName) == FieldTypeArray
 }
 
+// HasArrayElementFields reports whether an array field has schema-described
+// object fields on its elements.
+func (s *Schema) HasArrayElementFields(fieldName string) bool {
+	if s == nil {
+		return false
+	}
+	field, exists := s.fields[fieldName]
+	return exists && field.Type == FieldTypeArray && len(field.ElementFields) > 0
+}
+
 // IsStringType checks if a field is of string type.
 func (s *Schema) IsStringType(fieldName string) bool {
 	return s.GetFieldTypeFieldType(fieldName) == FieldTypeString

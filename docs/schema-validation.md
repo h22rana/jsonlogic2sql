@@ -488,6 +488,7 @@ schema.HasField(fieldName string) bool              // Check if field exists
 schema.ValidateField(fieldName string) error        // Validate field existence
 schema.GetFieldType(fieldName string) string        // Get field type as string
 schema.IsArrayType(fieldName string) bool           // Check if field is array type
+schema.HasArrayElementFields(fieldName string) bool  // Check if an array field has object element fields
 schema.IsStringType(fieldName string) bool          // Check if field is string type
 schema.IsNumericType(fieldName string) bool         // Check if field is numeric type
 schema.IsBooleanType(fieldName string) bool         // Check if field is boolean type

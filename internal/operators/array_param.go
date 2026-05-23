@@ -213,6 +213,9 @@ func (a *ArrayOperator) handleReduceParam(args []interface{}, pc *params.ParamCo
 
 	reduceScoped := a.withArrayLambdaSource(arrayLambdaScopeReduce, sourceScopes, arrayValue, false)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
+		if aggregateErr := reduceScoped.validateAggregatePattern(pattern); aggregateErr != nil {
+			return "", aggregateErr
+		}
 		switch a.getDialect() {
 		case dialect.DialectClickHouse:
 			aggregateInput := array

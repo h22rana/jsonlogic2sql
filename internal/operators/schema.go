@@ -30,3 +30,10 @@ type ScopedSchemaProvider interface {
 	SchemaProvider
 	ResolveScopedField(scopePath, fieldName string) (string, error)
 }
+
+// ArrayElementSchemaProvider is implemented by schemas that can distinguish
+// scalar array fields from arrays whose elements expose object fields.
+type ArrayElementSchemaProvider interface {
+	SchemaProvider
+	HasArrayElementFields(fieldName string) bool
+}

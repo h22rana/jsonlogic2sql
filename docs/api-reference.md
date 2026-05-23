@@ -333,6 +333,7 @@ Schema for field validation.
 | `ValidateField(fieldName string) error` | Validate field existence |
 | `GetFieldType(fieldName string) string` | Get field type as string |
 | `IsArrayType(fieldName string) bool` | Check if field is array type |
+| `HasArrayElementFields(fieldName string) bool` | Check if an array field has object element fields |
 | `IsStringType(fieldName string) bool` | Check if field is string type |
 | `IsNumericType(fieldName string) bool` | Check if field is numeric type |
 | `IsBooleanType(fieldName string) bool` | Check if field is boolean type |
