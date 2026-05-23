@@ -279,15 +279,15 @@ func TestStringOperator_ToSQLParam_Dialects(t *testing.T) {
 	}{
 		{dialect.DialectBigQuery, "SUBSTR(@p1, (@p2 + 1), @p3)"},
 		// handleSubstringParam uses SUBSTR for PostgreSQL (same as BigQuery); ClickHouse uses lowercase substring.
-		{dialect.DialectPostgreSQL, "SUBSTR(@p1, (@p2 + 1), @p3)"},
-		{dialect.DialectClickHouse, "substring(@p1, (@p2 + 1), @p3)"},
+		{dialect.DialectPostgreSQL, "SUBSTR($1, ($2 + 1), $3)"},
+		{dialect.DialectClickHouse, "substring({p1:String}, ({p2:Float64} + 1), {p3:Float64})"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.dialect.String(), func(t *testing.T) {
 			config := NewOperatorConfig(tt.dialect, &fieldOnlySchemaProvider{})
 			op := NewStringOperator(config)
-			pc := params.NewParamCollector(params.PlaceholderNamed)
+			pc := params.NewParamCollector(params.StyleForDialect(tt.dialect))
 			sql, err := op.ToSQLParam("substr", args, pc)
 			if err != nil {
 				t.Fatalf("ToSQLParam: %v", err)

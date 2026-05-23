@@ -133,17 +133,7 @@ func validateNewParamRefs(sql string, pc *params.ParamCollector, start int) erro
 }
 
 func formatCollectedPlaceholder(index int, param params.QueryParam, style params.PlaceholderStyle) string {
-	switch style {
-	case params.PlaceholderNamed:
-		return "@" + param.Name
-	case params.PlaceholderPositional:
-		return fmt.Sprintf("$%d", index)
-	case params.PlaceholderQuestion:
-		return "?"
-	case params.PlaceholderClickHouse:
-		return "{" + param.Name + "}"
-	}
-	return "@" + param.Name
+	return params.FormatPlaceholderForParam(index, param, style)
 }
 
 func (a *ArrayOperator) valueToSQLParamAtPath(value interface{}, pc *params.ParamCollector, path string) (string, error) {

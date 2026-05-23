@@ -37,7 +37,7 @@ The placeholder style is determined by the dialect:
 |---------|-------|---------|
 | BigQuery | Named | `@p1`, `@p2` |
 | Spanner | Named | `@p1`, `@p2` |
-| ClickHouse | Named | `@p1`, `@p2` |
+| ClickHouse | Typed named | `{p1:String}`, `{p2:Float64}` |
 | PostgreSQL | Positional | `$1`, `$2` |
 | DuckDB | Positional | `$1`, `$2` |
 
@@ -69,8 +69,8 @@ sql, params, _ := jsonlogic2sql.TranspileParameterizedCondition(
 
 | Value Type | Parameterized? | Output |
 |------------|:--------------:|--------|
-| Strings | Yes | `@p1` with bound value |
-| Numbers (int, float) | Yes | `@p1` with bound value |
+| Strings | Yes | dialect placeholder such as `@p1`, `$1`, or `{p1:String}` |
+| Numbers (int, float) | Yes | dialect placeholder such as `@p1`, `$1`, or `{p1:Float64}` |
 | `NULL` | No | `NULL` (structural SQL token) |
 | `TRUE` / `FALSE` | No | `TRUE` / `FALSE` (structural SQL tokens) |
 | Column names (`var`) | No | Column name as-is |
@@ -99,6 +99,7 @@ Why this matters:
 
 The same rule applies to positional styles:
 - PostgreSQL/DuckDB: `LIKE CONCAT($1, '%')`
+- ClickHouse: `position(name, {p1:String}) > 0`, not `position(name, '{p1:String}') > 0`
 - Prefix/suffix patterns: `LIKE CONCAT('%', @p1, '%')`, `LIKE CONCAT('%', $1)`
 
 ## API Reference
@@ -227,43 +228,36 @@ rows, err := conn.Query(ctx, sql, args...)
 
 ### ClickHouse (Go - clickhouse-go v2)
 
-The ClickHouse driver uses `{name:Type}` natively, not `@p1`. You can adapt the named parameters:
+Create the transpiler with `DialectClickHouse`. The generated SQL already uses
+ClickHouse's native `{name:Type}` query-parameter syntax, so no placeholder
+rewriting is needed:
 
 ```go
 sql, params, _ := transpiler.TranspileParameterizedCondition(jsonLogic)
+// Example SQL: "email = {p1:String} AND amount > {p2:Float64}"
 
-// Convert @p1 → {p1:String}, @p2 → {p2:Int64}, etc.
-chSQL := sql
-chParams := make(clickhouse.Named, len(params))
+args := make([]any, 0, len(params))
 for _, p := range params {
-    placeholder := "@" + p.Name
-    switch p.Value.(type) {
-    case string:
-        chSQL = strings.Replace(chSQL, placeholder, fmt.Sprintf("{%s:String}", p.Name), 1)
-    case float64:
-        chSQL = strings.Replace(chSQL, placeholder, fmt.Sprintf("{%s:Float64}", p.Name), 1)
-    case int64:
-        chSQL = strings.Replace(chSQL, placeholder, fmt.Sprintf("{%s:Int64}", p.Name), 1)
-    }
-    chParams = append(chParams, clickhouse.Named(p.Name, p.Value))
+    args = append(args, clickhouse.Named(p.Name, p.Value))
 }
+rows, err := conn.Query(ctx, sql, args...)
 ```
 
 ## Custom Operators
 
 Custom operators receive SQL fragment arguments that may contain placeholders. The contract is the same as with inline mode: custom operators **must** include all provided arguments in their output SQL. Dropping an argument is a semantic bug that, in parameterized mode, additionally triggers an `E350 ErrUnreferencedPlaceholder` error.
 
-Custom operators must also keep placeholders as SQL expressions, not hidden inside quoted or commented SQL regions. For example, use `CONCAT(@p1, '%')`, not `'@p1%'`. If a custom operator emits a placeholder inside a quoted string literal, quoted identifier, PostgreSQL dollar-quoted string, or SQL comment, transpilation fails with `E102 ErrCustomOperatorFailed`.
+Custom operators must also keep placeholders as SQL expressions, not hidden inside quoted or commented SQL regions. For BigQuery/Spanner-style SQL, use `CONCAT(@p1, '%')`, not `'@p1%'`; for ClickHouse the same rule applies to typed placeholders such as `{p1:String}`. If a custom operator emits a placeholder inside a quoted string literal, quoted identifier, PostgreSQL dollar-quoted string, or SQL comment, transpilation fails with `E102 ErrCustomOperatorFailed`.
 
 ```go
 // Good: all args used
 transpiler.RegisterOperatorFunc("double", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
-    return jsonlogic2sql.ValueSQL(fmt.Sprintf("(%s * 2)", args[0].SQL), jsonlogic2sql.ExpressionTypeNumber), nil // @p1 flows through
+    return jsonlogic2sql.ValueSQL(fmt.Sprintf("(%s * 2)", args[0].SQL), jsonlogic2sql.ExpressionTypeNumber), nil // placeholder flows through
 })
 
 // Bad: dropping args causes E350
 transpiler.RegisterOperatorFunc("broken", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
-    return jsonlogic2sql.ValueSQL("42", jsonlogic2sql.ExpressionTypeNumber), nil // discards args containing @p1 -> E350 error
+    return jsonlogic2sql.ValueSQL("42", jsonlogic2sql.ExpressionTypeNumber), nil // discards args containing a placeholder -> E350 error
 })
 ```
 

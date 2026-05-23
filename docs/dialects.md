@@ -155,7 +155,7 @@ When using parameterized queries, the placeholder style varies by dialect:
 |---------|-------|---------------------|
 | BigQuery | Named | `@p1`, `@p2`, `@p3` |
 | Spanner | Named | `@p1`, `@p2`, `@p3` |
-| ClickHouse | Named | `@p1`, `@p2`, `@p3` |
+| ClickHouse | Typed named | `{p1:String}`, `{p2:Float64}` |
 | PostgreSQL | Positional | `$1`, `$2`, `$3` |
 | DuckDB | Positional | `$1`, `$2`, `$3` |
 

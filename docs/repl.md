@@ -93,7 +93,7 @@ Parameterized mode: OFF (output uses inlined literals)
 SQL: (status = 'active' AND amount > 1000)
 ```
 
-Placeholder styles vary by dialect (`@p1` for BigQuery/Spanner/ClickHouse, `$1` for PostgreSQL/DuckDB). See [Parameterized Queries](parameterized-queries.md) for details.
+Placeholder styles vary by dialect (`@p1` for BigQuery/Spanner, `{p1:Type}` for ClickHouse, `$1` for PostgreSQL/DuckDB). See [Parameterized Queries](parameterized-queries.md) for details.
 
 ### Pattern-Matching Note (`LIKE`)
 

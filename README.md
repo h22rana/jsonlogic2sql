@@ -6,7 +6,7 @@ A Go library that converts JSON Logic expressions into SQL predicate and value e
 
 - **Complete JSON Logic Support**: Implements all core JSON Logic operators
 - **SQL Dialect Support**: Target BigQuery, Spanner, PostgreSQL, DuckDB, or ClickHouse
-- **Parameterized Queries**: Generate SQL with bind placeholders (`@p1`, `$1`) and separate parameter values for safe execution
+- **Parameterized Queries**: Generate SQL with dialect-specific bind placeholders (`@p1`, `$1`, `{p1:Type}`) and separate parameter values for safe execution
 - **Custom Operators**: Extensible registry pattern for custom SQL functions
 - **Schema Validation**: Required field schema for strict column validation, including nested object fields and array element fields
 - **Identifier Quoting**: Path segments such as `24h`, `7d`, and `café` are quoted per dialect

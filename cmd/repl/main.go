@@ -104,7 +104,7 @@ func escapeLikeExpr(expr string, d jsonlogic2sql.Dialect) string {
 //
 // Three pattern argument forms are handled:
 //  1. SQL string literal ('hello'): unquote, escape LIKE wildcards, inline.
-//  2. Bind placeholder (@p1, $1, or a typed ClickHouse custom placeholder):
+//  2. Bind placeholder (@p1, $1, or {p1:String}):
 //     CAST to string, wrap with REPLACE for runtime escaping.
 //  3. Unquoted primitive (1000, TRUE): treat as a literal value, escape and inline.
 func buildLikeSQL(column, patternArg, prefix, suffix string, negate bool, d jsonlogic2sql.Dialect) string {

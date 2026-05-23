@@ -348,12 +348,12 @@ func TestComparisonOperator_handleInParam_SchemaRequired_StringExpressionHeurist
 		{
 			name:    "clickhouse nested string expression uses containment",
 			d:       dialect.DialectClickHouse,
-			style:   params.PlaceholderNamed,
+			style:   params.PlaceholderClickHouse,
 			leftArg: leftStringExpr,
 			wantSQL: testRuntimeStringContainmentSQL(
 				dialect.DialectClickHouse,
 				"profile.name",
-				"CONCAT(COALESCE(substring(profile.first, (@p1 + 1), @p2), ''), @p3)",
+				"CONCAT(COALESCE(substring(profile.first, ({p1:Float64} + 1), {p2:Float64}), ''), {p3:String})",
 			),
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(0)},
@@ -386,9 +386,9 @@ func TestComparisonOperator_handleInParam_SchemaRequired_StringExpressionHeurist
 		{
 			name:    "clickhouse numeric expression uses null-safe membership fallback",
 			d:       dialect.DialectClickHouse,
-			style:   params.PlaceholderNamed,
+			style:   params.PlaceholderClickHouse,
 			leftArg: leftNumericExpr,
-			wantSQL: testNullSafeArrayMembershipSQL(dialect.DialectClickHouse, "(@p1 + @p2)", "profile.name"),
+			wantSQL: testNullSafeArrayMembershipSQL(dialect.DialectClickHouse, "({p1:Float64} + {p2:Float64})", "profile.name"),
 			wantParams: []params.QueryParam{
 				{Name: "p1", Value: float64(1)},
 				{Name: "p2", Value: float64(2)},

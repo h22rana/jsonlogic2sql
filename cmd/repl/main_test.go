@@ -838,31 +838,36 @@ func TestTranspileParameterized_LikeOperators_PlaceholderNotQuoted(t *testing.T)
 		name         string
 		dialect      jsonlogic2sql.Dialect
 		jsonExpr     string
+		placeholder  string
 		quotedShould string
 	}{
 		{
 			name:         "bigquery startsWith placeholder not quoted",
 			dialect:      jsonlogic2sql.DialectBigQuery,
 			jsonExpr:     `{"startsWith": [{"var": "name"}, "Al"]}`,
+			placeholder:  "@p1",
 			quotedShould: "'@p1%",
 		},
 		{
 			name:         "postgres startsWith placeholder not quoted",
 			dialect:      jsonlogic2sql.DialectPostgreSQL,
 			jsonExpr:     `{"startsWith": [{"var": "name"}, "Al"]}`,
+			placeholder:  "$1",
 			quotedShould: "'$1%",
 		},
 		{
 			name:         "duckdb contains placeholder not quoted",
 			dialect:      jsonlogic2sql.DialectDuckDB,
 			jsonExpr:     `{"contains": [{"var": "name"}, "Al"]}`,
+			placeholder:  "$1",
 			quotedShould: "'%$1%",
 		},
 		{
 			name:         "clickhouse contains placeholder not quoted",
 			dialect:      jsonlogic2sql.DialectClickHouse,
 			jsonExpr:     `{"contains": [{"var": "name"}, "Al"]}`,
-			quotedShould: "'%@p1%",
+			placeholder:  "{p1:String}",
+			quotedShould: "'%{p1:String}%",
 		},
 	}
 
@@ -882,6 +887,9 @@ func TestTranspileParameterized_LikeOperators_PlaceholderNotQuoted(t *testing.T)
 
 			if strings.Contains(sql, tt.quotedShould) {
 				t.Fatalf("placeholder appears quoted in LIKE pattern, SQL: %s", sql)
+			}
+			if !strings.Contains(sql, tt.placeholder) {
+				t.Fatalf("SQL %q does not contain expected placeholder %q", sql, tt.placeholder)
 			}
 		})
 	}

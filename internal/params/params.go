@@ -126,7 +126,7 @@ func (pc *ParamCollector) Style() PlaceholderStyle {
 // distinguishing string containment from array membership in the "in" operator).
 func (pc *ParamCollector) ValueForPlaceholder(placeholder string) (interface{}, bool) {
 	for i, p := range pc.params {
-		if formatPlaceholderForParam(i+1, p, pc.style) == placeholder {
+		if FormatPlaceholderForParam(i+1, p, pc.style) == placeholder {
 			return p.Value, true
 		}
 	}
@@ -152,7 +152,7 @@ func ValidatePlaceholderRefs(sql string, params []QueryParam, style PlaceholderS
 	}
 
 	for i, p := range params {
-		placeholder := formatPlaceholderForParam(i+1, p, style)
+		placeholder := FormatPlaceholderForParam(i+1, p, style)
 		if !containsPlaceholderRef(sql, placeholder, style) {
 			return tperrors.New(tperrors.ErrUnreferencedPlaceholder, "", "",
 				fmt.Sprintf("placeholder %s (param %q) is not referenced in generated SQL; "+
@@ -166,7 +166,7 @@ func ValidatePlaceholderRefs(sql string, params []QueryParam, style PlaceholderS
 // outside quoted strings and comments. Index is one-based, matching generated
 // positional placeholders such as $1.
 func ContainsParamRef(sql string, index int, param QueryParam, style PlaceholderStyle) bool {
-	return containsPlaceholderRef(sql, formatPlaceholderForParam(index, param, style), style)
+	return containsPlaceholderRef(sql, FormatPlaceholderForParam(index, param, style), style)
 }
 
 func containsPlaceholderRef(sql, placeholder string, style PlaceholderStyle) bool {
@@ -332,7 +332,7 @@ func FindQuotedPlaceholderRefAfter(sql string, params []QueryParam, style Placeh
 	placeholders := make([]string, 0, len(params)-previousCount)
 	for i := previousCount; i < len(params); i++ {
 		p := params[i]
-		placeholders = append(placeholders, formatPlaceholderForParam(i+1, p, style))
+		placeholders = append(placeholders, FormatPlaceholderForParam(i+1, p, style))
 	}
 
 	for i := 0; i < len(sql); i++ {
@@ -409,7 +409,10 @@ func isPlaceholderBoundaryChar(ch byte, style PlaceholderStyle) bool {
 	return style == PlaceholderPositional && ch == '$'
 }
 
-func formatPlaceholderForParam(index int, param QueryParam, style PlaceholderStyle) string {
+// FormatPlaceholderForParam returns the placeholder token for an already
+// collected parameter. It is used by validation code that needs exact
+// dialect-specific placeholder text without allocating a new parameter.
+func FormatPlaceholderForParam(index int, param QueryParam, style PlaceholderStyle) string {
 	switch style {
 	case PlaceholderNamed:
 		return "@" + param.Name
