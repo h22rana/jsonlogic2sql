@@ -122,6 +122,9 @@ func (c *ComparisonOperator) defaultedFieldFieldEqualitySQL(
 	if err := c.validateEqualityFieldOperand(rightField); err != nil {
 		return "", true, err
 	}
+	if constant, ok := c.strictIncompatibleFieldEqualityConstant(operator, leftField, rightField); ok {
+		return boolSQL(constant), true, nil
+	}
 	if !c.defaultedFieldNeedsNullSplit(leftField) && !c.defaultedFieldNeedsNullSplit(rightField) {
 		return "", false, nil
 	}
@@ -139,16 +142,16 @@ func (c *ComparisonOperator) defaultedFieldFieldEqualitySQL(
 	rightStates := defaultedEqualityStates(rightField)
 	predicates := make([]string, 0, len(leftStates)*len(rightStates))
 	for _, leftState := range leftStates {
-		leftBranchArg := c.defaultedEqualityBranchArg(leftArg, leftField, leftState.useDefault)
-		leftNullPredicate := defaultedEqualityNullPredicate(leftSQL, leftState.useDefault)
+		leftBranchArg := c.defaultedEqualityBranchArg(leftArg, leftField, leftState)
+		leftNullPredicate := defaultedEqualityNullPredicate(leftSQL, leftState)
 		for _, rightState := range rightStates {
-			rightBranchArg := c.defaultedEqualityBranchArg(rightArg, rightField, rightState.useDefault)
+			rightBranchArg := c.defaultedEqualityBranchArg(rightArg, rightField, rightState)
 			branchSQL, branchConstant, err := c.equalityBranchSQL(operator, leftBranchArg, rightBranchArg, pc)
 			if err != nil {
 				return "", true, err
 			}
 			conditions := make([]string, 0, 3)
-			conditions = append(conditions, leftNullPredicate, defaultedEqualityNullPredicate(rightSQL, rightState.useDefault))
+			conditions = append(conditions, leftNullPredicate, defaultedEqualityNullPredicate(rightSQL, rightState))
 			if branchConstant != nil {
 				if !*branchConstant {
 					continue
@@ -166,30 +169,53 @@ func (c *ComparisonOperator) defaultedFieldFieldEqualitySQL(
 	return combineOrPredicates(predicates), true, nil
 }
 
+type defaultedEqualityStateKind int
+
+const (
+	defaultedEqualityFieldState defaultedEqualityStateKind = iota
+	defaultedEqualityDefaultState
+	defaultedEqualityNullState
+)
+
 type defaultedEqualityState struct {
-	useDefault bool
+	kind defaultedEqualityStateKind
 }
 
 func defaultedEqualityStates(field equalityFieldOperand) []defaultedEqualityState {
 	if field.hasDefault && field.defaultLiteralKnown {
-		return []defaultedEqualityState{{useDefault: false}, {useDefault: true}}
+		return []defaultedEqualityState{
+			{kind: defaultedEqualityFieldState},
+			{kind: defaultedEqualityDefaultState},
+		}
 	}
-	return []defaultedEqualityState{{useDefault: false}}
+	if field.hasDefault {
+		return []defaultedEqualityState{{kind: defaultedEqualityFieldState}}
+	}
+	return []defaultedEqualityState{
+		{kind: defaultedEqualityFieldState},
+		{kind: defaultedEqualityNullState},
+	}
 }
 
 func (c *ComparisonOperator) defaultedEqualityBranchArg(
 	original interface{},
 	field equalityFieldOperand,
-	useDefault bool,
+	state defaultedEqualityState,
 ) interface{} {
-	if useDefault {
+	switch state.kind {
+	case defaultedEqualityDefaultState:
 		return field.defaultLiteral
+	case defaultedEqualityNullState:
+		return nil
+	case defaultedEqualityFieldState:
+		return defaultedFieldLiteralOperand{original: original, field: field}.withoutDefault()
+	default:
+		return defaultedFieldLiteralOperand{original: original, field: field}.withoutDefault()
 	}
-	return defaultedFieldLiteralOperand{original: original, field: field}.withoutDefault()
 }
 
-func defaultedEqualityNullPredicate(fieldSQL string, useDefault bool) string {
-	if useDefault {
+func defaultedEqualityNullPredicate(fieldSQL string, state defaultedEqualityState) string {
+	if state.kind == defaultedEqualityDefaultState || state.kind == defaultedEqualityNullState {
 		return fmt.Sprintf("%s IS NULL", fieldSQL)
 	}
 	return fmt.Sprintf("%s IS NOT NULL", fieldSQL)

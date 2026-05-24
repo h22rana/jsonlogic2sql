@@ -505,10 +505,14 @@ func (c *ComparisonOperator) strictIncompatibleFieldEqualitySQL(
 	leftArg, rightArg interface{},
 	leftSQL, rightSQL string,
 ) (string, bool) {
-	if !c.hasStrictIncompatibleFieldEqualityOperands(operator, leftArg, rightArg) {
+	leftField, rightField, ok := c.strictIncompatibleFieldEqualityOperands(operator, leftArg, rightArg)
+	if !ok {
 		return "", false
 	}
 
+	if constant, ok := c.strictIncompatibleFieldEqualityConstant(operator, leftField, rightField); ok {
+		return boolSQL(constant), true
+	}
 	if operator == OpStrictEqual {
 		return fmt.Sprintf("(%s IS NULL AND %s IS NULL)", leftSQL, rightSQL), true
 	}
@@ -516,19 +520,73 @@ func (c *ComparisonOperator) strictIncompatibleFieldEqualitySQL(
 }
 
 func (c *ComparisonOperator) hasStrictIncompatibleFieldEqualityOperands(operator string, leftArg, rightArg interface{}) bool {
+	_, _, ok := c.strictIncompatibleFieldEqualityOperands(operator, leftArg, rightArg)
+	return ok
+}
+
+func (c *ComparisonOperator) strictIncompatibleFieldEqualityOperands(
+	operator string,
+	leftArg, rightArg interface{},
+) (equalityFieldOperand, equalityFieldOperand, bool) {
 	if !isStrictEqualityOperator(operator) {
-		return false
+		return equalityFieldOperand{}, equalityFieldOperand{}, false
 	}
 
 	leftField, leftOK := c.extractEqualityFieldOperand(leftArg)
 	rightField, rightOK := c.extractEqualityFieldOperand(rightArg)
-	if !leftOK || !rightOK || !strictIncompatibleFieldsCanUseNullBranch(leftField, rightField) {
-		return false
+	if !leftOK || !rightOK {
+		return equalityFieldOperand{}, equalityFieldOperand{}, false
 	}
 
 	leftKind, leftKnown := c.schemaEqualityKind(leftField.fieldName)
 	rightKind, rightKnown := c.schemaEqualityKind(rightField.fieldName)
-	return leftKnown && rightKnown && leftKind != rightKind
+	return leftField, rightField, leftKnown && rightKnown && leftKind != rightKind
+}
+
+func (c *ComparisonOperator) strictIncompatibleFieldEqualityConstant(
+	operator string,
+	leftField, rightField equalityFieldOperand,
+) (bool, bool) {
+	leftKinds, leftKnown := c.strictFieldResultKinds(leftField)
+	rightKinds, rightKnown := c.strictFieldResultKinds(rightField)
+	if !leftKnown || !rightKnown {
+		return false, false
+	}
+	for kind := range leftKinds {
+		if _, ok := rightKinds[kind]; ok {
+			return false, false
+		}
+	}
+	return operator == OpStrictNotEqual, true
+}
+
+func (c *ComparisonOperator) strictFieldResultKinds(field equalityFieldOperand) (map[string]struct{}, bool) {
+	fieldKind, ok := c.schemaEqualityKind(field.fieldName)
+	if !ok {
+		return nil, false
+	}
+	kinds := map[string]struct{}{fieldKind: {}}
+	if !field.hasDefault {
+		kinds[literalKindNull] = struct{}{}
+		return kinds, true
+	}
+	if !field.defaultLiteralKnown {
+		return nil, false
+	}
+	defaultKind, ok := strictDefaultLiteralKind(field.defaultLiteral)
+	if !ok {
+		return nil, false
+	}
+	kinds[defaultKind] = struct{}{}
+	return kinds, true
+}
+
+func strictDefaultLiteralKind(value interface{}) (string, bool) {
+	if _, ok := value.([]interface{}); ok {
+		return literalKindArray, true
+	}
+	kind := equalityLiteralKind(value)
+	return kind, kind != ""
 }
 
 func (c *ComparisonOperator) isNullSafeFieldOperand(value interface{}) bool {

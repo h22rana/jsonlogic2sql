@@ -616,6 +616,183 @@ func TestTypeMetadataDefaultedFieldFieldEqualityAllDialects(t *testing.T) {
 	}
 }
 
+func TestTypeMetadataFoldsStrictMismatchedFieldDefaultsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "str", Type: FieldTypeString},
+		{Name: "num", Type: FieldTypeNumber},
+		{Name: "flag", Type: FieldTypeBoolean},
+	})
+	cases := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "string default strict equals number field",
+			logic: `{"===":[{"var":["str","x"]},{"var":"num"}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "string default strict not equals number field",
+			logic: `{"!==":[{"var":["str","x"]},{"var":"num"}]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "number field strict equals boolean default",
+			logic: `{"===":[{"var":"num"},{"var":["flag",false]}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "number field strict not equals boolean default",
+			logic: `{"!==":[{"var":"num"},{"var":["flag",false]}]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "both defaults keep mismatched field strict equals impossible",
+			logic: `{"===":[{"var":["str","x"]},{"var":["num",1]}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "both defaults keep mismatched field strict not equals certain",
+			logic: `{"!==":[{"var":["str","x"]},{"var":["num",1]}]}`,
+			want:  "TRUE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileCondition() SQL = %q, want %q", sql, tc.want)
+					}
+
+					sql, params, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", sql, tc.want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("TranspileParameterizedCondition() params = %#v, want none", params)
+					}
+
+					sql, err = tr.TranspileValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileValue() SQL = %q, want %q", sql, tc.want)
+					}
+
+					sql, params, err = tr.TranspileParameterizedValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", sql, tc.want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("TranspileParameterizedValue() params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTypeMetadataSplitsStrictMismatchedFieldDefaultsWhenKindsOverlapAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "str", Type: FieldTypeString},
+		{Name: "num", Type: FieldTypeNumber},
+	})
+	cases := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "string field numeric default can match number field",
+			logic: `{"===":[{"var":["str",1]},{"var":"num"}]}`,
+		},
+		{
+			name:  "string field numeric default can differ from null number field",
+			logic: `{"!==":[{"var":["str",1]},{"var":"num"}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					assertStrictMismatchedDefaultSplitSQL(t, sql)
+
+					paramSQL, _, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					assertStrictMismatchedDefaultSplitSQL(t, paramSQL)
+
+					sql, err = tr.TranspileValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					assertStrictMismatchedDefaultSplitSQL(t, sql)
+
+					paramSQL, _, err = tr.TranspileParameterizedValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					assertStrictMismatchedDefaultSplitSQL(t, paramSQL)
+				})
+			}
+		})
+	}
+}
+
+func assertStrictMismatchedDefaultSplitSQL(t *testing.T, sql string) {
+	t.Helper()
+	if sql == "FALSE" || sql == "TRUE" {
+		t.Fatalf("SQL = %q, want branch split because default kind can match opposite field", sql)
+	}
+	if strings.Contains(sql, "COALESCE(") || strings.Contains(sql, "coalesce(") {
+		t.Fatalf("SQL = %q, should split default branches instead of rendering COALESCE", sql)
+	}
+	for _, fragment := range []string{"str IS NULL", "num IS NULL", "num IS NOT NULL"} {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("SQL = %q, want fragment %q", sql, fragment)
+		}
+	}
+}
+
 func TestTypeMetadataRejectsObjectArrayEqualityAndScalarMembershipAllDialects(t *testing.T) {
 	t.Parallel()
 
