@@ -36,16 +36,19 @@ type ArrayOperator struct {
 	schemaScopes  []string
 	// valueSemantics means the current expression position returns a JSONLogic
 	// value, so and/or/if must preserve fallback values instead of boolean SQL.
-	valueSemantics           bool
-	accumulatorType          ExpressionType
-	hasAccumulatorType       bool
-	accumulatorSQL           string
-	accumulatorElemTypes     []ExpressionType
-	accumulatorSchemaScopes  []string
-	elementType              ExpressionType
-	elementNestedTypes       []ExpressionType
-	elementArraySchemaScopes []string
-	hasElementType           bool
+	valueSemantics            bool
+	accumulatorType           ExpressionType
+	hasAccumulatorType        bool
+	accumulatorSQL            string
+	accumulatorElemTypes      []ExpressionType
+	accumulatorElemSchemaType string
+	accumulatorSchemaScopes   []string
+	elementType               ExpressionType
+	elementSchemaType         string
+	elementNestedTypes        []ExpressionType
+	elementNestedSchemaType   string
+	elementArraySchemaScopes  []string
+	hasElementType            bool
 }
 
 // NewArrayOperator creates a new ArrayOperator instance.

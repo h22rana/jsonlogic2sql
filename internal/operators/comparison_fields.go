@@ -147,6 +147,9 @@ func (c *ComparisonOperator) arrayElementEqualityKind(fieldName string) (string,
 	if fieldName == "" {
 		return "", false
 	}
+	if elemType := normalizeSchemaType(schemaArrayElementType(c.schema(), fieldName)); elemType != "" {
+		return elemType, true
+	}
 	elemType, known := schemaArrayElementExpressionType(c.schema(), fieldName)
 	if !known {
 		return "", false
@@ -177,7 +180,14 @@ func (c *ComparisonOperator) validateArrayMembershipNeedle(fieldName string, nee
 	if !needleKnown {
 		return true, nil
 	}
-	if _, ok := needleKinds[elemKind]; !ok {
+	if _, ok := needleKinds["null"]; ok {
+		return true, nil
+	}
+	needleKind := elemKind
+	if elemKind == "enum" {
+		needleKind = "string"
+	}
+	if _, ok := needleKinds[needleKind]; !ok {
 		return false, nil
 	}
 	if literal, ok := equalityLiteralValue(needle); ok && equalityLiteralKind(literal) == "string" {

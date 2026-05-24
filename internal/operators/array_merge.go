@@ -66,5 +66,5 @@ func (a *ArrayOperator) handleMergeResult(args []interface{}) (OperatorResult, e
 	if err := a.validateArrayResultElementTypes(elementTypes); err != nil {
 		return OperatorResult{}, err
 	}
-	return arrayValueSQLWithMetadata(sql, elementTypes, sourceScopes), nil
+	return arrayValueSQLWithMetadata(sql, elementTypes, sourceScopes, common.schemaType), nil
 }

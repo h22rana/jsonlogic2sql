@@ -148,6 +148,7 @@ func validateArrayVarDefaultElementsForField(schema SchemaProvider, fieldName st
 	if !known || expected == ExpressionTypeObject {
 		return nil
 	}
+	elemSchemaType := normalizeSchemaType(schemaArrayElementType(schema, fieldName))
 	for i, elem := range arr {
 		if err := validateEqualityJSONNumberLiteral(elem); err != nil {
 			return err
@@ -171,6 +172,28 @@ func validateArrayVarDefaultElementsForField(schema SchemaProvider, fieldName st
 			return fmt.Errorf("default value for array field '%s' element %d has incompatible type %s; expected %s or null",
 				fieldName, i, expressionTypeName(actual), expressionTypeName(expected))
 		}
+		if elemSchemaType == "integer" {
+			if err := validateIntegerArrayDefaultElement(fieldName, i, elem); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateIntegerArrayDefaultElement(fieldName string, index int, elem interface{}) error {
+	if jsonNumberIntegerOutsideInt64(elem) {
+		return fmt.Errorf("default value for integer array field '%s' element %d is outside int64 range", fieldName, index)
+	}
+	n, handled, valid := jsNumberFromLiteral(elem)
+	if !handled {
+		return nil
+	}
+	if !valid || !n.integral {
+		return fmt.Errorf("default value for integer array field '%s' element %d must be an integer or null", fieldName, index)
+	}
+	if _, ok := int64FromJSNumber(n); !ok {
+		return fmt.Errorf("default value for integer array field '%s' element %d is outside int64 range", fieldName, index)
 	}
 	return nil
 }

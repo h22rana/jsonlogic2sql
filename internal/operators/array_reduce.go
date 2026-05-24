@@ -148,12 +148,13 @@ generalReduce:
 
 func operatorResultFromTypedValue(value typedValueSQL) OperatorResult {
 	if value.typ == ExpressionTypeArray {
-		res := arrayValueSQLWithMetadata(value.sql, typedValueElementTypes(value), typedValueSchemaScopes(value))
+		res := arrayValueSQLWithMetadata(value.sql, typedValueElementTypes(value), typedValueSchemaScopes(value), typedValueElementSchemaType(value))
 		res.EmptyArrayLiteral = value.emptyArrayLiteral
 		res.PreserveParamRefs = value.preserveParamRefs
 		return res
 	}
 	res := ValueSQL(value.sql, value.typ)
+	res.SchemaType = value.schemaType
 	res.PreserveParamRefs = value.preserveParamRefs
 	return res
 }

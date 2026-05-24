@@ -8,6 +8,7 @@ import (
 func arrayElementTypeRegressionSchema() *Schema {
 	return mustNewSchema([]FieldSchema{
 		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "ints", Type: FieldTypeArray, ElementType: FieldTypeInteger},
 		{Name: "numbers", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 		{Name: "tags", Type: FieldTypeArray, ElementType: FieldTypeString},
 		{Name: "states", Type: FieldTypeArray, ElementType: FieldTypeEnum, AllowedValues: []string{"active", "pending"}},
@@ -30,6 +31,107 @@ func arrayElementTypeRegressionSchema() *Schema {
 	})
 }
 
+func TestSchemaArrayIntegerMergeNullUsesIntegerNullAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := arrayElementTypeRegressionSchema()
+	tests := []struct {
+		name      string
+		logic     string
+		wantToken map[Dialect]string
+	}{
+		{
+			name:  "prepend null to integer array field",
+			logic: `{"merge":[null,{"var":"ints"}]}`,
+			wantToken: map[Dialect]string{
+				DialectBigQuery:   "CAST(NULL AS INT64)",
+				DialectSpanner:    "CAST(NULL AS INT64)",
+				DialectPostgreSQL: "CAST(NULL AS BIGINT)",
+				DialectDuckDB:     "CAST(NULL AS BIGINT)",
+				DialectClickHouse: "CAST(NULL AS Nullable(Int64))",
+			},
+		},
+		{
+			name:  "append null to filtered integer array",
+			logic: `{"merge":[{"filter":[{"var":"ints"},{"var":""}]},null]}`,
+			wantToken: map[Dialect]string{
+				DialectBigQuery:   "CAST(NULL AS INT64)",
+				DialectSpanner:    "CAST(NULL AS INT64)",
+				DialectPostgreSQL: "CAST(NULL AS BIGINT)",
+				DialectDuckDB:     "CAST(NULL AS BIGINT)",
+				DialectClickHouse: "CAST(NULL AS Nullable(Int64))",
+			},
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if !strings.Contains(sql, tt.wantToken[d]) {
+						t.Fatalf("TranspileValue() = %q, want integer NULL token %q", sql, tt.wantToken[d])
+					}
+					if strings.Contains(sql, "FLOAT64") || strings.Contains(sql, "DOUBLE PRECISION") || strings.Contains(sql, "Nullable(Float64)") {
+						t.Fatalf("TranspileValue() = %q, should not render floating-point NULL for integer array merge", sql)
+					}
+
+					paramSQL, params, err := tr.TranspileParameterizedValue(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if len(params) != 0 {
+						t.Fatalf("TranspileParameterizedValue() params = %#v, want none", params)
+					}
+					if !strings.Contains(paramSQL, tt.wantToken[d]) {
+						t.Fatalf("TranspileParameterizedValue() = %q, want integer NULL token %q", paramSQL, tt.wantToken[d])
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestSchemaArrayElementTypesRejectIntegerNumberMergeAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := arrayElementTypeRegressionSchema()
+	logic := `{"merge":[{"var":"ints"},{"var":"numbers"}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			if sql, err := tr.TranspileValue(logic); err == nil ||
+				!strings.Contains(err.Error(), "incompatible array element schema types") {
+				t.Fatalf("TranspileValue() = %q, error = %v; want integer/number schema type error", sql, err)
+			}
+
+			if sql, _, err := tr.TranspileParameterizedValue(logic); err == nil ||
+				!strings.Contains(err.Error(), "incompatible array element schema types") {
+				t.Fatalf("TranspileParameterizedValue() = %q, error = %v; want integer/number schema type error", sql, err)
+			}
+		})
+	}
+}
+
 func TestSchemaArrayElementTypesRejectInvalidFieldEqualityAllDialects(t *testing.T) {
 	t.Parallel()
 
@@ -42,6 +144,7 @@ func TestSchemaArrayElementTypesRejectInvalidFieldEqualityAllDialects(t *testing
 		{name: "strict equality", logic: `{"===":[{"var":"numbers"},{"var":"tags"}]}`},
 		{name: "loose inequality", logic: `{"!=":[{"var":"numbers"},{"var":"tags"}]}`},
 		{name: "strict inequality", logic: `{"!==":[{"var":"numbers"},{"var":"tags"}]}`},
+		{name: "integer number equality", logic: `{"==":[{"var":"ints"},{"var":"numbers"}]}`},
 	}
 
 	for _, d := range allDialects() {
@@ -124,6 +227,11 @@ func TestSchemaArrayDefaultsValidateElementTypesAllDialects(t *testing.T) {
 			wantError: "default value for array field 'numbers' element 0 has incompatible type string; expected number or null",
 		},
 		{
+			name:      "integer array rejects fractional default element",
+			logic:     `{"var":["ints",[1.5]]}`,
+			wantError: "default value for integer array field 'ints' element 0 must be an integer or null",
+		},
+		{
 			name:      "enum array rejects invalid default element",
 			logic:     `{"var":["states",["archived"]]}`,
 			wantError: "invalid enum value 'archived' for field 'states'",
@@ -151,6 +259,74 @@ func TestSchemaArrayDefaultsValidateElementTypesAllDialects(t *testing.T) {
 						t.Fatalf("TranspileParameterizedValue() = %q, error = %v; want %q", sql, err, tt.wantError)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestSchemaArrayElementTypesRejectIntegerNumberValueBranchesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := arrayElementTypeRegressionSchema()
+	logic := `{"if":[{"var":"flag"},{"var":"ints"},{"var":"numbers"}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			if sql, err := tr.TranspileValue(logic); err == nil ||
+				!strings.Contains(err.Error(), "compatible element schema types") {
+				t.Fatalf("TranspileValue() = %q, error = %v; want integer/number branch type error", sql, err)
+			}
+
+			if sql, _, err := tr.TranspileParameterizedValue(logic); err == nil ||
+				!strings.Contains(err.Error(), "compatible element schema types") {
+				t.Fatalf("TranspileParameterizedValue() = %q, error = %v; want integer/number branch type error", sql, err)
+			}
+		})
+	}
+}
+
+func TestSchemaArrayElementTypesAllowNullMembershipNeedlesAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := arrayElementTypeRegressionSchema()
+	logic := `{"in":[null,{"var":"ints"}]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			sql, err := tr.TranspileCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
+			}
+			if sql == "FALSE" || !strings.Contains(sql, "IS NULL") {
+				t.Fatalf("TranspileCondition() = %q, want null-safe array membership", sql)
+			}
+
+			paramSQL, params, err := tr.TranspileParameterizedCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			for _, param := range params {
+				if param.Value == nil {
+					continue
+				}
+				t.Fatalf("TranspileParameterizedCondition() params = %#v, want no non-nil params for literal null needle", params)
+			}
+			if paramSQL == "FALSE" || !strings.Contains(paramSQL, "IS NULL") {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want null-safe array membership", paramSQL)
 			}
 		})
 	}

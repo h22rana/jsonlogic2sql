@@ -40,8 +40,10 @@ type OperatorArg struct {
 	SQL                      string
 	Kind                     ExpressionKind
 	Type                     ExpressionType
+	SchemaType               string
 	ArrayElementType         ExpressionType
 	ArrayElementTypes        []ExpressionType
+	ArrayElementSchemaType   string
 	ArrayElementSchemaScopes []string
 }
 
@@ -52,9 +54,12 @@ func (a OperatorArg) String() string {
 // OperatorResult is the typed SQL representation returned by custom operators
 // and parser expression callbacks.
 type OperatorResult struct {
-	SQL               string
-	Kind              ExpressionKind
-	Type              ExpressionType
+	SQL  string
+	Kind ExpressionKind
+	Type ExpressionType
+	// SchemaType carries the declared schema field type when a value is known
+	// to come directly from a schema field or scoped element.
+	SchemaType        string
 	EmptyArrayLiteral bool
 	// PreserveParamRefs marks parameterized SQL whose collected params must
 	// survive parser constant folding so placeholder validation can catch
@@ -68,6 +73,10 @@ type OperatorResult struct {
 	// element type first. For example, array<array<number>> is represented as
 	// []ExpressionType{ExpressionTypeArray, ExpressionTypeNumber}.
 	ArrayElementTypes []ExpressionType
+	// ArrayElementSchemaType preserves the declared schema element type for
+	// scalar array fields, where coarse ExpressionType metadata intentionally
+	// groups integer and number as numeric values.
+	ArrayElementSchemaType string
 	// ArrayElementSchemaScopes carries schema fields whose element schemas
 	// describe object-array values, and object values produced from those
 	// elements. It is used to reject CASE/merge/lambda compositions that would
@@ -132,6 +141,9 @@ type ProcessedValue struct {
 	Kind ExpressionKind
 	// Type identifies the coarse SQL value type when known.
 	Type ExpressionType
+	// SchemaType carries the declared schema field type when this value is
+	// derived from a schema field or a scoped array element.
+	SchemaType string
 	// RequiresKnownTruthiness forces callers to reject truthiness checks when
 	// Type is unknown instead of emitting mixed-type fallback SQL.
 	RequiresKnownTruthiness bool
@@ -146,6 +158,9 @@ type ProcessedValue struct {
 	// ArrayElementTypes carries nested array element types, with the immediate
 	// element type first. ExpressionTypeUnknown or an empty slice means unknown.
 	ArrayElementTypes []ExpressionType
+	// ArrayElementSchemaType preserves the declared schema element type for
+	// scalar array fields.
+	ArrayElementSchemaType string
 	// ArrayElementSchemaScopes carries schema fields for object-array values
 	// and object values produced from object-array elements.
 	ArrayElementSchemaScopes []string

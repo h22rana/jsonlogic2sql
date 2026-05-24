@@ -331,11 +331,13 @@ func (p *Parser) fieldExpressionType(fieldName string) operators.ExpressionType 
 
 func (p *Parser) fieldValueExpressionResult(sql, fieldName string) expressionResult {
 	res := fieldValueResult(sql, p.fieldExpressionType(fieldName), fieldName)
+	res.OperatorResult.SchemaType = normalizeSchemaType(p.config.Schema.GetFieldType(fieldName))
 	if p.fieldHasObjectArrayElements(fieldName) {
 		res = withArrayElementTypes(res, operators.ExpressionTypeObject)
 		res = withArrayElementSchemaScopes(res, fieldName)
-	} else if elemType := p.fieldArrayElementExpressionType(fieldName); elemType != operators.ExpressionTypeUnknown {
+	} else if elemType, elemSchemaType := p.fieldArrayElementExpressionType(fieldName); elemType != operators.ExpressionTypeUnknown {
 		res = withArrayElementTypes(res, elemType)
+		res.OperatorResult.ArrayElementSchemaType = elemSchemaType
 	}
 	return res
 }
@@ -348,18 +350,20 @@ func (p *Parser) fieldHasObjectArrayElements(fieldName string) bool {
 	return ok && provider.HasArrayElementFields(fieldName)
 }
 
-func (p *Parser) fieldArrayElementExpressionType(fieldName string) operators.ExpressionType {
+func (p *Parser) fieldArrayElementExpressionType(fieldName string) (operators.ExpressionType, string) {
 	if fieldName == "" {
-		return operators.ExpressionTypeUnknown
+		return operators.ExpressionTypeUnknown, ""
 	}
 	provider, ok := p.config.Schema.(operators.ArrayElementTypeProvider)
 	if !ok {
-		return operators.ExpressionTypeUnknown
+		return operators.ExpressionTypeUnknown, ""
 	}
-	return schemaFieldTypeExpressionType(provider.GetArrayElementType(fieldName))
+	elemSchemaType := normalizeSchemaType(provider.GetArrayElementType(fieldName))
+	return schemaFieldTypeExpressionType(elemSchemaType), elemSchemaType
 }
 
 func schemaFieldTypeExpressionType(fieldType string) operators.ExpressionType {
+	fieldType = normalizeSchemaType(fieldType)
 	switch fieldType {
 	case "boolean":
 		return operators.ExpressionTypeBoolean
@@ -374,6 +378,10 @@ func schemaFieldTypeExpressionType(fieldType string) operators.ExpressionType {
 	default:
 		return operators.ExpressionTypeUnknown
 	}
+}
+
+func normalizeSchemaType(fieldType string) string {
+	return strings.ToLower(strings.TrimSpace(fieldType))
 }
 
 func varFieldName(args interface{}) string {
@@ -456,6 +464,7 @@ func valueOperatorResult(res expressionResult) operators.OperatorResult {
 		opResult.ArrayElementType = res.arrayElementType
 		opResult.ArrayElementTypes = normalizeExpressionTypes(res.arrayElementTypes)
 	}
+	opResult.ArrayElementSchemaType = res.OperatorResult.ArrayElementSchemaType
 	opResult.ArrayElementSchemaScopes = normalizeParserSchemaScopes(res.arrayElementSchemaScopes)
 	return opResult
 }
@@ -489,12 +498,14 @@ func (p *Parser) catStringSQL(res expressionResult) string {
 
 func typedValueOperand(res expressionResult) operators.ProcessedValue {
 	pv := operators.TypedSQLResult(valueOperandSQL(res), res.Kind, valueTypeOf(res))
+	pv.SchemaType = res.OperatorResult.SchemaType
 	pv.RequiresKnownTruthiness = res.requiresKnownTruthiness
 	pv.PreserveParamRefs = res.preserveParamRefs
 	if res.arrayElementTypeKnown {
 		pv.ArrayElementType = res.arrayElementType
 		pv.ArrayElementTypes = normalizeExpressionTypes(res.arrayElementTypes)
 	}
+	pv.ArrayElementSchemaType = res.OperatorResult.ArrayElementSchemaType
 	pv.ArrayElementSchemaScopes = normalizeParserSchemaScopes(res.arrayElementSchemaScopes)
 	if res.fieldValue {
 		pv.IsField = true
@@ -512,9 +523,10 @@ func typedValueOperand(res expressionResult) operators.ProcessedValue {
 
 func operatorResultFromProcessedValue(pv operators.ProcessedValue) operators.OperatorResult {
 	res := operators.OperatorResult{
-		SQL:  pv.Value,
-		Kind: pv.Kind,
-		Type: pv.Type,
+		SQL:        pv.Value,
+		Kind:       pv.Kind,
+		Type:       pv.Type,
+		SchemaType: pv.SchemaType,
 	}
 	res.PreserveParamRefs = pv.PreserveParamRefs
 	if pv.ArrayElementType != operators.ExpressionTypeUnknown {
@@ -526,6 +538,7 @@ func operatorResultFromProcessedValue(pv operators.ProcessedValue) operators.Ope
 			res.ArrayElementType = res.ArrayElementTypes[0]
 		}
 	}
+	res.ArrayElementSchemaType = pv.ArrayElementSchemaType
 	res.ArrayElementSchemaScopes = normalizeParserSchemaScopes(pv.ArrayElementSchemaScopes)
 	return res
 }
@@ -542,14 +555,16 @@ func operatorResultArrayElementTypes(res operators.OperatorResult) []operators.E
 
 func operatorArgFromExpressionResult(res expressionResult) operators.OperatorArg {
 	arg := operators.OperatorArg{
-		SQL:  res.SQL,
-		Kind: res.Kind,
-		Type: valueTypeOf(res),
+		SQL:        res.SQL,
+		Kind:       res.Kind,
+		Type:       valueTypeOf(res),
+		SchemaType: res.OperatorResult.SchemaType,
 	}
 	if elemTypes, ok := arrayElementTypesOf(res); ok {
 		arg.ArrayElementType = elemTypes[0]
 		arg.ArrayElementTypes = elemTypes
 	}
+	arg.ArrayElementSchemaType = res.OperatorResult.ArrayElementSchemaType
 	arg.ArrayElementSchemaScopes = normalizeParserSchemaScopes(res.arrayElementSchemaScopes)
 	return arg
 }

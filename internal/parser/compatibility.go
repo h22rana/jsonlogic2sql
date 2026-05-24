@@ -23,6 +23,9 @@ func (p *Parser) compatibleValueType(left, right expressionResult, path string) 
 			if _, _, err := p.compatibleArrayElementType(left, right, path); err != nil {
 				return operators.ExpressionTypeUnknown, err
 			}
+			if _, err := p.compatibleArrayElementSchemaType(left, right, path); err != nil {
+				return operators.ExpressionTypeUnknown, err
+			}
 			if err := p.validateCompatibleObjectArrayScopes(left, right, path); err != nil {
 				return operators.ExpressionTypeUnknown, err
 			}
@@ -64,6 +67,11 @@ func (p *Parser) compatibleValueResult(left, right expressionResult, path string
 	if known {
 		res = withArrayElementTypes(res, elemTypes...)
 	}
+	elemSchemaType, err := p.mergedArrayElementSchemaType(left, right, path)
+	if err != nil {
+		return expressionResult{}, err
+	}
+	res.OperatorResult.ArrayElementSchemaType = elemSchemaType
 	res = withArrayElementSchemaScopes(res, compatibleArrayElementSchemaScopes(left, right)...)
 	return res, nil
 }
@@ -98,6 +106,9 @@ func (p *Parser) compatibleArrayElementTypes(left, right expressionResult, path 
 	leftTypes, leftKnown := arrayElementTypesOf(left)
 	rightTypes, rightKnown := arrayElementTypesOf(right)
 	if leftKnown && rightKnown {
+		if _, err := p.compatibleArrayElementSchemaType(left, right, path); err != nil {
+			return nil, false, err
+		}
 		if sameExpressionTypes(leftTypes, rightTypes) {
 			return leftTypes, true, nil
 		}
@@ -112,6 +123,36 @@ func (p *Parser) compatibleArrayElementTypes(left, right expressionResult, path 
 		return rightTypes, true, nil
 	}
 	return nil, false, nil
+}
+
+func (p *Parser) mergedArrayElementSchemaType(left, right expressionResult, path string) (string, error) {
+	if valueTypeOf(left) == operators.ExpressionTypeArray && valueTypeOf(right) == operators.ExpressionTypeArray {
+		return p.compatibleArrayElementSchemaType(left, right, path)
+	}
+	if valueTypeOf(left) == operators.ExpressionTypeArray && valueTypeOf(right) == operators.ExpressionTypeNull {
+		return arrayElementSchemaTypeOf(left), nil
+	}
+	if valueTypeOf(right) == operators.ExpressionTypeArray && valueTypeOf(left) == operators.ExpressionTypeNull {
+		return arrayElementSchemaTypeOf(right), nil
+	}
+	return "", nil
+}
+
+func (p *Parser) compatibleArrayElementSchemaType(left, right expressionResult, path string) (string, error) {
+	leftType := arrayElementSchemaTypeOf(left)
+	rightType := arrayElementSchemaTypeOf(right)
+	if leftType == "" {
+		return rightType, nil
+	}
+	if rightType == "" {
+		return leftType, nil
+	}
+	if leftType == rightType {
+		return leftType, nil
+	}
+	return "", tperrors.NewTypeMismatch("", path,
+		"array value branches must have compatible element schema types",
+		fmt.Sprintf("%s and %s", leftType, rightType))
 }
 
 func (p *Parser) validateCompatibleObjectArrayScopes(left, right expressionResult, path string) error {
@@ -234,6 +275,13 @@ func arrayElementTypesOf(res expressionResult) ([]operators.ExpressionType, bool
 		return nil, false
 	}
 	return elemTypes, true
+}
+
+func arrayElementSchemaTypeOf(res expressionResult) string {
+	if valueTypeOf(res) != operators.ExpressionTypeArray {
+		return ""
+	}
+	return normalizeSchemaType(res.OperatorResult.ArrayElementSchemaType)
 }
 
 func sameExpressionTypes(left, right []operators.ExpressionType) bool {

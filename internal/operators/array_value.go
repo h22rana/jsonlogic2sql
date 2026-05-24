@@ -85,7 +85,8 @@ func (a *ArrayOperator) localMapExpressionMetadata(args []interface{}, sql strin
 	if err != nil {
 		return OperatorResult{}, false
 	}
-	return arrayValueSQLWithMetadata(sql, mappedArrayElementTypes(res), res.ArrayElementSchemaScopes), true
+	result := arrayValueSQLWithMetadata(sql, mappedArrayElementTypes(res), res.ArrayElementSchemaScopes, mappedArrayElementSchemaType(res))
+	return result, true
 }
 
 func (a *ArrayOperator) localFilterExpressionMetadata(args []interface{}, sql string) (OperatorResult, bool) {
@@ -96,7 +97,7 @@ func (a *ArrayOperator) localFilterExpressionMetadata(args []interface{}, sql st
 	if err != nil {
 		return OperatorResult{}, false
 	}
-	return arrayValueSQLWithMetadata(sql, typedValueElementTypes(source), typedValueSchemaScopes(source)), true
+	return arrayValueSQLWithMetadata(sql, typedValueElementTypes(source), typedValueSchemaScopes(source), typedValueElementSchemaType(source)), true
 }
 
 func (a *ArrayOperator) localMergeExpressionMetadata(args []interface{}, sql string) (OperatorResult, bool) {
@@ -116,7 +117,7 @@ func (a *ArrayOperator) localMergeExpressionMetadata(args []interface{}, sql str
 	if err != nil {
 		return OperatorResult{}, false
 	}
-	return arrayValueSQLWithMetadata(sql, mergeElementTypes(values, common), a.arraySourceSchemaScopesForValues(args, values)), true
+	return arrayValueSQLWithMetadata(sql, mergeElementTypes(values, common), a.arraySourceSchemaScopesForValues(args, values), common.schemaType), true
 }
 
 func isPredicateArrayExpression(expr interface{}) bool {
@@ -229,9 +230,11 @@ func (a *ArrayOperator) valueToTypedSQLAtPath(value interface{}, path string) (t
 					SQL:                      pv.Value,
 					Kind:                     pv.Kind,
 					Type:                     pv.Type,
+					SchemaType:               pv.SchemaType,
 					PreserveParamRefs:        pv.PreserveParamRefs,
 					ArrayElementType:         pv.ArrayElementType,
 					ArrayElementTypes:        pv.ArrayElementTypes,
+					ArrayElementSchemaType:   pv.ArrayElementSchemaType,
 					ArrayElementSchemaScopes: pv.ArrayElementSchemaScopes,
 				}), nil
 			}

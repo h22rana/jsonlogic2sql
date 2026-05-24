@@ -152,8 +152,11 @@ func (a *ArrayOperator) valueToTypedSQLParamAtPath(value interface{}, pc *params
 					SQL:                      pv.Value,
 					Kind:                     pv.Kind,
 					Type:                     pv.Type,
+					SchemaType:               pv.SchemaType,
+					PreserveParamRefs:        pv.PreserveParamRefs,
 					ArrayElementType:         pv.ArrayElementType,
 					ArrayElementTypes:        pv.ArrayElementTypes,
+					ArrayElementSchemaType:   pv.ArrayElementSchemaType,
 					ArrayElementSchemaScopes: pv.ArrayElementSchemaScopes,
 				}), nil
 			}
@@ -258,6 +261,7 @@ func typedSQLFromOperatorResult(res OperatorResult) typedValueSQL {
 	out := typedValueSQL{
 		sql:               res.SQL,
 		typ:               typ,
+		schemaType:        normalizeSchemaType(res.SchemaType),
 		emptyArrayLiteral: res.EmptyArrayLiteral,
 		schemaScopes:      normalizeSchemaScopes(res.ArrayElementSchemaScopes),
 		preserveParamRefs: res.PreserveParamRefs,
@@ -268,6 +272,7 @@ func typedSQLFromOperatorResult(res OperatorResult) typedValueSQL {
 			out.elemType = elemTypes[0]
 			out.elemTypes = elemTypes
 		}
+		out.elemSchemaType = operatorResultElementSchemaType(res)
 	}
 	return out
 }
@@ -280,10 +285,12 @@ func typedSQLFromProcessedValue(pv ProcessedValue) typedValueSQL {
 		SQL:                      pv.Value,
 		Kind:                     pv.Kind,
 		Type:                     pv.Type,
+		SchemaType:               pv.SchemaType,
 		EmptyArrayLiteral:        false,
 		PreserveParamRefs:        pv.PreserveParamRefs,
 		ArrayElementType:         pv.ArrayElementType,
 		ArrayElementTypes:        pv.ArrayElementTypes,
+		ArrayElementSchemaType:   pv.ArrayElementSchemaType,
 		ArrayElementSchemaScopes: pv.ArrayElementSchemaScopes,
 	})
 }

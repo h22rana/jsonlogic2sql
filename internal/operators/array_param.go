@@ -156,7 +156,7 @@ func (a *ArrayOperator) handleMapResultParam(args []interface{}, pc *params.Para
 		elementSchemaScopes = normalizeSchemaScopes(transformation.ArrayElementSchemaScopes)
 	case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeString, ExpressionTypeNumber:
 	}
-	result := arrayValueSQLWithMetadata(sql, elementTypes, elementSchemaScopes)
+	result := arrayValueSQLWithMetadata(sql, elementTypes, elementSchemaScopes, mappedArrayElementSchemaType(transformation))
 	result.PreserveParamRefs = arrayValue.preserveParamRefs || transformation.PreserveParamRefs
 	return result, nil
 }
@@ -210,6 +210,7 @@ func (a *ArrayOperator) handleFilterResultParam(args []interface{}, pc *params.P
 		a.renderFilterSQL(alias, array, condition),
 		typedValueElementTypes(arrayValue),
 		typedValueSchemaScopes(arrayValue),
+		typedValueElementSchemaType(arrayValue),
 	)
 	result.PreserveParamRefs = arrayValue.preserveParamRefs
 	return result, nil
@@ -513,7 +514,7 @@ func (a *ArrayOperator) handleMergeResultParam(args []interface{}, pc *params.Pa
 	if err := a.validateArrayResultElementTypes(elementTypes); err != nil {
 		return OperatorResult{}, err
 	}
-	result := arrayValueSQLWithMetadata(sql, elementTypes, sourceScopes)
+	result := arrayValueSQLWithMetadata(sql, elementTypes, sourceScopes, common.schemaType)
 	result.PreserveParamRefs = typedValuesPreserveParamRefs(values)
 	return result, nil
 }

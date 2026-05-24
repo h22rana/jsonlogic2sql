@@ -80,7 +80,7 @@ func (a *ArrayOperator) handleMapResult(args []interface{}) (OperatorResult, err
 		elementSchemaScopes = normalizeSchemaScopes(transformation.ArrayElementSchemaScopes)
 	case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeBoolean, ExpressionTypeString, ExpressionTypeNumber:
 	}
-	return arrayValueSQLWithMetadata(sql, elementTypes, elementSchemaScopes), nil
+	return arrayValueSQLWithMetadata(sql, elementTypes, elementSchemaScopes, mappedArrayElementSchemaType(transformation)), nil
 }
 
 // handleFilter converts filter operator to SQL.
@@ -143,5 +143,6 @@ func (a *ArrayOperator) handleFilterResult(args []interface{}) (OperatorResult, 
 		a.renderFilterSQL(alias, array, condition),
 		typedValueElementTypes(arrayValue),
 		typedValueSchemaScopes(arrayValue),
+		typedValueElementSchemaType(arrayValue),
 	), nil
 }

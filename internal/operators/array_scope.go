@@ -65,12 +65,15 @@ func (a *ArrayOperator) withArrayLambdaSource(
 	child.lambdaScope = scope
 	child.valueSemantics = valueSemantics
 	child.elementType = ExpressionTypeUnknown
+	child.elementSchemaType = ""
 	child.elementNestedTypes = nil
+	child.elementNestedSchemaType = ""
 	child.elementArraySchemaScopes = nil
 	child.hasElementType = false
 
 	scopes := normalizeSchemaScopes(sourceScopes)
 	elemTypes := typedValueElementTypes(arrayValue)
+	elemSchemaType := typedValueElementSchemaType(arrayValue)
 	if len(scopes) > 0 && arrayLambdaSourceUsesSchemaScope(scopes, elemTypes) {
 		child.schemaScope = scopes[0]
 		child.schemaScopes = scopes
@@ -84,9 +87,11 @@ func (a *ArrayOperator) withArrayLambdaSource(
 	child.schemaScopes = nil
 	if len(elemTypes) > 0 {
 		child.elementType = elemTypes[0]
+		child.elementSchemaType = elemSchemaType
 		child.elementNestedTypes = slices.Clone(elemTypes[1:])
 		child.hasElementType = true
 		if elemTypes[0] == ExpressionTypeArray {
+			child.elementNestedSchemaType = elemSchemaType
 			child.elementArraySchemaScopes = scopes
 		}
 	}
@@ -110,6 +115,7 @@ func (a *ArrayOperator) withReduceValueScope(accumulator typedValueSQL, accumula
 	child.hasAccumulatorType = true
 	child.accumulatorSQL = accumulatorSQL
 	child.accumulatorElemTypes = typedValueElementTypes(accumulator)
+	child.accumulatorElemSchemaType = typedValueElementSchemaType(accumulator)
 	child.accumulatorSchemaScopes = typedValueSchemaScopes(accumulator)
 	return child
 }
@@ -239,15 +245,16 @@ func (a *ArrayOperator) schemaExpressionType(fieldName string) ExpressionType {
 }
 
 func (a *ArrayOperator) typedFieldSQL(sql, fieldName string, typ ExpressionType) typedValueSQL {
-	value := typedValueSQL{sql: sql, typ: typ}
+	value := typedValueSQL{sql: sql, typ: typ, schemaType: normalizeSchemaType(a.schema().GetFieldType(fieldName))}
 	if typ == ExpressionTypeArray && a.fieldHasObjectArrayElements(fieldName) {
 		value.elemType = ExpressionTypeObject
 		value.elemTypes = []ExpressionType{ExpressionTypeObject}
 		value.schemaScopes = singleSchemaScope(fieldName)
 	} else if typ == ExpressionTypeArray {
-		if elemType := a.fieldArrayElementType(fieldName); elemType != ExpressionTypeUnknown {
+		if elemType, elemSchemaType := a.fieldArrayElementType(fieldName); elemType != ExpressionTypeUnknown {
 			value.elemType = elemType
 			value.elemTypes = []ExpressionType{elemType}
+			value.elemSchemaType = elemSchemaType
 		}
 	}
 	return value
@@ -261,15 +268,16 @@ func (a *ArrayOperator) fieldHasObjectArrayElements(fieldName string) bool {
 	return ok && provider.HasArrayElementFields(fieldName)
 }
 
-func (a *ArrayOperator) fieldArrayElementType(fieldName string) ExpressionType {
+func (a *ArrayOperator) fieldArrayElementType(fieldName string) (ExpressionType, string) {
 	if fieldName == "" {
-		return ExpressionTypeUnknown
+		return ExpressionTypeUnknown, ""
 	}
 	provider, ok := a.schema().(ArrayElementTypeProvider)
 	if !ok {
-		return ExpressionTypeUnknown
+		return ExpressionTypeUnknown, ""
 	}
-	return schemaFieldTypeExpressionType(provider.GetArrayElementType(fieldName))
+	elemSchemaType := normalizeSchemaType(provider.GetArrayElementType(fieldName))
+	return schemaFieldTypeExpressionType(elemSchemaType), elemSchemaType
 }
 
 func (a *ArrayOperator) validateScopedFieldName(fieldName string) error {
@@ -403,6 +411,7 @@ func (a *ArrayOperator) scopedSQLFieldResult(sql string, fieldNames ...string) P
 			result.HasExpressionInfo = true
 			result.Kind = ExpressionKindValue
 			result.Type = ExpressionTypeObject
+			result.SchemaType = objectFieldType
 			result.ArrayElementSchemaScopes = scopes
 			return result
 		}
@@ -410,12 +419,14 @@ func (a *ArrayOperator) scopedSQLFieldResult(sql string, fieldNames ...string) P
 			result.HasExpressionInfo = true
 			result.Kind = ExpressionKindValue
 			result.Type = a.elementType
+			result.SchemaType = a.elementSchemaType
 			if a.elementType == ExpressionTypeArray {
 				elemTypes := normalizeArrayElementTypes(a.elementNestedTypes)
 				if len(elemTypes) > 0 {
 					result.ArrayElementType = elemTypes[0]
 					result.ArrayElementTypes = elemTypes
 				}
+				result.ArrayElementSchemaType = a.elementNestedSchemaType
 				result.ArrayElementSchemaScopes = normalizeSchemaScopes(a.elementArraySchemaScopes)
 			}
 		}
@@ -427,14 +438,16 @@ func (a *ArrayOperator) scopedSQLFieldResult(sql string, fieldNames ...string) P
 		result.HasExpressionInfo = true
 		result.Kind = ExpressionKindValue
 		result.Type = typ
+		result.SchemaType = normalizeSchemaType(a.schema().GetFieldType(fieldName))
 		if typ == ExpressionTypeArray && a.fieldHasObjectArrayElements(fieldName) {
 			result.ArrayElementType = ExpressionTypeObject
 			result.ArrayElementTypes = []ExpressionType{ExpressionTypeObject}
 			result.ArrayElementSchemaScopes = singleSchemaScope(fieldName)
 		} else if typ == ExpressionTypeArray {
-			if elemType := a.fieldArrayElementType(fieldName); elemType != ExpressionTypeUnknown {
+			if elemType, elemSchemaType := a.fieldArrayElementType(fieldName); elemType != ExpressionTypeUnknown {
 				result.ArrayElementType = elemType
 				result.ArrayElementTypes = []ExpressionType{elemType}
+				result.ArrayElementSchemaType = elemSchemaType
 			}
 		}
 	}
@@ -534,6 +547,7 @@ func expressionTypeName(typ ExpressionType) string {
 }
 
 func schemaFieldTypeExpressionType(fieldType string) ExpressionType {
+	fieldType = normalizeSchemaType(fieldType)
 	switch fieldType {
 	case "boolean":
 		return ExpressionTypeBoolean
@@ -563,6 +577,7 @@ func (a *ArrayOperator) accumulatorSQLResult() ProcessedValue {
 				result.ArrayElementType = elemTypes[0]
 				result.ArrayElementTypes = elemTypes
 			}
+			result.ArrayElementSchemaType = a.accumulatorElemSchemaType
 			result.ArrayElementSchemaScopes = normalizeSchemaScopes(a.accumulatorSchemaScopes)
 		}
 		return result
@@ -810,8 +825,13 @@ func (a *ArrayOperator) validateArrayResultElementTypes(elementTypes []Expressio
 	return a.config.ValidateArrayLiteralElementTypes(elementTypes)
 }
 
-func validateMergeElementCompatibility(values []typedValueSQL) (ExpressionType, error) {
-	common := ExpressionTypeUnknown
+type mergeElementCompatibility struct {
+	typ        ExpressionType
+	schemaType string
+}
+
+func validateMergeElementCompatibility(values []typedValueSQL) (mergeElementCompatibility, error) {
+	common := mergeElementCompatibility{typ: ExpressionTypeUnknown}
 	var commonTypes []ExpressionType
 	for _, value := range values {
 		if value.emptyArrayLiteral {
@@ -819,26 +839,40 @@ func validateMergeElementCompatibility(values []typedValueSQL) (ExpressionType, 
 		}
 		elemType := value.typ
 		elemTypes := typedValueElementTypes(value)
+		elemSchemaType := value.schemaType
 		if value.typ == ExpressionTypeArray {
 			elemType = value.elemType
+			elemSchemaType = value.elemSchemaType
 		}
 		if elemType == ExpressionTypeUnknown || elemType == ExpressionTypeNull {
 			continue
 		}
-		if common == ExpressionTypeUnknown {
-			common = elemType
+		elemSchemaType = normalizeSchemaType(elemSchemaType)
+		if common.typ == ExpressionTypeUnknown {
+			common.typ = elemType
+			common.schemaType = elemSchemaType
 			commonTypes = elemTypes
 			continue
 		}
-		if common != elemType {
-			return ExpressionTypeUnknown, fmt.Errorf(
+		if common.typ != elemType {
+			return mergeElementCompatibility{}, fmt.Errorf(
 				"merge arguments have incompatible element types (%s and %s)",
-				arrayExpressionTypeName(common),
+				arrayExpressionTypeName(common.typ),
 				arrayExpressionTypeName(elemType),
 			)
 		}
+		if common.schemaType != "" && elemSchemaType != "" && common.schemaType != elemSchemaType {
+			return mergeElementCompatibility{}, fmt.Errorf(
+				"merge arguments have incompatible array element schema types (%s and %s)",
+				common.schemaType,
+				elemSchemaType,
+			)
+		}
+		if common.schemaType == "" {
+			common.schemaType = elemSchemaType
+		}
 		if len(commonTypes) > 0 && len(elemTypes) > 0 && !sameExpressionTypes(commonTypes, elemTypes) {
-			return ExpressionTypeUnknown, fmt.Errorf(
+			return mergeElementCompatibility{}, fmt.Errorf(
 				"merge arguments have incompatible element types (%s and %s)",
 				arrayExpressionTypeName(commonTypes[len(commonTypes)-1]),
 				arrayExpressionTypeName(elemTypes[len(elemTypes)-1]),
@@ -848,12 +882,12 @@ func validateMergeElementCompatibility(values []typedValueSQL) (ExpressionType, 
 	return common, nil
 }
 
-func (a *ArrayOperator) mergeValueToArraySQL(value typedValueSQL, common ExpressionType) (string, bool, error) {
+func (a *ArrayOperator) mergeValueToArraySQL(value typedValueSQL, common mergeElementCompatibility) (string, bool, error) {
 	if value.emptyArrayLiteral {
 		return "", true, nil
 	}
 	if value.typ == ExpressionTypeArray {
-		if value.elemType == ExpressionTypeNull && common == ExpressionTypeUnknown {
+		if value.elemType == ExpressionTypeNull && common.typ == ExpressionTypeUnknown {
 			return "", false, fmt.Errorf("merge null-only array argument requires a compatible typed operand")
 		}
 		return value.sql, false, nil
@@ -863,15 +897,15 @@ func (a *ArrayOperator) mergeValueToArraySQL(value typedValueSQL, common Express
 	}
 	scalarSQL := value.sql
 	if value.typ == ExpressionTypeNull {
-		if common == ExpressionTypeUnknown {
+		if common.typ == ExpressionTypeUnknown {
 			return "", false, fmt.Errorf("merge null scalar argument requires a compatible typed operand")
 		}
-		scalarSQL = a.typedNullSQL(common)
-	} else if common != ExpressionTypeUnknown && value.typ != common {
+		scalarSQL = a.typedNullSQL(common.typ, common.schemaType)
+	} else if common.typ != ExpressionTypeUnknown && value.typ != common.typ {
 		return "", false, fmt.Errorf(
 			"merge scalar argument has incompatible type %s; expected %s",
 			arrayExpressionTypeName(value.typ),
-			arrayExpressionTypeName(common),
+			arrayExpressionTypeName(common.typ),
 		)
 	}
 	arraySQL, err := a.arrayLiteral([]string{scalarSQL})
@@ -881,7 +915,10 @@ func (a *ArrayOperator) mergeValueToArraySQL(value typedValueSQL, common Express
 	return arraySQL, false, nil
 }
 
-func (a *ArrayOperator) typedNullSQL(typ ExpressionType) string {
+func (a *ArrayOperator) typedNullSQL(typ ExpressionType, schemaType ...string) string {
+	if typ == ExpressionTypeNumber && firstSchemaType(schemaType...) == "integer" {
+		return a.typedIntegerNullSQL()
+	}
 	switch typ {
 	case ExpressionTypeBoolean:
 		switch a.getDialect() {
@@ -920,6 +957,20 @@ func (a *ArrayOperator) typedNullSQL(typ ExpressionType) string {
 		return "NULL"
 	}
 	return "NULL"
+}
+
+func (a *ArrayOperator) typedIntegerNullSQL() string {
+	switch a.getDialect() {
+	case dialect.DialectPostgreSQL:
+		return "CAST(NULL AS BIGINT)"
+	case dialect.DialectDuckDB:
+		return "CAST(NULL AS BIGINT)"
+	case dialect.DialectClickHouse:
+		return "CAST(NULL AS Nullable(Int64))"
+	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner:
+		return "CAST(NULL AS INT64)"
+	}
+	return "CAST(NULL AS INT64)"
 }
 
 func arrayExpressionTypeName(typ ExpressionType) string {
