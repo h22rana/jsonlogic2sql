@@ -195,6 +195,49 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 	}
 }
 
+func TestParameterizedCustomNumericPlaceholderDoesNotForceStringContainment(t *testing.T) {
+	t.Parallel()
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, mustNewSchema(nil))
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			if regErr := tr.RegisterOperatorFunc("idnum", func(_ string, args []OperatorArg) (OperatorResult, error) {
+				return ValueSQL(args[0].SQL, args[0].Type), nil
+			}); regErr != nil {
+				t.Fatalf("RegisterOperatorFunc(idnum) error = %v", regErr)
+			}
+			if regErr := tr.RegisterOperatorFunc("unknownBag", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return ValueSQL("candidate_values", ExpressionTypeUnknown), nil
+			}); regErr != nil {
+				t.Fatalf("RegisterOperatorFunc(unknownBag) error = %v", regErr)
+			}
+
+			sql, params, err := tr.TranspileParameterizedCondition(`{"in":[{"idnum":[9007199254740993]},{"unknownBag":[]}]}`)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			if strings.Contains(sql, "STRPOS") || strings.Contains(sql, "POSITION(") || strings.Contains(sql, "position(") {
+				t.Fatalf("TranspileParameterizedCondition() SQL = %q, want array membership instead of string containment", sql)
+			}
+			if d == DialectClickHouse {
+				if !strings.Contains(sql, "arrayExists") || !strings.Contains(sql, "{p1:Int64}") {
+					t.Fatalf("ClickHouse SQL = %q, want arrayExists with numeric placeholder", sql)
+				}
+			} else if !strings.Contains(sql, "UNNEST(candidate_values)") {
+				t.Fatalf("%s SQL = %q, want UNNEST array membership", d, sql)
+			}
+			if len(params) != 1 || params[0].Value != "9007199254740993" {
+				t.Fatalf("params = %#v, want exact numeric string param", params)
+			}
+		})
+	}
+}
+
 func TestParameterizedCustomValueFoldedComparisonRollsBackParserDroppedParams(t *testing.T) {
 	t.Parallel()
 

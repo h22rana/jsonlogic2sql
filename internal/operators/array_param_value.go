@@ -61,7 +61,7 @@ func (a *ArrayOperator) predicateExpressionToSQLParamWithContextAndPath(
 	pc *params.ParamCollector,
 	path string,
 ) (string, error) {
-	paramStart := len(pc.Params())
+	paramStart := len(pc.RawParams())
 	if a.config == nil || !a.config.HasParamPredicateExpressionParser() {
 		sql, err := a.expressionToSQLParamWithContextAndPath(expr, pc, false, path)
 		if err != nil {
@@ -92,7 +92,7 @@ func (a *ArrayOperator) truthinessExpressionToSQLParamWithContextAndPath(
 	pc *params.ParamCollector,
 	path string,
 ) (string, error) {
-	paramStart := len(pc.Params())
+	paramStart := len(pc.RawParams())
 	if a.config == nil || !a.config.HasParamTruthinessExpressionParser() {
 		return a.predicateExpressionToSQLParamWithContextAndPath(expr, pc, path)
 	}
@@ -119,7 +119,7 @@ func (a *ArrayOperator) truthinessExpressionToSQLParamWithContextAndPath(
 }
 
 func validateNewParamRefs(sql string, pc *params.ParamCollector, start int) error {
-	collected := pc.Params()
+	collected := pc.RawParams()
 	for i := start; i < len(collected); i++ {
 		if params.ContainsParamRef(sql, i+1, collected[i], pc.Style()) {
 			continue

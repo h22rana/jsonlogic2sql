@@ -349,7 +349,7 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return sqlFalse, nil
 	}
-	paramStart := len(pc.Params())
+	paramStart := len(pc.RawParams())
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid all array argument: %w", err)
@@ -391,7 +391,7 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return sqlFalse, nil
 	}
-	paramStart := len(pc.Params())
+	paramStart := len(pc.RawParams())
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid some array argument: %w", err)
@@ -432,7 +432,7 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return sqlTrue, nil
 	}
-	paramStart := len(pc.Params())
+	paramStart := len(pc.RawParams())
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
 	if err != nil {
 		return "", fmt.Errorf("invalid none array argument: %w", err)

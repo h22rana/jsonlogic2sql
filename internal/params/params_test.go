@@ -112,6 +112,37 @@ func TestParamCollectorAddClickHouse(t *testing.T) {
 	}
 }
 
+func TestParamCollectorAddClickHouseExactNumberString(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "int64 range", value: "9007199254740993", want: "{p1:Int64}"},
+		{name: "uint64 range", value: "9223372036854775808", want: "{p1:UInt64}"},
+		{name: "uint128 range", value: "18446744073709551616", want: "{p1:UInt128}"},
+		{name: "int128 range", value: "-9223372036854775809", want: "{p1:Int128}"},
+		{name: "float overflow literal", value: "1e400", want: "{p1:Float64}"},
+		{name: "float underflow literal", value: "1e-400", want: "{p1:Float64}"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParamCollector(PlaceholderClickHouse)
+			if got := pc.AddExactNumberString(tt.value); got != tt.want {
+				t.Fatalf("AddExactNumberString(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+			gotParams := pc.Params()
+			if len(gotParams) != 1 || gotParams[0].Value != tt.value {
+				t.Fatalf("Params() = %#v, want exact public value %q", gotParams, tt.value)
+			}
+			if pc.PlaceholderValueIsString(tt.want) {
+				t.Fatalf("PlaceholderValueIsString(%q) = true, want false for exact numeric string", tt.want)
+			}
+		})
+	}
+}
+
 func TestParamCollectorOrdering(t *testing.T) {
 	pc := NewParamCollector(PlaceholderNamed)
 	pc.Add("first")
@@ -517,6 +548,19 @@ func TestValueForPlaceholder(t *testing.T) {
 		_, ok = pc.ValueForPlaceholder("@p1")
 		if ok {
 			t.Error("ValueForPlaceholder(@p1) should not match positional style")
+		}
+	})
+
+	t.Run("string inference excludes exact numeric strings", func(t *testing.T) {
+		pc := NewParamCollector(PlaceholderNamed)
+		pc.Add("actual string")
+		pc.AddExactNumberString("9007199254740993")
+
+		if !pc.PlaceholderValueIsString("@p1") {
+			t.Error("PlaceholderValueIsString(@p1) = false, want true for actual string")
+		}
+		if pc.PlaceholderValueIsString("@p2") {
+			t.Error("PlaceholderValueIsString(@p2) = true, want false for exact numeric string")
 		}
 	})
 }

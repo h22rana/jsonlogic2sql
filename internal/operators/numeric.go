@@ -772,11 +772,9 @@ func (n *NumericOperator) valueToSQLParam(value interface{}, pc *params.ParamCol
 			if err == nil {
 				return pc.Add(n), nil
 			}
-			// Integer overflows int64; store as string to preserve full precision.
-			// *big.Int is not used because database/sql's defaultConverter rejects
-			// it (unsupported type). Callers binding large integers should convert
-			// the string to their driver's appropriate numeric type.
-			return pc.Add(trimmed), nil
+			// Integer overflows int64; store as string to preserve full precision
+			// while retaining numeric placeholder metadata for dialects that need it.
+			return pc.AddExactNumberString(trimmed), nil
 		}
 		if num, err := strconv.ParseFloat(trimmed, 64); err == nil && !math.IsNaN(num) && !math.IsInf(num, 0) {
 			return pc.Add(num), nil
@@ -787,7 +785,7 @@ func (n *NumericOperator) valueToSQLParam(value interface{}, pc *params.ParamCol
 		if _, err := normalizeJSONNumberLiteral(num); err != nil {
 			return "", err
 		}
-		return pc.Add(jsonNumberParamValue(num)), nil
+		return addJSONNumberParam(pc, num), nil
 	}
 
 	if expr, ok := value.(map[string]interface{}); ok {

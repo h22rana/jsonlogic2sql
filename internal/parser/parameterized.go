@@ -33,7 +33,7 @@ func (p *Parser) ParseParameterized(logic interface{}) (string, []params.QueryPa
 		return "", nil, err
 	}
 
-	if vErr := params.ValidatePlaceholderRefs(res.SQL, pc.Params(), style); vErr != nil {
+	if vErr := params.ValidatePlaceholderRefs(res.SQL, pc.RawParams(), style); vErr != nil {
 		return "", nil, vErr
 	}
 
@@ -58,7 +58,7 @@ func (p *Parser) ParseConditionParameterized(logic interface{}) (string, []param
 		return "", nil, err
 	}
 
-	if vErr := params.ValidatePlaceholderRefs(res.SQL, pc.Params(), style); vErr != nil {
+	if vErr := params.ValidatePlaceholderRefs(res.SQL, pc.RawParams(), style); vErr != nil {
 		return "", nil, vErr
 	}
 
@@ -83,7 +83,7 @@ func (p *Parser) ParseValueParameterized(logic interface{}) (string, []params.Qu
 	}
 
 	sql := valueSQL(res)
-	if vErr := params.ValidatePlaceholderRefs(sql, pc.Params(), style); vErr != nil {
+	if vErr := params.ValidatePlaceholderRefs(sql, pc.RawParams(), style); vErr != nil {
 		return "", nil, vErr
 	}
 
@@ -211,7 +211,7 @@ func (p *Parser) parseExpressionAnyParam(expr interface{}, path string, pc *para
 func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
 	if p.customOpLookup != nil {
 		if handler, ok := p.customOpLookup(operator); ok {
-			paramCount := len(pc.Params())
+			paramCount := len(pc.RawParams())
 			processedArgs, err := p.processCustomOperatorArgsParam(args, path, pc)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
@@ -222,7 +222,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
 			}
-			if ph, bad := params.FindQuotedPlaceholderRefAfter(res.SQL, pc.Params(), pc.Style(), paramCount); bad {
+			if ph, bad := params.FindQuotedPlaceholderRefAfter(res.SQL, pc.RawParams(), pc.Style(), paramCount); bad {
 				return expressionResult{}, tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
 					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}
@@ -319,7 +319,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
 	if p.customOpLookup != nil {
 		if handler, ok := p.customOpLookup(operator); ok {
-			paramCount := len(pc.Params())
+			paramCount := len(pc.RawParams())
 			processedArgs, err := p.processCustomOperatorArgsParam(args, path, pc)
 			if err != nil {
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
@@ -330,7 +330,7 @@ func (p *Parser) parseOperatorValueParam(operator string, args interface{}, path
 				return expressionResult{}, tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
 			}
-			if ph, bad := params.FindQuotedPlaceholderRefAfter(res.SQL, pc.Params(), pc.Style(), paramCount); bad {
+			if ph, bad := params.FindQuotedPlaceholderRefAfter(res.SQL, pc.RawParams(), pc.Style(), paramCount); bad {
 				return expressionResult{}, tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
 					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}
@@ -991,7 +991,7 @@ func (p *Parser) parseStringifiedLogicalFromParam(
 func (p *Parser) parseOperatorParam(operator string, args interface{}, path string, pc *params.ParamCollector) (string, error) {
 	if p.customOpLookup != nil {
 		if handler, ok := p.customOpLookup(operator); ok {
-			paramCount := len(pc.Params())
+			paramCount := len(pc.RawParams())
 			processedArgs, err := p.processCustomOperatorArgsParam(args, path, pc)
 			if err != nil {
 				return "", tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
@@ -1002,7 +1002,7 @@ func (p *Parser) parseOperatorParam(operator string, args interface{}, path stri
 				return "", tperrors.Wrap(tperrors.ErrCustomOperatorFailed, operator, path,
 					"custom operator failed", err)
 			}
-			if ph, bad := params.FindQuotedPlaceholderRefAfter(res.SQL, pc.Params(), pc.Style(), paramCount); bad {
+			if ph, bad := params.FindQuotedPlaceholderRefAfter(res.SQL, pc.RawParams(), pc.Style(), paramCount); bad {
 				return "", tperrors.New(tperrors.ErrCustomOperatorFailed, operator, path,
 					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}

@@ -2007,8 +2007,8 @@ func TestTranspileValue_OverflowJSONNumberComparisonsDoNotShortCircuitAllDialect
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf(
 					"CASE WHEN %s = %s THEN %s ELSE %s END",
-					testStringPlaceholder(d, 1),
-					testStringPlaceholder(d, 2),
+					testPlaceholder(d, 1),
+					testPlaceholder(d, 2),
 					testStringPlaceholder(d, 3),
 					testStringPlaceholder(d, 4),
 				)
@@ -2027,8 +2027,8 @@ func TestTranspileValue_OverflowJSONNumberComparisonsDoNotShortCircuitAllDialect
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf(
 					"CASE WHEN %s != %s THEN %s ELSE %s END",
-					testStringPlaceholder(d, 1),
-					testStringPlaceholder(d, 2),
+					testPlaceholder(d, 1),
+					testPlaceholder(d, 2),
 					testStringPlaceholder(d, 3),
 					testStringPlaceholder(d, 4),
 				)
@@ -2047,7 +2047,7 @@ func TestTranspileValue_OverflowJSONNumberComparisonsDoNotShortCircuitAllDialect
 			wantParam: func(d Dialect) string {
 				return fmt.Sprintf(
 					"CASE WHEN %s > %s THEN %s ELSE %s END",
-					testStringPlaceholder(d, 1),
+					testPlaceholder(d, 1),
 					testPlaceholder(d, 2),
 					testStringPlaceholder(d, 3),
 					testStringPlaceholder(d, 4),

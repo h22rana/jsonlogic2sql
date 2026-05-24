@@ -824,7 +824,7 @@ func (d *DataOperator) valueToSQLParam(value interface{}, pc *params.ParamCollec
 		if _, err := normalizeJSONNumberLiteral(v); err != nil {
 			return "", err
 		}
-		return pc.Add(jsonNumberParamValue(v)), nil
+		return addJSONNumberParam(pc, v), nil
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return pc.Add(v), nil
 	case float32:
@@ -896,6 +896,14 @@ func jsonNumberParamValue(num json.Number) interface{} {
 		return f
 	}
 	return numStr
+}
+
+func addJSONNumberParam(pc *params.ParamCollector, num json.Number) string {
+	value := jsonNumberParamValue(num)
+	if exact, ok := value.(string); ok {
+		return pc.AddExactNumberString(exact)
+	}
+	return pc.Add(value)
 }
 
 // normalizeJSONNumberLiteral validates json.Number text and returns the literal

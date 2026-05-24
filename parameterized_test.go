@@ -1099,6 +1099,74 @@ func TestTranspileParameterized_OutOfRangeFloats(t *testing.T) {
 	}
 }
 
+func TestTranspileParameterized_ClickHousePreservedNumericPlaceholderTypes(t *testing.T) {
+	tp, err := NewTranspiler(DialectClickHouse, defaultTestSchema())
+	if err != nil {
+		t.Fatalf("NewTranspiler() error = %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		mode      string
+		jsonLogic string
+		wantSQL   string
+		wantValue string
+	}{
+		{
+			name:      "condition integer beyond js safe range keeps numeric placeholder",
+			mode:      "condition",
+			jsonLogic: `{">":[{"var":"score"},9007199254740993]}`,
+			wantSQL:   "score > {p1:Int64}",
+			wantValue: "9007199254740993",
+		},
+		{
+			name:      "condition underflow float keeps numeric placeholder",
+			mode:      "condition",
+			jsonLogic: `{"<=":[{"var":"score"},1e-400]}`,
+			wantSQL:   "score <= {p1:Float64}",
+			wantValue: "1e-400",
+		},
+		{
+			name:      "value numeric string coerces to numeric placeholder",
+			mode:      "value",
+			jsonLogic: `{"*":["9223372036854775808",2]}`,
+			wantSQL:   "({p1:UInt64} * {p2:Float64})",
+			wantValue: "9223372036854775808",
+		},
+		{
+			name:      "string field numeric-looking literal remains string placeholder",
+			mode:      "condition",
+			jsonLogic: `{"==":[{"var":"code"},"9007199254740993"]}`,
+			wantSQL:   "code = {p1:String}",
+			wantValue: "9007199254740993",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				gotSQL string
+				params []QueryParam
+				err    error
+			)
+			if tt.mode == "value" {
+				gotSQL, params, err = tp.TranspileParameterizedValue(tt.jsonLogic)
+			} else {
+				gotSQL, params, err = tp.TranspileParameterizedCondition(tt.jsonLogic)
+			}
+			if err != nil {
+				t.Fatalf("TranspileParameterized%s() error = %v", tt.mode, err)
+			}
+			if gotSQL != tt.wantSQL {
+				t.Fatalf("TranspileParameterized%s() SQL = %q, want %q", tt.mode, gotSQL, tt.wantSQL)
+			}
+			if len(params) == 0 || params[0].Value != tt.wantValue {
+				t.Fatalf("params = %#v, want first value %q", params, tt.wantValue)
+			}
+		})
+	}
+}
+
 func TestTranspileParameterized_InStringContainment(t *testing.T) {
 	tests := []struct {
 		name       string

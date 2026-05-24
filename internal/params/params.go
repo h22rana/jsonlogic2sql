@@ -4,6 +4,7 @@ package params
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -29,8 +30,9 @@ const (
 
 // QueryParam represents a single bind parameter collected during parameterized transpilation.
 type QueryParam struct {
-	Name  string
-	Value interface{}
+	Name           string
+	Value          interface{}
+	clickHouseType string
 }
 
 const (
@@ -44,9 +46,18 @@ const (
 	clickHouseTypeString        = "String"
 	clickHouseTypeInt64         = "Int64"
 	clickHouseTypeUInt64        = "UInt64"
+	clickHouseTypeInt128        = "Int128"
+	clickHouseTypeUInt128       = "UInt128"
+	clickHouseTypeInt256        = "Int256"
+	clickHouseTypeUInt256       = "UInt256"
 	clickHouseTypeFloat32       = "Float32"
 	clickHouseTypeFloat64       = "Float64"
 	clickHouseTypeBool          = "Bool"
+
+	clickHouseInt128Bits  = 128
+	clickHouseInt256Bits  = 256
+	clickHouseUInt128Bits = 128
+	clickHouseUInt256Bits = 256
 )
 
 // ParamCollector accumulates bind parameters and generates placeholder tokens
@@ -102,9 +113,22 @@ func StyleForDialect(d dialect.Dialect) PlaceholderStyle {
 // Add registers a new bind parameter and returns the dialect-appropriate
 // placeholder token to embed in the SQL string.
 func (pc *ParamCollector) Add(value interface{}) string {
+	return pc.add(value, "")
+}
+
+// AddExactNumberString registers a numeric literal that is stored as a string
+// to preserve precision. The retained numeric type hint keeps exact numeric
+// strings distinct from ordinary string literals for ClickHouse placeholders and
+// internal type inference.
+func (pc *ParamCollector) AddExactNumberString(value string) string {
+	return pc.add(value, clickHouseExactNumberStringType(value))
+}
+
+func (pc *ParamCollector) add(value interface{}, sqlType string) string {
 	pc.count++
 	name := paramNamePrefix + strconv.Itoa(pc.count)
-	pc.params = append(pc.params, QueryParam{Name: name, Value: value})
+	param := QueryParam{Name: name, Value: value, clickHouseType: sqlType}
+	pc.params = append(pc.params, param)
 
 	switch pc.style {
 	case PlaceholderNamed:
@@ -114,7 +138,7 @@ func (pc *ParamCollector) Add(value interface{}) string {
 	case PlaceholderQuestion:
 		return questionPlaceholder
 	case PlaceholderClickHouse:
-		return clickHousePlaceholder(name, value)
+		return clickHousePlaceholder(param)
 	default:
 		return namedPlaceholderPrefix + name
 	}
@@ -122,6 +146,20 @@ func (pc *ParamCollector) Add(value interface{}) string {
 
 // Params returns the collected parameters in insertion order.
 func (pc *ParamCollector) Params() []QueryParam {
+	if pc.params == nil {
+		return nil
+	}
+	publicParams := make([]QueryParam, len(pc.params))
+	for i, param := range pc.params {
+		publicParams[i] = QueryParam{Name: param.Name, Value: param.Value}
+	}
+	return publicParams
+}
+
+// RawParams returns collected parameters with internal placeholder metadata.
+// Use this for placeholder validation/formatting; public API returns should use
+// Params so QueryParam remains a simple name/value pair.
+func (pc *ParamCollector) RawParams() []QueryParam {
 	return pc.params
 }
 
@@ -147,6 +185,20 @@ func (pc *ParamCollector) ValueForPlaceholder(placeholder string) (interface{}, 
 		}
 	}
 	return nil, false
+}
+
+// PlaceholderValueIsString reports whether a placeholder was produced from an
+// actual string literal. Exact numeric strings carry internal type metadata and
+// intentionally return false here.
+func (pc *ParamCollector) PlaceholderValueIsString(placeholder string) bool {
+	for i, p := range pc.params {
+		if FormatPlaceholderForParam(i+1, p, pc.style) != placeholder {
+			continue
+		}
+		_, ok := p.Value.(string)
+		return ok && p.clickHouseType == ""
+	}
+	return false
 }
 
 // ValidatePlaceholderRefs is a safety guard that scans the final SQL for each
@@ -437,18 +489,21 @@ func FormatPlaceholderForParam(index int, param QueryParam, style PlaceholderSty
 	case PlaceholderQuestion:
 		return questionPlaceholder
 	case PlaceholderClickHouse:
-		return clickHousePlaceholder(param.Name, param.Value)
+		return clickHousePlaceholder(param)
 	default:
 		return namedPlaceholderPrefix + param.Name
 	}
 }
 
-func clickHousePlaceholder(name string, value interface{}) string {
-	return clickHousePlaceholderOpen + name + clickHousePlaceholderSep + clickHouseParamType(value) + clickHousePlaceholderClose
+func clickHousePlaceholder(param QueryParam) string {
+	return clickHousePlaceholderOpen + param.Name + clickHousePlaceholderSep + clickHouseParamType(param) + clickHousePlaceholderClose
 }
 
-func clickHouseParamType(value interface{}) string {
-	switch value.(type) {
+func clickHouseParamType(param QueryParam) string {
+	if param.clickHouseType != "" {
+		return param.clickHouseType
+	}
+	switch param.Value.(type) {
 	case string:
 		return clickHouseTypeString
 	case int, int8, int16, int32, int64:
@@ -464,4 +519,86 @@ func clickHouseParamType(value interface{}) string {
 	default:
 		return clickHouseTypeString
 	}
+}
+
+func clickHouseExactNumberStringType(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if isSignedDecimalIntegerLiteral(trimmed) {
+		return clickHouseIntegerStringType(trimmed)
+	}
+	return clickHouseTypeFloat64
+}
+
+func clickHouseIntegerStringType(value string) string {
+	if _, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return clickHouseTypeInt64
+	}
+	if !strings.HasPrefix(value, "-") {
+		unsigned := strings.TrimPrefix(value, "+")
+		if _, err := strconv.ParseUint(unsigned, 10, 64); err == nil {
+			return clickHouseTypeUInt64
+		}
+		if fitsUnsignedDecimalIntegerBits(unsigned, clickHouseUInt128Bits) {
+			return clickHouseTypeUInt128
+		}
+		if fitsUnsignedDecimalIntegerBits(unsigned, clickHouseUInt256Bits) {
+			return clickHouseTypeUInt256
+		}
+		return clickHouseTypeFloat64
+	}
+	if fitsSignedDecimalIntegerBits(value, clickHouseInt128Bits) {
+		return clickHouseTypeInt128
+	}
+	if fitsSignedDecimalIntegerBits(value, clickHouseInt256Bits) {
+		return clickHouseTypeInt256
+	}
+	return clickHouseTypeFloat64
+}
+
+func isSignedDecimalIntegerLiteral(value string) bool {
+	if value == "" {
+		return false
+	}
+	start := 0
+	if value[0] == '+' || value[0] == '-' {
+		start = 1
+	}
+	if start == len(value) {
+		return false
+	}
+	for i := start; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func fitsSignedDecimalIntegerBits(value string, bits uint) bool {
+	n, ok := parseDecimalInteger(value)
+	if !ok {
+		return false
+	}
+	limit := new(big.Int).Lsh(big.NewInt(1), bits-1)
+	lowerBound := new(big.Int).Neg(new(big.Int).Set(limit))
+	upperBound := new(big.Int).Sub(limit, big.NewInt(1))
+	return n.Cmp(lowerBound) >= 0 && n.Cmp(upperBound) <= 0
+}
+
+func fitsUnsignedDecimalIntegerBits(value string, bits uint) bool {
+	if strings.HasPrefix(value, "-") {
+		return false
+	}
+	n, ok := parseDecimalInteger(value)
+	if !ok {
+		return false
+	}
+	upperBound := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), bits), big.NewInt(1))
+	return n.Sign() >= 0 && n.Cmp(upperBound) <= 0
+}
+
+func parseDecimalInteger(value string) (*big.Int, bool) {
+	normalized := strings.TrimPrefix(value, "+")
+	n, ok := new(big.Int).SetString(normalized, 10)
+	return n, ok
 }

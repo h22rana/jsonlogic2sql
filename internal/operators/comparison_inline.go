@@ -387,10 +387,7 @@ func (c *ComparisonOperator) isStringLikeInOperandSchemaRequired(
 			return true
 		}
 		if pc != nil {
-			if paramValue, found := pc.ValueForPlaceholder(strings.TrimSpace(v.Value)); found {
-				_, ok := paramValue.(string)
-				return ok
-			}
+			return pc.PlaceholderValueIsString(strings.TrimSpace(v.Value))
 		}
 		return false
 	case map[string]interface{}:

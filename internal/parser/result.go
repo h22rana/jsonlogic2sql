@@ -619,7 +619,7 @@ func processedArgsPreserveParamRefs(args []interface{}) bool {
 }
 
 func customResultPreservesDroppedParamRefs(sql string, pc *params.ParamCollector, paramCount int) bool {
-	collected := pc.Params()
+	collected := pc.RawParams()
 	for i := paramCount; i < len(collected); i++ {
 		if !params.ContainsParamRef(sql, i+1, collected[i], pc.Style()) {
 			return true
