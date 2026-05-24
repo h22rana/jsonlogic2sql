@@ -4,7 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
+
+	ops "github.com/h22rana/jsonlogic2sql/internal/operators"
 )
+
+const unlimitedArgs = -1
 
 var validJSONNumberLiteral = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$`)
 
@@ -173,7 +178,7 @@ func (v *Validator) validateCustomOperatorArgs(args interface{}, path string) er
 func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec OperatorSpec, path string) error {
 	// Handle different argument structures
 	switch operator {
-	case "var":
+	case ops.OpVar:
 		// var can have 1 or 2 arguments: [path] or [path, default]
 		// For SQL context, only string arguments (column names) are supported
 		if _, ok := args.(string); ok {
@@ -204,7 +209,7 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 			Path:     path,
 		}
 
-	case "missing", "missing_some":
+	case ops.OpMissing, ops.OpMissingSome:
 		// These operators have specific argument requirements
 		return v.validateMissingOperator(operator, args, path)
 
@@ -217,7 +222,7 @@ func (v *Validator) validateOperatorArgs(operator string, args interface{}, spec
 // validateMissingOperator validates missing and missing_some operators.
 func (v *Validator) validateMissingOperator(operator string, args interface{}, path string) error {
 	switch operator {
-	case "missing":
+	case ops.OpMissing:
 		// missing takes a single string argument (column name) or array of strings
 		if varName, ok := args.(string); ok {
 			if varName == "" {
@@ -229,7 +234,6 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 			}
 			return nil
 		}
-		// Also allow array of strings
 		if varNames, ok := args.([]interface{}); ok {
 			if len(varNames) == 0 {
 				return ValidationError{
@@ -238,25 +242,14 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 					Path:     path,
 				}
 			}
-			// Validate all elements are strings
-			for i, varName := range varNames {
-				if name, ok := varName.(string); !ok || name == "" {
-					return ValidationError{
-						Operator: operator,
-						Message:  fmt.Sprintf("missing operator array element %d must be a non-empty string", i),
-						Path:     path,
-					}
-				}
-			}
-			return nil
+			return validateStringList(operator, varNames, path)
 		}
-		// Neither string nor array
 		return ValidationError{
 			Operator: operator,
 			Message:  "missing operator argument must be a string or array of strings",
 			Path:     path,
 		}
-	case "missing_some":
+	case ops.OpMissingSome:
 		// missing_some takes an array argument
 		arr, ok := args.([]interface{})
 		if !ok {
@@ -281,23 +274,40 @@ func (v *Validator) validateMissingOperator(operator string, args interface{}, p
 				Path:     path,
 			}
 		}
-		// Second argument should be an array
-		if _, ok := arr[1].([]interface{}); !ok {
+		varNames, ok := arr[1].([]interface{})
+		if !ok {
 			return ValidationError{
 				Operator: operator,
 				Message:  "missing_some operator second argument must be an array",
 				Path:     path,
 			}
 		}
+		if err := validateStringList(operator, varNames, path); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func validateStringList(operator string, values []interface{}, path string) error {
+	for i, value := range values {
+		name, ok := value.(string)
+		if !ok || name == "" {
+			return ValidationError{
+				Operator: operator,
+				Message:  fmt.Sprintf("%s operator array element %d must be a non-empty string", operator, i),
+				Path:     path,
+			}
+		}
+	}
 	return nil
 }
 
 // validateStandardOperator validates standard operators with array arguments.
 func (v *Validator) validateStandardOperator(operator string, args interface{}, spec OperatorSpec, path string) error {
 	// Special handling for unary operators (! and !!) - they can accept non-array arguments
-	if operator == "!" || operator == "!!" {
+	if operator == ops.OpNot || operator == ops.OpDoubleBang {
 		// Accept both array and non-array arguments
 		if arr, ok := args.([]interface{}); ok {
 			if len(arr) != 1 {
@@ -306,6 +316,9 @@ func (v *Validator) validateStandardOperator(operator string, args interface{}, 
 					Message:  fmt.Sprintf("%s operator requires exactly 1 argument", operator),
 					Path:     path,
 				}
+			}
+			if argArr, ok := arr[0].([]interface{}); ok && len(argArr) == 0 {
+				return nil
 			}
 			// Validate the single argument recursively
 			return v.validateRecursive(arr[0], fmt.Sprintf("%s[0]", path))
@@ -439,155 +452,155 @@ func (v *Validator) isObject(value interface{}) bool {
 func getSupportedOperators() map[string]OperatorSpec {
 	return map[string]OperatorSpec{
 		// Data access operators
-		"var": {
-			Name:        "var",
+		ops.OpVar: {
+			Name:        ops.OpVar,
 			MinArgs:     1,
 			MaxArgs:     2,
 			Description: "Access variable value",
 		},
-		"missing": {
-			Name:        "missing",
+		ops.OpMissing: {
+			Name:        ops.OpMissing,
 			MinArgs:     1,
 			MaxArgs:     1,
 			ArgTypes:    []ArgType{StringType},
 			Description: "Check if variable is missing",
 		},
-		"missing_some": {
-			Name:        "missing_some",
+		ops.OpMissingSome: {
+			Name:        ops.OpMissingSome,
 			MinArgs:     2,
 			MaxArgs:     2,
 			Description: "Check if some variables are missing",
 		},
 
 		// Logic and Boolean operations
-		"if": {
-			Name:        "if",
+		ops.OpIf: {
+			Name:        ops.OpIf,
 			MinArgs:     2,
-			MaxArgs:     -1, // Variable number of arguments for nested IF
+			MaxArgs:     unlimitedArgs,
 			Description: "Conditional expression",
 		},
-		"==": {
-			Name:        "==",
+		ops.OpEqual: {
+			Name:        ops.OpEqual,
 			MinArgs:     2,
 			MaxArgs:     2,
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Equality comparison",
 		},
-		"!=": {
-			Name:        "!=",
+		ops.OpNotEqual: {
+			Name:        ops.OpNotEqual,
 			MinArgs:     2,
 			MaxArgs:     2,
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Inequality comparison",
 		},
-		"===": {
-			Name:        "===",
+		ops.OpStrictEqual: {
+			Name:        ops.OpStrictEqual,
 			MinArgs:     2,
 			MaxArgs:     2,
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Strict equality comparison",
 		},
-		"!==": {
-			Name:        "!==",
+		ops.OpStrictNotEqual: {
+			Name:        ops.OpStrictNotEqual,
 			MinArgs:     2,
 			MaxArgs:     2,
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Strict inequality comparison",
 		},
-		"!": {
-			Name:        "!",
+		ops.OpNot: {
+			Name:        ops.OpNot,
 			MinArgs:     1,
 			MaxArgs:     1,
 			ArgTypes:    []ArgType{AnyType},
 			Description: "Logical NOT",
 		},
-		"!!": {
-			Name:        "!!",
+		ops.OpDoubleBang: {
+			Name:        ops.OpDoubleBang,
 			MinArgs:     1,
 			MaxArgs:     1,
 			ArgTypes:    []ArgType{AnyType},
 			Description: "Double negation (boolean conversion)",
 		},
-		"or": {
-			Name:        "or",
+		ops.OpOr: {
+			Name:        ops.OpOr,
 			MinArgs:     1,
-			MaxArgs:     -1, // Variable number of arguments
+			MaxArgs:     unlimitedArgs,
 			Description: "Logical OR",
 		},
-		"and": {
-			Name:        "and",
+		ops.OpAnd: {
+			Name:        ops.OpAnd,
 			MinArgs:     1,
-			MaxArgs:     -1, // Variable number of arguments
+			MaxArgs:     unlimitedArgs,
 			Description: "Logical AND",
 		},
 
 		// Numeric operations
-		">": {
-			Name:        ">",
+		ops.OpGreaterThan: {
+			Name:        ops.OpGreaterThan,
 			MinArgs:     2,
-			MaxArgs:     -1, // Variable number of arguments for chained comparisons
+			MaxArgs:     unlimitedArgs,
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Greater than",
 		},
-		">=": {
-			Name:        ">=",
+		ops.OpGreaterThanOrEqual: {
+			Name:        ops.OpGreaterThanOrEqual,
 			MinArgs:     2,
-			MaxArgs:     -1, // Variable number of arguments for chained comparisons
+			MaxArgs:     unlimitedArgs,
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Greater than or equal",
 		},
-		"<": {
-			Name:        "<",
+		ops.OpLessThan: {
+			Name:        ops.OpLessThan,
 			MinArgs:     2,
-			MaxArgs:     -1, // Variable number of arguments for chained comparisons
+			MaxArgs:     unlimitedArgs,
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Less than",
 		},
-		"<=": {
-			Name:        "<=",
+		ops.OpLessThanOrEqual: {
+			Name:        ops.OpLessThanOrEqual,
 			MinArgs:     2,
-			MaxArgs:     -1, // Variable number of arguments for chained comparisons
+			MaxArgs:     unlimitedArgs,
 			ArgTypes:    []ArgType{AnyType, AnyType},
 			Description: "Less than or equal",
 		},
-		"max": {
-			Name:        "max",
+		ops.OpMax: {
+			Name:        ops.OpMax,
 			MinArgs:     1,
-			MaxArgs:     -1,
+			MaxArgs:     unlimitedArgs,
 			Description: "Maximum value",
 		},
-		"min": {
-			Name:        "min",
+		ops.OpMin: {
+			Name:        ops.OpMin,
 			MinArgs:     1,
-			MaxArgs:     -1,
+			MaxArgs:     unlimitedArgs,
 			Description: "Minimum value",
 		},
-		"+": {
-			Name:        "+",
+		ops.OpAdd: {
+			Name:        ops.OpAdd,
 			MinArgs:     1,
-			MaxArgs:     -1,
+			MaxArgs:     unlimitedArgs,
 			Description: "Addition",
 		},
-		"-": {
-			Name:        "-",
+		ops.OpSubtract: {
+			Name:        ops.OpSubtract,
 			MinArgs:     1,
-			MaxArgs:     -1,
+			MaxArgs:     unlimitedArgs,
 			Description: "Subtraction",
 		},
-		"*": {
-			Name:        "*",
+		ops.OpMultiply: {
+			Name:        ops.OpMultiply,
 			MinArgs:     1,
-			MaxArgs:     -1,
+			MaxArgs:     unlimitedArgs,
 			Description: "Multiplication",
 		},
-		"/": {
-			Name:        "/",
+		ops.OpDivide: {
+			Name:        ops.OpDivide,
 			MinArgs:     1,
-			MaxArgs:     -1,
+			MaxArgs:     unlimitedArgs,
 			Description: "Division",
 		},
-		"%": {
-			Name:        "%",
+		ops.OpModulo: {
+			Name:        ops.OpModulo,
 			MinArgs:     2,
 			MaxArgs:     2,
 			ArgTypes:    []ArgType{AnyType, AnyType},
@@ -595,65 +608,65 @@ func getSupportedOperators() map[string]OperatorSpec {
 		},
 
 		// Array operations
-		"in": {
-			Name:        "in",
+		ops.OpIn: {
+			Name:        ops.OpIn,
 			MinArgs:     2,
 			MaxArgs:     2,
 			ArgTypes:    []ArgType{AnyType, AnyType}, // Allow variables on right side
 			Description: "Check if value is in array",
 		},
-		"map": {
-			Name:        "map",
+		ops.OpMap: {
+			Name:        ops.OpMap,
 			MinArgs:     2,
 			MaxArgs:     2,
 			Description: "Map over array",
 		},
-		"filter": {
-			Name:        "filter",
+		ops.OpFilter: {
+			Name:        ops.OpFilter,
 			MinArgs:     2,
 			MaxArgs:     2,
 			Description: "Filter array",
 		},
-		"reduce": {
-			Name:        "reduce",
+		ops.OpReduce: {
+			Name:        ops.OpReduce,
 			MinArgs:     3,
 			MaxArgs:     3,
 			Description: "Reduce array",
 		},
-		"all": {
-			Name:        "all",
+		ops.OpAll: {
+			Name:        ops.OpAll,
 			MinArgs:     2,
 			MaxArgs:     2,
 			Description: "Check if all elements satisfy condition",
 		},
-		"some": {
-			Name:        "some",
+		ops.OpSome: {
+			Name:        ops.OpSome,
 			MinArgs:     2,
 			MaxArgs:     2,
 			Description: "Check if some elements satisfy condition",
 		},
-		"none": {
-			Name:        "none",
+		ops.OpNone: {
+			Name:        ops.OpNone,
 			MinArgs:     2,
 			MaxArgs:     2,
 			Description: "Check if no elements satisfy condition",
 		},
-		"merge": {
-			Name:        "merge",
+		ops.OpMerge: {
+			Name:        ops.OpMerge,
 			MinArgs:     1,
-			MaxArgs:     -1,
+			MaxArgs:     unlimitedArgs,
 			Description: "Merge arrays",
 		},
 
 		// String operations
-		"cat": {
-			Name:        "cat",
+		ops.OpCat: {
+			Name:        ops.OpCat,
 			MinArgs:     1,
-			MaxArgs:     -1,
+			MaxArgs:     unlimitedArgs,
 			Description: "Concatenate strings",
 		},
-		"substr": {
-			Name:        "substr",
+		ops.OpSubstr: {
+			Name:        ops.OpSubstr,
 			MinArgs:     2,
 			MaxArgs:     3,
 			Description: "Substring operation",
@@ -667,6 +680,7 @@ func (v *Validator) GetSupportedOperators() []string {
 	for op := range v.supportedOperators {
 		operators = append(operators, op)
 	}
+	sort.Strings(operators)
 	return operators
 }
 

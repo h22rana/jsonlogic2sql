@@ -6,7 +6,7 @@ import (
 )
 
 func TestAsTranspileError(t *testing.T) {
-	transpiler, err := NewTranspiler(DialectBigQuery)
+	transpiler, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestAsTranspileError(t *testing.T) {
 			jsonLogic:    `{"and": [{"unknown_op": [1]}]}`,
 			expectError:  true,
 			expectedCode: ErrUnsupportedOperator,
-			expectedPath: "$.and.unknown_op[0]",
+			expectedPath: "$.and[0].unknown_op",
 		},
 		{
 			name:         "invalid JSON",
@@ -52,7 +52,7 @@ func TestAsTranspileError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := transpiler.Transpile(tt.jsonLogic)
+			_, err := transpiler.TranspileCondition(tt.jsonLogic)
 
 			if tt.expectError {
 				if err == nil {
@@ -83,13 +83,13 @@ func TestAsTranspileError(t *testing.T) {
 }
 
 func TestIsErrorCode(t *testing.T) {
-	transpiler, err := NewTranspiler(DialectBigQuery)
+	transpiler, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
 
 	// Test ErrUnsupportedOperator
-	_, err = transpiler.Transpile(`{"and": [{"unknown": [1]}]}`)
+	_, err = transpiler.TranspileCondition(`{"and": [{"unknown": [1]}]}`)
 	if !IsErrorCode(err, ErrUnsupportedOperator) {
 		t.Errorf("Expected ErrUnsupportedOperator")
 	}
@@ -98,13 +98,13 @@ func TestIsErrorCode(t *testing.T) {
 	}
 
 	// Test ErrValidation
-	_, err = transpiler.Transpile(`{"unknown_op": [1]}`)
+	_, err = transpiler.TranspileCondition(`{"unknown_op": [1]}`)
 	if !IsErrorCode(err, ErrValidation) {
 		t.Errorf("Expected ErrValidation")
 	}
 
 	// Test ErrInvalidJSON
-	_, err = transpiler.Transpile(`{invalid}`)
+	_, err = transpiler.TranspileCondition(`{invalid}`)
 	if !IsErrorCode(err, ErrInvalidJSON) {
 		t.Errorf("Expected ErrInvalidJSON")
 	}
@@ -116,13 +116,13 @@ func TestIsErrorCode(t *testing.T) {
 }
 
 func TestTranspileErrorUnwrap(t *testing.T) {
-	transpiler, err := NewTranspiler(DialectBigQuery)
+	transpiler, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
 
 	// Test that we can unwrap to get the underlying error
-	_, err = transpiler.Transpile(`{invalid json}`)
+	_, err = transpiler.TranspileCondition(`{invalid json}`)
 	if err == nil {
 		t.Fatal("Expected error")
 	}

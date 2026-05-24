@@ -1,7 +1,13 @@
 // Package errors provides structured error types for jsonlogic2sql transpilation.
 package errors
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+const jsonPathRoot = "$"
 
 // ErrorCode represents a specific error condition.
 // Codes are organized by category:
@@ -27,6 +33,9 @@ const (
 	ErrValidation ErrorCode = "E006"
 	// ErrInvalidJSON indicates the input is not valid JSON.
 	ErrInvalidJSON ErrorCode = "E007"
+	// ErrInvalidExpressionContext indicates a value expression was used where
+	// a predicate was required, or vice versa.
+	ErrInvalidExpressionContext ErrorCode = "E008"
 )
 
 // Operator-specific error codes (E100-E199).
@@ -86,30 +95,29 @@ type TranspileError struct {
 
 // Error implements the error interface.
 func (e *TranspileError) Error() string {
-	var s string
+	var b strings.Builder
+	b.WriteByte('[')
+	b.WriteString(string(e.Code))
+	b.WriteByte(']')
 
-	// Start with error code
-	s = fmt.Sprintf("[%s]", e.Code)
-
-	// Add path if available
 	if e.Path != "" {
-		s += fmt.Sprintf(" at %s", e.Path)
+		b.WriteString(" at ")
+		b.WriteString(e.Path)
 	}
-
-	// Add operator if available
 	if e.Operator != "" {
-		s += fmt.Sprintf(" (operator: %s)", e.Operator)
+		b.WriteString(" (operator: ")
+		b.WriteString(e.Operator)
+		b.WriteByte(')')
 	}
 
-	// Add message
-	s += ": " + e.Message
-
-	// Include cause if available
+	b.WriteString(": ")
+	b.WriteString(e.Message)
 	if e.Cause != nil {
-		s += ": " + e.Cause.Error()
+		b.WriteString(": ")
+		b.WriteString(e.Cause.Error())
 	}
 
-	return s
+	return b.String()
 }
 
 // Unwrap returns the underlying error for errors.Is/As support.
@@ -141,24 +149,16 @@ func Wrap(code ErrorCode, operator, path, message string, cause error) *Transpil
 // WithPath returns a copy of the error with the path updated.
 // This is useful for adding path context as errors bubble up.
 func (e *TranspileError) WithPath(path string) *TranspileError {
-	return &TranspileError{
-		Code:     e.Code,
-		Operator: e.Operator,
-		Path:     path,
-		Message:  e.Message,
-		Cause:    e.Cause,
-	}
+	next := *e
+	next.Path = path
+	return &next
 }
 
 // WithOperator returns a copy of the error with the operator updated.
 func (e *TranspileError) WithOperator(operator string) *TranspileError {
-	return &TranspileError{
-		Code:     e.Code,
-		Operator: operator,
-		Path:     e.Path,
-		Message:  e.Message,
-		Cause:    e.Cause,
-	}
+	next := *e
+	next.Operator = operator
+	return &next
 }
 
 // Helper constructors for common errors.
@@ -199,6 +199,13 @@ func NewTypeMismatch(operator, path, expected, got string) *TranspileError {
 		fmt.Sprintf("expected %s, got %s", expected, got))
 }
 
+// NewInvalidExpressionContext creates an error for expressions used in a
+// disallowed context.
+func NewInvalidExpressionContext(operator, path, expected, got string) *TranspileError {
+	return New(ErrInvalidExpressionContext, operator, path,
+		fmt.Sprintf("expected %s expression, got %s expression", expected, got))
+}
+
 // NewFieldNotInSchema creates an error when a field is not in the schema.
 func NewFieldNotInSchema(field, path string) *TranspileError {
 	return New(ErrFieldNotInSchema, "var", path,
@@ -226,32 +233,32 @@ func NewMultipleKeys(path string) *TranspileError {
 // NewPrimitiveNotAllowed creates an error when primitives are not allowed.
 func NewPrimitiveNotAllowed(path string) *TranspileError {
 	return New(ErrPrimitiveNotAllowed, "", path,
-		"primitive values not supported in WHERE clauses")
+		"primitive values are not supported in this expression context")
 }
 
 // NewArrayNotAllowed creates an error when arrays are not allowed at top level.
 func NewArrayNotAllowed(path string) *TranspileError {
 	return New(ErrArrayNotAllowed, "", path,
-		"arrays not supported in WHERE clauses")
+		"arrays are not supported in this expression context")
 }
 
 // BuildPath constructs a JSONPath string for a given operator and index.
 func BuildPath(parent, operator string, index int) string {
 	if parent == "" {
-		parent = "$"
+		parent = jsonPathRoot
 	}
 	if index >= 0 {
-		return fmt.Sprintf("%s.%s[%d]", parent, operator, index)
+		return parent + "." + operator + "[" + strconv.Itoa(index) + "]"
 	}
-	return fmt.Sprintf("%s.%s", parent, operator)
+	return parent + "." + operator
 }
 
 // BuildArrayPath constructs a JSONPath string for an array index.
 func BuildArrayPath(parent string, index int) string {
 	if parent == "" {
-		parent = "$"
+		parent = jsonPathRoot
 	}
-	return fmt.Sprintf("%s[%d]", parent, index)
+	return parent + "[" + strconv.Itoa(index) + "]"
 }
 
 // NewValidationError wraps a validation error from the validator package.

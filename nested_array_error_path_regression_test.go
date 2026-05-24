@@ -55,12 +55,12 @@ func TestNestedArrayCustomOperatorErrorPath_Preserved_InlineAndParam(t *testing.
 		{
 			name:     "array under comparison",
 			parentOp: "==",
-			logic:    `{"==":[{"map":[{"var":"nums"},{"oops":[{"var":"item"}]}]},1]}`,
+			logic:    `{"==":[{"map":[{"var":"nums"},{"oops":[{"var":""}]}]},1]}`,
 		},
 		{
 			name:     "array under logical",
 			parentOp: "and",
-			logic:    `{"and":[true,{"map":[{"var":"nums"},{"oops":[{"var":"item"}]}]}]}`,
+			logic:    `{"and":[true,{"map":[{"var":"nums"},{"oops":[{"var":""}]}]}]}`,
 		},
 	}
 
@@ -68,28 +68,45 @@ func TestNestedArrayCustomOperatorErrorPath_Preserved_InlineAndParam(t *testing.
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}
-			tr.RegisterOperatorFunc("oops", func(_ string, _ []interface{}) (string, error) {
-				return "", fmt.Errorf("boom")
+			tr.RegisterOperatorFunc("oops", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+				return OperatorResult{}, fmt.Errorf("boom")
 			})
 
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					logicMap := decodeLogicMapForPathTest(t, tc.logic)
 
-					_, err := tr.Transpile(tc.logic)
+					var err error
+					if tc.parentOp == "and" {
+						_, err = tr.TranspileValue(tc.logic)
+					} else {
+						_, err = tr.TranspileCondition(tc.logic)
+					}
 					assertNestedPathNotTruncated(t, err, tc.parentOp)
 
-					_, _, err = tr.TranspileParameterized(tc.logic)
+					if tc.parentOp == "and" {
+						_, _, err = tr.TranspileParameterizedValue(tc.logic)
+					} else {
+						_, _, err = tr.TranspileParameterizedCondition(tc.logic)
+					}
 					assertNestedPathNotTruncated(t, err, tc.parentOp)
 
-					_, err = tr.TranspileFromMap(logicMap)
+					if tc.parentOp == "and" {
+						_, err = tr.TranspileValueFromMap(logicMap)
+					} else {
+						_, err = tr.TranspileConditionFromMap(logicMap)
+					}
 					assertNestedPathNotTruncated(t, err, tc.parentOp)
 
-					_, _, err = tr.TranspileParameterizedFromMap(logicMap)
+					if tc.parentOp == "and" {
+						_, _, err = tr.TranspileParameterizedValueFromMap(logicMap)
+					} else {
+						_, _, err = tr.TranspileParameterizedConditionFromMap(logicMap)
+					}
 					assertNestedPathNotTruncated(t, err, tc.parentOp)
 				})
 			}

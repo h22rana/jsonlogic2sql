@@ -14,42 +14,36 @@ func TestNewOperatorConfig(t *testing.T) {
 		dialect     dialect.Dialect
 		schema      SchemaProvider
 		wantDialect dialect.Dialect
-		wantSchema  bool
 	}{
 		{
-			name:        "BigQuery without schema",
+			name:        "BigQuery with nil provider uses empty schema",
 			dialect:     dialect.DialectBigQuery,
 			schema:      nil,
 			wantDialect: dialect.DialectBigQuery,
-			wantSchema:  false,
 		},
 		{
-			name:        "Spanner without schema",
+			name:        "Spanner with nil provider uses empty schema",
 			dialect:     dialect.DialectSpanner,
 			schema:      nil,
 			wantDialect: dialect.DialectSpanner,
-			wantSchema:  false,
 		},
 		{
-			name:        "PostgreSQL without schema",
+			name:        "PostgreSQL with nil provider uses empty schema",
 			dialect:     dialect.DialectPostgreSQL,
 			schema:      nil,
 			wantDialect: dialect.DialectPostgreSQL,
-			wantSchema:  false,
 		},
 		{
-			name:        "DuckDB without schema",
+			name:        "DuckDB with nil provider uses empty schema",
 			dialect:     dialect.DialectDuckDB,
 			schema:      nil,
 			wantDialect: dialect.DialectDuckDB,
-			wantSchema:  false,
 		},
 		{
-			name:        "ClickHouse without schema",
+			name:        "ClickHouse with nil provider uses empty schema",
 			dialect:     dialect.DialectClickHouse,
 			schema:      nil,
 			wantDialect: dialect.DialectClickHouse,
-			wantSchema:  false,
 		},
 	}
 
@@ -59,46 +53,40 @@ func TestNewOperatorConfig(t *testing.T) {
 			if config.Dialect != tt.wantDialect {
 				t.Errorf("Dialect = %v, want %v", config.Dialect, tt.wantDialect)
 			}
-			if config.HasSchema() != tt.wantSchema {
-				t.Errorf("HasSchema() = %v, want %v", config.HasSchema(), tt.wantSchema)
+			if config.Schema == nil {
+				t.Fatal("Schema should be normalized to an empty provider")
 			}
-			if config.NullSafeFieldEquality {
-				t.Errorf("NullSafeFieldEquality = true, want false by default")
+			if err := config.Schema.ValidateField("missing"); err == nil {
+				t.Fatal("empty schema provider should reject field access")
 			}
 		})
 	}
 }
 
-func TestOperatorConfig_HasSchema(t *testing.T) {
-	tests := []struct {
-		name   string
-		config *OperatorConfig
-		want   bool
-	}{
-		{
-			name:   "nil config",
-			config: nil,
-			want:   false,
-		},
-		{
-			name:   "config with nil schema",
-			config: &OperatorConfig{Dialect: dialect.DialectBigQuery, Schema: nil},
-			want:   false,
-		},
-		{
-			name:   "config with schema",
-			config: &OperatorConfig{Dialect: dialect.DialectBigQuery, Schema: &mockSchemaProvider{}},
-			want:   true,
-		},
-	}
+type fieldOnlySchemaProvider struct{}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.config.HasSchema(); got != tt.want {
-				t.Errorf("HasSchema() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+func (m *fieldOnlySchemaProvider) GetFieldType(_ string) string { return "" }
+
+func (m *fieldOnlySchemaProvider) HasField(_ string) bool { return true }
+
+func (m *fieldOnlySchemaProvider) ValidateField(_ string) error { return nil }
+
+func (m *fieldOnlySchemaProvider) GetAllowedValues(_ string) []string { return nil }
+
+func (m *fieldOnlySchemaProvider) IsNumericType(_ string) bool { return false }
+
+func (m *fieldOnlySchemaProvider) IsStringType(_ string) bool { return false }
+
+func (m *fieldOnlySchemaProvider) IsArrayType(_ string) bool { return false }
+
+func (m *fieldOnlySchemaProvider) IsBooleanType(_ string) bool { return false }
+
+func (m *fieldOnlySchemaProvider) IsEnumType(_ string) bool { return false }
+
+func (m *fieldOnlySchemaProvider) ValidateEnumValue(_, _ string) error { return nil }
+
+func testFieldOnlyConfig() *OperatorConfig {
+	return NewOperatorConfig(dialect.DialectBigQuery, &fieldOnlySchemaProvider{})
 }
 
 func TestOperatorConfig_GetDialect(t *testing.T) {

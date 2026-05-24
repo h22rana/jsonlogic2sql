@@ -1,44 +1,38 @@
 package operators
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
-	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
 
-// StringOperator handles string operations like cat, substr.
+// StringOperator handles JSONLogic string operators.
 type StringOperator struct {
 	config *OperatorConfig
 	dataOp *DataOperator
 }
 
-// NewStringOperator creates a new StringOperator instance with optional config.
+// NewStringOperator creates a new StringOperator instance.
 func NewStringOperator(config *OperatorConfig) *StringOperator {
+	config = normalizeOperatorConfig(config)
 	return &StringOperator{
 		config: config,
 		dataOp: NewDataOperator(config),
 	}
 }
 
-// schema returns the schema from config, or nil if not configured.
 func (s *StringOperator) schema() SchemaProvider {
-	if s.config == nil {
-		return nil
-	}
-	return s.config.Schema
+	return schemaFromConfig(s.config)
 }
 
 // validateStringOperand checks if a field used in a string operation is of compatible type
 // Allows string types and numeric types (implicit conversion is common)
 // Rejects array and object types.
 func (s *StringOperator) validateStringOperand(value interface{}) error {
-	if s.schema() == nil {
-		return nil // No schema, no validation
-	}
-
 	fieldName := s.extractFieldNameFromValue(value)
 	if fieldName == "" {
 		return nil // Can't determine field name, skip validation
@@ -55,15 +49,51 @@ func (s *StringOperator) validateStringOperand(value interface{}) error {
 	}
 
 	// Disallow array and object types
-	if s.schema().IsArrayType(fieldName) || fieldType == "object" {
+	if s.schema().IsArrayType(fieldName) || fieldType == objectFieldType {
 		return fmt.Errorf("string operation on incompatible field '%s' (type: %s)", fieldName, fieldType)
 	}
 
 	return nil
 }
 
+func (s *StringOperator) validateSubstringSourceOperand(value interface{}) error {
+	if err := s.validateStringOperand(value); err != nil {
+		return err
+	}
+	kind, typ := s.inferExpressionShape(value)
+	if kind == ExpressionKindPredicate {
+		return fmt.Errorf("substring source argument must be string or number, got predicate")
+	}
+	switch typ {
+	case ExpressionTypeString, ExpressionTypeNumber, ExpressionTypeUnknown:
+		return nil
+	case ExpressionTypeBoolean, ExpressionTypeNull, ExpressionTypeArray, ExpressionTypeObject:
+		return fmt.Errorf("substring source argument must be string or number, got %s", expressionTypeName(typ))
+	default:
+		return nil
+	}
+}
+
+func (s *StringOperator) validateSubstringIndexOperand(value interface{}, name string) error {
+	kind, typ := s.inferExpressionShape(value)
+	if kind == ExpressionKindPredicate {
+		return fmt.Errorf("substring %s argument must be numeric, got predicate", name)
+	}
+	switch typ {
+	case ExpressionTypeNumber, ExpressionTypeUnknown:
+		return nil
+	case ExpressionTypeString, ExpressionTypeBoolean, ExpressionTypeNull, ExpressionTypeArray, ExpressionTypeObject:
+		return fmt.Errorf("substring %s argument must be numeric, got %s", name, expressionTypeName(typ))
+	default:
+		return nil
+	}
+}
+
 // extractFieldNameFromValue extracts field name from a value that might be a var expression.
 func (s *StringOperator) extractFieldNameFromValue(value interface{}) string {
+	if pv, ok := value.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+		return pv.FieldName
+	}
 	if varExpr, ok := value.(map[string]interface{}); ok {
 		if varName, hasVar := varExpr[OpVar]; hasVar {
 			return s.extractFieldName(varName)
@@ -74,10 +104,16 @@ func (s *StringOperator) extractFieldNameFromValue(value interface{}) string {
 
 // extractFieldName extracts the field name from a var argument.
 func (s *StringOperator) extractFieldName(varName interface{}) string {
+	if pv, ok := varName.(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+		return pv.FieldName
+	}
 	if nameStr, ok := varName.(string); ok {
 		return nameStr
 	}
 	if nameArr, ok := varName.([]interface{}); ok && len(nameArr) > 0 {
+		if pv, ok := nameArr[0].(ProcessedValue); ok && pv.IsSQL && pv.IsField {
+			return pv.FieldName
+		}
 		if nameStr, ok := nameArr[0].(string); ok {
 			return nameStr
 		}
@@ -85,16 +121,135 @@ func (s *StringOperator) extractFieldName(varName interface{}) string {
 	return ""
 }
 
-// ToSQL converts a string operation to SQL.
-func (s *StringOperator) ToSQL(operator string, args []interface{}) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("string operator %s requires at least one argument", operator)
+func (s *StringOperator) inferExpressionShape(value interface{}) (ExpressionKind, ExpressionType) {
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.IsSQL {
+			if pv.HasExpressionInfo {
+				return pv.Kind, pv.Type
+			}
+			return ExpressionKindValue, ExpressionTypeUnknown
+		}
+		return s.inferExpressionShape(pv.Value)
 	}
 
+	if typ, ok := primitiveExpressionType(value); ok {
+		return ExpressionKindValue, typ
+	}
+
+	if expr, ok := value.(map[string]interface{}); ok && len(expr) == 1 {
+		for op, args := range expr {
+			switch op {
+			case OpVar:
+				return ExpressionKindValue, s.varExpressionType(args)
+			case OpMissing, OpMissingSome,
+				OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual,
+				OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual,
+				OpIn, OpNot, OpDoubleBang,
+				OpAll, OpSome, OpNone:
+				return ExpressionKindPredicate, ExpressionTypeBoolean
+			case OpAnd, OpOr:
+				return ExpressionKindPredicate, ExpressionTypeBoolean
+			case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo, OpMax, OpMin:
+				return ExpressionKindValue, ExpressionTypeNumber
+			case OpCat, OpSubstr:
+				return ExpressionKindValue, ExpressionTypeString
+			case OpIf:
+				return ExpressionKindValue, s.inferIfExpressionType(args)
+			}
+		}
+	}
+
+	return ExpressionKindValue, ExpressionTypeUnknown
+}
+
+func (s *StringOperator) inferIfExpressionType(args interface{}) ExpressionType {
+	arr, ok := args.([]interface{})
+	if !ok || len(arr) < 2 {
+		return ExpressionTypeUnknown
+	}
+
+	var result ExpressionType
+	hasResult := false
+	for i := 1; i < len(arr); i += 2 {
+		_, typ := s.inferExpressionShape(arr[i])
+		result = mergeInferredTypes(result, typ, hasResult)
+		hasResult = true
+	}
+	if len(arr)%2 == 1 {
+		_, typ := s.inferExpressionShape(arr[len(arr)-1])
+		result = mergeInferredTypes(result, typ, hasResult)
+		hasResult = true
+	} else {
+		result = mergeInferredTypes(result, ExpressionTypeNull, hasResult)
+		hasResult = true
+	}
+	if !hasResult {
+		return ExpressionTypeUnknown
+	}
+	return result
+}
+
+func mergeInferredTypes(current, next ExpressionType, hasCurrent bool) ExpressionType {
+	if !hasCurrent {
+		return next
+	}
+	if current == ExpressionTypeNull {
+		return next
+	}
+	if next == ExpressionTypeNull {
+		return current
+	}
+	if current == next {
+		return current
+	}
+	return ExpressionTypeUnknown
+}
+
+func primitiveExpressionType(value interface{}) (ExpressionType, bool) {
+	switch value.(type) {
+	case string:
+		return ExpressionTypeString, true
+	case bool:
+		return ExpressionTypeBoolean, true
+	case nil:
+		return ExpressionTypeNull, true
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64, json.Number:
+		return ExpressionTypeNumber, true
+	default:
+		return ExpressionTypeUnknown, false
+	}
+}
+
+func (s *StringOperator) varExpressionType(args interface{}) ExpressionType {
+	fieldName := s.extractFieldName(args)
+	if fieldName == "" {
+		return ExpressionTypeUnknown
+	}
+	switch {
+	case s.schema().IsBooleanType(fieldName):
+		return ExpressionTypeBoolean
+	case s.schema().IsStringType(fieldName), s.schema().IsEnumType(fieldName):
+		return ExpressionTypeString
+	case s.schema().IsNumericType(fieldName):
+		return ExpressionTypeNumber
+	case s.schema().IsArrayType(fieldName):
+		return ExpressionTypeArray
+	default:
+		return ExpressionTypeUnknown
+	}
+}
+
+// ToSQL converts a string operation to SQL.
+func (s *StringOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	switch operator {
-	case "cat":
+	case OpCat:
 		return s.handleConcatenation(args)
-	case "substr":
+	case OpSubstr:
+		if len(args) == 0 {
+			return "", fmt.Errorf("string operator %s requires at least one argument", operator)
+		}
 		return s.handleSubstring(args)
 	default:
 		return "", fmt.Errorf("unsupported string operator: %s", operator)
@@ -103,8 +258,8 @@ func (s *StringOperator) ToSQL(operator string, args []interface{}) (string, err
 
 // handleConcatenation converts cat operator to SQL.
 func (s *StringOperator) handleConcatenation(args []interface{}) (string, error) {
-	if len(args) < 1 {
-		return "", fmt.Errorf("concatenation requires at least 1 argument")
+	if len(args) == 0 {
+		return "''", nil
 	}
 
 	// Validate operand types
@@ -116,15 +271,122 @@ func (s *StringOperator) handleConcatenation(args []interface{}) (string, error)
 
 	operands := make([]string, len(args))
 	for i, arg := range args {
-		operand, err := s.valueToSQL(arg)
+		operand, err := s.valueToSQLForConcat(arg)
 		if err != nil {
 			return "", fmt.Errorf("invalid concatenation argument %d: %w", i, err)
 		}
 		operands[i] = operand
 	}
 
-	// Use CONCAT function for SQL concatenation
-	return fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), nil
+	return s.config.ConcatSQL(operands), nil
+}
+
+func (s *StringOperator) valueToSQLForConcat(value interface{}) (string, error) {
+	if sql, handled, err := s.ifExpressionToConcatSQL(value); handled || err != nil {
+		return sql, err
+	}
+	sql, err := s.valueToSQL(value)
+	if err != nil {
+		return "", err
+	}
+	if literalSQL, ok := s.literalConcatSQL(value, sql); ok {
+		return literalSQL, nil
+	}
+	kind, typ := s.inferExpressionShape(value)
+	return s.stringifyConcatSQL(sql, kind, typ), nil
+}
+
+func (s *StringOperator) literalConcatSQL(value interface{}, sql string) (string, bool) {
+	typ, ok := primitiveExpressionType(value)
+	if !ok {
+		return "", false
+	}
+	expr := StripRedundantOuterParens(sql)
+	switch typ {
+	case ExpressionTypeNull:
+		return "''", true
+	case ExpressionTypeString:
+		return expr, true
+	case ExpressionTypeNumber:
+		return s.config.StringCast(expr), true
+	case ExpressionTypeBoolean:
+		return PredicateStringSQL(expr), true
+	case ExpressionTypeArray, ExpressionTypeObject, ExpressionTypeUnknown:
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+func ifExpressionArgs(value interface{}) ([]interface{}, bool, error) {
+	expr, ok := value.(map[string]interface{})
+	if !ok || len(expr) != 1 {
+		return nil, false, nil
+	}
+	args, ok := expr[OpIf]
+	if !ok {
+		return nil, false, nil
+	}
+	arr, ok := args.([]interface{})
+	if !ok {
+		return nil, true, fmt.Errorf("if operation requires array of arguments")
+	}
+	return arr, true, nil
+}
+
+func (s *StringOperator) ifExpressionToConcatSQL(value interface{}) (string, bool, error) {
+	args, handled, err := ifExpressionArgs(value)
+	if !handled || err != nil {
+		return "", handled, err
+	}
+	sql, err := s.processStringifiedIfExpression(args)
+	return sql, true, err
+}
+
+func (s *StringOperator) processStringifiedIfExpression(args []interface{}) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("if operation requires at least 2 arguments (condition, then)")
+	}
+
+	var result strings.Builder
+	result.WriteString("CASE")
+
+	pairLimit := len(args)
+	hasElse := len(args)%2 == 1
+	if hasElse {
+		pairLimit = len(args) - 1
+	}
+
+	for i := 0; i < pairLimit; i += 2 {
+		condition, err := s.valueToSQL(args[i])
+		if err != nil {
+			return "", fmt.Errorf("invalid if condition: %w", err)
+		}
+
+		thenValue, err := s.valueToSQLForConcat(args[i+1])
+		if err != nil {
+			return "", fmt.Errorf("invalid if then value: %w", err)
+		}
+
+		result.WriteString(fmt.Sprintf(" WHEN %s THEN %s", condition, thenValue))
+	}
+
+	if hasElse {
+		elseValue, err := s.valueToSQLForConcat(args[len(args)-1])
+		if err != nil {
+			return "", fmt.Errorf("invalid if else value: %w", err)
+		}
+		result.WriteString(fmt.Sprintf(" ELSE %s", elseValue))
+	} else {
+		result.WriteString(" ELSE ''")
+	}
+
+	result.WriteString(" END")
+	return result.String(), nil
+}
+
+func (s *StringOperator) stringifyConcatSQL(sql string, kind ExpressionKind, typ ExpressionType) string {
+	return ConcatStringSQL(s.config, sql, kind, typ)
 }
 
 // handleSubstring converts substr operator to SQL.
@@ -134,7 +396,7 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 	}
 
 	// Validate first argument type (string source)
-	if err := s.validateStringOperand(args[0]); err != nil {
+	if err := s.validateSubstringSourceOperand(args[0]); err != nil {
 		return "", err
 	}
 
@@ -144,14 +406,17 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid substring string argument: %w", err)
 	}
 
+	if validationErr := s.validateSubstringIndexOperand(args[1], "start"); validationErr != nil {
+		return "", validationErr
+	}
+
 	// Second argument: start position (convert from 0-based to 1-based)
 	start, err := s.valueToSQL(args[1])
 	if err != nil {
 		return "", fmt.Errorf("invalid substring start argument: %w", err)
 	}
 
-	// Convert 0-based start to 1-based, handling numeric literals cleanly
-	startSQL := s.convertStartIndex(start)
+	startSQL := s.substringStartSQL(args[1], str, start, false)
 
 	// Get the function name based on dialect
 	d := dialect.DialectUnspecified
@@ -169,10 +434,14 @@ func (s *StringOperator) handleSubstring(args []interface{}) (string, error) {
 
 	// Third argument: length (optional)
 	if len(args) == 3 {
+		if err := s.validateSubstringIndexOperand(args[2], "length"); err != nil {
+			return "", err
+		}
 		length, err := s.valueToSQL(args[2])
 		if err != nil {
 			return "", fmt.Errorf("invalid substring length argument: %w", err)
 		}
+		length = s.substringLengthSQL(args[1], args[2], str, start, length, false)
 		return fmt.Sprintf("%s(%s, %s, %s)", substrFunc, str, startSQL, length), nil
 	}
 
@@ -193,6 +462,9 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 
 	// Handle var expressions
 	if expr, ok := value.(map[string]interface{}); ok {
+		if len(expr) != 1 {
+			return "", fmt.Errorf("operator object must have exactly one key")
+		}
 		if varExpr, hasVar := expr[OpVar]; hasVar {
 			return s.dataOp.ToSQL(OpVar, []interface{}{varExpr})
 		}
@@ -203,54 +475,55 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 		if len(expr) == 1 {
 			for op, args := range expr {
 				switch op {
-				case "+", "-", "*", "/", "%":
+				case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo:
 					// Handle arithmetic operations
 					return s.processArithmeticExpression(op, args)
-				case ">", ">=", "<", "<=", "==", "===", "!=", "!==":
+				case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual,
+					OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual:
 					// Handle comparison operations
 					return s.processComparisonExpression(op, args)
-				case "if":
+				case OpIf:
 					// Handle conditional expressions
 					return s.processIfExpression(args)
-				case "substr":
+				case OpSubstr:
 					// Handle nested substr operations
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("substr requires array of arguments")
 					}
 					return s.handleSubstring(argsSlice)
-				case "cat":
+				case OpCat:
 					// Handle nested cat operations
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("cat requires array of arguments")
 					}
 					return s.handleConcatenation(argsSlice)
-				case "max", "min":
+				case OpMax, OpMin:
 					// Handle max/min operations
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("%s requires array of arguments", op)
 					}
 					return s.processMaxMinExpression(op, argsSlice)
-				case "and", "or":
+				case OpAnd, OpOr:
 					// Handle logical operations
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("%s requires array of arguments", op)
 					}
 					return s.processLogicalExpression(op, argsSlice)
-				case "!":
+				case OpNot:
 					// Handle NOT operation
 					return s.processNotExpression(args)
-				case "!!":
+				case OpDoubleBang:
 					// Handle boolean coercion
 					return s.processBooleanCoercion(args)
 				default:
 					// Try to use the expression parser callback for unknown operators
 					// This enables support for custom operators in nested contexts
 					if s.config != nil && s.config.HasExpressionParser() {
-						return s.config.ParseExpression(expr, "$")
+						return s.config.ParseExpression(expr, jsonPathRoot)
 					}
 					return "", fmt.Errorf("unsupported expression type in string operation: %s", op)
 				}
@@ -262,18 +535,134 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 	return s.dataOp.valueToSQL(value)
 }
 
-// convertStartIndex converts a 0-based start index to 1-based for SQL SUBSTR
-// Handles numeric literals cleanly (e.g., "0" becomes "1", "5" becomes "6")
-// For complex expressions, adds "+ 1" (e.g., "x" becomes "x + 1").
-func (s *StringOperator) convertStartIndex(start string) string {
-	// Try to parse as integer for clean conversion
-	if num, err := strconv.Atoi(start); err == nil {
-		// It's a simple integer, convert directly
-		return strconv.Itoa(num + 1)
+func (s *StringOperator) substringStartSQL(rawStart interface{}, str, start string, parameterized bool) string {
+	if num, ok := integerLiteralValue(rawStart); ok {
+		if num >= 0 {
+			if parameterized {
+				return fmt.Sprintf("(%s + 1)", start)
+			}
+			return strconv.Itoa(num + 1)
+		}
+		startTerm := strconv.Itoa(num)
+		if parameterized {
+			startTerm = start
+		}
+		return s.config.GreatestSQL([]string{fmt.Sprintf("(%s + %s + 1)", s.stringLengthSQL(str), startTerm), "1"})
+	}
+	return fmt.Sprintf(
+		"(CASE WHEN %s < 0 THEN %s ELSE (%s + 1) END)",
+		start,
+		s.config.GreatestSQL([]string{fmt.Sprintf("(%s + %s + 1)", s.stringLengthSQL(str), start), "1"}),
+		start,
+	)
+}
+
+func (s *StringOperator) substringLengthSQL(
+	rawStart, rawLength interface{},
+	str, start, length string,
+	parameterized bool,
+) string {
+	if num, ok := integerLiteralValue(rawLength); ok && num >= 0 {
+		if parameterized {
+			return length
+		}
+		return strconv.Itoa(num)
 	}
 
-	// It's a complex expression (variable, arithmetic, etc.), add "+ 1"
-	return fmt.Sprintf("(%s + 1)", start)
+	startZero := s.substringStartZeroSQL(rawStart, str, start, parameterized)
+	negativeLength := s.config.GreatestSQL([]string{
+		fmt.Sprintf("(%s - %s)", s.config.GreatestSQL([]string{fmt.Sprintf("(%s + %s)", s.stringLengthSQL(str), length), "0"}), startZero),
+		"0",
+	})
+	if num, ok := integerLiteralValue(rawLength); ok && num < 0 {
+		return negativeLength
+	}
+	return fmt.Sprintf("(CASE WHEN %s < 0 THEN %s ELSE %s END)", length, negativeLength, length)
+}
+
+func (s *StringOperator) substringStartZeroSQL(rawStart interface{}, str, start string, parameterized bool) string {
+	if num, ok := integerLiteralValue(rawStart); ok {
+		if num >= 0 {
+			if parameterized {
+				return start
+			}
+			return strconv.Itoa(num)
+		}
+		startTerm := strconv.Itoa(num)
+		if parameterized {
+			startTerm = start
+		}
+		return s.config.GreatestSQL([]string{fmt.Sprintf("(%s + %s)", s.stringLengthSQL(str), startTerm), "0"})
+	}
+	return fmt.Sprintf(
+		"(CASE WHEN %s < 0 THEN %s ELSE %s END)",
+		start,
+		s.config.GreatestSQL([]string{fmt.Sprintf("(%s + %s)", s.stringLengthSQL(str), start), "0"}),
+		start,
+	)
+}
+
+func (s *StringOperator) stringLengthSQL(str string) string {
+	if s.config != nil && s.config.GetDialect() == dialect.DialectClickHouse {
+		return fmt.Sprintf("length(%s)", str)
+	}
+	return fmt.Sprintf("LENGTH(%s)", str)
+}
+
+func integerLiteralValue(value interface{}) (int, bool) {
+	const maxIntValue = int64(1<<(strconv.IntSize-1) - 1)
+	const minIntValue = -maxIntValue - 1
+
+	if pv, ok := value.(ProcessedValue); ok {
+		if pv.IsSQL {
+			return 0, false
+		}
+		return integerLiteralValue(pv.Value)
+	}
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int8:
+		return int(v), true
+	case int16:
+		return int(v), true
+	case int32:
+		return int(v), true
+	case int64:
+		if v >= minIntValue && v <= maxIntValue {
+			return int(v), true
+		}
+	case uint:
+		i, err := strconv.Atoi(strconv.FormatUint(uint64(v), 10))
+		return i, err == nil
+	case uint8:
+		return int(v), true
+	case uint16:
+		return int(v), true
+	case uint32:
+		i, err := strconv.Atoi(strconv.FormatUint(uint64(v), 10))
+		return i, err == nil
+	case uint64:
+		i, err := strconv.Atoi(strconv.FormatUint(v, 10))
+		return i, err == nil
+	case float32:
+		f := float64(v)
+		if !math.IsInf(f, 0) && !math.IsNaN(f) &&
+			f >= float64(minIntValue) && f <= float64(maxIntValue) &&
+			math.Trunc(f) == f {
+			return int(f), true
+		}
+	case float64:
+		if !math.IsInf(v, 0) && !math.IsNaN(v) &&
+			v >= float64(minIntValue) && v <= float64(maxIntValue) &&
+			math.Trunc(v) == v {
+			return int(v), true
+		}
+	case json.Number:
+		i, err := strconv.Atoi(v.String())
+		return i, err == nil
+	}
+	return 0, false
 }
 
 // processArithmeticExpression handles arithmetic operations within string operations.
@@ -317,16 +706,19 @@ func (s *StringOperator) processArithmeticExpression(op string, args interface{}
 
 	// Generate SQL based on operation
 	switch op {
-	case "+":
+	case OpAdd:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " + ")), nil
-	case "-":
+	case OpSubtract:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " - ")), nil
-	case "*":
+	case OpMultiply:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " * ")), nil
-	case "/":
+	case OpDivide:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " / ")), nil
-	case "%":
-		return fmt.Sprintf("(%s)", strings.Join(operands, " % ")), nil
+	case OpModulo:
+		if len(operands) != 2 {
+			return "", fmt.Errorf("modulo requires exactly 2 arguments")
+		}
+		return s.config.ModuloSQL(operands[0], operands[1]), nil
 	default:
 		return "", fmt.Errorf("unsupported arithmetic operation: %s", op)
 	}
@@ -417,7 +809,7 @@ func (s *StringOperator) processMaxMinExpression(op string, args []interface{}) 
 		if err != nil {
 			return "", fmt.Errorf("invalid %s argument %d: %w", op, i, err)
 		}
-		operands[i] = operand
+		operands[i] = StripRedundantOuterParens(operand)
 	}
 
 	funcName := "GREATEST"
@@ -440,15 +832,27 @@ func (s *StringOperator) processLogicalExpression(op string, args []interface{})
 		if err != nil {
 			return "", fmt.Errorf("invalid %s argument %d: %w", op, i, err)
 		}
+		if op != "and" || !isOrExpression(arg) {
+			operand = StripRedundantOuterParens(operand)
+		}
 		operands[i] = operand
 	}
 
-	sqlOp := " AND "
+	sqlOp := sqlAndJoiner
 	if op == "or" {
-		sqlOp = " OR "
+		sqlOp = sqlOrJoiner
 	}
 
 	return fmt.Sprintf("(%s)", strings.Join(operands, sqlOp)), nil
+}
+
+func isOrExpression(arg interface{}) bool {
+	expr, ok := arg.(map[string]interface{})
+	if !ok || len(expr) != 1 {
+		return false
+	}
+	_, ok = expr["or"]
+	return ok
 }
 
 // processNotExpression handles NOT (!) operation within string operations.
@@ -495,174 +899,3 @@ func (s *StringOperator) processBooleanCoercion(args interface{}) (string, error
 }
 
 // ToSQLParam is the parameterized variant of ToSQL. Keep in sync.
-func (s *StringOperator) ToSQLParam(operator string, args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("string operator %s requires at least one argument", operator)
-	}
-	switch operator {
-	case "cat":
-		return s.handleConcatenationParam(args, pc)
-	case "substr":
-		return s.handleSubstringParam(args, pc)
-	default:
-		return "", fmt.Errorf("unsupported string operator: %s", operator)
-	}
-}
-
-// handleConcatenationParam is the parameterized variant of handleConcatenation. Keep in sync.
-func (s *StringOperator) handleConcatenationParam(args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) < 1 {
-		return "", fmt.Errorf("concatenation requires at least 1 argument")
-	}
-	for _, arg := range args {
-		if err := s.validateStringOperand(arg); err != nil {
-			return "", err
-		}
-	}
-	operands := make([]string, len(args))
-	for i, arg := range args {
-		operand, err := s.valueToSQLParam(arg, pc)
-		if err != nil {
-			return "", fmt.Errorf("invalid concatenation argument %d: %w", i, err)
-		}
-		operands[i] = operand
-	}
-	return fmt.Sprintf("CONCAT(%s)", strings.Join(operands, ", ")), nil
-}
-
-// handleSubstringParam is the parameterized variant of handleSubstring. Keep in sync.
-func (s *StringOperator) handleSubstringParam(args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) < 2 || len(args) > 3 {
-		return "", fmt.Errorf("substring requires 2 or 3 arguments")
-	}
-	if err := s.validateStringOperand(args[0]); err != nil {
-		return "", err
-	}
-	str, err := s.valueToSQLParam(args[0], pc)
-	if err != nil {
-		return "", fmt.Errorf("invalid substring string argument: %w", err)
-	}
-	start, err := s.valueToSQLParam(args[1], pc)
-	if err != nil {
-		return "", fmt.Errorf("invalid substring start argument: %w", err)
-	}
-	startSQL := s.convertStartIndex(start)
-
-	d := dialect.DialectUnspecified
-	if s.config != nil {
-		d = s.config.GetDialect()
-	}
-	var substrFunc string
-	switch d {
-	case dialect.DialectClickHouse:
-		substrFunc = "substring"
-	case dialect.DialectUnspecified, dialect.DialectBigQuery, dialect.DialectSpanner, dialect.DialectPostgreSQL, dialect.DialectDuckDB:
-		substrFunc = "SUBSTR"
-	}
-
-	if len(args) == 3 {
-		length, err := s.valueToSQLParam(args[2], pc)
-		if err != nil {
-			return "", fmt.Errorf("invalid substring length argument: %w", err)
-		}
-		return fmt.Sprintf("%s(%s, %s, %s)", substrFunc, str, startSQL, length), nil
-	}
-	return fmt.Sprintf("%s(%s, %s)", substrFunc, str, startSQL), nil
-}
-
-// valueToSQLParam is the parameterized variant of valueToSQL. Keep in sync.
-func (s *StringOperator) valueToSQLParam(value interface{}, pc *params.ParamCollector) (string, error) {
-	if pv, ok := value.(ProcessedValue); ok {
-		if pv.IsSQL {
-			return pv.Value, nil
-		}
-		return s.dataOp.valueToSQLParam(pv.Value, pc)
-	}
-
-	if expr, ok := value.(map[string]interface{}); ok {
-		if varExpr, hasVar := expr[OpVar]; hasVar {
-			return s.dataOp.ToSQLParam(OpVar, []interface{}{varExpr}, pc)
-		}
-
-		if len(expr) == 1 {
-			for op, args := range expr {
-				switch op {
-				case "+", "-", "*", "/", "%":
-					argsSlice, ok := args.([]interface{})
-					if !ok {
-						return "", fmt.Errorf("arithmetic operation requires array of arguments")
-					}
-					numOp := NewNumericOperator(s.config)
-					return numOp.ToSQLParam(op, argsSlice, pc)
-				case ">", ">=", "<", "<=", "==", "===", "!=", "!==":
-					argsSlice, ok := args.([]interface{})
-					if !ok {
-						return "", fmt.Errorf("comparison operation requires array of arguments")
-					}
-					compOp := NewComparisonOperator(s.config)
-					sql, err := compOp.ToSQLParam(op, argsSlice, pc)
-					if err != nil {
-						return "", err
-					}
-					return parenthesizeComparisonSQL(sql), nil
-				case "if":
-					argsSlice, ok := args.([]interface{})
-					if !ok {
-						return "", fmt.Errorf("if operation requires array of arguments")
-					}
-					logOp := NewLogicalOperator(s.config)
-					return logOp.ToSQLParam("if", argsSlice, pc)
-				case "substr":
-					argsSlice, ok := args.([]interface{})
-					if !ok {
-						return "", fmt.Errorf("substr requires array of arguments")
-					}
-					return s.handleSubstringParam(argsSlice, pc)
-				case "cat":
-					argsSlice, ok := args.([]interface{})
-					if !ok {
-						return "", fmt.Errorf("cat requires array of arguments")
-					}
-					return s.handleConcatenationParam(argsSlice, pc)
-				case "max", "min":
-					argsSlice, ok := args.([]interface{})
-					if !ok {
-						return "", fmt.Errorf("%s requires array of arguments", op)
-					}
-					numOp := NewNumericOperator(s.config)
-					return numOp.ToSQLParam(op, argsSlice, pc)
-				case "and", "or":
-					argsSlice, ok := args.([]interface{})
-					if !ok {
-						return "", fmt.Errorf("%s requires array of arguments", op)
-					}
-					logOp := NewLogicalOperator(s.config)
-					return logOp.ToSQLParam(op, argsSlice, pc)
-				case "!":
-					argsSlice, ok := args.([]interface{})
-					if ok {
-						logOp := NewLogicalOperator(s.config)
-						return logOp.ToSQLParam("!", argsSlice, pc)
-					}
-					logOp := NewLogicalOperator(s.config)
-					return logOp.ToSQLParam("!", []interface{}{args}, pc)
-				case "!!":
-					argsSlice, ok := args.([]interface{})
-					if ok {
-						logOp := NewLogicalOperator(s.config)
-						return logOp.ToSQLParam("!!", argsSlice, pc)
-					}
-					logOp := NewLogicalOperator(s.config)
-					return logOp.ToSQLParam("!!", []interface{}{args}, pc)
-				default:
-					if s.config != nil && s.config.HasParamExpressionParser() {
-						return s.config.ParseExpressionParam(expr, "$", pc)
-					}
-					return "", fmt.Errorf("unsupported expression type in string operation: %s", op)
-				}
-			}
-		}
-	}
-
-	return s.dataOp.valueToSQLParam(value, pc)
-}

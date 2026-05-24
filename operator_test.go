@@ -2,27 +2,44 @@ package jsonlogic2sql
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
+
+func testOperatorArgs(values ...string) []OperatorArg {
+	args := make([]OperatorArg, len(values))
+	for i, value := range values {
+		args[i] = OperatorArg{SQL: value, Kind: ExpressionKindValue, Type: ExpressionTypeUnknown}
+	}
+	return args
+}
+
+func transpileOperatorExpression(tr *Transpiler, logic string) (string, error) {
+	sql, err := tr.TranspileCondition(logic)
+	if IsErrorCode(err, ErrInvalidExpressionContext) {
+		return tr.TranspileValue(logic)
+	}
+	return sql, err
+}
 
 // LengthOperator implements OperatorHandler for LENGTH SQL function.
 type LengthOperator struct{}
 
-func (l *LengthOperator) ToSQL(operator string, args []interface{}) (string, error) {
+func (l *LengthOperator) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
 	if len(args) != 1 {
-		return "", fmt.Errorf("length requires exactly 1 argument, got %d", len(args))
+		return OperatorResult{}, fmt.Errorf("length requires exactly 1 argument, got %d", len(args))
 	}
-	return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+	return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 }
 
 // UpperOperator implements OperatorHandler for UPPER SQL function.
 type UpperOperator struct{}
 
-func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, error) {
+func (u *UpperOperator) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
 	if len(args) != 1 {
-		return "", fmt.Errorf("upper requires exactly 1 argument, got %d", len(args))
+		return OperatorResult{}, fmt.Errorf("upper requires exactly 1 argument, got %d", len(args))
 	}
-	return fmt.Sprintf("UPPER(%s)", args[0]), nil
+	return ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), ExpressionTypeString), nil
 }
 
 // ConcatWithSeparatorOperator joins arguments with a separator.
@@ -30,15 +47,15 @@ type ConcatWithSeparatorOperator struct {
 	Separator string
 }
 
-func (c *ConcatWithSeparatorOperator) ToSQL(operator string, args []interface{}) (string, error) {
+func (c *ConcatWithSeparatorOperator) ToSQL(operator string, args []OperatorArg) (OperatorResult, error) {
 	if len(args) < 2 {
-		return "", fmt.Errorf("concat_ws requires at least 2 arguments")
+		return OperatorResult{}, fmt.Errorf("concat_ws requires at least 2 arguments")
 	}
-	result := fmt.Sprintf("%s", args[0])
+	result := args[0].SQL
 	for i := 1; i < len(args); i++ {
-		result += fmt.Sprintf(" || '%s' || %s", c.Separator, args[i])
+		result += fmt.Sprintf(" || '%s' || %s", c.Separator, args[i].SQL)
 	}
-	return result, nil
+	return ValueSQL(result, ExpressionTypeString), nil
 }
 
 func TestOperatorRegistry(t *testing.T) {
@@ -57,8 +74,8 @@ func TestOperatorRegistry(t *testing.T) {
 
 	t.Run("RegisterFunc", func(t *testing.T) {
 		registry := NewOperatorRegistry()
-		registry.RegisterFunc("custom", func(op string, args []interface{}) (string, error) {
-			return "CUSTOM()", nil
+		registry.RegisterFunc("custom", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL("CUSTOM()", ExpressionTypeUnknown), nil
 		})
 
 		handler, ok := registry.Get("custom")
@@ -69,8 +86,8 @@ func TestOperatorRegistry(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result != "CUSTOM()" {
-			t.Errorf("expected CUSTOM(), got %s", result)
+		if result.SQL != "CUSTOM()" {
+			t.Errorf("expected CUSTOM(), got %s", result.SQL)
 		}
 	})
 
@@ -103,12 +120,13 @@ func TestOperatorRegistry(t *testing.T) {
 
 	t.Run("List", func(t *testing.T) {
 		registry := NewOperatorRegistry()
-		registry.Register("length", &LengthOperator{})
 		registry.Register("upper", &UpperOperator{})
+		registry.Register("length", &LengthOperator{})
 
 		list := registry.List()
-		if len(list) != 2 {
-			t.Errorf("expected 2 operators, got %d", len(list))
+		want := []string{"length", "upper"}
+		if !reflect.DeepEqual(list, want) {
+			t.Errorf("List() = %#v, want %#v", list, want)
 		}
 	})
 
@@ -152,6 +170,18 @@ func TestOperatorRegistry(t *testing.T) {
 		}
 		if !registry1.Has("upper") {
 			t.Error("expected registry1 to have upper after merge")
+		}
+	})
+
+	t.Run("Merge nil and self are no-op", func(t *testing.T) {
+		registry := NewOperatorRegistry()
+		registry.Register("length", &LengthOperator{})
+
+		registry.Merge(nil)
+		registry.Merge(registry)
+
+		if got, want := registry.List(), []string{"length"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("List() after no-op merges = %#v, want %#v", got, want)
 		}
 	})
 }
@@ -202,146 +232,157 @@ func TestValidateOperatorName(t *testing.T) {
 
 func TestTranspilerCustomOperators(t *testing.T) {
 	t.Run("RegisterOperatorFunc simple", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		err := transpiler.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 1 {
-				return "", fmt.Errorf("length requires 1 argument")
+				return OperatorResult{}, fmt.Errorf("length requires 1 argument")
 			}
-			return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+			return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error registering operator: %v", err)
 		}
 
-		sql, err := transpiler.Transpile(`{"length": [{"var": "email"}]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"length": [{"var": "email"}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE LENGTH(email)"
+		expected := "LENGTH(email)"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
+	t.Run("RegisterOperatorFunc rejects nil function", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		err := transpiler.RegisterOperatorFunc("bad", nil)
+		if err == nil {
+			t.Fatal("RegisterOperatorFunc() expected error, got nil")
+		}
+		if transpiler.HasCustomOperator("bad") {
+			t.Fatal("unsupported function type should not be registered")
+		}
+	})
+
 	t.Run("RegisterOperator with struct", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperator("length", &LengthOperator{})
 		if err != nil {
 			t.Fatalf("unexpected error registering operator: %v", err)
 		}
 
-		sql, err := transpiler.Transpile(`{"length": [{"var": "name"}]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"length": [{"var": "name"}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE LENGTH(name)"
+		expected := "LENGTH(name)"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
 	t.Run("custom operator with nested expression", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		err := transpiler.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
 		// length of concatenated string
-		sql, err := transpiler.Transpile(`{"length": [{"cat": [{"var": "first"}, {"var": "last"}]}]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"length": [{"cat": [{"var": "first"}, {"var": "last"}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE LENGTH(CONCAT(first, last))"
+		expected := "LENGTH(CONCAT(COALESCE(first, ''), COALESCE(last, '')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
 	t.Run("custom operator in comparison", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		err := transpiler.RegisterOperatorFunc("length", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), ExpressionTypeNumber), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		sql, err := transpiler.Transpile(`{">": [{"length": [{"var": "email"}]}, 10]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{">": [{"length": [{"var": "email"}]}, 10]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE LENGTH(email) > 10"
+		expected := "LENGTH(email) > 10"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
 	t.Run("upper operator", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperator("upper", &UpperOperator{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		sql, err := transpiler.Transpile(`{"==": [{"upper": [{"var": "name"}]}, "JOHN"]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"==": [{"upper": [{"var": "name"}]}, "JOHN"]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE UPPER(name) = 'JOHN'"
+		expected := "UPPER(name) = 'JOHN'"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
 	t.Run("multiple custom operators", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("length", &LengthOperator{})
 		transpiler.RegisterOperator("upper", &UpperOperator{})
 
-		sql, err := transpiler.Transpile(`{"and": [{">": [{"length": [{"var": "name"}]}, 5]}, {"==": [{"upper": [{"var": "status"}]}, "ACTIVE"]}]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"and": [{">": [{"length": [{"var": "name"}]}, 5]}, {"==": [{"upper": [{"var": "status"}]}, "ACTIVE"]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE (LENGTH(name) > 5 AND UPPER(status) = 'ACTIVE')"
+		expected := "(LENGTH(name) > 5 AND UPPER(status) = 'ACTIVE')"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
 	t.Run("custom operator with multiple args", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("coalesce", func(op string, args []interface{}) (string, error) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		err := transpiler.RegisterOperatorFunc("coalesce", func(op string, args []OperatorArg) (OperatorResult, error) {
 			result := "COALESCE("
 			for i, arg := range args {
 				if i > 0 {
 					result += ", "
 				}
-				result += fmt.Sprintf("%s", arg)
+				result += arg.SQL
 			}
 			result += ")"
-			return result, nil
+			return ValueSQL(result, ExpressionTypeUnknown), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		sql, err := transpiler.Transpile(`{"coalesce": [{"var": "nickname"}, {"var": "name"}, "Unknown"]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"coalesce": [{"var": "nickname"}, {"var": "name"}, "Unknown"]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE COALESCE(nickname, name, 'Unknown')"
+		expected := "COALESCE(nickname, name, 'Unknown')"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
 	t.Run("reject built-in operator override", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("and", func(op string, args []interface{}) (string, error) {
-			return "CUSTOM_AND", nil
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		err := transpiler.RegisterOperatorFunc("and", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return PredicateSQL("CUSTOM_AND"), nil
 		})
 		if err == nil {
 			t.Error("expected error when trying to override built-in operator")
@@ -349,7 +390,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("HasCustomOperator", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("length", &LengthOperator{})
 
 		if !transpiler.HasCustomOperator("length") {
@@ -361,7 +402,7 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("UnregisterOperator", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("length", &LengthOperator{})
 
 		if !transpiler.UnregisterOperator("length") {
@@ -369,25 +410,26 @@ func TestTranspilerCustomOperators(t *testing.T) {
 		}
 
 		// Now it should fail to transpile
-		_, err := transpiler.Transpile(`{"length": [{"var": "email"}]}`)
+		_, err := transpiler.TranspileCondition(`{"length": [{"var": "email"}]}`)
 		if err == nil {
 			t.Error("expected error after unregistering operator")
 		}
 	})
 
 	t.Run("ListCustomOperators", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		transpiler.RegisterOperator("length", &LengthOperator{})
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("upper", &UpperOperator{})
+		transpiler.RegisterOperator("length", &LengthOperator{})
 
 		list := transpiler.ListCustomOperators()
-		if len(list) != 2 {
-			t.Errorf("expected 2 operators, got %d", len(list))
+		want := []string{"length", "upper"}
+		if !reflect.DeepEqual(list, want) {
+			t.Errorf("ListCustomOperators() = %#v, want %#v", list, want)
 		}
 	})
 
 	t.Run("ClearCustomOperators", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.RegisterOperator("length", &LengthOperator{})
 		transpiler.RegisterOperator("upper", &UpperOperator{})
 
@@ -398,39 +440,39 @@ func TestTranspilerCustomOperators(t *testing.T) {
 	})
 
 	t.Run("custom operator with literal argument", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterOperatorFunc("repeat", func(op string, args []interface{}) (string, error) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		err := transpiler.RegisterOperatorFunc("repeat", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("repeat requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("repeat requires 2 arguments")
 			}
-			return fmt.Sprintf("REPEAT(%s, %s)", args[0], args[1]), nil
+			return ValueSQL(fmt.Sprintf("REPEAT(%s, %s)", args[0].SQL, args[1].SQL), ExpressionTypeString), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		sql, err := transpiler.Transpile(`{"repeat": [{"var": "char"}, 5]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"repeat": [{"var": "char"}, 5]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE REPEAT(char, 5)"
+		expected := "REPEAT(char, 5)"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
 	t.Run("custom operator with stateful handler", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		err := transpiler.RegisterOperator("concat_ws", &ConcatWithSeparatorOperator{Separator: ", "})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		sql, err := transpiler.Transpile(`{"concat_ws": [{"var": "first"}, {"var": "last"}]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"concat_ws": [{"var": "first"}, {"var": "last"}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE first || ', ' || last"
+		expected := "first || ', ' || last"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -439,45 +481,45 @@ func TestTranspilerCustomOperators(t *testing.T) {
 
 func TestCustomOperatorEdgeCases(t *testing.T) {
 	t.Run("custom operator returning error", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		transpiler.RegisterOperatorFunc("failing", func(op string, args []interface{}) (string, error) {
-			return "", fmt.Errorf("intentional failure")
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		transpiler.RegisterOperatorFunc("failing", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return OperatorResult{}, fmt.Errorf("intentional failure")
 		})
 
-		_, err := transpiler.Transpile(`{"failing": [{"var": "x"}]}`)
+		_, err := transpiler.TranspileCondition(`{"failing": [{"var": "x"}]}`)
 		if err == nil {
 			t.Error("expected error from failing operator")
 		}
 	})
 
 	t.Run("custom operator with no arguments", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		transpiler.RegisterOperatorFunc("now", func(op string, args []interface{}) (string, error) {
-			return "NOW()", nil
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		transpiler.RegisterOperatorFunc("now", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL("NOW()", ExpressionTypeUnknown), nil
 		})
 
-		sql, err := transpiler.Transpile(`{"now": []}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"now": []}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE NOW()"
+		expected := "NOW()"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
 	t.Run("custom operator with single non-array argument", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		transpiler.RegisterOperatorFunc("single", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("SINGLE(%s)", args[0]), nil
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		transpiler.RegisterOperatorFunc("single", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("SINGLE(%s)", args[0].SQL), ExpressionTypeUnknown), nil
 		})
 
 		// When argument is not an array, it should still work
-		sql, err := transpiler.Transpile(`{"single": {"var": "x"}}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"single": {"var": "x"}}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE SINGLE(x)"
+		expected := "SINGLE(x)"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -488,12 +530,12 @@ func TestCustomOperatorEdgeCases(t *testing.T) {
 func TestDialectAwareFuncHandler(t *testing.T) {
 	t.Run("ToSQL returns error requiring dialect", func(t *testing.T) {
 		handler := &dialectAwareFuncHandler{
-			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
-				return "TEST()", nil
+			fn: func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+				return ValueSQL("TEST()", ExpressionTypeUnknown), nil
 			},
 		}
 
-		_, err := handler.ToSQL("test_op", []interface{}{"arg1"})
+		_, err := handler.ToSQL("test_op", testOperatorArgs("arg1"))
 		if err == nil {
 			t.Error("expected error from ToSQL on dialectAwareFuncHandler")
 		}
@@ -505,38 +547,40 @@ func TestDialectAwareFuncHandler(t *testing.T) {
 
 	t.Run("ToSQLWithDialect delegates to wrapped function", func(t *testing.T) {
 		handler := &dialectAwareFuncHandler{
-			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
-				return fmt.Sprintf("DIALECT_%s(%s)", dialect.String(), args[0]), nil
+			fn: func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+				return ValueSQL(fmt.Sprintf("DIALECT_%s(%s)", dialect.String(), args[0].SQL), ExpressionTypeUnknown), nil
 			},
 		}
 
-		result, err := handler.ToSQLWithDialect("test_op", []interface{}{"col"}, DialectBigQuery)
+		result, err := handler.ToSQLWithDialect("test_op", testOperatorArgs("col"), DialectBigQuery)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		expected := "DIALECT_BigQuery(col)"
-		if result != expected {
-			t.Errorf("expected %q, got %q", expected, result)
+		if result.SQL != expected {
+			t.Errorf("expected %q, got %q", expected, result.SQL)
 		}
 	})
 
 	t.Run("ToSQLWithDialect with multiple dialects", func(t *testing.T) {
 		handler := &dialectAwareFuncHandler{
-			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
+			fn: func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+				var sql string
 				switch dialect {
 				case DialectBigQuery:
-					return "BQ_FUNC()", nil
+					sql = "BQ_FUNC()"
 				case DialectSpanner:
-					return "SPANNER_FUNC()", nil
+					sql = "SPANNER_FUNC()"
 				case DialectPostgreSQL:
-					return "PG_FUNC()", nil
+					sql = "PG_FUNC()"
 				case DialectDuckDB:
-					return "DUCKDB_FUNC()", nil
+					sql = "DUCKDB_FUNC()"
 				case DialectClickHouse:
-					return "CH_FUNC()", nil
+					sql = "CH_FUNC()"
 				default:
-					return "", fmt.Errorf("unsupported dialect: %s", dialect)
+					return OperatorResult{}, fmt.Errorf("unsupported dialect: %s", dialect)
 				}
+				return ValueSQL(sql, ExpressionTypeUnknown), nil
 			},
 		}
 
@@ -556,16 +600,16 @@ func TestDialectAwareFuncHandler(t *testing.T) {
 			if err != nil {
 				t.Fatalf("dialect %s: unexpected error: %v", tt.dialect, err)
 			}
-			if result != tt.expected {
-				t.Errorf("dialect %s: expected %q, got %q", tt.dialect, tt.expected, result)
+			if result.SQL != tt.expected {
+				t.Errorf("dialect %s: expected %q, got %q", tt.dialect, tt.expected, result.SQL)
 			}
 		}
 	})
 
 	t.Run("ToSQLWithDialect passes error from wrapped function", func(t *testing.T) {
 		handler := &dialectAwareFuncHandler{
-			fn: func(op string, args []interface{}, dialect Dialect) (string, error) {
-				return "", fmt.Errorf("custom error from function")
+			fn: func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+				return OperatorResult{}, fmt.Errorf("custom error from function")
 			},
 		}
 
@@ -584,8 +628,8 @@ type DialectAwareTestHandler struct {
 	prefix string
 }
 
-func (d *DialectAwareTestHandler) ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error) {
-	return fmt.Sprintf("%s_%s(%s)", d.prefix, dialect.String(), args[0]), nil
+func (d *DialectAwareTestHandler) ToSQLWithDialect(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+	return ValueSQL(fmt.Sprintf("%s_%s(%s)", d.prefix, dialect.String(), args[0].SQL), ExpressionTypeUnknown), nil
 }
 
 // Test dialectAwareHandlerWrapper directly.
@@ -597,13 +641,13 @@ func TestDialectAwareHandlerWrapper(t *testing.T) {
 			dialect: DialectBigQuery,
 		}
 
-		result, err := wrapper.ToSQL("my_op", []interface{}{"column"})
+		result, err := wrapper.ToSQL("my_op", testOperatorArgs("column"))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		expected := "TEST_BigQuery(column)"
-		if result != expected {
-			t.Errorf("expected %q, got %q", expected, result)
+		if result.SQL != expected {
+			t.Errorf("expected %q, got %q", expected, result.SQL)
 		}
 	})
 
@@ -627,12 +671,12 @@ func TestDialectAwareHandlerWrapper(t *testing.T) {
 				dialect: tt.dialect,
 			}
 
-			result, err := wrapper.ToSQL("op", []interface{}{"arg"})
+			result, err := wrapper.ToSQL("op", testOperatorArgs("arg"))
 			if err != nil {
 				t.Fatalf("dialect %s: unexpected error: %v", tt.dialect, err)
 			}
-			if result != tt.expected {
-				t.Errorf("dialect %s: expected %q, got %q", tt.dialect, tt.expected, result)
+			if result.SQL != tt.expected {
+				t.Errorf("dialect %s: expected %q, got %q", tt.dialect, tt.expected, result.SQL)
 			}
 		}
 	})
@@ -642,8 +686,8 @@ func TestDialectAwareHandlerWrapper(t *testing.T) {
 func TestOperatorRegistry_RegisterDialectAwareFunc(t *testing.T) {
 	t.Run("register and retrieve dialect-aware function", func(t *testing.T) {
 		registry := NewOperatorRegistry()
-		registry.RegisterDialectAwareFunc("now", func(op string, args []interface{}, dialect Dialect) (string, error) {
-			return fmt.Sprintf("NOW_%s()", dialect.String()), nil
+		registry.RegisterDialectAwareFunc("now", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("NOW_%s()", dialect.String()), ExpressionTypeUnknown), nil
 		})
 
 		handler, ok := registry.Get("now")
@@ -662,15 +706,15 @@ func TestOperatorRegistry_RegisterDialectAwareFunc(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		expected := "NOW_PostgreSQL()"
-		if result != expected {
-			t.Errorf("expected %q, got %q", expected, result)
+		if result.SQL != expected {
+			t.Errorf("expected %q, got %q", expected, result.SQL)
 		}
 	})
 
 	t.Run("ToSQL on dialect-aware func returns error", func(t *testing.T) {
 		registry := NewOperatorRegistry()
-		registry.RegisterDialectAwareFunc("custom", func(op string, args []interface{}, dialect Dialect) (string, error) {
-			return "CUSTOM()", nil
+		registry.RegisterDialectAwareFunc("custom", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			return ValueSQL("CUSTOM()", ExpressionTypeUnknown), nil
 		})
 
 		handler, _ := registry.Get("custom")
@@ -683,52 +727,56 @@ func TestOperatorRegistry_RegisterDialectAwareFunc(t *testing.T) {
 
 func TestDialectAwareOperators(t *testing.T) {
 	t.Run("RegisterDialectAwareOperatorFunc with BigQuery", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterDialectAwareOperatorFunc("now", func(op string, args []interface{}, dialect Dialect) (string, error) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		err := transpiler.RegisterDialectAwareOperatorFunc("now", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			var sql string
 			switch dialect {
 			case DialectBigQuery:
-				return "CURRENT_TIMESTAMP()", nil
+				sql = "CURRENT_TIMESTAMP()"
 			case DialectSpanner:
-				return "CURRENT_TIMESTAMP()", nil
+				sql = "CURRENT_TIMESTAMP()"
 			default:
-				return "", fmt.Errorf("unsupported dialect: %s", dialect)
+				return OperatorResult{}, fmt.Errorf("unsupported dialect: %s", dialect)
 			}
+			return ValueSQL(sql, ExpressionTypeUnknown), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		sql, err := transpiler.Transpile(`{"==": [{"now": []}, "2024-01-01"]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{"==": [{"now": []}, "2024-01-01"]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE CURRENT_TIMESTAMP() = '2024-01-01'"
+		expected := "CURRENT_TIMESTAMP() = '2024-01-01'"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
 	})
 
 	t.Run("RegisterDialectAwareOperatorFunc with Spanner", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectSpanner)
-		err := transpiler.RegisterDialectAwareOperatorFunc("array_length", func(op string, args []interface{}, dialect Dialect) (string, error) {
+		transpiler := mustTestTranspiler(t, DialectSpanner)
+		err := transpiler.RegisterDialectAwareOperatorFunc("array_length", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			var sql string
 			switch dialect {
 			case DialectBigQuery:
-				return fmt.Sprintf("ARRAY_LENGTH(%s)", args[0]), nil
+				sql = fmt.Sprintf("ARRAY_LENGTH(%s)", args[0].SQL)
 			case DialectSpanner:
-				return fmt.Sprintf("ARRAY_LENGTH(%s)", args[0]), nil
+				sql = fmt.Sprintf("ARRAY_LENGTH(%s)", args[0].SQL)
 			default:
-				return "", fmt.Errorf("unsupported dialect: %s", dialect)
+				return OperatorResult{}, fmt.Errorf("unsupported dialect: %s", dialect)
 			}
+			return ValueSQL(sql, ExpressionTypeNumber), nil
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		sql, err := transpiler.Transpile(`{">": [{"array_length": [{"var": "items"}]}, 0]}`)
+		sql, err := transpileOperatorExpression(transpiler, `{">": [{"array_length": [{"var": "items"}]}, 0]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE ARRAY_LENGTH(items) > 0"
+		expected := "ARRAY_LENGTH(items) > 0"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -736,47 +784,49 @@ func TestDialectAwareOperators(t *testing.T) {
 
 	t.Run("dialect-aware operator with different output per dialect", func(t *testing.T) {
 		// Define a function that returns different SQL based on dialect
-		stringContainsOp := func(op string, args []interface{}, dialect Dialect) (string, error) {
+		stringContainsOp := func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("string_contains requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("string_contains requires 2 arguments")
 			}
+			var sql string
 			switch dialect {
 			case DialectBigQuery:
-				return fmt.Sprintf("STRPOS(%s, %s) > 0", args[0], args[1]), nil
+				sql = fmt.Sprintf("STRPOS(%s, %s) > 0", args[0].SQL, args[1].SQL)
 			case DialectSpanner:
-				return fmt.Sprintf("STRPOS(%s, %s) > 0", args[0], args[1]), nil
+				sql = fmt.Sprintf("STRPOS(%s, %s) > 0", args[0].SQL, args[1].SQL)
 			default:
-				return "", fmt.Errorf("unsupported dialect: %s", dialect)
+				return OperatorResult{}, fmt.Errorf("unsupported dialect: %s", dialect)
 			}
+			return PredicateSQL(sql), nil
 		}
 
 		// Test with BigQuery
-		bqTranspiler, _ := NewTranspiler(DialectBigQuery)
+		bqTranspiler := mustTestTranspiler(t, DialectBigQuery)
 		bqTranspiler.RegisterDialectAwareOperatorFunc("string_contains", stringContainsOp)
-		bqSQL, err := bqTranspiler.Transpile(`{"string_contains": [{"var": "name"}, "test"]}`)
+		bqSQL, err := transpileOperatorExpression(bqTranspiler, `{"string_contains": [{"var": "name"}, "test"]}`)
 		if err != nil {
 			t.Fatalf("BigQuery: unexpected error: %v", err)
 		}
-		if bqSQL != "WHERE STRPOS(name, 'test') > 0" {
-			t.Errorf("BigQuery: expected 'WHERE STRPOS(name, 'test') > 0', got %s", bqSQL)
+		if bqSQL != "STRPOS(name, 'test') > 0" {
+			t.Errorf("BigQuery: expected STRPOS(name, 'test') > 0, got %s", bqSQL)
 		}
 
 		// Test with Spanner
-		spannerTranspiler, _ := NewTranspiler(DialectSpanner)
+		spannerTranspiler := mustTestTranspiler(t, DialectSpanner)
 		spannerTranspiler.RegisterDialectAwareOperatorFunc("string_contains", stringContainsOp)
-		spannerSQL, err := spannerTranspiler.Transpile(`{"string_contains": [{"var": "name"}, "test"]}`)
+		spannerSQL, err := transpileOperatorExpression(spannerTranspiler, `{"string_contains": [{"var": "name"}, "test"]}`)
 		if err != nil {
 			t.Fatalf("Spanner: unexpected error: %v", err)
 		}
-		if spannerSQL != "WHERE STRPOS(name, 'test') > 0" {
-			t.Errorf("Spanner: expected 'WHERE STRPOS(name, 'test') > 0', got %s", spannerSQL)
+		if spannerSQL != "STRPOS(name, 'test') > 0" {
+			t.Errorf("Spanner: expected STRPOS(name, 'test') > 0, got %s", spannerSQL)
 		}
 	})
 
 	t.Run("reject built-in operator override with dialect-aware", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		err := transpiler.RegisterDialectAwareOperatorFunc("and", func(op string, args []interface{}, dialect Dialect) (string, error) {
-			return "CUSTOM_AND", nil
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
+		err := transpiler.RegisterDialectAwareOperatorFunc("and", func(op string, args []OperatorArg, dialect Dialect) (OperatorResult, error) {
+			return PredicateSQL("CUSTOM_AND"), nil
 		})
 		if err == nil {
 			t.Error("expected error when trying to override built-in operator with dialect-aware function")
@@ -788,65 +838,65 @@ func TestDialectAwareOperators(t *testing.T) {
 func TestDeeplyNestedCustomOperators(t *testing.T) {
 	// Helper to create a transpiler with common custom operators
 	setupTranspiler := func(dialect Dialect) *Transpiler {
-		tr, _ := NewTranspiler(dialect)
-		tr.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
+		tr := mustTestTranspiler(t, dialect)
+		tr.RegisterOperatorFunc("toLower", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 1 {
-				return "", fmt.Errorf("toLower requires 1 argument")
+				return OperatorResult{}, fmt.Errorf("toLower requires 1 argument")
 			}
-			return fmt.Sprintf("LOWER(%s)", args[0]), nil
+			return ValueSQL(fmt.Sprintf("LOWER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
-		tr.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("toUpper", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 1 {
-				return "", fmt.Errorf("toUpper requires 1 argument")
+				return OperatorResult{}, fmt.Errorf("toUpper requires 1 argument")
 			}
-			return fmt.Sprintf("UPPER(%s)", args[0]), nil
+			return ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
-		tr.RegisterOperatorFunc("startsWith", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("startsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("startsWith requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("startsWith requires 2 arguments")
 			}
-			return fmt.Sprintf("%s LIKE '%s%%'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE CONCAT(%s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("!startsWith", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("!startsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("!startsWith requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("!startsWith requires 2 arguments")
 			}
-			return fmt.Sprintf("%s NOT LIKE '%s%%'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE CONCAT(%s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("endsWith requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("endsWith requires 2 arguments")
 			}
-			return fmt.Sprintf("%s LIKE '%%%s'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE CONCAT('%%', %s)", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("!endsWith", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("!endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("!endsWith requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("!endsWith requires 2 arguments")
 			}
-			return fmt.Sprintf("%s NOT LIKE '%%%s'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE CONCAT('%%', %s)", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("contains", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("contains", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("contains requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("contains requires 2 arguments")
 			}
-			return fmt.Sprintf("%s LIKE '%%%s%%'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s LIKE CONCAT('%%', %s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("!contains", func(op string, args []interface{}) (string, error) {
+		tr.RegisterOperatorFunc("!contains", func(op string, args []OperatorArg) (OperatorResult, error) {
 			if len(args) != 2 {
-				return "", fmt.Errorf("!contains requires 2 arguments")
+				return OperatorResult{}, fmt.Errorf("!contains requires 2 arguments")
 			}
-			return fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0], args[1]), nil
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE CONCAT('%%', %s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
 		return tr
 	}
 
 	t.Run("custom operator inside cat", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"cat": [{"toLower": [{"var": "firstName"}]}, " ", {"toUpper": [{"var": "lastName"}]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"cat": [{"toLower": [{"var": "firstName"}]}, " ", {"toUpper": [{"var": "lastName"}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE CONCAT(LOWER(firstName), ' ', UPPER(lastName))"
+		expected := "CONCAT(COALESCE(LOWER(firstName), ''), ' ', COALESCE(UPPER(lastName), ''))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -854,11 +904,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside if then/else branches", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"if": [{"==": [{"var": "type"}, "premium"]}, {"toUpper": [{"var": "name"}]}, {"toLower": [{"var": "name"}]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"if": [{"==": [{"var": "type"}, "premium"]}, {"toUpper": [{"var": "name"}]}, {"toLower": [{"var": "name"}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE CASE WHEN type = 'premium' THEN UPPER(name) ELSE LOWER(name) END"
+		expected := "CASE WHEN type = 'premium' THEN UPPER(name) ELSE LOWER(name) END"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -866,12 +916,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside and/or", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"and": [{"startsWith": [{"var": "name"}, "A"]}, {"or": [{"endsWith": [{"var": "email"}, "@company.com"]}, {"!contains": [{"var": "desc"}, "spam"]}]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"and": [{"startsWith": [{"var": "name"}, "A"]}, {"or": [{"endsWith": [{"var": "email"}, "@company.com"]}, {"!contains": [{"var": "desc"}, "spam"]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "WHERE (name LIKE ''A'%' AND (email LIKE '%'@company.com'' OR desc NOT LIKE '%'spam'%'))"
+		expected := "(name LIKE CONCAT('A', '%') AND (email LIKE CONCAT('%', '@company.com') OR desc NOT LIKE CONCAT('%', 'spam', '%')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -879,12 +928,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside all array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "WHERE (ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')))"
+		expected := "(ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -892,12 +940,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside some array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"some": [{"var": "emails"}, {"endsWith": [{"var": "item"}, "@company.com"]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"some": [{"var": "emails"}, {"endsWith": [{"var": ""}, "@company.com"]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "WHERE EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE '%'@company.com'')"
+		expected := "EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@company.com'))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -905,12 +952,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside none array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"none": [{"var": "names"}, {"startsWith": [{"var": "item"}, "Bot"]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"none": [{"var": "names"}, {"startsWith": [{"var": ""}, "Bot"]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE ''Bot'%')"
+		expected := "NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE CONCAT('Bot', '%'))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -918,12 +964,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside filter array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"filter": [{"var": "users"}, {"and": [{"!startsWith": [{"var": "item.name"}, "Test"]}, {"!endsWith": [{"var": "item.email"}, "@temp.com"]}]}]}`)
+		sql, err := tr.TranspileValue(`{"filter": [{"var": "users"}, {"and": [{"!startsWith": [{"var": "name"}, "Test"]}, {"!endsWith": [{"var": "email"}, "@temp.com"]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "WHERE ARRAY(SELECT elem FROM UNNEST(users) AS elem WHERE (elem.name NOT LIKE ''Test'%' AND elem.email NOT LIKE '%'@temp.com''))"
+		expected := "ARRAY(SELECT elem FROM UNNEST(users) AS elem WHERE (elem.name NOT LIKE CONCAT('Test', '%') AND elem.email NOT LIKE CONCAT('%', '@temp.com')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -931,11 +976,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside map array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"map": [{"var": "names"}, {"toLower": [{"var": "item"}]}]}`)
+		sql, err := tr.TranspileValue(`{"map": [{"var": "names"}, {"toLower": [{"var": ""}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE ARRAY(SELECT LOWER(elem) FROM UNNEST(names) AS elem)"
+		expected := "ARRAY(SELECT LOWER(elem) FROM UNNEST(names) AS elem)"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -943,11 +988,16 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("custom operator inside reduce array operator", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"reduce": [{"var": "items"}, {"cat": [{"var": "accumulator"}, {"toUpper": [{"var": "current"}]}]}, ""]}`)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if sql, err := tr.TranspileValue(`{"reduce": [{"var": "items"}, {"cat": [{"var": "accumulator"}, {"toUpper": [{"var": "current"}]}]}, ""]}`); err == nil {
+			t.Fatalf("BigQuery general string reduce should be unsupported, got SQL: %s", sql)
 		}
-		expected := "WHERE (SELECT CONCAT('', UPPER(elem)) FROM UNNEST(items) AS elem)"
+
+		tr = setupTranspiler(DialectClickHouse)
+		sql, err := tr.TranspileValue(`{"reduce": [{"var": "items"}, {"cat": [{"var": "accumulator"}, {"toUpper": [{"var": "current"}]}]}, ""]}`)
+		if err != nil {
+			t.Fatalf("ClickHouse reduce error: %v", err)
+		}
+		expected := "arrayFold((acc, elem) -> CONCAT(COALESCE(acc, ''), COALESCE(UPPER(elem), '')), items, '')"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -955,12 +1005,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("deeply nested: and with all containing custom operators", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": "item"}, "@valid.com"]}]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": ""}, "@valid.com"]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "WHERE ((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%'))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE '%'@valid.com''))"
+		expected := "((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -968,12 +1017,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("deeply nested: or with none containing custom operators", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"or": [{"none": [{"var": "names"}, {"startsWith": [{"var": "item"}, "Bot"]}]}, {"all": [{"var": "scores"}, {">": [{"var": "item"}, 50]}]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"or": [{"none": [{"var": "names"}, {"startsWith": [{"var": ""}, "Bot"]}]}, {"all": [{"var": "scores"}, {">": [{"var": ""}, 50]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "WHERE (NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE ''Bot'%') OR (ARRAY_LENGTH(scores) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem > 50))))"
+		expected := "(NOT EXISTS (SELECT 1 FROM UNNEST(names) AS elem WHERE elem LIKE CONCAT('Bot', '%')) OR (ARRAY_LENGTH(scores) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem > 50))))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -981,12 +1029,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("triple nested: and with or containing all/some/none", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"and": [{"or": [{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}, {"none": [{"var": "emails"}, {"startsWith": [{"var": "item"}, "blocked_"]}]}]}, {"some": [{"var": "scores"}, {">": [{"var": "item"}, 100]}]}]}`)
+		sql, err := transpileOperatorExpression(tr, `{"and": [{"or": [{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}, {"none": [{"var": "emails"}, {"startsWith": [{"var": ""}, "blocked_"]}]}]}, {"some": [{"var": "scores"}, {">": [{"var": ""}, 100]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "WHERE (((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%'))) OR NOT EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE ''blocked_'%')) AND EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE elem > 100))"
+		expected := "(((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) OR NOT EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('blocked_', '%'))) AND EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE elem > 100))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -994,12 +1041,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("filter with nested and/or and multiple custom operators", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"filter": [{"var": "transactions"}, {"and": [{"!startsWith": [{"var": "item.name"}, "VOID"]}, {"!endsWith": [{"var": "item.category"}, "_canceled"]}, {"!contains": [{"var": "item.email"}, "spam"]}]}]}`)
+		sql, err := tr.TranspileValue(`{"filter": [{"var": "transactions"}, {"and": [{"!startsWith": [{"var": "name"}, "VOID"]}, {"!endsWith": [{"var": "category"}, "_canceled"]}, {"!contains": [{"var": "email"}, "spam"]}]}]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Note: string literals come pre-quoted from the parser
-		expected := "WHERE ARRAY(SELECT elem FROM UNNEST(transactions) AS elem WHERE (elem.name NOT LIKE ''VOID'%' AND elem.category NOT LIKE '%'_canceled'' AND elem.email NOT LIKE '%'spam'%'))"
+		expected := "ARRAY(SELECT elem FROM UNNEST(transactions) AS elem WHERE (elem.name NOT LIKE CONCAT('VOID', '%') AND elem.category NOT LIKE CONCAT('%', '_canceled') AND elem.email NOT LIKE CONCAT('%', 'spam', '%')))"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -1007,11 +1053,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("if with all condition in then branch", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"if": [{"all": [{"var": "scores"}, {">": [{"var": "item"}, 50]}]}, {"var": "status"}, "FAILED"]}`)
+		sql, err := tr.TranspileValue(`{"if": [{"all": [{"var": "scores"}, {">": [{"var": ""}, 50]}]}, {"var": "status"}, "FAILED"]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE CASE WHEN (ARRAY_LENGTH(scores) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem > 50))) THEN status ELSE 'FAILED' END"
+		expected := "CASE WHEN (ARRAY_LENGTH(scores) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem > 50))) THEN status ELSE 'FAILED' END"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -1019,11 +1065,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("comparison with custom operator result", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"==": [{"toLower": [{"var": "status"}]}, "active"]}`)
+		sql, err := transpileOperatorExpression(tr, `{"==": [{"toLower": [{"var": "status"}]}, "active"]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE LOWER(status) = 'active'"
+		expected := "LOWER(status) = 'active'"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -1031,11 +1077,11 @@ func TestDeeplyNestedCustomOperators(t *testing.T) {
 
 	t.Run("nested custom operators inside substr", func(t *testing.T) {
 		tr := setupTranspiler(DialectBigQuery)
-		sql, err := tr.Transpile(`{"!=": [{"substr": [{"toUpper": [{"var": "region"}]}, 0, 2]}, "XX"]}`)
+		sql, err := transpileOperatorExpression(tr, `{"!=": [{"substr": [{"toUpper": [{"var": "region"}]}, 0, 2]}, "XX"]}`)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		expected := "WHERE SUBSTR(UPPER(region), 1, 2) != 'XX'"
+		expected := "SUBSTR(UPPER(region), 1, 2) != 'XX'"
 		if sql != expected {
 			t.Errorf("expected %s, got %s", expected, sql)
 		}
@@ -1057,18 +1103,18 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 
 	// Helper to create a transpiler with common custom operators
 	setupTranspiler := func(dialect Dialect) *Transpiler {
-		tr, _ := NewTranspiler(dialect)
-		tr.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("LOWER(%s)", args[0]), nil
+		tr := mustTestTranspiler(t, dialect)
+		tr.RegisterOperatorFunc("toLower", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("LOWER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
-		tr.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("UPPER(%s)", args[0]), nil
+		tr.RegisterOperatorFunc("toUpper", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), ExpressionTypeString), nil
 		})
-		tr.RegisterOperatorFunc("!contains", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("%s NOT LIKE '%%%s%%'", args[0], args[1]), nil
+		tr.RegisterOperatorFunc("!contains", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return PredicateSQL(fmt.Sprintf("%s NOT LIKE CONCAT('%%', %s, '%%')", args[0].SQL, args[1].SQL)), nil
 		})
-		tr.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
-			return fmt.Sprintf("%s LIKE '%%%s'", args[0], args[1]), nil
+		tr.RegisterOperatorFunc("endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
+			return PredicateSQL(fmt.Sprintf("%s LIKE CONCAT('%%', %s)", args[0].SQL, args[1].SQL)), nil
 		})
 		return tr
 	}
@@ -1078,60 +1124,70 @@ func TestDeeplyNestedCustomOperatorsMultiDialect(t *testing.T) {
 			tr := setupTranspiler(d.dialect)
 
 			// Test: custom operator inside cat
-			sql, err := tr.Transpile(`{"cat": ["Hello ", {"toUpper": [{"var": "name"}]}]}`)
+			sql, err := tr.TranspileValue(`{"cat": ["Hello ", {"toUpper": [{"var": "name"}]}]}`)
 			if err != nil {
 				t.Errorf("[%s] cat with custom operator: unexpected error: %v", d.name, err)
 			}
-			if sql != "WHERE CONCAT('Hello ', UPPER(name))" {
+			if sql != "CONCAT('Hello ', COALESCE(UPPER(name), ''))" {
 				t.Errorf("[%s] cat with custom operator: got %s", d.name, sql)
 			}
 
 			// Test: custom operator inside map
-			sql, err = tr.Transpile(`{"map": [{"var": "tags"}, {"toLower": [{"var": "item"}]}]}`)
+			sql, err = tr.TranspileValue(`{"map": [{"var": "tags"}, {"toLower": [{"var": ""}]}]}`)
 			if err != nil {
 				t.Errorf("[%s] map with custom operator: unexpected error: %v", d.name, err)
 			}
 			// ClickHouse uses arrayMap, others use UNNEST
 			if d.dialect == DialectClickHouse {
-				if sql != "WHERE arrayMap(elem -> LOWER(elem), tags)" {
+				if sql != "arrayMap(elem -> LOWER(elem), tags)" {
 					t.Errorf("[%s] map with custom operator: got %s", d.name, sql)
 				}
 			} else {
-				if sql != "WHERE ARRAY(SELECT LOWER(elem) FROM UNNEST(tags) AS elem)" {
-					t.Errorf("[%s] map with custom operator: got %s", d.name, sql)
+				expectedMap := testDuckDBUnnestSourceAliases(d.dialect, "ARRAY(SELECT LOWER(elem) FROM UNNEST(tags) AS elem)")
+				if sql != expectedMap {
+					t.Errorf("[%s] map with custom operator: got %s, want %s", d.name, sql, expectedMap)
 				}
 			}
 
 			// Test: custom operator inside all
-			sql, err = tr.Transpile(`{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}`)
+			sql, err = transpileOperatorExpression(tr, `{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}`)
 			if err != nil {
 				t.Errorf("[%s] all with custom operator: unexpected error: %v", d.name, err)
 			}
-			// ClickHouse uses arrayAll, others use NOT EXISTS with dialect-specific array length
-			// Note: string literals come pre-quoted from the parser
+			// ClickHouse uses arrayAll, others use NOT EXISTS with dialect-specific array length.
 			var expectedAll string
 			switch d.dialect {
 			case DialectClickHouse:
-				expectedAll = "WHERE (length(tags) > 0 AND arrayAll(elem -> elem NOT LIKE '%'spam'%', tags))"
+				expectedAll = "(length(tags) > 0 AND arrayAll(elem -> elem NOT LIKE CONCAT('%', 'spam', '%'), tags))"
 			case DialectPostgreSQL:
-				expectedAll = "WHERE (CARDINALITY(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')))"
+				expectedAll = "(CARDINALITY(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
 			case DialectDuckDB:
-				expectedAll = "WHERE (length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')))"
+				expectedAll = testDuckDBUnnestSourceAliases(d.dialect, "(length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))")
 			default: // BigQuery, Spanner
-				expectedAll = "WHERE (ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%'spam'%')))"
+				expectedAll = "(ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%'))))"
 			}
 			if sql != expectedAll {
 				t.Errorf("[%s] all with custom operator: got %s", d.name, sql)
 			}
 
 			// Test: and with all and some containing custom operators
-			sql, err = tr.Transpile(`{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": "item"}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": "item"}, "@valid.com"]}]}]}`)
+			sql, err = transpileOperatorExpression(tr, `{"and": [{"all": [{"var": "tags"}, {"!contains": [{"var": ""}, "spam"]}]}, {"some": [{"var": "emails"}, {"endsWith": [{"var": ""}, "@valid.com"]}]}]}`)
 			if err != nil {
 				t.Errorf("[%s] and with all/some: unexpected error: %v", d.name, err)
 			}
-			// Just verify no error - detailed output differs by dialect
-			if sql == "" {
-				t.Errorf("[%s] and with all/some: got empty result", d.name)
+			var expectedAnd string
+			switch d.dialect {
+			case DialectClickHouse:
+				expectedAnd = "((length(tags) > 0 AND arrayAll(elem -> elem NOT LIKE CONCAT('%', 'spam', '%'), tags)) AND arrayExists(elem -> elem LIKE CONCAT('%', '@valid.com'), emails))"
+			case DialectPostgreSQL:
+				expectedAnd = "((CARDINALITY(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
+			case DialectDuckDB:
+				expectedAnd = testDuckDBUnnestSourceAliases(d.dialect, "((length(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))")
+			default:
+				expectedAnd = "((ARRAY_LENGTH(tags) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE CONCAT('%', 'spam', '%')))) AND EXISTS (SELECT 1 FROM UNNEST(emails) AS elem WHERE elem LIKE CONCAT('%', '@valid.com')))"
+			}
+			if sql != expectedAnd {
+				t.Errorf("[%s] and with all/some: got %s, want %s", d.name, sql, expectedAnd)
 			}
 		})
 	}

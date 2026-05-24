@@ -15,11 +15,13 @@ jsonlogic2sql supports multiple SQL dialects, generating appropriate syntax for 
 ## Usage
 
 ```go
+schema, _ := jsonlogic2sql.NewSchema(nil) // literal-only expressions
+
 // Create transpiler with specific dialect
-transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Or use convenience functions
-sql, err := jsonlogic2sql.Transpile(jsonlogic2sql.DialectPostgreSQL, jsonLogic)
+sql, err := jsonlogic2sql.TranspileCondition(jsonlogic2sql.DialectPostgreSQL, schema, jsonLogic)
 ```
 
 ## Operator Compatibility by Dialect
@@ -37,17 +39,17 @@ All JSON Logic operators are supported across all dialects. The library generate
 
 ## Identifier Quoting
 
-Path segments that are not valid unquoted SQL identifiers (e.g. start with a digit) are automatically quoted using the dialect-appropriate character:
+Path segments outside the portable unquoted ASCII identifier shape (for example numeric-leading or Unicode segments) are automatically quoted using the dialect-appropriate character:
 
 | Dialect | Quote Character | Example |
 |---------|----------------|---------|
-| BigQuery | Backtick (`` ` ``) | `` fixture.history.`24h`.events.total `` |
-| Spanner | Backtick (`` ` ``) | `` fixture.history.`24h`.events.total `` |
-| PostgreSQL | Double quote (`"`) | `fixture.history."24h".events.total` |
-| DuckDB | Double quote (`"`) | `fixture.history."24h".events.total` |
-| ClickHouse | Backtick (`` ` ``) | `` fixture.history.`24h`.events.total `` |
+| BigQuery | Backtick (`` ` ``) | `` fixture.history.`24h`.`café`.total `` |
+| Spanner | Backtick (`` ` ``) | `` fixture.history.`24h`.`café`.total `` |
+| PostgreSQL | Double quote (`"`) | `fixture.history."24h"."café".total` |
+| DuckDB | Double quote (`"`) | `fixture.history."24h"."café".total` |
+| ClickHouse | Backtick (`` ` ``) | `` fixture.history.`24h`.`café`.total `` |
 
-Segments that only contain letters, digits, and underscores (and don't start with a digit) remain unquoted. The same per-segment quoting is applied inside array scopes such as `current.24h`/`item.24h` and before variable references are passed to custom operators.
+ASCII segments that only contain letters, digits, and underscores (and don't start with a digit) remain unquoted. Unicode letters and digits are accepted by schema validation, but are quoted for portable SQL output. The same per-segment quoting is applied inside array lambdas such as `{"var":"24h"}` or `{"var":"café"}`, inside reduce scopes such as `{"var":"current.24h"}`, and before variable references are passed to custom operators.
 
 ## Dialect-Specific SQL Generation
 
@@ -55,12 +57,39 @@ Some operators generate different SQL based on the target dialect:
 
 | Operator | BigQuery | Spanner | PostgreSQL | DuckDB | ClickHouse |
 |----------|----------|---------|------------|--------|------------|
-| `merge` (arrays) | `ARRAY_CONCAT(a, b)` | `ARRAY_CONCAT(a, b)` | `(a \|\| b)` | `ARRAY_CONCAT(a, b)` | `arrayConcat(a, b)` |
+| `merge` (arrays/scalars) | `ARRAY_CONCAT(a, [x])` | `ARRAY_CONCAT(a, [x])` | `(a \|\| ARRAY[x])` | `ARRAY_CONCAT(a, [x])` | `arrayConcat(a, [x])` |
 | `map` (arrays) | `ARRAY(SELECT ... UNNEST)` | `ARRAY(SELECT ... UNNEST)` | `ARRAY(SELECT ... UNNEST)` | `ARRAY(SELECT ... UNNEST)` | `arrayMap(x -> ..., arr)` |
 | `filter` (arrays) | `ARRAY(SELECT ... WHERE)` | `ARRAY(SELECT ... WHERE)` | `ARRAY(SELECT ... WHERE)` | `ARRAY(SELECT ... WHERE)` | `arrayFilter(x -> ..., arr)` |
+| `%` | `MOD(a, b)` | `MOD(a, b)` | `(a % b)` | `(a % b)` | `(a % b)` |
 | `substr` | `SUBSTR(s, i, n)` | `SUBSTR(s, i, n)` | `SUBSTR(s, i, n)` | `SUBSTR(s, i, n)` | `substring(s, i, n)` |
-| `in` (array) | `value IN UNNEST(array)` | `value IN UNNEST(array)` | `value = ANY(array)` | `list_contains(array, value)` | `has(array, value)` |
+| `in` (array) | `EXISTS ... UNNEST(array)` | `EXISTS ... UNNEST(array)` | `EXISTS ... UNNEST(array)` | `EXISTS ... UNNEST(array)` | `arrayExists(...)` |
 | `in` (string) | `STRPOS(h, n) > 0` | `STRPOS(h, n) > 0` | `POSITION(n IN h) > 0` | `STRPOS(h, n) > 0` | `position(h, n) > 0` |
+
+DuckDB `UNNEST` scopes use an explicit column alias, for example
+`UNNEST(items) AS elem(elem)`, because DuckDB otherwise exposes the element as
+a struct-like `unnest` column. BigQuery, Spanner, and PostgreSQL use the shorter
+`UNNEST(items) AS elem` form. ClickHouse uses lambda array functions instead of
+`UNNEST`.
+
+`substr` uses the dialect-specific function name above for simple positive
+literal indexes. Negative or dynamic start/length operands are wrapped with
+portable `CASE`, `GREATEST`, and `LENGTH`/`length` expressions to preserve
+JSONLogic `substr` behavior.
+
+PostgreSQL array literals use `ARRAY[...]`. Empty-array value results are
+rejected whenever the emitted SQL would contain an untyped `ARRAY[]`, because
+PostgreSQL requires an explicit element type and the transpiler does not always
+have enough type context. Foldable contexts that do not need to emit the empty
+array, such as value fallbacks and empty-array `all`/`some`/`none` predicates,
+can still fold normally.
+
+PostgreSQL multidimensional array literals must also be rectangular. The
+transpiler rejects ragged direct literals such as `[[1], [2, 3]]` instead of
+emitting `ARRAY[ARRAY[1], ARRAY[2, 3]]`, which PostgreSQL rejects at execution.
+
+BigQuery and Spanner do not support array literals whose elements are arrays.
+The transpiler rejects direct nested-array literal shapes in those dialects
+instead of emitting invalid SQL such as `[[]]` or `[[1]]`.
 
 ## SQL Function Reference by Dialect
 
@@ -71,13 +100,25 @@ Some operators generate different SQL based on the target dialect:
 | Substring | `SUBSTR()` | `SUBSTR()` | `SUBSTR()` | `SUBSTR()` | `substring()` |
 | Array map | `UNNEST` subquery | `UNNEST` subquery | `UNNEST` subquery | `UNNEST` subquery | `arrayMap()` |
 | Array filter | `UNNEST` subquery | `UNNEST` subquery | `UNNEST` subquery | `UNNEST` subquery | `arrayFilter()` |
-| Array reduce | `SUM/MIN/MAX` | `SUM/MIN/MAX` | `SUM/MIN/MAX` | `SUM/MIN/MAX` | `arrayReduce()` |
+| Array reduce | `SUM/MIN/MAX` aggregate patterns | `SUM/MIN/MAX` aggregate patterns | `SUM/MIN/MAX` aggregate patterns | `SUM/MIN/MAX` aggregate patterns; `list_reduce()` for arbitrary scalar reducers without nested subqueries | `arrayReduce()` for aggregate patterns; `arrayFold()` for arbitrary reducers |
 | Array concat | `ARRAY_CONCAT()` | `ARRAY_CONCAT()` | `\|\|` | `ARRAY_CONCAT()` | `arrayConcat()` |
 | Max of values | `GREATEST()` | `GREATEST()` | `GREATEST()` | `GREATEST()` | `greatest()` |
 | Min of values | `LEAST()` | `LEAST()` | `LEAST()` | `LEAST()` | `least()` |
-| Null coalesce | `COALESCE()` | `COALESCE()` | `COALESCE()` | `COALESCE()` | `coalesce()` |
 | Safe divide | `SAFE_DIVIDE()` | N/A (use CASE) | N/A (use CASE) | N/A (use CASE) | `if()` expression |
 | Regex match | `REGEXP_CONTAINS()` | `REGEXP_CONTAINS()` | `~` | `regexp_matches()` | `match()` |
+
+String containment coerces nullable needles with JavaScript-style
+stringification (`NULL` becomes `'null'`) and treats empty needles as a match
+for any non-null haystack, matching JavaScript `indexOf`. `cat` uses
+JSONLogic's join-style stringification instead, so nullable operands are
+wrapped with
+`COALESCE(value, '')`, and untyped or numeric operands are cast with the
+dialect's string cast before `COALESCE`.
+
+Array membership uses null-safe element equality rather than compact dialect
+helpers such as `= ANY`, `list_contains`, or `has`, because JSONLogic treats
+`null in [null]` as true while SQL nullable equality normally returns
+`UNKNOWN`.
 
 ## Custom Dialect-Aware Operators
 
@@ -85,18 +126,21 @@ You can create custom operators that generate different SQL per dialect:
 
 ```go
 transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
-    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
-        numerator := args[0].(string)
-        denominator := args[1].(string)
+    func(op string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
+        numerator := args[0].SQL
+        denominator := args[1].SQL
 
         switch dialect {
         case jsonlogic2sql.DialectBigQuery:
-            return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+            return jsonlogic2sql.ValueSQL(fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), jsonlogic2sql.ExpressionTypeNumber), nil
         case jsonlogic2sql.DialectClickHouse:
-            return fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), nil
+            return jsonlogic2sql.ValueSQL(fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), jsonlogic2sql.ExpressionTypeNumber), nil
         default:
-            return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
-                denominator, numerator, denominator), nil
+            return jsonlogic2sql.ValueSQL(
+                fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+                    denominator, numerator, denominator),
+                jsonlogic2sql.ExpressionTypeNumber,
+            ), nil
         }
     })
 ```
@@ -111,7 +155,7 @@ When using parameterized queries, the placeholder style varies by dialect:
 |---------|-------|---------------------|
 | BigQuery | Named | `@p1`, `@p2`, `@p3` |
 | Spanner | Named | `@p1`, `@p2`, `@p3` |
-| ClickHouse | Named | `@p1`, `@p2`, `@p3` |
+| ClickHouse | Typed named | `{p1:String}`, `{p2:Float64}` |
 | PostgreSQL | Positional | `$1`, `$2`, `$3` |
 | DuckDB | Positional | `$1`, `$2`, `$3` |
 

@@ -23,7 +23,35 @@ transpiler.RegisterOperatorFunc("and", handler)    // built-in operator
 
 ## Using a Function
 
-The simplest way to register a custom operator:
+The simplest way to register a custom operator is to return a typed `OperatorResult`.
+Use `ValueSQL` for scalar/value expressions, `ArrayValueSQL` for array
+expressions with known immediate element types, and `PredicateSQL` for boolean
+predicates. This lets `TranspileCondition` reject value-only operators at the
+root while still allowing those operators inside comparisons.
+For nested arrays, set `OperatorResult.ArrayElementTypes` with the immediate
+element type first, for example `[]ExpressionType{ExpressionTypeArray,
+ExpressionTypeNumber}` for `array<array<number>>`.
+For object-array results, set `OperatorResult.ArrayElementSchemaScopes` to the
+schema path or paths whose element fields describe the returned objects; this
+keeps downstream array lambdas schema-validated.
+
+Custom operators must use this typed contract. Legacy handlers that return only
+a SQL string are no longer accepted because the transpiler cannot infer whether
+the SQL is a predicate or a value expression safely.
+`ValueSQL("NULL", ExpressionTypeNull)` is treated as a statically falsy
+JSONLogic value, so value-mode `and`/`or`/`if` short-circuit the same way they
+do for a literal `null`.
+
+The examples below assume a schema variable such as:
+
+```go
+schema, _ := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "name", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+})
+```
 
 ```go
 package main
@@ -34,26 +62,32 @@ import (
 )
 
 func main() {
-    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    schema, _ := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+    })
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
     // Register a custom "length" operator
-    err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+    err := transpiler.RegisterOperatorFunc("length", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
         if len(args) != 1 {
-            return "", fmt.Errorf("length requires exactly 1 argument")
+            return jsonlogic2sql.OperatorResult{}, fmt.Errorf("length requires exactly 1 argument")
         }
-        return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+        return jsonlogic2sql.ValueSQL(
+            fmt.Sprintf("LENGTH(%s)", args[0].SQL),
+            jsonlogic2sql.ExpressionTypeNumber,
+        ), nil
     })
     if err != nil {
         panic(err)
     }
 
     // Use the custom operator
-    sql, _ := transpiler.Transpile(`{"length": [{"var": "email"}]}`)
-    fmt.Println(sql) // Output: WHERE LENGTH(email)
+    sql, _ := transpiler.TranspileValue(`{"length": [{"var": "email"}]}`)
+    fmt.Println(sql) // Output: LENGTH(email)
 
     // Use in comparisons
-    sql, _ = transpiler.Transpile(`{">": [{"length": [{"var": "email"}]}, 10]}`)
-    fmt.Println(sql) // Output: WHERE LENGTH(email) > 10
+    sql, _ = transpiler.TranspileCondition(`{">": [{"length": [{"var": "email"}]}, 10]}`)
+    fmt.Println(sql) // Output: LENGTH(email) > 10
 }
 ```
 
@@ -72,15 +106,15 @@ import (
 // UpperOperator implements the OperatorHandler interface
 type UpperOperator struct{}
 
-func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, error) {
+func (u *UpperOperator) ToSQL(operator string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
     if len(args) != 1 {
-        return "", fmt.Errorf("upper requires exactly 1 argument")
+        return jsonlogic2sql.OperatorResult{}, fmt.Errorf("upper requires exactly 1 argument")
     }
-    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+    return jsonlogic2sql.ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), jsonlogic2sql.ExpressionTypeString), nil
 }
 
 func main() {
-    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
     // Register the handler
     err := transpiler.RegisterOperator("upper", &UpperOperator{})
@@ -88,8 +122,8 @@ func main() {
         panic(err)
     }
 
-    sql, _ := transpiler.Transpile(`{"==": [{"upper": [{"var": "name"}]}, "JOHN"]}`)
-    fmt.Println(sql) // Output: WHERE UPPER(name) = 'JOHN'
+    sql, _ := transpiler.TranspileCondition(`{"==": [{"upper": [{"var": "name"}]}, "JOHN"]}`)
+    fmt.Println(sql) // Output: UPPER(name) = 'JOHN'
 }
 ```
 
@@ -98,25 +132,25 @@ func main() {
 Register and use multiple custom operators together:
 
 ```go
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
-transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
-    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+transpiler.RegisterOperatorFunc("length", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+    return jsonlogic2sql.ValueSQL(fmt.Sprintf("LENGTH(%s)", args[0].SQL), jsonlogic2sql.ExpressionTypeNumber), nil
 })
 
-transpiler.RegisterOperatorFunc("upper", func(op string, args []interface{}) (string, error) {
-    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+transpiler.RegisterOperatorFunc("upper", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+    return jsonlogic2sql.ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), jsonlogic2sql.ExpressionTypeString), nil
 })
 
 // Use both in a complex expression
-sql, _ := transpiler.Transpile(`{"and": [{">": [{"length": [{"var": "name"}]}, 5]}, {"==": [{"upper": [{"var": "status"}]}, "ACTIVE"]}]}`)
-// Output: WHERE (LENGTH(name) > 5 AND UPPER(status) = 'ACTIVE')
+sql, _ := transpiler.TranspileCondition(`{"and": [{">": [{"length": [{"var": "name"}]}, 5]}, {"==": [{"upper": [{"var": "status"}]}, "ACTIVE"]}]}`)
+// Output: (LENGTH(name) > 5 AND UPPER(status) = 'ACTIVE')
 ```
 
 ## Managing Custom Operators
 
 ```go
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Check if an operator is registered
 if transpiler.HasCustomOperator("length") {
@@ -145,34 +179,43 @@ operators receive dialect-correct SQL column references. For example,
 `fixture.history."24h".events.total` for PostgreSQL/DuckDB.
 
 ```go
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // safeDivide: Division that returns NULL on division by zero
 transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
-    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    func(op string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
         if len(args) != 2 {
-            return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+            return jsonlogic2sql.OperatorResult{}, fmt.Errorf("safeDivide requires exactly 2 arguments")
         }
-        numerator := args[0].(string)
-        denominator := args[1].(string)
+        numerator := args[0].SQL
+        denominator := args[1].SQL
 
         switch dialect {
         case jsonlogic2sql.DialectBigQuery:
             // BigQuery has built-in SAFE_DIVIDE
-            return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+            return jsonlogic2sql.ValueSQL(
+                fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator),
+                jsonlogic2sql.ExpressionTypeNumber,
+            ), nil
         case jsonlogic2sql.DialectClickHouse:
             // ClickHouse uses if() expression
-            return fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), nil
+            return jsonlogic2sql.ValueSQL(
+                fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator),
+                jsonlogic2sql.ExpressionTypeNumber,
+            ), nil
         default:
             // Other dialects use CASE expression
-            return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
-                denominator, numerator, denominator), nil
+            return jsonlogic2sql.ValueSQL(
+                fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+                    denominator, numerator, denominator),
+                jsonlogic2sql.ExpressionTypeNumber,
+            ), nil
         }
     })
 
-sql, _ := transpiler.Transpile(`{"safeDivide": [{"var": "total"}, {"var": "count"}]}`)
-// BigQuery: WHERE SAFE_DIVIDE(total, count)
-// Spanner:  WHERE CASE WHEN count = 0 THEN NULL ELSE total / count END
+sql, _ := transpiler.TranspileValue(`{"safeDivide": [{"var": "total"}, {"var": "count"}]}`)
+// BigQuery: SAFE_DIVIDE(total, count)
+// Spanner:  CASE WHEN count = 0 THEN NULL ELSE total / count END
 ```
 
 ### Using a Handler Struct for Dialect-Aware Operators
@@ -180,25 +223,28 @@ sql, _ := transpiler.Transpile(`{"safeDivide": [{"var": "total"}, {"var": "count
 ```go
 type SafeDivideOperator struct{}
 
-func (s *SafeDivideOperator) ToSQLWithDialect(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+func (s *SafeDivideOperator) ToSQLWithDialect(op string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
     if len(args) != 2 {
-        return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+        return jsonlogic2sql.OperatorResult{}, fmt.Errorf("safeDivide requires exactly 2 arguments")
     }
-    numerator := args[0].(string)
-    denominator := args[1].(string)
+    numerator := args[0].SQL
+    denominator := args[1].SQL
 
     switch dialect {
     case jsonlogic2sql.DialectBigQuery:
-        return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+        return jsonlogic2sql.ValueSQL(fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), jsonlogic2sql.ExpressionTypeNumber), nil
     case jsonlogic2sql.DialectSpanner:
-        return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
-            denominator, numerator, denominator), nil
+        return jsonlogic2sql.ValueSQL(
+            fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+                denominator, numerator, denominator),
+            jsonlogic2sql.ExpressionTypeNumber,
+        ), nil
     default:
-        return "", fmt.Errorf("unsupported dialect: %v", dialect)
+        return jsonlogic2sql.OperatorResult{}, fmt.Errorf("unsupported dialect: %v", dialect)
     }
 }
 
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 transpiler.RegisterDialectAwareOperator("safeDivide", &SafeDivideOperator{})
 ```
 
@@ -207,28 +253,28 @@ transpiler.RegisterDialectAwareOperator("safeDivide", &SafeDivideOperator{})
 Custom operators work seamlessly when nested inside any built-in operator:
 
 ```go
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Register custom operators
-transpiler.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
-    return fmt.Sprintf("LOWER(%s)", args[0]), nil
+transpiler.RegisterOperatorFunc("toLower", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+    return jsonlogic2sql.ValueSQL(fmt.Sprintf("LOWER(%s)", args[0].SQL), jsonlogic2sql.ExpressionTypeString), nil
 })
 
-transpiler.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
-    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+transpiler.RegisterOperatorFunc("toUpper", func(op string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+    return jsonlogic2sql.ValueSQL(fmt.Sprintf("UPPER(%s)", args[0].SQL), jsonlogic2sql.ExpressionTypeString), nil
 })
 
 // Custom operators nested inside cat (string concatenation)
-sql, _ := transpiler.Transpile(`{"cat": [{"toLower": [{"var": "firstName"}]}, " ", {"toUpper": [{"var": "lastName"}]}]}`)
-// Output: WHERE CONCAT(LOWER(firstName), ' ', UPPER(lastName))
+sql, _ := transpiler.TranspileValue(`{"cat": [{"toLower": [{"var": "firstName"}]}, " ", {"toUpper": [{"var": "lastName"}]}]}`)
+// Output: CONCAT(COALESCE(LOWER(firstName), ''), ' ', COALESCE(UPPER(lastName), ''))
 
 // Custom operators nested inside if (conditional)
-sql, _ = transpiler.Transpile(`{"if": [{"==": [{"var": "type"}, "premium"]}, {"toUpper": [{"var": "name"}]}, {"toLower": [{"var": "name"}]}]}`)
-// Output: WHERE CASE WHEN type = 'premium' THEN UPPER(name) ELSE LOWER(name) END
+sql, _ = transpiler.TranspileValue(`{"if": [{"==": [{"var": "type"}, "premium"]}, {"toUpper": [{"var": "name"}]}, {"toLower": [{"var": "name"}]}]}`)
+// Output: CASE WHEN type = 'premium' THEN UPPER(name) ELSE LOWER(name) END
 
 // Custom operators inside and/or (logical operators)
-sql, _ = transpiler.Transpile(`{"and": [{"==": [{"toLower": [{"var": "status"}]}, "active"]}, {">": [{"var": "amount"}, 100]}]}`)
-// Output: WHERE (LOWER(status) = 'active' AND amount > 100)
+sql, _ = transpiler.TranspileCondition(`{"and": [{"==": [{"toLower": [{"var": "status"}]}, "active"]}, {">": [{"var": "amount"}, 100]}]}`)
+// Output: (LOWER(status) = 'active' AND amount > 100)
 ```
 
 ### Deeply Nested Example
@@ -274,17 +320,17 @@ This demonstrates:
 
 **BigQuery Output:**
 ```sql
-WHERE (SAFE_DIVIDE(revenue, cost) > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+(SAFE_DIVIDE(revenue, cost) > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
 ```
 
 **Spanner/PostgreSQL/DuckDB Output:**
 ```sql
-WHERE (CASE WHEN cost = 0 THEN NULL ELSE revenue / cost END > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+(CASE WHEN cost = 0 THEN NULL ELSE revenue / cost END > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
 ```
 
 **ClickHouse Output:**
 ```sql
-WHERE (if(cost = 0, NULL, revenue / cost) > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
+(if(cost = 0, NULL, revenue / cost) > 1.5 AND status IN ('active', 'pending') AND (region LIKE 'US%' OR priority >= 5) AND category LIKE '%premium%')
 ```
 
 ## See Also

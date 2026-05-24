@@ -25,68 +25,95 @@ func decodeLogicAnyLocal(t *testing.T, logic string) interface{} {
 	return v
 }
 
-func assertAccumulatorSchemaError(t *testing.T, err error) {
+func assertAccumulatorFieldSQL(t *testing.T, sql string) {
 	t.Helper()
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	msg := strings.ToLower(err.Error())
-	if !strings.Contains(msg, "accumulator") {
-		t.Fatalf("expected error to mention accumulator, got: %v", err)
-	}
-	if !strings.Contains(msg, "schema") {
-		t.Fatalf("expected schema validation error, got: %v", err)
+	if !strings.Contains(sql, "elem.accumulator") {
+		t.Fatalf("expected accumulator to resolve as an element field, got: %s", sql)
 	}
 }
 
-func assertAllAPIsErrorForAccumulatorOutsideReduce(t *testing.T, tr *Transpiler, logic string) {
+func assertAllAPIsResolveAccumulatorAsElementField(t *testing.T, tr *Transpiler, logic string, valueMode bool) {
 	t.Helper()
 
 	m := decodeLogicMapLocal(t, logic)
 	logicAny := decodeLogicAnyLocal(t, logic)
 
-	_, err := tr.Transpile(logic)
-	assertAccumulatorSchemaError(t, err)
+	var (
+		sql string
+		err error
+	)
+	if valueMode {
+		sql, err = tr.TranspileValue(logic)
+	} else {
+		sql, err = tr.TranspileCondition(logic)
+	}
+	if err != nil {
+		t.Fatalf("inline transpilation error: %v", err)
+	}
+	assertAccumulatorFieldSQL(t, sql)
 
-	_, err = tr.TranspileCondition(logic)
-	assertAccumulatorSchemaError(t, err)
+	if valueMode {
+		sql, err = tr.TranspileValueFromMap(m)
+	} else {
+		sql, err = tr.TranspileConditionFromMap(m)
+	}
+	if err != nil {
+		t.Fatalf("map transpilation error: %v", err)
+	}
+	assertAccumulatorFieldSQL(t, sql)
 
-	_, _, err = tr.TranspileParameterized(logic)
-	assertAccumulatorSchemaError(t, err)
+	if valueMode {
+		sql, err = tr.TranspileValueFromInterface(logicAny)
+	} else {
+		sql, err = tr.TranspileConditionFromInterface(logicAny)
+	}
+	if err != nil {
+		t.Fatalf("interface transpilation error: %v", err)
+	}
+	assertAccumulatorFieldSQL(t, sql)
 
-	_, _, err = tr.TranspileConditionParameterized(logic)
-	assertAccumulatorSchemaError(t, err)
+	if valueMode {
+		sql, _, err = tr.TranspileParameterizedValue(logic)
+	} else {
+		sql, _, err = tr.TranspileParameterizedCondition(logic)
+	}
+	if err != nil {
+		t.Fatalf("parameterized transpilation error: %v", err)
+	}
+	assertAccumulatorFieldSQL(t, sql)
 
-	_, err = tr.TranspileFromMap(m)
-	assertAccumulatorSchemaError(t, err)
+	if valueMode {
+		sql, _, err = tr.TranspileParameterizedValueFromMap(m)
+	} else {
+		sql, _, err = tr.TranspileParameterizedConditionFromMap(m)
+	}
+	if err != nil {
+		t.Fatalf("parameterized map transpilation error: %v", err)
+	}
+	assertAccumulatorFieldSQL(t, sql)
 
-	_, err = tr.TranspileFromInterface(logicAny)
-	assertAccumulatorSchemaError(t, err)
-
-	_, err = tr.TranspileConditionFromMap(m)
-	assertAccumulatorSchemaError(t, err)
-
-	_, err = tr.TranspileConditionFromInterface(logicAny)
-	assertAccumulatorSchemaError(t, err)
-
-	_, _, err = tr.TranspileParameterizedFromMap(m)
-	assertAccumulatorSchemaError(t, err)
-
-	_, _, err = tr.TranspileParameterizedFromInterface(logicAny)
-	assertAccumulatorSchemaError(t, err)
-
-	_, _, err = tr.TranspileConditionParameterizedFromMap(m)
-	assertAccumulatorSchemaError(t, err)
-
-	_, _, err = tr.TranspileConditionParameterizedFromInterface(logicAny)
-	assertAccumulatorSchemaError(t, err)
+	if valueMode {
+		sql, _, err = tr.TranspileParameterizedValueFromInterface(logicAny)
+	} else {
+		sql, _, err = tr.TranspileParameterizedConditionFromInterface(logicAny)
+	}
+	if err != nil {
+		t.Fatalf("parameterized interface transpilation error: %v", err)
+	}
+	assertAccumulatorFieldSQL(t, sql)
 }
 
-func TestAccumulatorOutsideReduceRejectedWithSchema_AllDialects(t *testing.T) {
+func TestAccumulatorOutsideReduceResolvesAsElementField_AllDialects(t *testing.T) {
 	t.Parallel()
 
 	schema := mustNewSchema([]FieldSchema{
-		{Name: "bag.numbers", Type: FieldTypeArray},
+		{
+			Name: "bag.numbers",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{Name: "accumulator", Type: FieldTypeNumber},
+			},
+		},
 	})
 
 	dialects := []Dialect{
@@ -98,16 +125,19 @@ func TestAccumulatorOutsideReduceRejectedWithSchema_AllDialects(t *testing.T) {
 	}
 
 	cases := []struct {
-		name  string
-		logic string
+		name      string
+		logic     string
+		valueMode bool
 	}{
 		{
-			name:  "map expression",
-			logic: `{"map":[{"var":"bag.numbers"},{"+":[{"var":"accumulator"},1]}]}`,
+			name:      "map expression",
+			logic:     `{"map":[{"var":"bag.numbers"},{"+":[{"var":"accumulator"},1]}]}`,
+			valueMode: true,
 		},
 		{
-			name:  "filter predicate",
-			logic: `{"filter":[{"var":"bag.numbers"},{">":[{"var":"accumulator"},0]}]}`,
+			name:      "filter predicate",
+			logic:     `{"filter":[{"var":"bag.numbers"},{">":[{"var":"accumulator"},0]}]}`,
+			valueMode: true,
 		},
 		{
 			name:  "all predicate",
@@ -137,7 +167,7 @@ func TestAccumulatorOutsideReduceRejectedWithSchema_AllDialects(t *testing.T) {
 
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
-					assertAllAPIsErrorForAccumulatorOutsideReduce(t, tr, tc.logic)
+					assertAllAPIsResolveAccumulatorAsElementField(t, tr, tc.logic, tc.valueMode)
 				})
 			}
 		})
@@ -162,22 +192,22 @@ func TestReduceAccumulatorStillWorks_AllDialects(t *testing.T) {
 		t.Run(d.String(), func(t *testing.T) {
 			t.Parallel()
 
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("NewTranspiler() error: %v", err)
 			}
 
-			sql, err := tr.Transpile(logic)
+			sql, err := tr.TranspileValue(logic)
 			if err != nil {
-				t.Fatalf("Transpile() error: %v", err)
+				t.Fatalf("TranspileValue() error: %v", err)
 			}
 			if accWord.MatchString(sql) {
 				t.Fatalf("unexpected bare accumulator in inline SQL: %s", sql)
 			}
 
-			psql, params, err := tr.TranspileParameterized(logic)
+			psql, params, err := tr.TranspileParameterizedValue(logic)
 			if err != nil {
-				t.Fatalf("TranspileParameterized() error: %v", err)
+				t.Fatalf("TranspileParameterizedValue() error: %v", err)
 			}
 			if accWord.MatchString(psql) {
 				t.Fatalf("unexpected bare accumulator in parameterized SQL: %s", psql)

@@ -2,10 +2,13 @@ package jsonlogic2sql
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
@@ -24,62 +27,241 @@ const (
 	FieldTypeEnum    FieldType = "enum"
 )
 
+const (
+	schemaPathSeparator        = "."
+	schemaRequiredErrorMessage = "schema is required"
+)
+
 // FieldSchema represents the schema/metadata for a single field.
 type FieldSchema struct {
-	Name          string    `json:"name"`
-	Type          FieldType `json:"type"`
-	AllowedValues []string  `json:"allowedValues,omitempty"` // For enum types: list of valid values
+	Name          string        `json:"name"`
+	Type          FieldType     `json:"type"`
+	ElementType   FieldType     `json:"elementType,omitempty"`   // For array types: scalar/object element type
+	AllowedValues []string      `json:"allowedValues,omitempty"` // For enum types: list of valid values
+	Fields        []FieldSchema `json:"fields,omitempty"`        // Nested object fields
+	ElementFields []FieldSchema `json:"elementFields,omitempty"` // Nested fields on array elements
 }
 
 // Schema represents the collection of field schemas.
 type Schema struct {
-	fields        map[string]FieldSchema // Map field name to schema for O(1) lookup
-	validationErr error
+	fields       map[string]FieldSchema       // All schema paths, including array element fields, for O(1) lookup.
+	rootFields   map[string]struct{}          // Paths that can be referenced directly from the root SQL row.
+	scopedFields map[string]map[string]string // Per-array scope: relative element field path -> flattened schema path.
 }
 
-// NewSchema creates a new schema from a slice of field schemas.
-//
-// This constructor is kept source-compatible with the v1 API. For callers that
-// need immediate validation errors, use NewValidatedSchema or ValidateSchemaFields.
-func NewSchema(fields []FieldSchema) *Schema {
-	s := newSchemaUnchecked(fields)
-	s.validationErr = ValidateSchemaFields(fields)
-	return s
-}
-
-func newSchemaUnchecked(fields []FieldSchema) *Schema {
+// NewSchema validates field definitions and creates a new schema.
+// Schema field names must be raw, unquoted identifier segments; the transpiler
+// handles dialect-specific segment quoting automatically.
+func NewSchema(fields []FieldSchema) (*Schema, error) {
+	if err := ValidateSchemaFields(fields); err != nil {
+		return nil, err
+	}
 	s := &Schema{
-		fields: make(map[string]FieldSchema),
+		fields:       make(map[string]FieldSchema),
+		rootFields:   make(map[string]struct{}),
+		scopedFields: make(map[string]map[string]string),
 	}
 	for _, field := range fields {
-		s.fields[field.Name] = field
+		s.addField("", field, true)
 	}
-	return s
+	return s, nil
 }
 
-// ValidateSchemaFields validates schema field definitions.
-// Field names must be raw, unquoted identifiers; the transpiler applies SQL
-// identifier quoting automatically based on the target dialect.
+func (s *Schema) addField(prefix string, field FieldSchema, rootAccessible bool) {
+	fieldName := joinSchemaPath(prefix, field.Name)
+	stored := cloneFieldSchema(field)
+	stored.Name = fieldName
+	s.fields[fieldName] = stored
+	if rootAccessible {
+		s.rootFields[fieldName] = struct{}{}
+	}
+	if field.Type == FieldTypeArray {
+		s.addArrayScope(fieldName, field.ElementFields)
+	}
+
+	for _, child := range field.Fields {
+		s.addField(fieldName, child, rootAccessible)
+	}
+	for _, child := range field.ElementFields {
+		s.addField(fieldName, child, false)
+	}
+}
+
+func cloneFieldSchemas(fields []FieldSchema) []FieldSchema {
+	if len(fields) == 0 {
+		return nil
+	}
+	cloned := make([]FieldSchema, len(fields))
+	for i, field := range fields {
+		cloned[i] = cloneFieldSchema(field)
+	}
+	return cloned
+}
+
+func cloneFieldSchema(field FieldSchema) FieldSchema {
+	field.AllowedValues = slices.Clone(field.AllowedValues)
+	field.Fields = cloneFieldSchemas(field.Fields)
+	field.ElementFields = cloneFieldSchemas(field.ElementFields)
+	return field
+}
+
+func (s *Schema) addArrayScope(scopePath string, elementFields []FieldSchema) {
+	if _, exists := s.scopedFields[scopePath]; !exists {
+		s.scopedFields[scopePath] = make(map[string]string)
+	}
+	for _, field := range elementFields {
+		s.addArrayScopeAccessibleField(scopePath, "", field)
+	}
+}
+
+func (s *Schema) addArrayScopeAccessibleField(scopePath, relativePrefix string, field FieldSchema) {
+	relativeName := joinSchemaPath(relativePrefix, field.Name)
+	fullName := joinSchemaPath(scopePath, relativeName)
+	s.scopedFields[scopePath][relativeName] = fullName
+
+	switch field.Type {
+	case FieldTypeObject:
+		for _, child := range field.Fields {
+			s.addArrayScopeAccessibleField(scopePath, relativeName, child)
+		}
+	case FieldTypeArray:
+		s.addArrayScope(fullName, field.ElementFields)
+	case FieldTypeString, FieldTypeInteger, FieldTypeNumber, FieldTypeBoolean, FieldTypeEnum:
+		return
+	}
+}
+
+// ValidateSchemaFields validates schema field definitions without constructing
+// a Schema. Field names must be raw, unquoted identifier segments; the
+// transpiler applies SQL identifier quoting automatically based on the target
+// dialect for segments outside the portable unquoted ASCII shape.
 func ValidateSchemaFields(fields []FieldSchema) error {
+	seen := make(map[string]struct{})
 	for _, field := range fields {
-		for _, seg := range strings.Split(field.Name, ".") {
-			if dialect.ContainsQuoteCharacters(seg) {
-				return fmt.Errorf(
-					"schema field %q contains quote characters; "+
-						"use raw identifiers; the transpiler handles quoting automatically", field.Name)
-			}
+		if err := validateSchemaField("", field, seen); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// NewValidatedSchema creates a schema and returns an error for invalid schema
-// field names. Use this when the caller needs construction-time validation.
-func NewValidatedSchema(fields []FieldSchema) (*Schema, error) {
-	if err := ValidateSchemaFields(fields); err != nil {
-		return nil, err
+func validateSchemaField(prefix string, field FieldSchema, seen map[string]struct{}) error {
+	if strings.TrimSpace(field.Name) == "" {
+		if prefix == "" {
+			return fmt.Errorf("schema field requires non-empty name")
+		}
+		return fmt.Errorf("schema field under %q requires non-empty name", prefix)
 	}
-	return newSchemaUnchecked(fields), nil
+	if field.Type == "" {
+		return fmt.Errorf("schema field %q requires non-empty type", joinSchemaPath(prefix, field.Name))
+	}
+	if !isSupportedFieldType(field.Type) {
+		return fmt.Errorf("schema field %q has unsupported type %q", joinSchemaPath(prefix, field.Name), field.Type)
+	}
+
+	fieldName := joinSchemaPath(prefix, field.Name)
+	for _, seg := range strings.Split(fieldName, schemaPathSeparator) {
+		if seg == "" {
+			return fmt.Errorf("schema field %q contains an empty path segment", fieldName)
+		}
+		if dialect.ContainsQuoteCharacters(seg) {
+			return fmt.Errorf(
+				"schema field %q contains quote characters; "+
+					"use raw identifiers; the transpiler handles quoting automatically", fieldName)
+		}
+		if !isSafeSchemaIdentifierSegment(seg) {
+			return fmt.Errorf("schema field %q contains invalid identifier segment %q; "+
+				"each segment must contain only letters, digits, or underscores", fieldName, seg)
+		}
+	}
+	if _, exists := seen[fieldName]; exists {
+		return fmt.Errorf("schema field %q is defined more than once", fieldName)
+	}
+	seen[fieldName] = struct{}{}
+
+	if len(field.Fields) > 0 && field.Type != FieldTypeObject {
+		return fmt.Errorf("schema field %q uses fields but has type %q; fields require object type", fieldName, field.Type)
+	}
+	if len(field.ElementFields) > 0 && field.Type != FieldTypeArray {
+		return fmt.Errorf("schema field %q uses elementFields but has type %q; elementFields require array type", fieldName, field.Type)
+	}
+	if field.ElementType != "" {
+		if field.Type != FieldTypeArray {
+			return fmt.Errorf("schema field %q uses elementType but has type %q; elementType requires array type", fieldName, field.Type)
+		}
+		if !isSupportedFieldType(field.ElementType) {
+			return fmt.Errorf("schema field %q has unsupported elementType %q", fieldName, field.ElementType)
+		}
+	}
+	if len(field.ElementFields) > 0 && field.ElementType != "" && field.ElementType != FieldTypeObject {
+		return fmt.Errorf("schema field %q uses elementFields with elementType %q; elementFields require object elements", fieldName, field.ElementType)
+	}
+	if field.Type == FieldTypeEnum || (field.Type == FieldTypeArray && field.ElementType == FieldTypeEnum) {
+		if len(field.AllowedValues) == 0 {
+			return fmt.Errorf("schema enum field %q requires at least one allowedValues entry", fieldName)
+		}
+		if err := validateEnumAllowedValues(fieldName, field.AllowedValues); err != nil {
+			return err
+		}
+	} else if len(field.AllowedValues) > 0 {
+		return fmt.Errorf("schema field %q uses allowedValues but has type %q; allowedValues require enum type", fieldName, field.Type)
+	}
+	for _, child := range field.Fields {
+		if err := validateSchemaField(fieldName, child, seen); err != nil {
+			return err
+		}
+	}
+	for _, child := range field.ElementFields {
+		if err := validateSchemaField(fieldName, child, seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isSafeSchemaIdentifierSegment(segment string) bool {
+	for _, r := range segment {
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func validateEnumAllowedValues(fieldName string, allowedValues []string) error {
+	seen := make(map[string]struct{}, len(allowedValues))
+	for _, value := range allowedValues {
+		if _, exists := seen[value]; exists {
+			return fmt.Errorf("schema enum field %q has duplicate allowed value %q", fieldName, value)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
+func isSupportedFieldType(fieldType FieldType) bool {
+	switch fieldType {
+	case FieldTypeString,
+		FieldTypeInteger,
+		FieldTypeNumber,
+		FieldTypeBoolean,
+		FieldTypeArray,
+		FieldTypeObject,
+		FieldTypeEnum:
+		return true
+	default:
+		return false
+	}
+}
+
+func joinSchemaPath(prefix, name string) string {
+	if prefix == "" {
+		return name
+	}
+	if name == "" {
+		return prefix
+	}
+	return prefix + schemaPathSeparator + name
 }
 
 // NewSchemaFromJSON creates a new schema from a JSON byte slice.
@@ -88,7 +270,7 @@ func NewSchemaFromJSON(data []byte) (*Schema, error) {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return nil, fmt.Errorf("invalid schema JSON: %w", err)
 	}
-	return NewValidatedSchema(fields)
+	return NewSchema(fields)
 }
 
 // NewSchemaFromFile loads a schema from a JSON file.
@@ -103,7 +285,7 @@ func NewSchemaFromFile(path string) (*Schema, error) {
 // HasField checks if a field exists in the schema.
 func (s *Schema) HasField(fieldName string) bool {
 	if s == nil {
-		return true // No schema means all fields are allowed
+		return false
 	}
 	_, exists := s.fields[fieldName]
 	return exists
@@ -112,15 +294,36 @@ func (s *Schema) HasField(fieldName string) bool {
 // ValidateField checks if a field exists in the schema and returns an error if not.
 func (s *Schema) ValidateField(fieldName string) error {
 	if s == nil {
-		return nil // No schema means no validation
+		return errors.New(schemaRequiredErrorMessage)
 	}
-	if s.validationErr != nil {
-		return s.validationErr
-	}
-	if !s.HasField(fieldName) {
+	if _, exists := s.rootFields[fieldName]; !exists {
 		return fmt.Errorf("field '%s' is not defined in schema", fieldName)
 	}
 	return nil
+}
+
+// ResolveScopedField resolves a field name relative to an array element or
+// object schema scope. For example, field "type" in scope "payments" resolves
+// to "payments.type" and validates against that nested schema entry.
+func (s *Schema) ResolveScopedField(scopePath, fieldName string) (string, error) {
+	if s == nil {
+		return "", errors.New(schemaRequiredErrorMessage)
+	}
+	if fieldName == "" {
+		return scopePath, nil
+	}
+	if scopePath == "" {
+		if err := s.ValidateField(fieldName); err != nil {
+			return "", err
+		}
+		return fieldName, nil
+	}
+	if fields, ok := s.scopedFields[scopePath]; ok {
+		if scopedName, exists := fields[fieldName]; exists {
+			return scopedName, nil
+		}
+	}
+	return "", fmt.Errorf("field '%s' is not defined in schema scope '%s'", fieldName, scopePath)
 }
 
 // GetFields returns all field names in the schema.
@@ -132,12 +335,198 @@ func (s *Schema) GetFields() []string {
 	for name := range s.fields {
 		fields = append(fields, name)
 	}
+	slices.Sort(fields)
 	return fields
 }
 
 // IsArrayType checks if a field is of array type.
 func (s *Schema) IsArrayType(fieldName string) bool {
 	return s.GetFieldTypeFieldType(fieldName) == FieldTypeArray
+}
+
+// HasArrayElementFields reports whether an array field has schema-described
+// object fields on its elements.
+func (s *Schema) HasArrayElementFields(fieldName string) bool {
+	if s == nil {
+		return false
+	}
+	field, exists := s.fields[fieldName]
+	return exists && field.Type == FieldTypeArray && len(field.ElementFields) > 0
+}
+
+// GetArrayElementType returns the declared element type for an array field.
+// Object arrays with elementFields are object-typed even when elementType is
+// omitted for concise schemas.
+func (s *Schema) GetArrayElementType(fieldName string) string {
+	if s == nil {
+		return ""
+	}
+	field, exists := s.fields[fieldName]
+	if !exists || field.Type != FieldTypeArray {
+		return ""
+	}
+	if len(field.ElementFields) > 0 {
+		return string(FieldTypeObject)
+	}
+	return string(field.ElementType)
+}
+
+// ArrayElementSchemaSignature returns a stable structural signature for an
+// array field's element schema. Empty string means the array has scalar or
+// otherwise unspecified elements.
+func (s *Schema) ArrayElementSchemaSignature(fieldName string) string {
+	if s == nil || !s.HasArrayElementFields(fieldName) {
+		return ""
+	}
+	scoped := s.scopedFields[fieldName]
+	if len(scoped) == 0 {
+		return ""
+	}
+	relativeNames := make([]string, 0, len(scoped))
+	for relativeName := range scoped {
+		relativeNames = append(relativeNames, relativeName)
+	}
+	slices.Sort(relativeNames)
+
+	var b strings.Builder
+	for _, relativeName := range relativeNames {
+		fullName := scoped[relativeName]
+		field := s.fields[fullName]
+		b.WriteString(relativeName)
+		b.WriteByte(':')
+		b.WriteString(string(field.Type))
+		if field.Type == FieldTypeArray {
+			elementType := s.GetArrayElementType(fullName)
+			if elementType != "" {
+				b.WriteByte('<')
+				b.WriteString(elementType)
+				b.WriteByte('>')
+			}
+		}
+		if len(field.AllowedValues) > 0 {
+			allowed := slices.Clone(field.AllowedValues)
+			slices.Sort(allowed)
+			b.WriteByte('[')
+			b.WriteString(strings.Join(allowed, ","))
+			b.WriteByte(']')
+		}
+		if field.Type == FieldTypeArray {
+			b.WriteByte('{')
+			b.WriteString(s.ArrayElementSchemaSignature(fullName))
+			b.WriteByte('}')
+		}
+		b.WriteByte(';')
+	}
+	return b.String()
+}
+
+// ValidateArrayElementSchemasCompatible compares two array element schemas and
+// returns the first concrete field-level mismatch.
+func (s *Schema) ValidateArrayElementSchemasCompatible(leftField, rightField string) error {
+	if s == nil {
+		return errors.New(schemaRequiredErrorMessage)
+	}
+	return s.validateArrayElementSchemasCompatible(leftField, rightField)
+}
+
+func (s *Schema) validateArrayElementSchemasCompatible(leftField, rightField string) error {
+	leftFields := s.scopedFields[leftField]
+	rightFields := s.scopedFields[rightField]
+	if len(leftFields) == 0 && len(rightFields) == 0 {
+		return nil
+	}
+
+	relativeNames := make([]string, 0, len(leftFields)+len(rightFields))
+	seen := make(map[string]struct{}, len(leftFields)+len(rightFields))
+	for relativeName := range leftFields {
+		seen[relativeName] = struct{}{}
+		relativeNames = append(relativeNames, relativeName)
+	}
+	for relativeName := range rightFields {
+		if _, ok := seen[relativeName]; ok {
+			continue
+		}
+		relativeNames = append(relativeNames, relativeName)
+	}
+	slices.Sort(relativeNames)
+
+	var missingLeft []string
+	var missingRight []string
+	for _, relativeName := range relativeNames {
+		leftFull, leftOK := leftFields[relativeName]
+		rightFull, rightOK := rightFields[relativeName]
+		switch {
+		case !leftOK:
+			missingLeft = append(missingLeft, relativeName)
+			continue
+		case !rightOK:
+			missingRight = append(missingRight, relativeName)
+			continue
+		}
+
+		leftSchema := s.fields[leftFull]
+		rightSchema := s.fields[rightFull]
+		if leftSchema.Type != rightSchema.Type {
+			return fmt.Errorf("field '%s' has incompatible schema types across array source scopes", relativeName)
+		}
+		if leftSchema.Type == FieldTypeArray {
+			leftElementType := s.GetArrayElementType(leftFull)
+			rightElementType := s.GetArrayElementType(rightFull)
+			if leftElementType != rightElementType {
+				return fmt.Errorf("field '%s' has incompatible array element types across array source scopes", relativeName)
+			}
+		}
+		if !sameStringSetSchema(leftSchema.AllowedValues, rightSchema.AllowedValues) {
+			return fmt.Errorf("field '%s' has incompatible enum values across array source scopes", relativeName)
+		}
+		if leftSchema.Type == FieldTypeArray {
+			if err := s.validateArrayElementSchemasCompatible(leftFull, rightFull); err != nil {
+				return err
+			}
+		}
+	}
+	if len(missingLeft) > 0 {
+		return fmt.Errorf("field '%s' is not defined in schema scope '%s'", mostSpecificMissingSchemaField(missingLeft), leftField)
+	}
+	if len(missingRight) > 0 {
+		return fmt.Errorf("field '%s' is not defined in schema scope '%s'", mostSpecificMissingSchemaField(missingRight), rightField)
+	}
+	return nil
+}
+
+func mostSpecificMissingSchemaField(relativeNames []string) string {
+	if len(relativeNames) == 0 {
+		return ""
+	}
+	best := relativeNames[0]
+	for _, candidate := range relativeNames[1:] {
+		if strings.HasPrefix(candidate, best+schemaPathSeparator) ||
+			(!strings.HasPrefix(best, candidate+schemaPathSeparator) &&
+				strings.Count(candidate, schemaPathSeparator) > strings.Count(best, schemaPathSeparator)) {
+			best = candidate
+		}
+	}
+	return best
+}
+
+func sameStringSetSchema(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	if len(left) == 0 {
+		return true
+	}
+	counts := make(map[string]int, len(left))
+	for _, value := range left {
+		counts[value]++
+	}
+	for _, value := range right {
+		counts[value]--
+		if counts[value] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // IsStringType checks if a field is of string type.
@@ -168,7 +557,7 @@ func (s *Schema) GetAllowedValues(fieldName string) []string {
 		return nil
 	}
 	if field, exists := s.fields[fieldName]; exists {
-		return field.AllowedValues
+		return slices.Clone(field.AllowedValues)
 	}
 	return nil
 }
@@ -177,7 +566,7 @@ func (s *Schema) GetAllowedValues(fieldName string) []string {
 // Returns nil if valid, error if invalid.
 func (s *Schema) ValidateEnumValue(fieldName, value string) error {
 	if s == nil {
-		return nil // No schema means no validation
+		return errors.New(schemaRequiredErrorMessage)
 	}
 
 	if !s.IsEnumType(fieldName) {
@@ -207,7 +596,7 @@ func (s *Schema) GetFieldType(fieldName string) string {
 // GetFieldTypeFieldType returns the type of a field as FieldType (internal use).
 func (s *Schema) GetFieldTypeFieldType(fieldName string) FieldType {
 	if s == nil {
-		return "" // No schema means unknown type
+		return ""
 	}
 	if field, exists := s.fields[fieldName]; exists {
 		return field.Type

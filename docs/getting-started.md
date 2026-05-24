@@ -25,12 +25,18 @@ import (
 )
 
 func main() {
-    // Simple usage with dialect (required)
-    sql, err := jsonlogic2sql.Transpile(jsonlogic2sql.DialectBigQuery, `{">": [{"var": "amount"}, 1000]}`)
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    })
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE amount > 1000
+
+    sql, err := jsonlogic2sql.TranspileCondition(jsonlogic2sql.DialectBigQuery, schema, `{">": [{"var": "amount"}, 1000]}`)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: amount > 1000
 }
 ```
 
@@ -45,18 +51,28 @@ import (
 )
 
 func main() {
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+        {Name: "failedAttempts", Type: jsonlogic2sql.FieldTypeNumber},
+        {Name: "country", Type: jsonlogic2sql.FieldTypeString},
+    })
+    if err != nil {
+        panic(err)
+    }
+
     // Create a transpiler instance
-    transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
     if err != nil {
         panic(err)
     }
 
     // From JSON string
-    sql, err := transpiler.Transpile(`{"and": [{"==": [{"var": "status"}, "pending"]}, {">": [{"var": "amount"}, 5000]}]}`)
+    sql, err := transpiler.TranspileCondition(`{"and": [{"==": [{"var": "status"}, "pending"]}, {">": [{"var": "amount"}, 5000]}]}`)
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE (status = 'pending' AND amount > 5000)
+    fmt.Println(sql) // Output: (status = 'pending' AND amount > 5000)
 
     // From pre-parsed map
     logic := map[string]interface{}{
@@ -65,28 +81,41 @@ func main() {
             map[string]interface{}{"in": []interface{}{map[string]interface{}{"var": "country"}, []interface{}{"CN", "RU"}}},
         },
     }
-    sql, err = transpiler.TranspileFromMap(logic)
+    sql, err = transpiler.TranspileConditionFromMap(logic)
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+    fmt.Println(sql) // Output: (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 }
 ```
 
-### Getting SQL Without WHERE Prefix
+### Condition and Value Output
 
-Use `TranspileCondition` methods when you need to embed conditions in larger queries:
+`TranspileCondition` returns a boolean SQL predicate without the `WHERE`
+keyword. Use it for filters and join predicates:
 
 ```go
 // Returns just the condition without "WHERE"
 condition, err := jsonlogic2sql.TranspileCondition(
     jsonlogic2sql.DialectBigQuery,
+    schema,
     `{">": [{"var": "amount"}, 1000]}`,
 )
 // condition = "amount > 1000"
 
 // Use in a custom query
 query := fmt.Sprintf("SELECT * FROM orders WHERE %s AND created_at > '2024-01-01'", condition)
+```
+
+Use `TranspileValue` when the JSONLogic root produces a scalar or array value:
+
+```go
+value, err := jsonlogic2sql.TranspileValue(
+    jsonlogic2sql.DialectBigQuery,
+    schema,
+    `{"or": [false, "fallback"]}`,
+)
+// value = "'fallback'"
 ```
 
 ## Choosing a Dialect
@@ -102,14 +131,16 @@ The library supports multiple SQL dialects. You must specify a dialect when crea
 | ClickHouse | `DialectClickHouse` | ClickHouse SQL |
 
 ```go
+schema, _ := jsonlogic2sql.NewSchema(nil) // literal-only expressions
+
 // BigQuery
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // PostgreSQL
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL, schema)
 
 // ClickHouse
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectClickHouse)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectClickHouse, schema)
 ```
 
 ### Parameterized Queries
@@ -125,23 +156,28 @@ import (
 )
 
 func main() {
-    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    schema, _ := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    })
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
-    sql, params, err := transpiler.TranspileParameterized(
+    sql, params, err := transpiler.TranspileParameterizedCondition(
         `{"==": [{"var": "status"}, "active"]}`,
     )
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql)    // Output: WHERE status = @p1
+    fmt.Println(sql)    // Output: status = @p1
     fmt.Println(params) // Output: [{p1 active}]
 
     // Or use the convenience function
-    sql, params, err = jsonlogic2sql.TranspileParameterized(
+    sql, params, err = jsonlogic2sql.TranspileParameterizedCondition(
         jsonlogic2sql.DialectPostgreSQL,
+        schema,
         `{">": [{"var": "amount"}, 1000]}`,
     )
-    fmt.Println(sql)    // Output: WHERE amount > $1
+    fmt.Println(sql)    // Output: amount > $1
     fmt.Println(params) // Output: [{p1 1000}]
 }
 ```
@@ -155,9 +191,10 @@ The transpiler preserves JSON Logic variable names in the SQL output, with autom
 - Dot notation is preserved: `transaction.amount` → `transaction.amount`
 - Nested variables: `user.account.age` → `user.account.age`
 - Simple variables remain unchanged: `amount` → `amount`
-- Segments starting with a digit are quoted automatically:
+- Segments outside the portable unquoted ASCII shape are quoted automatically:
   - BigQuery/Spanner/ClickHouse: `fixture.history.24h.events.total` → `` fixture.history.`24h`.events.total ``
   - PostgreSQL/DuckDB: `fixture.history.24h.events.total` → `fixture.history."24h".events.total`
+  - Unicode: `profile.café` → `` profile.`café` `` on BigQuery/Spanner/ClickHouse and `profile."café"` on PostgreSQL/DuckDB
 
 ## Next Steps
 

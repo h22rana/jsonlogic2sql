@@ -13,16 +13,23 @@ go build -o bin/repl ./cmd/repl
 ./bin/repl
 ```
 
-On startup, the REPL will prompt for an optional schema path. Leave it empty to skip.
+On startup, the REPL prompts for:
+
+1. SQL dialect
+2. expression mode (`condition` by default, or `value`)
+3. schema path, or empty schema for literal-only expressions
+
+Leave the schema path empty only for literal-only expressions. Field access
+requires a schema.
 
 ## Basic Usage
 
 ```
 jsonlogic> {">": [{"var": "amount"}, 1000]}
-SQL: WHERE amount > 1000
+SQL: amount > 1000
 
 jsonlogic> {"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "count"}, 5]}]}
-SQL: WHERE (status = 'active' AND count > 5)
+SQL: (status = 'active' AND count > 5)
 ```
 
 ## Commands
@@ -32,6 +39,9 @@ SQL: WHERE (status = 'active' AND count > 5)
 | `:help` | Show available commands |
 | `:examples` | Show example JSON Logic expressions |
 | `:dialect` | Change the SQL dialect |
+| `:mode condition\|value` | Switch expression mode |
+| `:condition` | Use predicate/condition output mode |
+| `:value` | Use value-expression output mode |
 | `:params` | Toggle parameterized query output (bind placeholders) |
 | `:schema <path>` | Load a schema JSON file for validation |
 | `:file <path>` | Read JSON Logic from a file |
@@ -52,8 +62,14 @@ Select dialect:
 5. ClickHouse
 Enter choice (1-5): 3
 
-[PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
-SQL: WHERE (a || b)
+[PostgreSQL] jsonlogic> {"merge": [1, [2]]}
+Error: [E008] at $.merge (operator: merge): expected predicate expression, got value expression
+
+[PostgreSQL] jsonlogic> :value
+Expression mode: value
+
+[PostgreSQL] jsonlogic> {"merge": [1, [2]]}
+SQL: (ARRAY[1] || ARRAY[2])
 ```
 
 The prompt shows the current dialect in brackets.
@@ -67,17 +83,17 @@ Use `:params` to toggle parameterized query mode. When enabled, the output uses 
 Parameterized mode: ON (output uses bind placeholders)
 
 [BigQuery] jsonlogic> {"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}
-SQL:    WHERE (status = @p1 AND amount > @p2)
+SQL:    (status = @p1 AND amount > @p2)
 Params: [{p1: "active"}, {p2: 1000}]
 
 [BigQuery] jsonlogic> :params
 Parameterized mode: OFF (output uses inlined literals)
 
 [BigQuery] jsonlogic> {"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}
-SQL: WHERE (status = 'active' AND amount > 1000)
+SQL: (status = 'active' AND amount > 1000)
 ```
 
-Placeholder styles vary by dialect (`@p1` for BigQuery/Spanner/ClickHouse, `$1` for PostgreSQL/DuckDB). See [Parameterized Queries](parameterized-queries.md) for details.
+Placeholder styles vary by dialect (`@p1` for BigQuery/Spanner, `{p1:Type}` for ClickHouse, `$1` for PostgreSQL/DuckDB). See [Parameterized Queries](parameterized-queries.md) for details.
 
 ### Pattern-Matching Note (`LIKE`)
 
@@ -98,7 +114,7 @@ echo '{"and": [...very large JSON...]}' > input.json
 
 # In the REPL, load it with :file
 [BigQuery] jsonlogic> :file input.json
-SQL: WHERE (...)
+SQL: (...)
 ```
 
 ## Loading a Schema
@@ -110,7 +126,11 @@ Use `:schema` to load a schema file for field validation and type-aware SQL:
 Schema loaded: schema.json
 ```
 
-Schema field names should be raw, unquoted identifiers. The REPL uses the same dialect-aware identifier quoting as the library, including numeric-leading path segments in array scopes such as `current.24h`.
+Schema field names should be raw, unquoted identifier segments containing only
+letters, digits, and underscores. The REPL uses the same dialect-aware
+identifier quoting as the library, including numeric-leading and Unicode path
+segments in array lambdas such as `{"var":"24h"}` / `{"var":"café"}` and reduce
+scopes such as `{"var":"current.24h"}`.
 
 ## Examples Command
 
@@ -122,15 +142,15 @@ Example JSON Logic expressions:
 
 1. Simple Comparison
    JSON: {">": [{"var": "amount"}, 1000]}
-   SQL:  WHERE amount > 1000
+   SQL:  amount > 1000
 
 2. Equality Check
    JSON: {"==": [{"var": "status"}, "active"]}
-   SQL:  WHERE status = 'active'
+   SQL:  status = 'active'
 
 3. Logical AND
    JSON: {"and": [{">": [{"var": "a"}, 10]}, {"<": [{"var": "b"}, 20]}]}
-   SQL:  WHERE (a > 10 AND b < 20)
+   SQL:  (a > 10 AND b < 20)
 
 ...
 ```

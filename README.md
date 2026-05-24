@@ -1,18 +1,18 @@
 # JSON Logic to SQL Transpiler
 
-A Go library that converts JSON Logic expressions into SQL. This library provides a clean, type-safe API for transforming JSON Logic rules into SQL WHERE clauses or standalone conditions, with support for multiple SQL dialects.
+A Go library that converts JSON Logic expressions into SQL predicate and value expressions, with support for multiple SQL dialects.
 
 ## Features
 
 - **Complete JSON Logic Support**: Implements all core JSON Logic operators
 - **SQL Dialect Support**: Target BigQuery, Spanner, PostgreSQL, DuckDB, or ClickHouse
-- **Parameterized Queries**: Generate SQL with bind placeholders (`@p1`, `$1`) and separate parameter values for safe execution
+- **Parameterized Queries**: Generate SQL with dialect-specific bind placeholders (`@p1`, `$1`, `{p1:Type}`) and separate parameter values for safe execution
 - **Custom Operators**: Extensible registry pattern for custom SQL functions
-- **Schema Validation**: Optional field schema for strict column validation
-- **Identifier Quoting**: Path segments such as `24h` and `7d` are quoted per dialect
+- **Schema Validation**: Required field schema for strict column validation, including nested object fields and array element fields
+- **Identifier Quoting**: Path segments such as `24h`, `7d`, and `café` are quoted per dialect
 - **Structured Errors**: Error codes and JSONPath locations for debugging
-- **Regression Matrices**: Cross-dialect schema-aware/schema-less matrix tests for nested built-in and custom operator flows
-- **Array Scope Safety**: Nested array operators keep inner/outer element aliases distinct where required
+- **Regression Matrices**: Cross-dialect matrix tests for nested built-in and custom operator flows
+- **Array Scope Safety**: Array lambdas use JSONLogic element-relative vars while nested operators keep aliases distinct in generated SQL
 - **Library & CLI**: Both programmatic API and interactive REPL
 
 ## Quick Start
@@ -32,15 +32,34 @@ import (
 )
 
 func main() {
-    sql, err := jsonlogic2sql.Transpile(
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    })
+    if err != nil {
+        panic(err)
+    }
+
+    sql, err := jsonlogic2sql.TranspileCondition(
         jsonlogic2sql.DialectBigQuery,
+        schema,
         `{">": [{"var": "amount"}, 1000]}`,
     )
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE amount > 1000
+    fmt.Println(sql) // Output: amount > 1000
 }
+```
+
+Use `TranspileValue` for value-producing expressions such as arithmetic, string concatenation, `map`, `reduce`, or JSONLogic value fallback:
+
+```go
+sql, err := jsonlogic2sql.TranspileValue(
+    jsonlogic2sql.DialectBigQuery,
+    schema,
+    `{"or": [false, "fallback"]}`,
+)
+fmt.Println(sql) // Output: 'fallback'
 ```
 
 ### Parameterized Queries
@@ -54,14 +73,23 @@ import (
 )
 
 func main() {
-    sql, params, err := jsonlogic2sql.TranspileParameterized(
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+        {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+        {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    })
+    if err != nil {
+        panic(err)
+    }
+
+    sql, params, err := jsonlogic2sql.TranspileParameterizedCondition(
         jsonlogic2sql.DialectBigQuery,
+        schema,
         `{"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}`,
     )
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql)    // Output: WHERE (status = @p1 AND amount > @p2)
+    fmt.Println(sql)    // Output: (status = @p1 AND amount > @p2)
     fmt.Println(params) // Output: [{p1 active} {p2 1000}]
 }
 ```
@@ -108,11 +136,21 @@ func main() {
 
 > **SQL Injection:** This library includes hardening measures against SQL injection - identifier names are validated against a whitelist pattern, string literals are escaped, and numeric string operands are safely coerced. For maximum safety, use the [parameterized query API](docs/parameterized-queries.md) which generates SQL with bind placeholders instead of inlined literals.
 
-> **Equality Semantics:** With a schema, equality operators use type-aware literal coercion for numeric and boolean fields, and strict equality (`===`/`!==`) folds schema-known type mismatches. The same comparison rules apply to `[field, default]` vars while preserving `COALESCE(...)`, and visible enum defaults are validated. Field-to-field equality uses ordinary SQL by default (`a = b`); enable `NullSafeFieldEquality` to also match rows where both fields are `NULL`. For portability, runtime string-column coercion is not modeled: `code == 5` emits the canonical match `code = '5'` (`1e400` emits `'Infinity'`), while loose string/boolean comparisons such as `code == true` return an unsupported-comparison error.
+> **Equality Semantics:** With a schema, equality operators use type-aware literal coercion for numeric and boolean fields, and strict equality (`===`/`!==`) folds schema-known type mismatches. The same comparison rules apply to `[field, default]` vars while preserving `COALESCE(...)`, and visible enum defaults are validated. Field-to-field equality is null-safe by default, so `a == b` also matches rows where both fields are `NULL`, matching JSONLogic's `null == null` behavior. Strict field-to-field comparisons with incompatible schema types keep only the null-compatible branch (`a === b` becomes `a IS NULL AND b IS NULL`; `a !== b` becomes `a IS NOT NULL OR b IS NOT NULL`) instead of emitting non-portable cross-type SQL. For portability, runtime string-column coercion is not modeled: `code == 5` emits the canonical match `code = '5'` (`1e400` emits `'Infinity'`), while loose mixed-type field comparisons and loose string/boolean comparisons such as `code == true` return an unsupported-comparison error.
 
-> **Identifier Quoting:** JSON Logic `var` names and schema field names should use raw, unquoted identifiers. The transpiler quotes invalid unquoted path segments automatically, for example `fixture.history.24h.events.total` becomes ``fixture.history.`24h`.events.total`` for BigQuery/Spanner/ClickHouse and `fixture.history."24h".events.total` for PostgreSQL/DuckDB. `NewSchema` remains v1 source-compatible; use `NewValidatedSchema` or `ValidateSchemaFields` when you want construction-time schema validation.
+> **Array Membership:** JSONLogic `in` over arrays follows JavaScript `indexOf` semantics. Literal array members are matched strictly and are not coerced to the left field's schema type; for example, a string field tested against `[5960, 9000]` folds to `FALSE`. Runtime array-field membership is emitted with null-safe element equality so `null in [null]` stays true across SQL dialects.
 
-> **`in` Operator Inference:** Without a schema, `in` uses heuristics to infer string containment vs array membership. For deterministic behavior (especially with complex expressions), prefer schema-aware mode.
+> **Identifier Quoting:** JSON Logic `var` names and schema field names should use raw, unquoted identifier segments containing only letters, digits, and underscores. The transpiler quotes segments outside the portable unquoted ASCII shape automatically, for example `fixture.history.24h.events.total` becomes ``fixture.history.`24h`.events.total`` for BigQuery/Spanner/ClickHouse and `fixture.history."24h".events.total` for PostgreSQL/DuckDB; Unicode names such as `café` are accepted and quoted the same way. `NewSchema` returns an error when schema field names contain quote characters or SQL-control punctuation; use raw identifiers and let the transpiler apply dialect-specific quoting.
+
+> **Condition vs Value APIs:** `TranspileCondition` returns SQL predicates that callers can put after `WHERE`. `TranspileValue` returns SQL value expressions. Value-producing JSONLogic such as `{"or":[false,"fallback"]}` is valid in value mode, but is rejected in condition mode instead of generating non-portable SQL like `FALSE OR 'fallback'`.
+
+> **Schema Is Required:** Field-accessing JSONLogic must be transpiled with a schema. Use `NewSchema(nil)` only for literal-only expressions; an empty schema rejects `var` field access.
+
+> **Object Fields:** `object` schema fields are containers for nested scalar, enum, object, or array paths. Reference nested fields such as `profile.status`; returning the object container itself from `TranspileValue` is rejected because object/struct value SQL is not portable across supported dialects.
+
+> **`in` Operator Inference:** The schema determines whether `in` means string containment or array membership for field operands. Declare field types for deterministic behavior, especially with complex expressions.
+
+> **String Containment:** JSONLogic string `in` follows JavaScript `indexOf`, so an empty string needle matches any non-null string haystack, including an empty string haystack.
 
 ## Interactive REPL
 
@@ -122,20 +160,23 @@ make run
 
 ```
 [BigQuery] jsonlogic> {">": [{"var": "amount"}, 1000]}
-SQL: WHERE amount > 1000
+SQL: amount > 1000
 
 [BigQuery] jsonlogic> :params
 Parameterized mode: ON (output uses bind placeholders)
 
 [BigQuery] jsonlogic> {"==": [{"var": "status"}, "active"]}
-SQL:    WHERE status = @p1
+SQL:    status = @p1
 Params: [{p1: "active"}]
+
+[BigQuery] jsonlogic> :value
+Expression mode: value
 
 [BigQuery] jsonlogic> :dialect
 Select dialect: PostgreSQL
 
-[PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
-SQL: WHERE (a || b)
+[PostgreSQL] jsonlogic> {"merge": [1, [2]]}
+SQL: (ARRAY[1] || ARRAY[2])
 ```
 
 ## Development

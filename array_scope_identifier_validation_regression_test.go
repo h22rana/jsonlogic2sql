@@ -30,10 +30,12 @@ func assertUnsafeVarRejected(t *testing.T, err error) {
 		t.Fatal("expected rejection error, got nil")
 	}
 	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "invalid identifier") || strings.Contains(msg, "not defined in schema") {
+	if strings.Contains(msg, "invalid identifier") ||
+		strings.Contains(msg, "not defined in schema") ||
+		strings.Contains(msg, "unsupported array-scope variable") {
 		return
 	}
-	t.Fatalf("expected invalid identifier or schema validation error, got: %v", err)
+	t.Fatalf("expected invalid identifier, schema validation, or unsupported array-scope variable error, got: %v", err)
 }
 
 func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *testing.T) {
@@ -65,7 +67,7 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 		},
 		{
 			name:  "map source internal elem dotted payload",
-			logic: `{"map":[{"var":"elem.x) OR 1=1 --"},{"var":"item"}]}`,
+			logic: `{"map":[{"var":"elem.x) OR 1=1 --"},{"var":""}]}`,
 		},
 		{
 			name:  "reduce initial internal elem dotted payload",
@@ -73,7 +75,7 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 		},
 		{
 			name:  "map source internal elem dotted payload with default array-form var",
-			logic: `{"map":[{"var":["elem.x) OR 1=1 --",[]]},{"var":"item"}]}`,
+			logic: `{"map":[{"var":["elem.x) OR 1=1 --",[]]},{"var":""}]}`,
 		},
 	}
 
@@ -81,8 +83,7 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 		name   string
 		schema *Schema
 	}{
-		{name: "schema-less", schema: nil},
-		{name: "schema-aware", schema: mustNewSchema([]FieldSchema{{Name: "bag.numbers", Type: FieldTypeArray}})},
+		{name: "schema-required", schema: mustNewSchema([]FieldSchema{{Name: "bag.numbers", Type: FieldTypeArray}})},
 	}
 
 	for _, mode := range modes {
@@ -101,29 +102,29 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 							m := decodeLogicMapForArrayScopeIDTest(t, tc.logic)
 							logicAny := decodeLogicAnyForArrayScopeIDTest(t, tc.logic)
 
-							sql, err := tr.Transpile(tc.logic)
-							assertUnsafeVarRejected(t, err)
+							sql, inlineErr := tr.TranspileValue(tc.logic)
+							assertUnsafeVarRejected(t, inlineErr)
 							if strings.Contains(sql, "OR 1=1") {
 								t.Fatalf("unexpected injectable SQL emitted: %s", sql)
 							}
 
-							psql, _, err := tr.TranspileParameterized(tc.logic)
-							assertUnsafeVarRejected(t, err)
+							psql, _, paramErr := tr.TranspileParameterizedValue(tc.logic)
+							assertUnsafeVarRejected(t, paramErr)
 							if strings.Contains(psql, "OR 1=1") {
 								t.Fatalf("unexpected injectable SQL emitted in parameterized mode: %s", psql)
 							}
 
-							_, err = tr.TranspileFromMap(m)
-							assertUnsafeVarRejected(t, err)
+							_, mapErr := tr.TranspileValueFromMap(m)
+							assertUnsafeVarRejected(t, mapErr)
 
-							_, err = tr.TranspileFromInterface(logicAny)
-							assertUnsafeVarRejected(t, err)
+							_, anyErr := tr.TranspileValueFromInterface(logicAny)
+							assertUnsafeVarRejected(t, anyErr)
 
-							_, _, err = tr.TranspileParameterizedFromMap(m)
-							assertUnsafeVarRejected(t, err)
+							_, _, paramMapErr := tr.TranspileParameterizedValueFromMap(m)
+							assertUnsafeVarRejected(t, paramMapErr)
 
-							_, _, err = tr.TranspileParameterizedFromInterface(logicAny)
-							assertUnsafeVarRejected(t, err)
+							_, _, paramAnyErr := tr.TranspileParameterizedValueFromInterface(logicAny)
+							assertUnsafeVarRejected(t, paramAnyErr)
 						})
 					}
 				})
@@ -135,13 +136,13 @@ func TestArrayScopeIdentifierValidationRejectsMaliciousPaths_AllDialects(t *test
 func TestArrayScopeIdentifierValidationAllowsSafeDottedPaths(t *testing.T) {
 	t.Parallel()
 
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
-	logic := `{"map":[{"var":"bag.numbers"},{"var":"item.safe_field"}]}`
+	logic := `{"map":[{"var":"bag.records"},{"var":"safe_field"}]}`
 
-	sql, err := tr.Transpile(logic)
+	sql, err := tr.TranspileValue(logic)
 	if err != nil {
 		t.Fatalf("unexpected inline error: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestArrayScopeIdentifierValidationAllowsSafeDottedPaths(t *testing.T) {
 		t.Fatalf("expected rewritten safe element path, got: %s", sql)
 	}
 
-	psql, _, err := tr.TranspileParameterized(logic)
+	psql, _, err := tr.TranspileParameterizedValue(logic)
 	if err != nil {
 		t.Fatalf("unexpected parameterized error: %v", err)
 	}
@@ -167,11 +168,11 @@ func TestRootArrayOperandDoesNotTreatElemAsInScopeAlias_WithSchema(t *testing.T)
 		t.Fatalf("NewTranspilerWithConfig() error: %v", err)
 	}
 
-	logic := `{"map":[{"var":"elem.values"},{"var":"item"}]}`
+	logic := `{"map":[{"var":"elem.values"},{"var":""}]}`
 	logicMap := decodeLogicMapForArrayScopeIDTest(t, logic)
 	logicAny := decodeLogicAnyForArrayScopeIDTest(t, logic)
 
-	sql, err := tr.Transpile(logic)
+	sql, err := tr.TranspileValue(logic)
 	if err == nil {
 		t.Fatalf("expected schema validation error, got SQL: %s", sql)
 	}
@@ -179,7 +180,7 @@ func TestRootArrayOperandDoesNotTreatElemAsInScopeAlias_WithSchema(t *testing.T)
 		t.Fatalf("unexpected unbound elem alias SQL emitted: %s", sql)
 	}
 
-	psql, _, err := tr.TranspileParameterized(logic)
+	psql, _, err := tr.TranspileParameterizedValue(logic)
 	if err == nil {
 		t.Fatalf("expected schema validation error (param), got SQL: %s", psql)
 	}
@@ -187,50 +188,50 @@ func TestRootArrayOperandDoesNotTreatElemAsInScopeAlias_WithSchema(t *testing.T)
 		t.Fatalf("unexpected unbound elem alias SQL emitted (param): %s", psql)
 	}
 
-	_, err = tr.TranspileFromMap(logicMap)
+	_, err = tr.TranspileValueFromMap(logicMap)
 	if err == nil {
 		t.Fatal("expected schema validation error from map input")
 	}
 
-	_, err = tr.TranspileFromInterface(logicAny)
+	_, err = tr.TranspileValueFromInterface(logicAny)
 	if err == nil {
 		t.Fatal("expected schema validation error from interface input")
 	}
 
-	_, _, err = tr.TranspileParameterizedFromMap(logicMap)
+	_, _, err = tr.TranspileParameterizedValueFromMap(logicMap)
 	if err == nil {
 		t.Fatal("expected schema validation error from parameterized map input")
 	}
 
-	_, _, err = tr.TranspileParameterizedFromInterface(logicAny)
+	_, _, err = tr.TranspileParameterizedValueFromInterface(logicAny)
 	if err == nil {
 		t.Fatal("expected schema validation error from parameterized interface input")
 	}
 }
 
-func TestNestedArrayOperandAllowsOuterElemAliasInChildScope(t *testing.T) {
+func TestNestedArrayOperandUsesBareOuterFieldsInChildScope(t *testing.T) {
 	t.Parallel()
 
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("NewTranspiler() error: %v", err)
 	}
 
-	logic := `{"map":[{"var":"groups"},{"reduce":[{"var":"elem.values"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"elem.base"}]}]}`
+	logic := `{"map":[{"var":"groups"},{"reduce":[{"var":"subitems"},{"+":[{"var":"accumulator"},{"var":"current"}]},{"var":"base"}]}]}`
 
-	sql, err := tr.Transpile(logic)
+	sql, err := tr.TranspileValue(logic)
 	if err != nil {
 		t.Fatalf("unexpected inline error: %v", err)
 	}
-	if !strings.Contains(sql, "UNNEST(elem.values)") {
+	if !strings.Contains(sql, "UNNEST(elem.subitems)") {
 		t.Fatalf("expected nested outer elem alias in array operand, got: %s", sql)
 	}
 
-	psql, _, err := tr.TranspileParameterized(logic)
+	psql, _, err := tr.TranspileParameterizedValue(logic)
 	if err != nil {
 		t.Fatalf("unexpected parameterized error: %v", err)
 	}
-	if !strings.Contains(psql, "UNNEST(elem.values)") {
+	if !strings.Contains(psql, "UNNEST(elem.subitems)") {
 		t.Fatalf("expected nested outer elem alias in parameterized array operand, got: %s", psql)
 	}
 }

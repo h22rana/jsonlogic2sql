@@ -3,16 +3,14 @@ package validator
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"testing"
 )
 
 func TestNewValidator(t *testing.T) {
 	v := NewValidator()
-	if v == nil {
-		t.Fatal("NewValidator() returned nil")
-	}
-	if v.supportedOperators == nil {
-		t.Fatal("supportedOperators map is nil")
+	if v == nil || v.supportedOperators == nil {
+		t.Fatal("NewValidator() returned nil or has nil supportedOperators map")
 	}
 }
 
@@ -250,6 +248,16 @@ func TestValidateMissingOperator(t *testing.T) {
 			input:    map[string]interface{}{"missing_some": []interface{}{1, "field"}},
 			expected: ValidationError{Operator: "missing_some", Message: "missing_some operator second argument must be an array"},
 		},
+		{
+			name:     "missing_some with non-string field",
+			input:    map[string]interface{}{"missing_some": []interface{}{1, []interface{}{"field", 123}}},
+			expected: ValidationError{Operator: "missing_some", Message: "missing_some operator array element 1 must be a non-empty string"},
+		},
+		{
+			name:     "missing_some with empty field",
+			input:    map[string]interface{}{"missing_some": []interface{}{1, []interface{}{"field", ""}}},
+			expected: ValidationError{Operator: "missing_some", Message: "missing_some operator array element 1 must be a non-empty string"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -338,6 +346,16 @@ func TestValidateLogicalOperators(t *testing.T) {
 			expected: nil,
 		},
 		{
+			name:     "valid not empty array truthiness",
+			input:    map[string]interface{}{"!": []interface{}{[]interface{}{}}},
+			expected: nil,
+		},
+		{
+			name:     "valid double bang empty array truthiness",
+			input:    map[string]interface{}{"!!": []interface{}{[]interface{}{}}},
+			expected: nil,
+		},
+		{
 			name:     "and with no args",
 			input:    map[string]interface{}{"and": []interface{}{}},
 			expected: ValidationError{Operator: "and", Message: "and operator requires at least 1 arguments, got 0"},
@@ -416,6 +434,9 @@ func TestGetSupportedOperators(t *testing.T) {
 	expectedCount := 33 // Standard JSON Logic operators (including ===, !==, !!, cat, substr)
 	if len(operators) != expectedCount {
 		t.Errorf("Expected %d operators, got %d", expectedCount, len(operators))
+	}
+	if !sort.StringsAreSorted(operators) {
+		t.Errorf("GetSupportedOperators() should return sorted operators, got %v", operators)
 	}
 
 	// Check for some key operators (standard JSON Logic)

@@ -1,6 +1,9 @@
 # Supported Operators
 
 This document lists all JSON Logic operators supported by jsonlogic2sql.
+Examples show the SQL expression returned by the transpiler. Predicate examples
+use `TranspileCondition`; scalar and array-producing examples use
+`TranspileValue`.
 
 ## Data Access
 
@@ -16,7 +19,7 @@ This document lists all JSON Logic operators supported by jsonlogic2sql.
 {"var": "name"}
 ```
 ```sql
-WHERE name
+name
 ```
 
 > **Note:** JSONLogic's numeric `var` form, such as `{"var": 1}`, is not
@@ -29,15 +32,15 @@ WHERE name
 {"var": ["status", "pending"]}
 ```
 ```sql
-WHERE COALESCE(status, 'pending')
+COALESCE(status, 'pending')
 ```
 
 With a schema, equality and inequality comparisons against `[field, default]`
-vars preserve the `COALESCE` expression while applying schema-aware coercion to
+vars preserve the `COALESCE` expression while applying schema-required coercion to
 the comparison literal. The default value is emitted as provided; visible enum
 defaults are validated when enum values are configured.
 
-> **Note:** Path segments that start with a digit (e.g. `24h`, `7d`) are automatically quoted using the dialect-appropriate character. See [Identifier Quoting](dialects.md#identifier-quoting) for details.
+> **Note:** Path segments outside the portable unquoted ASCII shape, such as numeric-leading (`24h`, `7d`) or Unicode (`café`) segments, are automatically quoted using the dialect-appropriate character. See [Identifier Quoting](dialects.md#identifier-quoting) for details.
 
 ### Missing Field Check (Single)
 
@@ -45,7 +48,7 @@ defaults are validated when enum values are configured.
 {"missing": "email"}
 ```
 ```sql
-WHERE email IS NULL
+email IS NULL
 ```
 
 ### Missing Field Check (Multiple)
@@ -54,7 +57,7 @@ WHERE email IS NULL
 {"missing": ["email", "phone"]}
 ```
 ```sql
-WHERE (email IS NULL OR phone IS NULL)
+(email IS NULL OR phone IS NULL)
 ```
 
 ### Missing Some Fields
@@ -63,8 +66,12 @@ WHERE (email IS NULL OR phone IS NULL)
 {"missing_some": [1, ["field1", "field2"]]}
 ```
 ```sql
-WHERE (field1 IS NULL OR field2 IS NULL)
+(field1 IS NULL AND field2 IS NULL)
 ```
+
+`missing_some` returns the missing fields only when fewer than the required
+minimum are present. With `minimum = 1` and two fields, that means both fields
+must be missing.
 
 ## Logic and Boolean Operations
 
@@ -84,7 +91,7 @@ WHERE (field1 IS NULL OR field2 IS NULL)
 {"==": [{"var": "status"}, "active"]}
 ```
 ```sql
-WHERE status = 'active'
+status = 'active'
 ```
 
 ### Strict Equality
@@ -93,7 +100,7 @@ WHERE status = 'active'
 {"===": [{"var": "count"}, 5]}
 ```
 ```sql
-WHERE count = 5
+count = 5
 ```
 
 With a schema, strict equality folds field/literal type mismatches that are
@@ -103,7 +110,23 @@ known at transpile time:
 {"===": [{"var": "count"}, "5"]}
 ```
 ```sql
-WHERE FALSE
+FALSE
+```
+
+Strict field-to-field comparisons with incompatible schema types keep the
+JSONLogic-compatible null branch without emitting a cross-type SQL comparison:
+
+```json
+{"===": [{"var": "amount"}, {"var": "code"}]}
+```
+```sql
+(amount IS NULL AND code IS NULL)
+```
+
+For `!==`, the inverse is emitted:
+
+```sql
+(amount IS NOT NULL OR code IS NOT NULL)
 ```
 
 ### Schema-Aware Equality Coercion
@@ -120,6 +143,8 @@ coercion where the JSONLogic behavior is portable SQL:
   match a boolean field and folds to a constant.
 - String fields compared with numeric literals keep the canonical string match,
   for example `code == 5` emits `code = '5'`.
+- Loose mixed-type field-to-field comparisons return an unsupported-comparison
+  error instead of emitting non-portable runtime coercion SQL.
 - Loose string/boolean field comparisons such as `code == true` return an error
   because JSONLogic's runtime string coercion cannot be expressed portably in
   SQL.
@@ -135,7 +160,7 @@ that JavaScript would coerce to the same number, such as `'05'`, `'5.0'`, or
 {"!=": [{"var": "status"}, "inactive"]}
 ```
 ```sql
-WHERE status != 'inactive'
+status != 'inactive'
 ```
 
 ### Equality with NULL
@@ -144,7 +169,7 @@ WHERE status != 'inactive'
 {"==": [{"var": "deleted_at"}, null]}
 ```
 ```sql
-WHERE deleted_at IS NULL
+deleted_at IS NULL
 ```
 
 ### Inequality with NULL
@@ -153,33 +178,32 @@ WHERE deleted_at IS NULL
 {"!=": [{"var": "field"}, null]}
 ```
 ```sql
-WHERE field IS NOT NULL
+field IS NOT NULL
 ```
 
-### Opt-In Null-Safe Field Equality
+### Null-Safe Field Equality
 
-By default, field-to-field equality uses ordinary SQL comparison:
+Field-to-field equality uses JSONLogic-compatible null-safe SQL by default:
 
 ```json
 {"==": [{"var": "a"}, {"var": "b"}]}
 ```
 ```sql
-WHERE a = b
+((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))
 ```
 
-Set `NullSafeFieldEquality` or call `SetNullSafeFieldEquality(true)` to also
-match rows where both compared fields are `NULL`, matching JSONLogic's
-`null == null` and `null === null` behavior:
+This matches JSONLogic's `null == null` and `null === null` behavior when both
+compared fields are `NULL`.
 
-```sql
-WHERE ((a IS NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a = b))
-```
+For strict equality between fields with incompatible schema types, the ordinary
+`a = b` arm is omitted because typed SQL dialects can reject that comparison.
+Only the both-null case can satisfy `===`; any not-null side satisfies `!==`.
 
-For inequality, the opt-in fallback checks one-null-only rows plus the ordinary
+For inequality, the null-safe fallback checks one-null-only rows plus the ordinary
 comparison:
 
 ```sql
-WHERE ((a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a != b))
+((a IS NULL AND b IS NOT NULL) OR (a IS NOT NULL AND b IS NULL) OR (a IS NOT NULL AND b IS NOT NULL AND a != b))
 ```
 
 This mode only applies when both operands are `var` expressions, including
@@ -192,7 +216,8 @@ schema coercion keep their existing SQL.
 {"!": [{"var": "isDeleted"}]}
 ```
 ```sql
-WHERE NOT (isDeleted)
+-- With schema: isDeleted is boolean
+NOT (isDeleted IS TRUE)
 ```
 
 ### Double Negation (Boolean Conversion)
@@ -201,12 +226,11 @@ WHERE NOT (isDeleted)
 {"!!": [{"var": "value"}]}
 ```
 
-Without schema (generic truthiness check):
-```sql
-WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
-```
-
-With schema, the `!!` operator generates type-appropriate SQL. See [Schema-Aware Truthiness](schema-validation.md#schema-aware-truthiness) for details.
+Field truthiness requires schema metadata because the transpiler must know
+whether `value` should be treated as a string, number, boolean, or array. With a
+declared field type, the `!!` operator generates type-appropriate SQL. See
+[Schema-Aware Truthiness](schema-validation.md#schema-required-truthiness) for
+details.
 
 ### Logical AND
 
@@ -217,7 +241,7 @@ With schema, the `!!` operator generates type-appropriate SQL. See [Schema-Aware
 ]}
 ```
 ```sql
-WHERE (amount > 5000 AND status = 'pending')
+(amount > 5000 AND status = 'pending')
 ```
 
 ### Logical OR
@@ -229,7 +253,7 @@ WHERE (amount > 5000 AND status = 'pending')
 ]}
 ```
 ```sql
-WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+(failedAttempts >= 5 OR country IN ('CN', 'RU'))
 ```
 
 ### Conditional Expression (if)
@@ -242,7 +266,7 @@ WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
 ]}
 ```
 ```sql
-WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
+CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
 ```
 
 ## Numeric Operations
@@ -262,10 +286,10 @@ WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
 {"<=": [{"var": "count"}, 10]}
 ```
 ```sql
-WHERE amount > 1000
-WHERE score >= 80
-WHERE age < 65
-WHERE count <= 10
+amount > 1000
+score >= 80
+age < 65
+count <= 10
 ```
 
 ### Maximum/Minimum
@@ -275,8 +299,8 @@ WHERE count <= 10
 {"min": [{"var": "price1"}, {"var": "price2"}]}
 ```
 ```sql
-WHERE GREATEST(score1, score2, score3)
-WHERE LEAST(price1, price2)
+GREATEST(score1, score2, score3)
+LEAST(price1, price2)
 ```
 
 ### Arithmetic Operations
@@ -289,12 +313,15 @@ WHERE LEAST(price1, price2)
 {"%": [{"var": "count"}, 3]}
 ```
 ```sql
-WHERE (price + tax)
-WHERE (total - discount)
-WHERE (price * 1.2)
-WHERE (total / 2)
-WHERE (count % 3)
+(price + tax)
+(total - discount)
+(price * 1.2)
+(total / 2)
+(count % 3)
 ```
+
+BigQuery and Spanner render modulo as `MOD(count, 3)` because GoogleSQL does
+not use the portable `%` operator form.
 
 ### String Operands in Arithmetic
 
@@ -312,9 +339,9 @@ When string literals appear in numeric operations, the transpiler coerces them f
 {"+": ["hello", 1]}
 ```
 ```sql
-WHERE (42 + 1)
-WHERE (3 * 2)
-WHERE ('hello' + 1)
+(42 + 1)
+(3 * 2)
+('hello' + 1)
 ```
 
 ### Unary Operations
@@ -324,8 +351,8 @@ WHERE ('hello' + 1)
 {"+": ["-5"]}
 ```
 ```sql
-WHERE -value
-WHERE CAST(-5 AS NUMERIC)
+-value
+CAST(-5 AS NUMERIC)
 ```
 
 ## Array Operations
@@ -335,7 +362,7 @@ WHERE CAST(-5 AS NUMERIC)
 | `in` | Check if value is in array |
 | `map`, `filter`, `reduce` | Array transformations |
 | `all`, `some`, `none` | Array condition checks |
-| `merge` | Merge arrays |
+| `merge` | Merge arrays, casting scalar arguments to single-element arrays |
 
 ### In Array
 
@@ -343,41 +370,64 @@ WHERE CAST(-5 AS NUMERIC)
 {"in": [{"var": "country"}, ["US", "CA", "MX"]]}
 ```
 ```sql
-WHERE country IN ('US', 'CA', 'MX')
+country IN ('US', 'CA', 'MX')
 ```
 
-When the right-hand side is an array-typed field (with schema), `in` uses
-dialect-specific array membership syntax (e.g., BigQuery/Spanner use
-`value IN UNNEST(array)`; PostgreSQL uses `value = ANY(array)`).
+When the right-hand side is an array-typed field (with schema), `in` emits
+null-safe element membership SQL so JSONLogic `null in [null]` stays true.
+BigQuery, Spanner, PostgreSQL, and DuckDB use an `EXISTS ... UNNEST(...)`
+predicate; ClickHouse uses `arrayExists(...)`.
+DuckDB uses explicit column aliases in these `UNNEST` scopes, for example
+`UNNEST(tags) AS elem(elem)`, so the lambda variable resolves to the array
+element rather than DuckDB's default `unnest` column.
+The internal membership aliases use a `__j2s_` prefix and are automatically
+suffixed when needed so schema fields with the same names are not shadowed.
 
-When a schema is provided, array elements are automatically coerced to match the field type. For example, numeric values in the array are quoted as strings when the field is a string type:
+When the right-hand side is a known non-container value such as a number,
+boolean, null, or an empty array literal, `in` folds to `FALSE` because
+JSONLogic membership only applies to strings and arrays.
+
+Literal array membership follows JavaScript `indexOf` semantics, so element
+matching is strict. Unlike equality comparisons, literal array members are not
+coerced to the left field's schema type:
 
 ```json
 // Schema: merchant_code is string type
 {"in": [{"var": "merchant_code"}, [5960, 9000]]}
 ```
 ```sql
-WHERE merchant_code IN ('5960', '9000')
+FALSE
 ```
 
-See [Type Coercion](schema-validation.md#type-coercion) for details.
+If a literal array contains both type-compatible values and mismatched values,
+the impossible members are ignored. `null` is handled explicitly:
+
+```json
+{"in": [{"var": "status"}, [null, "active"]]}
+```
+```sql
+(status IS NULL OR status IN ('active'))
+```
+
+See [Type Coercion](schema-validation.md#type-coercion) for the comparison
+operators that do apply schema-aware literal coercion.
 
 ### Map Array
 
 ```json
-{"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
+{"map": [{"var": "numbers"}, {"+": [{"var": ""}, 1]}]}
 ```
 ```sql
-WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
+ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
 ```
 
 ### Filter Array
 
 ```json
-{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+{"filter": [{"var": "scores"}, {">": [{"var": ""}, 70]}]}
 ```
 ```sql
-WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 ```
 
 ### Reduce Array
@@ -386,14 +436,27 @@ WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
 {"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}
 ```
 ```sql
-WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
+0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
 ```
+
+Portable SQL dialects support reduce forms that can be represented as a SQL aggregate, including `accumulator + current`, `accumulator + <current-derived numeric expression>`, `min(accumulator,current...)`, and `max(accumulator,current...)`. Arbitrary reducers such as string concatenation, accumulator truthiness, or non-associative arithmetic require a dialect with native list folding: DuckDB emits `list_reduce(...)` for scalar reducer bodies and ClickHouse emits `arrayFold(...)`. DuckDB rejects reducer bodies that contain nested array operators lowering to subqueries, because DuckDB lambdas do not support subqueries. BigQuery, Spanner, and PostgreSQL return an explicit unsupported-expression error instead of generating a non-folding scalar subquery.
 
 ### Nested Array Scope
 
-For nested array operators, the transpiler keeps inner and outer element scopes distinct (for example `elem`, `elem1`) when needed, so references like `item.base` in nested reducers resolve to the intended outer element.
+Inside `map`, `filter`, `all`, `some`, and `none` lambdas, bare vars resolve against the current element:
 
-Inside an inner lambda, `current` and `current.*` always refer to that inner element alias (for example `elem1`, `elem1.base`). Outer-element access in nested lambdas should use `item.*`.
+```json
+{"map": [{"var": "records"}, {"var": "type"}]}
+```
+```sql
+ARRAY(SELECT elem.type FROM UNNEST(records) AS elem)
+```
+
+Use `{"var": ""}` for the current element itself, and array-form vars for defaults, for example `{"var":["type","unknown"]}` -> `COALESCE(elem.type, 'unknown')`.
+
+The implementation-specific dotted aliases `.type`, `item.type`, `current.type`, and generated SQL aliases such as `elem.type` are not supported in these lambdas. If the element schema really defines a nested field with that name, for example an `elem` object with a `type` field, `{"var":"elem.type"}` is treated as normal JSONLogic data access and emitted under the current SQL element alias. In `reduce`, use official JSONLogic names: `{"var":"current"}`, `{"var":"current.type"}`, and `{"var":"accumulator"}`. The whole reduce scope (`{"var":""}`) is an object in JSONLogic and is not emitted as a scalar SQL expression.
+
+For nested array operators, the transpiler keeps inner and outer generated SQL aliases distinct (for example `elem`, `elem1`) when needed.
 
 ### All Elements Satisfy Condition
 
@@ -402,13 +465,13 @@ Inside an inner lambda, `current` and `current.*` always refer to that inner ele
 ```
 ```sql
 -- BigQuery/Spanner
-WHERE (ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
+(ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
 -- PostgreSQL
-WHERE (CARDINALITY(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
+(CARDINALITY(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
 -- DuckDB
-WHERE (length(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
+(length(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))
 -- ClickHouse
-WHERE (length(ages) > 0 AND arrayAll(elem -> elem >= 18, ages))
+(length(ages) > 0 AND arrayAll(elem -> elem >= 18, ages))
 ```
 
 > **Note:** The array length guard ensures JSONLogic spec compliance - `{"all": [[], condition]}` returns `false` (not `true`). Each dialect uses its native array length function: `ARRAY_LENGTH` (BigQuery/Spanner), `CARDINALITY` (PostgreSQL), `length` (DuckDB/ClickHouse).
@@ -419,7 +482,7 @@ WHERE (length(ages) > 0 AND arrayAll(elem -> elem >= 18, ages))
 {"some": [{"var": "statuses"}, {"==": [{"var": ""}, "active"]}]}
 ```
 ```sql
-WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
+EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
 ```
 
 ### No Elements Satisfy Condition
@@ -428,7 +491,7 @@ WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
 {"none": [{"var": "values"}, {"==": [{"var": ""}, "invalid"]}]}
 ```
 ```sql
-WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
+NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
 ```
 
 ### Merge Arrays
@@ -437,7 +500,29 @@ WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
 {"merge": [{"var": "array1"}, {"var": "array2"}]}
 ```
 ```sql
-WHERE ARRAY_CONCAT(array1, array2)
+ARRAY_CONCAT(array1, array2)
+```
+
+JSONLogic `merge` casts non-array arguments to arrays. The transpiler follows
+that behavior when the scalar element type is statically known:
+
+```json
+{"merge": [1, [2]]}
+```
+```sql
+ARRAY_CONCAT([1], [2])
+```
+
+Unknown-typed or incompatible scalar element types return an explicit error
+instead of generating dialect-specific invalid array SQL.
+
+With no arguments, `merge` returns the empty-array identity:
+
+```json
+{"merge": []}
+```
+```sql
+[]
 ```
 
 ## String Operations
@@ -454,8 +539,14 @@ WHERE ARRAY_CONCAT(array1, array2)
 {"in": ["hello", "hello world"]}
 ```
 ```sql
-WHERE POSITION('hello' IN 'hello world') > 0
+POSITION('hello' IN 'hello world') > 0
 ```
+
+For string containment, non-string needles are coerced with JavaScript-style
+stringification before searching. For example, nullable field needles become
+`COALESCE(value, 'null')`, while boolean needles become `'true'`, `'false'`,
+or `'null'`. Empty string needles follow JavaScript `indexOf` semantics and
+match any non-null string haystack, including `""`.
 
 ### Concatenate Strings
 
@@ -463,7 +554,20 @@ WHERE POSITION('hello' IN 'hello world') > 0
 {"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
 ```
 ```sql
-WHERE CONCAT(firstName, ' ', lastName)
+CONCAT(COALESCE(CAST(firstName AS STRING), ''), ' ', COALESCE(CAST(lastName AS STRING), ''))
+```
+
+`cat` follows JSONLogic stringification: `null` stringifies as an empty
+string, and nullable operands are wrapped so SQL `CONCAT` does not return
+`NULL` for the whole expression.
+
+With no arguments, `cat` returns the empty string:
+
+```json
+{"cat": []}
+```
+```sql
+''
 ```
 
 ### Concatenate with Conditional
@@ -472,7 +576,7 @@ WHERE CONCAT(firstName, ' ', lastName)
 {"cat": [{"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]}, {"var": "first_name"}, " ", {"var": "last_name"}]}
 ```
 ```sql
-WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
+CONCAT(COALESCE(CASE WHEN gender = 'M' THEN 'Mr. ' ELSE 'Ms. ' END, ''), COALESCE(CAST(first_name AS STRING), ''), ' ', COALESCE(CAST(last_name AS STRING), ''))
 ```
 
 ### Substring with Length
@@ -481,7 +585,7 @@ WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, '
 {"substr": [{"var": "email"}, 0, 10]}
 ```
 ```sql
-WHERE SUBSTR(email, 1, 10)
+SUBSTR(email, 1, 10)
 ```
 
 ### Substring without Length
@@ -490,8 +594,13 @@ WHERE SUBSTR(email, 1, 10)
 {"substr": [{"var": "email"}, 4]}
 ```
 ```sql
-WHERE SUBSTR(email, 5)
+SUBSTR(email, 5)
 ```
+
+Negative starts count back from the end of the string, and negative lengths stop
+before the end. Dynamic start or length operands use `CASE`, `GREATEST`, and
+`LENGTH`/`length` so SQL follows JSONLogic `substr` semantics instead of the
+target database's native negative-index behavior.
 
 ## See Also
 

@@ -7,12 +7,73 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/dialect"
 )
 
+type elementRefSchemaProvider struct {
+	fieldOnlySchemaProvider
+}
+
+func (p *elementRefSchemaProvider) GetFieldType(fieldName string) string {
+	if p.IsArrayType(fieldName) {
+		return "array"
+	}
+	switch fieldName {
+	case "currently":
+		return "boolean"
+	case "base", "current_balance", "amount", "score", "item_count", "items":
+		return "number"
+	default:
+		return ""
+	}
+}
+
+func (p *elementRefSchemaProvider) IsArrayType(fieldName string) bool {
+	switch fieldName {
+	case "data", "groups", "numbers", "orders", "records", "results", "scores", "values", "amounts", "nums", "vals":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *elementRefSchemaProvider) IsNumericType(fieldName string) bool {
+	switch p.GetFieldType(fieldName) {
+	case "number", "integer":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *elementRefSchemaProvider) IsBooleanType(fieldName string) bool {
+	return p.GetFieldType(fieldName) == "boolean"
+}
+
+func (p *elementRefSchemaProvider) IsStringType(fieldName string) bool {
+	return p.GetFieldType(fieldName) == "string"
+}
+
+func (p *elementRefSchemaProvider) HasArrayElementFields(fieldName string) bool {
+	switch fieldName {
+	case "data", "groups", "orders", "records", "results", "scores":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *elementRefSchemaProvider) GetArrayElementType(fieldName string) string {
+	if p.HasArrayElementFields(fieldName) {
+		return "object"
+	}
+	if p.IsArrayType(fieldName) {
+		return "number"
+	}
+	return ""
+}
+
 // TestArrayOperator_ElementRefNoCorruption verifies that field names containing
-// "item" or "current" as substrings are NOT corrupted by the element variable rewrite.
-// This is a regression test for the replaceElementReference bug where
-// strings.ReplaceAll corrupted "current_balance" → "elem_balance".
+// "item" or "current" as substrings are NOT corrupted by array-scope mapping.
 func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &elementRefSchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -23,15 +84,15 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 		absent   string
 	}{
 		{
-			name:     "current_balance not corrupted in reduce",
+			name:     "current.current_balance correctly mapped in reduce",
 			operator: "reduce",
 			args: []any{
 				map[string]any{"var": "orders"},
-				map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current_balance"}}},
+				map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current.current_balance"}}},
 				0,
 			},
-			contains: "current_balance",
-			absent:   "elem_balance",
+			contains: "elem.current_balance",
+			absent:   "current.current_balance",
 		},
 		{
 			name:     "item_count not corrupted in all",
@@ -40,7 +101,7 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 				map[string]any{"var": "scores"},
 				map[string]any{">": []any{map[string]any{"var": "item_count"}, 0}},
 			},
-			contains: "item_count",
+			contains: "elem.item_count",
 			absent:   "elem_count",
 		},
 		{
@@ -50,7 +111,7 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 				map[string]any{"var": "data"},
 				map[string]any{">": []any{map[string]any{"var": "items"}, 0}},
 			},
-			contains: "items",
+			contains: "elem.items",
 		},
 		{
 			name:     "currently field not corrupted in some",
@@ -59,7 +120,7 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 				map[string]any{"var": "records"},
 				map[string]any{"==": []any{map[string]any{"var": "currently"}, true}},
 			},
-			contains: "currently",
+			contains: "elem.currently",
 		},
 		{
 			name:     "current.amount correctly mapped in reduce",
@@ -73,34 +134,31 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 			absent:   "current.amount",
 		},
 		{
-			name:     "item.score correctly mapped in all",
+			name:     "bare score correctly mapped in all",
 			operator: "all",
 			args: []any{
 				map[string]any{"var": "results"},
-				map[string]any{">=": []any{map[string]any{"var": "item.score"}, 50}},
+				map[string]any{">=": []any{map[string]any{"var": "score"}, 50}},
 			},
 			contains: "elem.score",
-			absent:   "item.score",
 		},
 		{
-			name:     "item exact match is replaced in none",
+			name:     "empty var maps to element in none",
 			operator: "none",
 			args: []any{
 				map[string]any{"var": "values"},
-				map[string]any{"==": []any{map[string]any{"var": "item"}, 0}},
+				map[string]any{"==": []any{map[string]any{"var": ""}, 0}},
 			},
 			contains: "elem = 0",
-			absent:   "item = 0",
 		},
 		{
-			name:     "current exact match is replaced in map",
+			name:     "empty var maps to element in map",
 			operator: "map",
 			args: []any{
 				map[string]any{"var": "values"},
-				map[string]any{"*": []any{map[string]any{"var": "current"}, 2}},
+				map[string]any{"*": []any{map[string]any{"var": ""}, 2}},
 			},
 			contains: "(elem * 2)",
-			absent:   "(current * 2)",
 		},
 	}
 
@@ -123,7 +181,7 @@ func TestArrayOperator_ElementRefNoCorruption(t *testing.T) {
 // TestArrayOperator_DottedIdentifierPreservation verifies that dotted identifiers
 // like "account.current" and "order.item" are NOT corrupted by the post-SQL safety net.
 func TestArrayOperator_DottedIdentifierPreservation(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &elementRefSchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		if m, ok := expr.(map[string]interface{}); ok {
 			for _, args := range m {
@@ -184,9 +242,9 @@ func TestArrayOperator_DottedIdentifierPreservation(t *testing.T) {
 }
 
 // TestArrayOperator_CustomOpLiteralSQL verifies that custom operators emitting
-// literal "item"/"current" SQL are correctly handled by the post-SQL safety net.
+// literal legacy alias SQL are no longer rewritten after SQL generation.
 func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &elementRefSchemaProvider{})
 	config.SetExpressionParser(func(expr any, path string) (string, error) {
 		if m, ok := expr.(map[string]interface{}); ok {
 			for op := range m {
@@ -214,32 +272,28 @@ func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
 		absent   string
 	}{
 		{
-			name:     "literal item replaced in map",
+			name:     "literal item preserved in map",
 			operator: "map",
 			args:     []any{map[string]any{"var": "nums"}, map[string]any{"emit_item": []any{}}},
-			contains: "SELECT elem FROM",
-			absent:   "SELECT item FROM",
+			contains: "SELECT item FROM",
 		},
 		{
-			name:     "literal current in expression replaced in filter",
+			name:     "literal current in expression preserved in filter",
 			operator: "filter",
 			args:     []any{map[string]any{"var": "vals"}, map[string]any{">": []any{map[string]any{"emit_current_expr": []any{}}, 0}}},
-			contains: "(elem + 1)",
-			absent:   "(current + 1)",
+			contains: "(current + 1)",
 		},
 		{
-			name:     "literal current.price replaced in some",
+			name:     "literal current.price preserved in some",
 			operator: "some",
-			args:     []any{map[string]any{"var": "items"}, map[string]any{">": []any{map[string]any{"emit_current_dot": []any{}}, 0}}},
-			contains: "elem.price",
-			absent:   "current.price",
+			args:     []any{map[string]any{"var": "nums"}, map[string]any{">": []any{map[string]any{"emit_current_dot": []any{}}, 0}}},
+			contains: "current.price",
 		},
 		{
-			name:     "literal current numeric-leading path replaced and quoted in some",
+			name:     "literal current numeric-leading path preserved in some",
 			operator: "some",
-			args:     []any{map[string]any{"var": "items"}, map[string]any{">": []any{map[string]any{"emit_current_numeric_dot": []any{}}, 0}}},
-			contains: "elem.`24h`",
-			absent:   "current.24h",
+			args:     []any{map[string]any{"var": "nums"}, map[string]any{">": []any{map[string]any{"emit_current_numeric_dot": []any{}}, 0}}},
+			contains: "current.24h",
 		},
 	}
 
@@ -262,18 +316,18 @@ func TestArrayOperator_CustomOpLiteralSQL(t *testing.T) {
 // TestArrayOperator_ReduceAccumulatorEdgeCases tests reduce-specific edge cases
 // including initial value preservation and nested reduces.
 func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
-	op := NewArrayOperator(config)
-
 	tests := []struct {
 		name     string
+		dialect  dialect.Dialect
 		operator string
 		args     []any
 		contains string
 		absent   string
+		wantErr  string
 	}{
 		{
 			name:     "standalone reduce initial current.amount preserved",
+			dialect:  dialect.DialectClickHouse,
 			operator: "reduce",
 			args: []any{
 				map[string]any{"var": "numbers"},
@@ -285,35 +339,44 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 		},
 		{
 			name:     "nested reduce initial rewritten by outer map",
+			dialect:  dialect.DialectBigQuery,
 			operator: "map",
 			args: []any{
 				map[string]any{"var": "groups"},
 				map[string]any{
 					"reduce": []any{
-						map[string]any{"var": "item.values"},
+						map[string]any{"var": "values"},
 						map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
-						map[string]any{"var": "item.base"},
+						map[string]any{"var": "base"},
 					},
 				},
 			},
 			contains: "elem.base",
-			absent:   "item.base",
 		},
 		{
-			name:     "reduce initial with dollar sign preserved",
+			name:     "reduce aggregate rejects non-numeric string initial",
+			dialect:  dialect.DialectBigQuery,
 			operator: "reduce",
 			args: []any{
 				map[string]any{"var": "amounts"},
 				map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": "current"}}},
 				"$0.00",
 			},
-			contains: "'$0.00'",
+			wantErr: "numeric reduce aggregate initial must be numeric",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			config := NewOperatorConfig(tt.dialect, &elementRefSchemaProvider{})
+			op := NewArrayOperator(config)
 			result, err := op.ToSQL(tt.operator, tt.args)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want containing %q (SQL %q)", err, tt.wantErr, result)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -330,7 +393,7 @@ func TestArrayOperator_ReduceAccumulatorEdgeCases(t *testing.T) {
 // TestArrayOperator_ClickHouseElementRefRewrite verifies element reference
 // rewriting works correctly with ClickHouse-specific array syntax.
 func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectClickHouse, nil)
+	config := NewOperatorConfig(dialect.DialectClickHouse, &elementRefSchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -343,7 +406,7 @@ func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
 		{
 			name:     "item replaced in ClickHouse arrayMap",
 			operator: "map",
-			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": "item"}, 2}}},
+			args:     []any{map[string]any{"var": "numbers"}, map[string]any{"*": []any{map[string]any{"var": ""}, 2}}},
 			contains: "arrayMap(elem -> (elem * 2)",
 			absent:   "item",
 		},
@@ -354,18 +417,17 @@ func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
 				map[string]any{"var": "data"},
 				map[string]any{">": []any{map[string]any{"var": "current_balance"}, 0}},
 			},
-			contains: "current_balance",
+			contains: "elem.current_balance",
 			absent:   "elem_balance",
 		},
 		{
-			name:     "item.score replaced in ClickHouse arrayAll",
+			name:     "bare score mapped in ClickHouse arrayAll",
 			operator: "all",
 			args: []any{
 				map[string]any{"var": "results"},
-				map[string]any{">=": []any{map[string]any{"var": "item.score"}, 50}},
+				map[string]any{">=": []any{map[string]any{"var": "score"}, 50}},
 			},
 			contains: "elem.score",
-			absent:   "item.score",
 		},
 	}
 
@@ -385,10 +447,9 @@ func TestArrayOperator_ClickHouseElementRefRewrite(t *testing.T) {
 	}
 }
 
-// TestArrayOperator_ArrayFormVarRewrite verifies that array-form var expressions
-// like {"var": ["current", 0]} are correctly rewritten to {"var": ["elem", 0]}.
+// TestArrayOperator_ArrayFormVarRewrite verifies scoped defaulted var expressions.
 func TestArrayOperator_ArrayFormVarRewrite(t *testing.T) {
-	config := NewOperatorConfig(dialect.DialectBigQuery, nil)
+	config := NewOperatorConfig(dialect.DialectBigQuery, &elementRefSchemaProvider{})
 	op := NewArrayOperator(config)
 
 	tests := []struct {
@@ -402,7 +463,7 @@ func TestArrayOperator_ArrayFormVarRewrite(t *testing.T) {
 			name:     "array-form current with default in reduce",
 			operator: "reduce",
 			args: []any{
-				map[string]any{"var": "items"},
+				map[string]any{"var": "amounts"},
 				map[string]any{"+": []any{map[string]any{"var": "accumulator"}, map[string]any{"var": []any{"current", 0}}}},
 				0,
 			},
@@ -410,14 +471,13 @@ func TestArrayOperator_ArrayFormVarRewrite(t *testing.T) {
 			absent:   "COALESCE(current, 0)",
 		},
 		{
-			name:     "array-form item with default in all",
+			name:     "array-form empty var with default in all",
 			operator: "all",
 			args: []any{
-				map[string]any{"var": "scores"},
-				map[string]any{">": []any{map[string]any{"var": []any{"item", 0}}, 50}},
+				map[string]any{"var": "amounts"},
+				map[string]any{">": []any{map[string]any{"var": []any{"", 0}}, 50}},
 			},
 			contains: "COALESCE(elem, 0)",
-			absent:   "COALESCE(item, 0)",
 		},
 	}
 

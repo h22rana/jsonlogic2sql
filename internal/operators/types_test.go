@@ -63,6 +63,86 @@ func TestSQLFieldResult(t *testing.T) {
 	}
 }
 
+func TestProcessedValue_SchemaFieldNames(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		pv   ProcessedValue
+		want []string
+	}{
+		{
+			name: "multiple fields",
+			pv:   ProcessedValue{FieldName: "items.a", FieldNames: []string{"items.a", "backup.a"}},
+			want: []string{"items.a", "backup.a"},
+		},
+		{
+			name: "single fallback field",
+			pv:   ProcessedValue{FieldName: "items.a"},
+			want: []string{"items.a"},
+		},
+		{
+			name: "no field",
+			pv:   ProcessedValue{},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tt.pv.SchemaFieldNames()
+			if len(got) != len(tt.want) {
+				t.Fatalf("SchemaFieldNames() = %#v, want %#v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("SchemaFieldNames() = %#v, want %#v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestTypedSQLResult(t *testing.T) {
+	result := TypedSQLResult("amount > 0", ExpressionKindPredicate, ExpressionTypeBoolean)
+	if result.Value != "amount > 0" {
+		t.Errorf("TypedSQLResult().Value = %q, want %q", result.Value, "amount > 0")
+	}
+	if !result.IsSQL {
+		t.Error("TypedSQLResult().IsSQL = false, want true")
+	}
+	if !result.HasExpressionInfo {
+		t.Error("TypedSQLResult().HasExpressionInfo = false, want true")
+	}
+	if result.Kind != ExpressionKindPredicate {
+		t.Errorf("TypedSQLResult().Kind = %v, want %v", result.Kind, ExpressionKindPredicate)
+	}
+	if result.Type != ExpressionTypeBoolean {
+		t.Errorf("TypedSQLResult().Type = %v, want %v", result.Type, ExpressionTypeBoolean)
+	}
+}
+
+func TestArrayValueSQL(t *testing.T) {
+	result := ArrayValueSQL("ARRAY[1, 2]", ExpressionTypeNumber)
+	if result.SQL != "ARRAY[1, 2]" {
+		t.Errorf("ArrayValueSQL().SQL = %q, want %q", result.SQL, "ARRAY[1, 2]")
+	}
+	if result.Kind != ExpressionKindValue {
+		t.Errorf("ArrayValueSQL().Kind = %v, want %v", result.Kind, ExpressionKindValue)
+	}
+	if result.Type != ExpressionTypeArray {
+		t.Errorf("ArrayValueSQL().Type = %v, want %v", result.Type, ExpressionTypeArray)
+	}
+	if result.ArrayElementType != ExpressionTypeNumber {
+		t.Errorf("ArrayValueSQL().ArrayElementType = %v, want %v", result.ArrayElementType, ExpressionTypeNumber)
+	}
+	if len(result.ArrayElementTypes) != 1 || result.ArrayElementTypes[0] != ExpressionTypeNumber {
+		t.Errorf("ArrayValueSQL().ArrayElementTypes = %#v, want [%v]", result.ArrayElementTypes, ExpressionTypeNumber)
+	}
+}
+
 func TestLiteralResult(t *testing.T) {
 	tests := []struct {
 		name    string

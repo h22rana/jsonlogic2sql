@@ -1,6 +1,6 @@
 # Schema Validation
 
-You can optionally provide a schema to enforce strict field validation. When a schema is set, the transpiler will only accept fields defined in the schema and will return errors for undefined fields.
+You must provide a schema to enforce strict field validation. The transpiler only accepts fields defined in the schema and returns errors for undefined fields. Use `NewSchema(nil)` only for literal-only JSONLogic that does not access fields.
 
 ## Defining a Schema
 
@@ -14,37 +14,45 @@ import (
 
 func main() {
     // Create a schema with field definitions
-    schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
         {Name: "order.amount", Type: jsonlogic2sql.FieldTypeInteger},
         {Name: "order.status", Type: jsonlogic2sql.FieldTypeString},
         {Name: "user.verified", Type: jsonlogic2sql.FieldTypeBoolean},
-        {Name: "user.roles", Type: jsonlogic2sql.FieldTypeArray},
+        {Name: "user.roles", Type: jsonlogic2sql.FieldTypeArray, ElementType: jsonlogic2sql.FieldTypeString},
     })
-
-    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
-    transpiler.SetSchema(schema)
-
-    // Valid field - works
-    sql, err := transpiler.Transpile(`{"==": [{"var": "order.status"}, "active"]}`)
     if err != nil {
         panic(err)
     }
-    fmt.Println(sql) // Output: WHERE order.status = 'active'
+
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
+
+    // Valid field - works
+    sql, err := transpiler.TranspileCondition(`{"==": [{"var": "order.status"}, "active"]}`)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: order.status = 'active'
 
     // Invalid field - returns error
-    _, err = transpiler.Transpile(`{"==": [{"var": "invalid.field"}, "value"]}`)
+    _, err = transpiler.TranspileCondition(`{"==": [{"var": "invalid.field"}, "value"]}`)
     if err != nil {
         fmt.Println(err) // Output: field 'invalid.field' is not defined in schema
     }
 }
 ```
 
-**Note:** Field names must be raw, unquoted identifiers. The transpiler handles identifier quoting automatically based on the target dialect. `NewSchema` remains source-compatible with the v1 API and reports invalid schema field names when the schema is used by the transpiler. Use `NewValidatedSchema`, `ValidateSchemaFields`, `NewSchemaFromJSON`, or `NewSchemaFromFile` when you need construction-time errors for schema field names that contain quote characters (backtick, double quote, or single quote).
+**Note:** Field names must be raw, unquoted identifier segments containing only
+letters, digits, and underscores. The transpiler handles identifier quoting
+automatically based on the target dialect for segments outside the portable
+unquoted ASCII shape, including numeric-leading segments such as `24h` and
+Unicode segments such as `café`. `NewSchema`, `NewSchemaFromJSON`, and
+`NewSchemaFromFile` return construction-time errors for schema field names that
+contain quote characters or SQL-control punctuation.
 
 ## Validated Schema Construction
 
 ```go
-schema, err := jsonlogic2sql.NewValidatedSchema([]jsonlogic2sql.FieldSchema{
+schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "order.amount", Type: jsonlogic2sql.FieldTypeInteger},
     {Name: "order.status", Type: jsonlogic2sql.FieldTypeString},
 })
@@ -61,7 +69,7 @@ schemaJSON := `[
     {"name": "order.amount", "type": "integer"},
     {"name": "order.status", "type": "string"},
     {"name": "user.verified", "type": "boolean"},
-    {"name": "user.roles", "type": "array"}
+    {"name": "user.roles", "type": "array", "elementType": "string"}
 ]`
 
 schema, err := jsonlogic2sql.NewSchemaFromJSON([]byte(schemaJSON))
@@ -76,6 +84,121 @@ if err != nil {
 }
 ```
 
+## Nested Object and Array Element Fields
+
+Schemas can describe object fields with `fields`, scalar array elements with
+`elementType`, and array element object fields with `elementFields`. The
+transpiler flattens those definitions internally for type validation, while
+array lambdas still emit SQL relative to the element alias.
+`fields` is valid only on `object` fields, `elementType` is valid only on
+`array` fields, and `elementFields` is valid only on `array` fields. Every field
+entry, including nested object children and array element children, must include
+a non-empty `name` and one of the supported `type` values. Enum fields and enum
+arrays must include at least one `allowedValues` entry; enum values must be
+unique, and non-enum fields cannot use `allowedValues`. `elementFields` implies
+object elements; if `elementType` is also set, it must be `object`.
+Object `fields`, array `elementType`, and array `elementFields` are optional so
+schemas can represent object fields and arrays whose children are intentionally
+opaque. Object fields are schema containers: `{"var":"profile.status"}` is
+valid when `status` is declared, but returning `{"var":"profile"}` as a value
+expression is rejected because object/struct value SQL is not portable across
+supported dialects.
+Flattened field paths must be unique and cannot contain empty path segments
+such as `profile..status`.
+
+```json
+[
+  {
+    "name": "profile",
+    "type": "object",
+    "fields": [
+      { "name": "country", "type": "string" },
+      {
+        "name": "status",
+        "type": "enum",
+        "allowedValues": ["active", "blocked"]
+      }
+    ]
+  },
+  {
+    "name": "payment_methods",
+    "type": "array",
+    "elementType": "object",
+    "elementFields": [
+      {
+        "name": "type",
+        "type": "enum",
+        "allowedValues": ["BALANCE", "CARD"]
+      },
+      { "name": "amount", "type": "number" },
+      {
+        "name": "details",
+        "type": "object",
+        "fields": [
+          { "name": "issuer", "type": "string" },
+          {
+            "name": "events",
+            "type": "array",
+            "elementFields": [
+              {
+                "name": "code",
+                "type": "enum",
+                "allowedValues": ["AUTH", "CAPTURE"]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "tags",
+    "type": "array",
+    "elementType": "string"
+  },
+  {
+    "name": "states",
+    "type": "array",
+    "elementType": "enum",
+    "allowedValues": ["active", "blocked"]
+  }
+]
+```
+
+Those entries define these schema paths: `profile.country`,
+`profile.status`, `payment_methods.type`, `payment_methods.amount`,
+`payment_methods.details.issuer`, `payment_methods.details.events`, and
+`payment_methods.details.events.code`, plus scalar arrays `tags` and `states`
+with declared element types.
+
+```json
+{"some":[{"var":"payment_methods"},{"==":[{"var":"type"},"BALANCE"]}]}
+```
+
+In a lambda, `{"var":"type"}` resolves against the current array element and
+is validated as `payment_methods.type`, then emitted as `elem.type`.
+Unknown scoped fields are rejected in schema-required mode.
+
+Array element fields stay scoped to their own array. From the
+`payment_methods` element scope, `{"var":"details.issuer"}` is valid because
+`details` is an object field on the current element, but
+`{"var":"details.events.code"}` is rejected because `code` belongs to each
+element of the nested `details.events` array. Enter the nested array first:
+
+```json
+{
+  "some": [
+    { "var": "payment_methods" },
+    {
+      "some": [
+        { "var": "details.events" },
+        { "==": [{ "var": "code" }, "AUTH"] }
+      ]
+    }
+  ]
+}
+```
+
 ## Supported Field Types
 
 | Type | Constant | Description |
@@ -85,8 +208,15 @@ if err != nil {
 | `number` | `FieldTypeNumber` | Numeric fields (float/decimal) |
 | `boolean` | `FieldTypeBoolean` | Boolean fields |
 | `array` | `FieldTypeArray` | Array fields |
-| `object` | `FieldTypeObject` | Object/struct fields |
+| `object` | `FieldTypeObject` | Object/struct container fields; use nested child paths in JSONLogic value expressions |
 | `enum` | `FieldTypeEnum` | Enum fields with allowed values |
+
+For arrays, `ElementType` can be any supported field type. Primitive arrays
+such as `array<string>` should set `ElementType` so lambda truthiness and
+comparison checks can be validated. Object arrays can either set
+`ElementType: FieldTypeObject` with `ElementFields`, or omit `ElementType` when
+`ElementFields` are present. `GetArrayElementType(field)` returns the declared
+element type, and returns `object` for arrays with `ElementFields`.
 
 ## Type-Aware Operators
 
@@ -95,7 +225,7 @@ When a schema is provided, operators perform strict type validation:
 | Operator Category | Allowed Types | Rejected Types |
 |------------------|---------------|----------------|
 | Numeric (`+`, `-`, `*`, `/`, `%`, `max`, `min`) | integer, number | string, array, object, boolean |
-| String (`cat`, `substr`) | string, integer, number | array, object |
+| String (`cat`, `substr`) | `cat`: string, integer, number, boolean; `substr`: string, integer, number | array, object |
 | Array (`all`, `some`, `none`, `map`, `filter`, `reduce`, `merge`) | array | all non-array types |
 | Comparison (`>`, `>=`, `<`, `<=`) | integer, number, string | array, object, boolean |
 | Equality (`==`, `!=`, `===`, `!==`) | any | unsupported loose string/enum-string vs boolean literal |
@@ -104,29 +234,31 @@ When a schema is provided, operators perform strict type validation:
 ### Example
 
 ```go
-schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
     {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
     {Name: "name", Type: jsonlogic2sql.FieldTypeString},
 })
+if err != nil {
+    panic(err)
+}
 
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
-transpiler.SetSchema(schema)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Valid: numeric operation on integer field
-sql, _ := transpiler.Transpile(`{"+": [{"var": "amount"}, 10]}`)
-fmt.Println(sql) // Output: WHERE (amount + 10)
+sql, _ := transpiler.TranspileValue(`{"+": [{"var": "amount"}, 10]}`)
+fmt.Println(sql) // Output: (amount + 10)
 
 // Valid: array operation on array field
-sql, _ = transpiler.Transpile(`{"some": [{"var": "tags"}, {"==": [{"var": ""}, "important"]}]}`)
-fmt.Println(sql) // Output: WHERE EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem = 'important')
+sql, _ = transpiler.TranspileCondition(`{"some": [{"var": "tags"}, {"==": [{"var": ""}, "important"]}]}`)
+fmt.Println(sql) // Output: EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem = 'important')
 
 // Error: numeric operation on string field
-_, err := transpiler.Transpile(`{"+": [{"var": "name"}, 10]}`)
+_, err := transpiler.TranspileValue(`{"+": [{"var": "name"}, 10]}`)
 // Error: numeric operation on non-numeric field 'name' (type: string)
 
 // Error: array operation on non-array field
-_, err = transpiler.Transpile(`{"some": [{"var": "amount"}, {"==": [{"var": ""}, 0]}]}`)
+_, err = transpiler.TranspileCondition(`{"some": [{"var": "amount"}, {"==": [{"var": ""}, 0]}]}`)
 // Error: array operation on non-array field 'amount' (type: integer)
 ```
 
@@ -135,25 +267,29 @@ _, err = transpiler.Transpile(`{"some": [{"var": "amount"}, {"==": [{"var": ""},
 The `in` operator behavior depends on the field type:
 
 ```go
-// Array field: uses dialect-specific array membership syntax
-sql, _ := transpiler.Transpile(`{"in": ["admin", {"var": "tags"}]}`)
+// Array field: uses null-safe JSONLogic membership
+sql, _ := transpiler.TranspileCondition(`{"in": ["admin", {"var": "tags"}]}`)
 fmt.Println(sql)
-// BigQuery/Spanner: WHERE 'admin' IN UNNEST(tags)
-// PostgreSQL:       WHERE 'admin' = ANY(tags)
-// DuckDB:           WHERE list_contains(tags, 'admin')
-// ClickHouse:       WHERE has(tags, 'admin')
+// BigQuery/Spanner:
+// EXISTS (SELECT 1 FROM UNNEST(tags) AS __j2s_member WHERE ((__j2s_member IS NULL AND 'admin' IS NULL) OR (__j2s_member IS NOT NULL AND 'admin' IS NOT NULL AND __j2s_member = 'admin')))
+// PostgreSQL/DuckDB:
+// EXISTS (SELECT 1 FROM UNNEST(tags) AS __j2s_members(__j2s_member) WHERE ((__j2s_member IS NULL AND 'admin' IS NULL) OR (__j2s_member IS NOT NULL AND 'admin' IS NOT NULL AND __j2s_member = 'admin')))
+// ClickHouse:
+// arrayExists(__j2s_member -> ((__j2s_member IS NULL AND 'admin' IS NULL) OR (__j2s_member IS NOT NULL AND 'admin' IS NOT NULL AND __j2s_member = 'admin')), tags)
 
 // String field: uses STRPOS for containment
-sql, _ = transpiler.Transpile(`{"in": ["hello", {"var": "name"}]}`)
-fmt.Println(sql) // Output: WHERE STRPOS(name, 'hello') > 0
+sql, _ = transpiler.TranspileCondition(`{"in": ["hello", {"var": "name"}]}`)
+fmt.Println(sql) // Output: STRPOS(name, 'hello') > 0
 ```
 
-### In Operator Behavior Without Schema
+### In Operator Behavior for Unknown Expressions
 
-When no schema is provided, `in` uses heuristics to infer whether to generate:
+When an `in` operand is a nested expression whose result type is not fully
+known from schema metadata, the transpiler uses conservative heuristics to
+infer whether to generate:
 
 - string containment (`STRPOS` / `POSITION` / `position`)
-- array membership (`IN UNNEST` / `= ANY` / `list_contains` / `has`)
+- array membership (`EXISTS ... UNNEST(...)` / ClickHouse `arrayExists`)
 
 Current heuristics treat obvious string-producing left operands as containment, including:
 
@@ -161,34 +297,43 @@ Current heuristics treat obvious string-producing left operands as containment, 
 - string SQL literals
 - string expressions rooted at `cat` or `substr`
 
-For deterministic behavior across all expression shapes (especially custom operators), use schema-aware mode.
+For deterministic behavior across all expression shapes (especially custom operators), use schema-required mode.
 
 ### Type Coercion
 
-When a schema is provided, the transpiler automatically coerces literal values to match the field's type. This prevents type errors in strict-typing databases like BigQuery and Spanner.
+When a schema is provided, the transpiler automatically coerces literal values
+for comparison operators where JSONLogic equality/order semantics can be
+modeled statically. This prevents type errors in strict-typing databases like
+BigQuery and Spanner.
 
 **Number to String** - When a string field is compared with numeric literals, the numbers are coerced to quoted strings:
 
 ```go
 // Schema: category_code is string type
-sql, _ := transpiler.Transpile(`{"in": [{"var": "category_code"}, [5960, 9000]]}`)
+sql, _ := transpiler.TranspileCondition(`{"==": [{"var": "category_code"}, 5960]}`)
 fmt.Println(sql)
-// Output: WHERE category_code IN ('5960', '9000')
-// Without schema: WHERE category_code IN (5960, 9000) - would fail in BigQuery
+// Output: category_code = '5960'
+// If category_code were not declared in the schema, transpilation would fail.
 ```
 
 For equality, this is a canonical string match. For example, `code == 5` emits
 `code = '5'`; it does not also match strings that JavaScript would coerce to the
 same number at runtime, such as `"05"`, `"5.0"`, or `" 5 "`.
 
+Literal array membership is different: JSONLogic uses JavaScript `indexOf`
+semantics, so members are matched strictly and are not coerced to the left field
+type. For a string field, `{"in":[{"var":"code"},[5960,9000]]}` folds to
+`FALSE`, while `{"in":[{"var":"code"},["5960","9000"]]}` emits
+`code IN ('5960', '9000')`.
+
 **String to Number** - When a numeric field is compared with string literals that are valid numbers, the strings are coerced to unquoted numbers:
 
 ```go
 // Schema: amount is integer type
-sql, _ := transpiler.Transpile(`{">=": [{"var": "amount"}, "50000"]}`)
+sql, _ := transpiler.TranspileCondition(`{">=": [{"var": "amount"}, "50000"]}`)
 fmt.Println(sql)
-// Output: WHERE amount >= 50000
-// Without schema: WHERE amount >= '50000'
+// Output: amount >= 50000
+// If amount were not declared in the schema, transpilation would fail.
 ```
 
 For equality and inequality, numeric string literals follow JavaScript-like
@@ -196,13 +341,13 @@ For equality and inequality, numeric string literals follow JavaScript-like
 
 ```go
 // Schema: amount is integer type
-sql, _ = transpiler.Transpile(`{"==": [{"var": "amount"}, "010"]}`)
+sql, _ = transpiler.TranspileCondition(`{"==": [{"var": "amount"}, "010"]}`)
 fmt.Println(sql)
-// Output: WHERE amount = 10
+// Output: amount = 10
 
-sql, _ = transpiler.Transpile(`{"==": [{"var": "amount"}, "abc"]}`)
+sql, _ = transpiler.TranspileCondition(`{"==": [{"var": "amount"}, "abc"]}`)
 fmt.Println(sql)
-// Output: WHERE FALSE
+// Output: FALSE
 ```
 
 **Boolean Equality** - When a boolean field is compared with numeric or string
@@ -211,13 +356,13 @@ semantics:
 
 ```go
 // Schema: active is boolean type
-sql, _ := transpiler.Transpile(`{"==": [{"var": "active"}, "1"]}`)
+sql, _ := transpiler.TranspileCondition(`{"==": [{"var": "active"}, "1"]}`)
 fmt.Println(sql)
-// Output: WHERE active = TRUE
+// Output: active = TRUE
 
-sql, _ = transpiler.Transpile(`{"==": [{"var": "active"}, "2"]}`)
+sql, _ = transpiler.TranspileCondition(`{"==": [{"var": "active"}, "2"]}`)
 fmt.Println(sql)
-// Output: WHERE FALSE
+// Output: FALSE
 ```
 
 **Strict Equality** - With a schema, `===` and `!==` fold known field/literal type
@@ -225,9 +370,9 @@ mismatches before loose coercion:
 
 ```go
 // Schema: amount is integer type
-sql, _ = transpiler.Transpile(`{"===": [{"var": "amount"}, "5"]}`)
+sql, _ = transpiler.TranspileCondition(`{"===": [{"var": "amount"}, "5"]}`)
 fmt.Println(sql)
-// Output: WHERE FALSE
+// Output: FALSE
 ```
 
 Loose equality between string or enum-string fields and boolean literals is not
@@ -235,7 +380,7 @@ portable SQL and returns an error:
 
 ```go
 // Schema: code is string type
-_, err := transpiler.Transpile(`{"==": [{"var": "code"}, true]}`)
+_, err := transpiler.TranspileCondition(`{"==": [{"var": "code"}, true]}`)
 // Error: loose equality between string field "code" and boolean literal is not supported
 ```
 
@@ -245,28 +390,28 @@ values produced by overflow:
 
 ```go
 // Schema: code is string type
-sql, _ := transpiler.Transpile(`{"==": [{"var": "code"}, 1e400]}`)
+sql, _ := transpiler.TranspileCondition(`{"==": [{"var": "code"}, 1e400]}`)
 fmt.Println(sql)
-// Output: WHERE code = 'Infinity'
+// Output: code = 'Infinity'
 ```
 
-**Defaulted Variables** - Equality and inequality apply the same schema-aware
+**Defaulted Variables** - Equality and inequality apply the same schema-required
 literal coercion to `[field, default]` vars while preserving the `COALESCE`
 expression emitted by the `var` operator:
 
 ```go
 // Schema: price is integer type
-sql, _ = transpiler.Transpile(`{"==": [{"var": ["price", 0]}, "50"]}`)
+sql, _ = transpiler.TranspileCondition(`{"==": [{"var": ["price", 0]}, "50"]}`)
 fmt.Println(sql)
-// Output: WHERE COALESCE(price, 0) = 50
+// Output: COALESCE(price, 0) = 50
 
-sql, _ = transpiler.Transpile(`{"===": [{"var": ["price", 0]}, "50"]}`)
+sql, _ = transpiler.TranspileCondition(`{"===": [{"var": ["price", 0]}, "50"]}`)
 fmt.Println(sql)
-// Output: WHERE FALSE
+// Output: FALSE
 
-sql, _ = transpiler.Transpile(`{"===": [{"var": ["price", "50"]}, "50"]}`)
+sql, _ = transpiler.TranspileCondition(`{"===": [{"var": ["price", "50"]}, "50"]}`)
 fmt.Println(sql)
-// Output: WHERE COALESCE(price, '50') = '50'
+// Output: COALESCE(price, '50') = '50'
 ```
 
 Strict or value-space folds only happen when both the field value and the
@@ -274,14 +419,14 @@ visible default cannot match. Expression defaults are not folded because their
 runtime value is unknown. The default value itself is emitted as provided by the
 `var` operator; it is not coerced to the schema type before `COALESCE`.
 
-Basic schema coercion applies to comparison operators (`==`, `!=`, `>`, `>=`, `<`, `<=`), the `in` operator with array literals, and string containment checks. Equality and inequality add the JS-aware literal handling described above. Schema coercion also applies to comparisons nested within numeric expressions (e.g., `{"+": [{"==": [{"var": "status"}, 123]}, 0]}` correctly coerces `123` to `'123'` for a string field).
+Basic schema coercion applies to comparison operators (`==`, `!=`, `>`, `>=`, `<`, `<=`) and string containment checks. Literal-array `in` uses strict JSONLogic membership instead of field-type coercion. Equality and inequality add the JS-aware literal handling described above. Schema coercion also applies to comparisons nested within numeric expressions (e.g., `{"+": [{"==": [{"var": "status"}, 123]}, 0]}` correctly coerces `123` to `'123'` for a string field).
 
 **Numeric String Coercion** - In numeric operations (`+`, `-`, `*`, `/`, `%`), string operands are coerced per JSONLogic's JavaScript-like semantics. Valid numeric strings are converted to numbers, whitespace is trimmed, and non-numeric strings are safely quoted:
 
 ```go
-sql, _ := transpiler.Transpile(`{"+": ["42", 1]}`)
+sql, _ := transpiler.TranspileValue(`{"+": ["42", 1]}`)
 fmt.Println(sql)
-// Output: WHERE (42 + 1)
+// Output: (42 + 1)
 // "42" coerced to number; "hello" would become 'hello'
 ```
 
@@ -297,10 +442,11 @@ When a schema is provided, the `!!` operator generates type-appropriate SQL to a
 | Array (BigQuery/Spanner/PostgreSQL/DuckDB) | `{"!!": {"var": "tags"}}` | `(tags IS NOT NULL AND CARDINALITY(tags) > 0)` |
 | Array (ClickHouse) | `{"!!": {"var": "tags"}}` | `(tags IS NOT NULL AND length(tags) > 0)` |
 
-Without a schema, the generic truthiness check is used:
-```sql
-WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
-```
+Field truthiness is rejected with `ErrInvalidExpressionContext` when the schema
+does not provide a concrete field type, instead of emitting non-portable
+mixed-type comparisons. Add field types to the schema before using a `var`
+operand directly in `!!`, `!`, value-mode `and` / `or`, or value-mode `if`
+conditions.
 
 ## Enum Type Support
 
@@ -308,24 +454,26 @@ Enum fields allow you to define a fixed set of allowed values:
 
 ```go
 // Define schema with enum field
-schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+schema, err := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
     {Name: "status", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"active", "pending", "cancelled"}},
     {Name: "priority", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"low", "medium", "high"}},
 })
+if err != nil {
+    panic(err)
+}
 
-transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
-transpiler.SetSchema(schema)
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
 
 // Valid enum value - works
-sql, err := transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
-// Output: WHERE status = 'active'
+sql, err := transpiler.TranspileCondition(`{"==": [{"var": "status"}, "active"]}`)
+// Output: status = 'active'
 
 // Valid enum IN array - works
-sql, err = transpiler.Transpile(`{"in": [{"var": "status"}, ["active", "pending"]]}`)
-// Output: WHERE status IN ('active', 'pending')
+sql, err = transpiler.TranspileCondition(`{"in": [{"var": "status"}, ["active", "pending"]]}`)
+// Output: status IN ('active', 'pending')
 
 // Invalid enum value - returns error
-_, err = transpiler.Transpile(`{"==": [{"var": "status"}, "invalid"]}`)
+_, err = transpiler.TranspileCondition(`{"==": [{"var": "status"}, "invalid"]}`)
 // Error: invalid enum value 'invalid' for field 'status': allowed values are [active pending cancelled]
 ```
 
@@ -333,7 +481,7 @@ Visible enum defaults are also validated because they become literal SQL inside
 `COALESCE`:
 
 ```go
-_, err = transpiler.Transpile(`{"==": [{"var": ["status", "unknown"]}, "active"]}`)
+_, err = transpiler.TranspileCondition(`{"==": [{"var": ["status", "unknown"]}, "active"]}`)
 // Error: invalid enum value 'unknown' for field 'status': allowed values are [active pending cancelled]
 ```
 
@@ -352,18 +500,19 @@ SQL expression.
 ## Schema API Reference
 
 ```go
-// Schema creation
-schema := jsonlogic2sql.NewSchema(fields)
-err := jsonlogic2sql.ValidateSchemaFields(fields)
-schema, err := jsonlogic2sql.NewValidatedSchema(fields)
-schema, err := jsonlogic2sql.NewSchemaFromJSON(data)
-schema, err := jsonlogic2sql.NewSchemaFromFile(filepath)
+// Schema creation. NewSchema validates by default; ValidateSchemaFields is the
+// standalone helper for checking definitions without constructing a Schema.
+schema, err := jsonlogic2sql.NewSchema(fields)
+err = jsonlogic2sql.ValidateSchemaFields(fields)
+schema, err = jsonlogic2sql.NewSchemaFromJSON(data)
+schema, err = jsonlogic2sql.NewSchemaFromFile(filepath)
 
 // Schema methods
 schema.HasField(fieldName string) bool              // Check if field exists
 schema.ValidateField(fieldName string) error        // Validate field existence
 schema.GetFieldType(fieldName string) string        // Get field type as string
 schema.IsArrayType(fieldName string) bool           // Check if field is array type
+schema.HasArrayElementFields(fieldName string) bool  // Check if an array field has object element fields
 schema.IsStringType(fieldName string) bool          // Check if field is string type
 schema.IsNumericType(fieldName string) bool         // Check if field is numeric type
 schema.IsBooleanType(fieldName string) bool         // Check if field is boolean type

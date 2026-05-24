@@ -12,10 +12,6 @@ import (
 	"github.com/h22rana/jsonlogic2sql/internal/params"
 )
 
-// validIdentifierSegment matches a conservative identifier segment allowlist
-// used when no schema is configured.
-var validIdentifierSegment = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
-
 // validJSONNumberLiteral matches strict JSON numeric literals.
 // This prevents crafted json.Number values (from map/interface APIs) from being
 // inlined as arbitrary SQL fragments.
@@ -27,21 +23,19 @@ type DataOperator struct {
 }
 
 const (
-	maxSafeJSInt = int64(1<<53 - 1)
-	minSafeJSInt = -maxSafeJSInt
+	maxSafeJSInt       = int64(1<<53 - 1)
+	minSafeJSInt       = -maxSafeJSInt
+	maxVarArrayEntries = 2
 )
 
-// NewDataOperator creates a new data operator with optional config.
+// NewDataOperator creates a new data operator.
 func NewDataOperator(config *OperatorConfig) *DataOperator {
+	config = normalizeOperatorConfig(config)
 	return &DataOperator{config: config}
 }
 
-// schema returns the schema from config, or nil if not configured.
 func (d *DataOperator) schema() SchemaProvider {
-	if d.config == nil {
-		return nil
-	}
-	return d.config.Schema
+	return schemaFromConfig(d.config)
 }
 
 func (d *DataOperator) columnNameForVar(varName string) (string, error) {
@@ -49,22 +43,284 @@ func (d *DataOperator) columnNameForVar(varName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if d.schema() != nil {
-		if err := d.schema().ValidateField(varName); err != nil {
-			return "", err
-		}
+	if err := d.schema().ValidateField(varName); err != nil {
+		return "", err
 	}
 	return columnName, nil
+}
+
+func (d *DataOperator) columnNameForFieldOperand(field interface{}, typeErr string) (string, error) {
+	if pv, ok := field.(ProcessedValue); ok && pv.IsSQL {
+		return pv.Value, nil
+	}
+	if varName, ok := field.(string); ok {
+		return d.columnNameForVar(varName)
+	}
+	return "", fmt.Errorf("%s", typeErr)
+}
+
+func validateVarArrayOperand(arr []interface{}) error {
+	if len(arr) == 0 {
+		return fmt.Errorf("var operator array cannot be empty")
+	}
+	return validateVarArrayMaxEntries(arr)
+}
+
+func validateVarArrayMaxEntries(arr []interface{}) error {
+	if len(arr) > maxVarArrayEntries {
+		return fmt.Errorf("var operator array accepts at most %d entries", maxVarArrayEntries)
+	}
+	return nil
+}
+
+func validateVarDefaultForFields(schema SchemaProvider, fieldNames []string, defaultValue interface{}) error {
+	for _, fieldName := range normalizeSchemaScopes(fieldNames) {
+		if err := validateVarDefaultForField(schema, fieldName, defaultValue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateProcessedValueDefault(schema SchemaProvider, pv ProcessedValue, defaultValue interface{}) error {
+	if fieldNames := pv.SchemaFieldNames(); len(fieldNames) > 0 {
+		return validateVarDefaultForFields(schema, fieldNames, defaultValue)
+	}
+	if pv.HasExpressionInfo && pv.Kind == ExpressionKindValue {
+		return validateVarDefaultForExpressionType(pv.Type, defaultValue, "array element")
+	}
+	return nil
+}
+
+func validateVarDefaultForField(schema SchemaProvider, fieldName string, defaultValue interface{}) error {
+	if schema == nil || fieldName == "" || defaultValue == nil {
+		return nil
+	}
+	if err := validateEqualityJSONNumberLiteral(defaultValue); err != nil {
+		return err
+	}
+	if schema.IsEnumType(fieldName) {
+		strVal, ok := defaultValue.(string)
+		if !ok {
+			return fmt.Errorf("default value for enum field '%s' must be string or null, got %s",
+				fieldName, expressionTypeName(inferLiteralValueExpressionType(defaultValue)))
+		}
+		return schema.ValidateEnumValue(fieldName, strVal)
+	}
+
+	defaultType := inferLiteralValueExpressionType(defaultValue)
+	if defaultType == ExpressionTypeNull {
+		return nil
+	}
+	expected := schemaExpressionType(schema, fieldName)
+	if expected == ExpressionTypeUnknown {
+		return nil
+	}
+	if expected == ExpressionTypeArray {
+		return validateArrayVarDefaultForField(schema, fieldName, defaultValue)
+	}
+	if expected == defaultType {
+		return nil
+	}
+	return fmt.Errorf("default value for field '%s' has incompatible type %s; expected %s or null",
+		fieldName, expressionTypeName(defaultType), expressionTypeName(expected))
+}
+
+func validateArrayVarDefaultForField(schema SchemaProvider, fieldName string, defaultValue interface{}) error {
+	arr, ok := defaultValue.([]interface{})
+	if !ok {
+		return fmt.Errorf("default value for field '%s' has incompatible type %s; expected array or null",
+			fieldName, expressionTypeName(inferLiteralValueExpressionType(defaultValue)))
+	}
+	provider, ok := schema.(ArrayElementSchemaProvider)
+	if err := validateArrayVarDefaultElementsForField(schema, fieldName, arr); err != nil {
+		return err
+	}
+	if !ok || !provider.HasArrayElementFields(fieldName) || len(arr) == 0 {
+		return nil
+	}
+	return fmt.Errorf("default value for object-array field '%s' must be an empty array or null; non-empty object-array defaults are not renderable as portable SQL literals",
+		fieldName)
+}
+
+func validateArrayVarDefaultElementsForField(schema SchemaProvider, fieldName string, arr []interface{}) error {
+	expected, known := schemaArrayElementExpressionType(schema, fieldName)
+	if !known || expected == ExpressionTypeObject {
+		return nil
+	}
+	elemSchemaType := normalizeSchemaType(schemaArrayElementType(schema, fieldName))
+	for i, elem := range arr {
+		if err := validateEqualityJSONNumberLiteral(elem); err != nil {
+			return err
+		}
+		actual := inferLiteralValueExpressionType(elem)
+		if actual == ExpressionTypeNull {
+			continue
+		}
+		if expected == ExpressionTypeString && schemaArrayElementType(schema, fieldName) == SchemaTypeEnum {
+			strVal, ok := elem.(string)
+			if !ok {
+				return fmt.Errorf("default value for array field '%s' element %d has incompatible type %s; expected string or null",
+					fieldName, i, expressionTypeName(actual))
+			}
+			if err := validateSchemaEnumArrayElementValue(schema, fieldName, strVal); err != nil {
+				return err
+			}
+			continue
+		}
+		if actual != expected {
+			return fmt.Errorf("default value for array field '%s' element %d has incompatible type %s; expected %s or null",
+				fieldName, i, expressionTypeName(actual), expressionTypeName(expected))
+		}
+		if elemSchemaType == SchemaTypeInteger {
+			if err := validateIntegerArrayDefaultElement(fieldName, i, elem); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateIntegerArrayDefaultElement(fieldName string, index int, elem interface{}) error {
+	if jsonNumberIntegerOutsideInt64(elem) {
+		return fmt.Errorf("default value for integer array field '%s' element %d is outside int64 range", fieldName, index)
+	}
+	n, handled, valid := jsNumberFromLiteral(elem)
+	if !handled {
+		return nil
+	}
+	if !valid || !n.integral {
+		return fmt.Errorf("default value for integer array field '%s' element %d must be an integer or null", fieldName, index)
+	}
+	if _, ok := int64FromJSNumber(n); !ok {
+		return fmt.Errorf("default value for integer array field '%s' element %d is outside int64 range", fieldName, index)
+	}
+	return nil
+}
+
+func validateVarDefaultForExpressionType(typ ExpressionType, defaultValue interface{}, label string) error {
+	if defaultValue == nil {
+		return nil
+	}
+	if err := validateEqualityJSONNumberLiteral(defaultValue); err != nil {
+		return err
+	}
+	defaultType := inferLiteralValueExpressionType(defaultValue)
+	if defaultType == ExpressionTypeNull || typ == ExpressionTypeUnknown || defaultType == typ {
+		return nil
+	}
+	return fmt.Errorf("default value for %s has incompatible type %s; expected %s or null",
+		label, expressionTypeName(defaultType), expressionTypeName(typ))
+}
+
+func (d *DataOperator) defaultValueToSQL(value interface{}) (string, error) {
+	if arr, ok := value.([]interface{}); ok {
+		return d.arrayLiteralToSQL(arr)
+	}
+	return d.valueToSQL(value)
+}
+
+func (d *DataOperator) defaultValueToSQLParam(value interface{}, pc *params.ParamCollector) (string, error) {
+	if arr, ok := value.([]interface{}); ok {
+		return d.arrayLiteralToSQLParam(arr, pc)
+	}
+	return d.valueToSQLParam(value, pc)
+}
+
+func (d *DataOperator) arrayLiteralToSQL(arr []interface{}) (string, error) {
+	if err := d.config.ValidateArrayLiteralValue(arr); err != nil {
+		return "", err
+	}
+	elements := make([]string, len(arr))
+	var commonTypes []ExpressionType
+	for i, elem := range arr {
+		elementSQL, elementType, err := d.arrayLiteralElementSQL(elem)
+		if err != nil {
+			return "", fmt.Errorf("invalid array default element %d: %w", i, err)
+		}
+		commonTypes, err = updateArrayLiteralElementTypes(commonTypes, typedValueSQL{typ: elementType}, i)
+		if err != nil {
+			return "", err
+		}
+		elements[i] = elementSQL
+	}
+	elementTypes := normalizeArrayElementTypes(commonTypes)
+	if err := d.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
+		return "", err
+	}
+	return d.config.ArrayLiteral(elements)
+}
+
+func (d *DataOperator) arrayLiteralToSQLParam(arr []interface{}, pc *params.ParamCollector) (string, error) {
+	if err := d.config.ValidateArrayLiteralValue(arr); err != nil {
+		return "", err
+	}
+	elements := make([]string, len(arr))
+	var commonTypes []ExpressionType
+	for i, elem := range arr {
+		elementSQL, elementType, err := d.arrayLiteralElementSQLParam(elem, pc)
+		if err != nil {
+			return "", fmt.Errorf("invalid array default element %d: %w", i, err)
+		}
+		commonTypes, err = updateArrayLiteralElementTypes(commonTypes, typedValueSQL{typ: elementType}, i)
+		if err != nil {
+			return "", err
+		}
+		elements[i] = elementSQL
+	}
+	elementTypes := normalizeArrayElementTypes(commonTypes)
+	if err := d.config.ValidateArrayLiteralElementTypes(elementTypes); err != nil {
+		return "", err
+	}
+	return d.config.ArrayLiteral(elements)
+}
+
+func (d *DataOperator) arrayLiteralElementSQL(value interface{}) (string, ExpressionType, error) {
+	if arr, ok := value.([]interface{}); ok {
+		sql, err := d.arrayLiteralToSQL(arr)
+		return sql, ExpressionTypeArray, err
+	}
+	sql, err := d.valueToSQL(value)
+	return sql, inferLiteralValueExpressionType(value), err
+}
+
+func (d *DataOperator) arrayLiteralElementSQLParam(value interface{}, pc *params.ParamCollector) (string, ExpressionType, error) {
+	if arr, ok := value.([]interface{}); ok {
+		sql, err := d.arrayLiteralToSQLParam(arr, pc)
+		return sql, ExpressionTypeArray, err
+	}
+	sql, err := d.valueToSQLParam(value, pc)
+	return sql, inferLiteralValueExpressionType(value), err
+}
+
+func schemaExpressionType(schema SchemaProvider, fieldName string) ExpressionType {
+	if schema == nil || fieldName == "" {
+		return ExpressionTypeUnknown
+	}
+	switch {
+	case schema.IsBooleanType(fieldName):
+		return ExpressionTypeBoolean
+	case schema.IsStringType(fieldName), schema.IsEnumType(fieldName):
+		return ExpressionTypeString
+	case schema.IsNumericType(fieldName):
+		return ExpressionTypeNumber
+	case schema.IsArrayType(fieldName):
+		return ExpressionTypeArray
+	case schema.GetFieldType(fieldName) == objectFieldType:
+		return ExpressionTypeObject
+	default:
+		return ExpressionTypeUnknown
+	}
 }
 
 // ToSQL converts a data operator to SQL.
 func (d *DataOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	switch operator {
-	case "var":
+	case OpVar:
 		return d.handleVar(args)
-	case "missing":
+	case OpMissing:
 		return d.handleMissing(args)
-	case "missing_some":
+	case OpMissingSome:
 		return d.handleMissingSome(args)
 	default:
 		return "", fmt.Errorf("unsupported data operator: %s", operator)
@@ -98,8 +354,26 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 
 	// Handle array argument [varName, defaultValue]
 	if arr, ok := args[0].([]interface{}); ok {
-		if len(arr) == 0 {
-			return "", fmt.Errorf("var operator array cannot be empty")
+		if err := validateVarArrayOperand(arr); err != nil {
+			return "", err
+		}
+
+		if pv, ok := arr[0].(ProcessedValue); ok && pv.IsSQL {
+			columnName := pv.Value
+			if len(arr) > 1 {
+				defaultValue := arr[1]
+				if !pv.FieldHasDefault {
+					if err := validateProcessedValueDefault(d.schema(), pv, defaultValue); err != nil {
+						return "", err
+					}
+				}
+				defaultSQL, err := d.defaultValueToSQL(defaultValue)
+				if err != nil {
+					return "", fmt.Errorf("invalid default value: %w", err)
+				}
+				return d.config.CoalesceSQL(columnName, defaultSQL), nil
+			}
+			return columnName, nil
 		}
 
 		// Check if first element is a string (variable name)
@@ -112,11 +386,14 @@ func (d *DataOperator) handleVar(args []interface{}) (string, error) {
 			// If there's a default value, use COALESCE
 			if len(arr) > 1 {
 				defaultValue := arr[1]
-				defaultSQL, err := d.valueToSQL(defaultValue)
+				if err := validateVarDefaultForField(d.schema(), varName, defaultValue); err != nil {
+					return "", err
+				}
+				defaultSQL, err := d.defaultValueToSQL(defaultValue)
 				if err != nil {
 					return "", fmt.Errorf("invalid default value: %w", err)
 				}
-				return fmt.Sprintf("COALESCE(%s, %s)", columnName, defaultSQL), nil
+				return d.config.CoalesceSQL(columnName, defaultSQL), nil
 			}
 
 			return columnName, nil
@@ -137,8 +414,15 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 	}
 
 	// Handle single string argument
-	if varName, ok := args[0].(string); ok {
-		columnName, err := d.columnNameForVar(varName)
+	if _, ok := args[0].(string); ok {
+		columnName, err := d.columnNameForFieldOperand(args[0], "missing operator argument must be a string or array of strings")
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s IS NULL", columnName), nil
+	}
+	if pv, ok := args[0].(ProcessedValue); ok && pv.IsSQL {
+		columnName, err := d.columnNameForFieldOperand(pv, "missing operator argument must be a string or array of strings")
 		if err != nil {
 			return "", err
 		}
@@ -152,12 +436,8 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 		}
 
 		var nullConditions []string
-		for _, varName := range varNames {
-			name, ok := varName.(string)
-			if !ok {
-				return "", fmt.Errorf("all variable names in missing must be strings")
-			}
-			columnName, err := d.columnNameForVar(name)
+		for _, field := range varNames {
+			columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing must be strings")
 			if err != nil {
 				return "", err
 			}
@@ -165,7 +445,7 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 		}
 
 		// Check if ANY of the fields are missing (OR condition)
-		return fmt.Sprintf("(%s)", strings.Join(nullConditions, " OR ")), nil
+		return fmt.Sprintf("(%s)", strings.Join(nullConditions, sqlOrJoiner)), nil
 	}
 
 	return "", fmt.Errorf("missing operator argument must be a string or array of strings")
@@ -193,48 +473,49 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 		return "", fmt.Errorf("missing_some operator variable list cannot be empty")
 	}
 
-	// For minCount = 1, use simpler OR syntax
-	if minCount == 1 {
-		var nullConditions []string
-		for _, varName := range varNames {
-			name, ok := varName.(string)
-			if !ok {
-				return "", fmt.Errorf("all variable names in missing_some must be strings")
-			}
-			columnName, err := d.columnNameForVar(name)
-			if err != nil {
-				return "", err
-			}
-			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
-		}
-		return fmt.Sprintf("(%s)", strings.Join(nullConditions, " OR ")), nil
+	threshold := missingSomeMissingThreshold(minCount, len(varNames))
+	if threshold > len(varNames) {
+		return sqlFalse, nil
 	}
 
-	// For other minCount values, use the counting approach
-	// Convert variable names to column names and build CASE WHEN conditions to count NULLs
+	// missing_some returns the missing field list only when fewer than minCount
+	// fields are present. As a predicate, that is true when the missing-field
+	// count reaches this derived threshold.
 	var caseStatements []string
-	for _, varName := range varNames {
-		name, ok := varName.(string)
-		if !ok {
-			return "", fmt.Errorf("all variable names in missing_some must be strings")
-		}
-		columnName, err := d.columnNameForVar(name)
+	for _, field := range varNames {
+		columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing_some must be strings")
 		if err != nil {
 			return "", err
 		}
 		caseStatements = append(caseStatements, fmt.Sprintf("CASE WHEN %s IS NULL THEN 1 ELSE 0 END", columnName))
 	}
+	if threshold == len(varNames) {
+		var nullConditions []string
+		for _, field := range varNames {
+			columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing_some must be strings")
+			if err != nil {
+				return "", err
+			}
+			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
+		}
+		return fmt.Sprintf("(%s)", strings.Join(nullConditions, sqlAndJoiner)), nil
+	}
 
-	// Count how many are NULL and compare with minimum
 	nullCount := strings.Join(caseStatements, " + ")
-	return fmt.Sprintf("(%s) >= %d", nullCount, int(minCount)), nil
+	return fmt.Sprintf("(%s) >= %d", nullCount, threshold), nil
+}
+
+func missingSomeMissingThreshold(minCount float64, fieldCount int) int {
+	threshold := int(math.Floor(float64(fieldCount)-minCount)) + 1
+	if threshold < 1 {
+		return 1
+	}
+	return threshold
 }
 
 // convertVarName converts a JSON Logic variable name to a SQL column reference.
 // It splits the name on dots, quotes any segment that is not a valid unquoted SQL
 // identifier (e.g. starts with a digit like "24h"), and rejoins with dots.
-// When no schema is configured, it still validates each raw segment against a
-// conservative allowlist before quoting to avoid accepting arbitrary SQL text.
 // Returns an error if any segment contains quote characters (backtick, double
 // quote, or single quote), since the transpiler handles quoting automatically.
 func (d *DataOperator) convertVarName(varName string) (string, error) {
@@ -243,20 +524,65 @@ func (d *DataOperator) convertVarName(varName string) (string, error) {
 		dl = d.config.GetDialect()
 	}
 
-	segments := strings.Split(varName, ".")
-	for i, seg := range segments {
+	needsQuoting := false
+	forEachDottedSegment(varName, func(seg string) {
 		if dialect.ContainsQuoteCharacters(seg) {
-			return "", fmt.Errorf("variable name %q contains quote characters; "+
-				"use raw identifiers — the transpiler handles quoting automatically", varName)
-		}
-		if d.schema() == nil && (seg == "" || !validIdentifierSegment.MatchString(seg)) {
-			return "", fmt.Errorf("invalid identifier %q: each segment must match [a-zA-Z0-9_]+", varName)
+			needsQuoting = true
+			return
 		}
 		if dialect.NeedsQuoting(seg) {
-			segments[i] = dialect.QuoteIdentifierSegment(seg, dl)
+			needsQuoting = true
 		}
+	})
+	if !needsQuoting {
+		return varName, nil
 	}
-	return strings.Join(segments, "."), nil
+
+	var out strings.Builder
+	out.Grow(len(varName) + 4)
+	var quoteErr error
+	firstSegment := true
+	forEachDottedSegment(varName, func(seg string) {
+		if quoteErr != nil {
+			return
+		}
+		if !firstSegment {
+			out.WriteByte('.')
+		}
+		firstSegment = false
+		if dialect.ContainsQuoteCharacters(seg) {
+			quoteErr = fmt.Errorf("variable name %q contains quote characters; "+
+				"use raw identifiers — the transpiler handles quoting automatically", varName)
+			return
+		}
+		if dialect.NeedsQuoting(seg) {
+			out.WriteString(dialect.QuoteIdentifierSegment(seg, dl))
+			return
+		}
+		out.WriteString(seg)
+	})
+	if quoteErr != nil {
+		return "", quoteErr
+	}
+	return out.String(), nil
+}
+
+func forEachDottedSegment(name string, visit func(string)) {
+	start := 0
+	for {
+		dot := strings.IndexByte(name[start:], '.')
+		if dot < 0 {
+			visit(name[start:])
+			return
+		}
+		end := start + dot
+		visit(name[start:end])
+		start = end + 1
+	}
+}
+
+func isValidIdentifierSegment(segment string) bool {
+	return dialect.IsSafeIdentifierSegment(segment)
 }
 
 // getNumber extracts a number from an interface{} and returns it as float64.
@@ -321,28 +647,42 @@ func (d *DataOperator) valueToSQL(value interface{}) (string, error) {
 		return numberLiteral, nil
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return fmt.Sprintf("%v", v), nil
-	case float32, float64:
+	case float32:
+		if err := ValidateFiniteNativeFloat(v); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%v", v), nil
+	case float64:
+		if err := ValidateFiniteNativeFloat(v); err != nil {
+			return "", err
+		}
 		return fmt.Sprintf("%v", v), nil
 	case bool:
 		if v {
-			return "TRUE", nil
+			return sqlTrue, nil
 		}
-		return "FALSE", nil
+		return sqlFalse, nil
 	case nil:
-		return "NULL", nil
+		return sqlNull, nil
 	default:
 		return "", fmt.Errorf("unsupported value type: %T", value)
 	}
 }
 
+// ValueToSQL converts a Go value to a SQL literal or expression. It exposes the
+// same conversion used internally by operators for parser-level value mode.
+func (d *DataOperator) ValueToSQL(value interface{}) (string, error) {
+	return d.valueToSQL(value)
+}
+
 // ToSQLParam is the parameterized variant of ToSQL. Keep in sync.
 func (d *DataOperator) ToSQLParam(operator string, args []interface{}, pc *params.ParamCollector) (string, error) {
 	switch operator {
-	case "var":
+	case OpVar:
 		return d.handleVarParam(args, pc)
-	case "missing":
+	case OpMissing:
 		return d.handleMissing(args)
-	case "missing_some":
+	case OpMissingSome:
 		return d.handleMissingSomeParam(args, pc)
 	default:
 		return "", fmt.Errorf("unsupported data operator: %s", operator)
@@ -368,8 +708,26 @@ func (d *DataOperator) handleVarParam(args []interface{}, pc *params.ParamCollec
 	}
 
 	if arr, ok := args[0].([]interface{}); ok {
-		if len(arr) == 0 {
-			return "", fmt.Errorf("var operator array cannot be empty")
+		if err := validateVarArrayOperand(arr); err != nil {
+			return "", err
+		}
+
+		if pv, ok := arr[0].(ProcessedValue); ok && pv.IsSQL {
+			columnName := pv.Value
+			if len(arr) > 1 {
+				defaultValue := arr[1]
+				if !pv.FieldHasDefault {
+					if err := validateProcessedValueDefault(d.schema(), pv, defaultValue); err != nil {
+						return "", err
+					}
+				}
+				defaultSQL, err := d.defaultValueToSQLParam(defaultValue, pc)
+				if err != nil {
+					return "", fmt.Errorf("invalid default value: %w", err)
+				}
+				return d.config.CoalesceSQL(columnName, defaultSQL), nil
+			}
+			return columnName, nil
 		}
 
 		if varName, ok := arr[0].(string); ok {
@@ -380,11 +738,14 @@ func (d *DataOperator) handleVarParam(args []interface{}, pc *params.ParamCollec
 
 			if len(arr) > 1 {
 				defaultValue := arr[1]
-				defaultSQL, err := d.valueToSQLParam(defaultValue, pc)
+				if err := validateVarDefaultForField(d.schema(), varName, defaultValue); err != nil {
+					return "", err
+				}
+				defaultSQL, err := d.defaultValueToSQLParam(defaultValue, pc)
 				if err != nil {
 					return "", fmt.Errorf("invalid default value: %w", err)
 				}
-				return fmt.Sprintf("COALESCE(%s, %s)", columnName, defaultSQL), nil
+				return d.config.CoalesceSQL(columnName, defaultSQL), nil
 			}
 
 			return columnName, nil
@@ -416,37 +777,33 @@ func (d *DataOperator) handleMissingSomeParam(args []interface{}, pc *params.Par
 		return "", fmt.Errorf("missing_some operator variable list cannot be empty")
 	}
 
-	if minCount == 1 {
-		var nullConditions []string
-		for _, varName := range varNames {
-			name, ok := varName.(string)
-			if !ok {
-				return "", fmt.Errorf("all variable names in missing_some must be strings")
-			}
-			columnName, err := d.columnNameForVar(name)
-			if err != nil {
-				return "", err
-			}
-			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
-		}
-		return fmt.Sprintf("(%s)", strings.Join(nullConditions, " OR ")), nil
+	threshold := missingSomeMissingThreshold(minCount, len(varNames))
+	if threshold > len(varNames) {
+		return sqlFalse, nil
 	}
 
 	var caseStatements []string
-	for _, varName := range varNames {
-		name, ok := varName.(string)
-		if !ok {
-			return "", fmt.Errorf("all variable names in missing_some must be strings")
-		}
-		columnName, err := d.columnNameForVar(name)
+	for _, field := range varNames {
+		columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing_some must be strings")
 		if err != nil {
 			return "", err
 		}
 		caseStatements = append(caseStatements, fmt.Sprintf("CASE WHEN %s IS NULL THEN 1 ELSE 0 END", columnName))
 	}
+	if threshold == len(varNames) {
+		var nullConditions []string
+		for _, field := range varNames {
+			columnName, err := d.columnNameForFieldOperand(field, "all variable names in missing_some must be strings")
+			if err != nil {
+				return "", err
+			}
+			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
+		}
+		return fmt.Sprintf("(%s)", strings.Join(nullConditions, sqlAndJoiner)), nil
+	}
 
 	nullCount := strings.Join(caseStatements, " + ")
-	return fmt.Sprintf("(%s) >= %s", nullCount, pc.Add(minCount)), nil
+	return fmt.Sprintf("(%s) >= %s", nullCount, pc.Add(float64(threshold))), nil
 }
 
 // valueToSQLParam is the parameterized variant of valueToSQL. Keep in sync.
@@ -467,23 +824,54 @@ func (d *DataOperator) valueToSQLParam(value interface{}, pc *params.ParamCollec
 		if _, err := normalizeJSONNumberLiteral(v); err != nil {
 			return "", err
 		}
-		return pc.Add(jsonNumberParamValue(v)), nil
+		return addJSONNumberParam(pc, v), nil
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return pc.Add(v), nil
 	case float32:
+		if err := ValidateFiniteNativeFloat(v); err != nil {
+			return "", err
+		}
 		return pc.Add(float64(v)), nil
 	case float64:
+		if err := ValidateFiniteNativeFloat(v); err != nil {
+			return "", err
+		}
 		return pc.Add(v), nil
 	case bool:
 		if v {
-			return "TRUE", nil
+			return sqlTrue, nil
 		}
-		return "FALSE", nil
+		return sqlFalse, nil
 	case nil:
-		return "NULL", nil
+		return sqlNull, nil
 	default:
 		return "", fmt.Errorf("unsupported value type: %T", value)
 	}
+}
+
+// ValueToSQLParam is the parameterized variant of ValueToSQL.
+func (d *DataOperator) ValueToSQLParam(value interface{}, pc *params.ParamCollector) (string, error) {
+	return d.valueToSQLParam(value, pc)
+}
+
+// ValidateFiniteNativeFloat rejects Go-native NaN/Infinity values before they
+// can be emitted as SQL literals or driver bind values.
+func ValidateFiniteNativeFloat(value interface{}) error {
+	switch v := value.(type) {
+	case float32:
+		return validateFiniteFloat64(float64(v))
+	case float64:
+		return validateFiniteFloat64(v)
+	default:
+		return nil
+	}
+}
+
+func validateFiniteFloat64(value float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return fmt.Errorf("non-finite float literal %v is not supported", value)
+	}
+	return nil
 }
 
 // jsonNumberParamValue converts a json.Number into a driver-friendly bind value.
@@ -508,6 +896,14 @@ func jsonNumberParamValue(num json.Number) interface{} {
 		return f
 	}
 	return numStr
+}
+
+func addJSONNumberParam(pc *params.ParamCollector, num json.Number) string {
+	value := jsonNumberParamValue(num)
+	if exact, ok := value.(string); ok {
+		return pc.AddExactNumberString(exact)
+	}
+	return pc.Add(value)
 }
 
 // normalizeJSONNumberLiteral validates json.Number text and returns the literal

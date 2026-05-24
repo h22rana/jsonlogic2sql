@@ -93,6 +93,7 @@ func TestNeedsQuoting(t *testing.T) {
 		{"10m", true},
 		{"120d", true},
 		{"\uff124h", true},
+		{"café", true},
 		{"col-name", true},
 		{"has space", true},
 		{"", false},
@@ -102,6 +103,31 @@ func TestNeedsQuoting(t *testing.T) {
 		t.Run(tt.segment, func(t *testing.T) {
 			if got := NeedsQuoting(tt.segment); got != tt.expected {
 				t.Errorf("NeedsQuoting(%q) = %v, want %v", tt.segment, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsSafeIdentifierSegment(t *testing.T) {
+	tests := []struct {
+		segment  string
+		expected bool
+	}{
+		{"name", true},
+		{"user_name", true},
+		{"café", true},
+		{"\uff124h", true},
+		{"", false},
+		{"col-name", false},
+		{"has space", false},
+		{"has`tick", false},
+		{"has'quote", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.segment, func(t *testing.T) {
+			if got := IsSafeIdentifierSegment(tt.segment); got != tt.expected {
+				t.Errorf("IsSafeIdentifierSegment(%q) = %v, want %v", tt.segment, got, tt.expected)
 			}
 		})
 	}

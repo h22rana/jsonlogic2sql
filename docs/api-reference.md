@@ -4,42 +4,18 @@ Complete API documentation for jsonlogic2sql.
 
 ## Functions
 
-### Transpile
-
-```go
-func Transpile(dialect Dialect, jsonLogic string) (string, error)
-```
-
-Converts a JSON Logic string to a SQL WHERE clause using the specified dialect.
-
-### TranspileFromMap
-
-```go
-func TranspileFromMap(dialect Dialect, logic map[string]interface{}) (string, error)
-```
-
-Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
-
-### TranspileFromInterface
-
-```go
-func TranspileFromInterface(dialect Dialect, logic interface{}) (string, error)
-```
-
-Converts any JSON Logic interface{} to a SQL WHERE clause.
-
 ### TranspileCondition
 
 ```go
-func TranspileCondition(dialect Dialect, jsonLogic string) (string, error)
+func TranspileCondition(dialect Dialect, schema *Schema, jsonLogic string) (string, error)
 ```
 
-Converts a JSON Logic string to a SQL condition **without** the WHERE keyword. Useful for embedding conditions in larger queries.
+Converts a JSON Logic string to a SQL predicate expression without the `WHERE` keyword. Callers add `WHERE` themselves when building full queries.
 
 ### TranspileConditionFromMap
 
 ```go
-func TranspileConditionFromMap(dialect Dialect, logic map[string]interface{}) (string, error)
+func TranspileConditionFromMap(dialect Dialect, schema *Schema, logic map[string]interface{}) (string, error)
 ```
 
 Converts a pre-parsed JSON Logic map to a SQL condition without WHERE.
@@ -47,66 +23,90 @@ Converts a pre-parsed JSON Logic map to a SQL condition without WHERE.
 ### TranspileConditionFromInterface
 
 ```go
-func TranspileConditionFromInterface(dialect Dialect, logic interface{}) (string, error)
+func TranspileConditionFromInterface(dialect Dialect, schema *Schema, logic interface{}) (string, error)
 ```
 
 Converts any JSON Logic interface{} to a SQL condition without WHERE.
 
-### TranspileParameterized
+### TranspileValue
 
 ```go
-func TranspileParameterized(dialect Dialect, jsonLogic string) (string, []QueryParam, error)
+func TranspileValue(dialect Dialect, schema *Schema, jsonLogic string) (string, error)
 ```
 
-Converts a JSON Logic string to a SQL WHERE clause with bind parameter placeholders instead of inlined literals. Returns the SQL, collected parameters, and any error.
+Converts a JSON Logic string to a SQL value expression. Use this for value-producing JSONLogic such as arithmetic, string expressions, `map`, `reduce`, or value-returning `and`/`or`.
 
-### TranspileParameterizedFromMap
+### TranspileValueFromMap
 
 ```go
-func TranspileParameterizedFromMap(dialect Dialect, logic map[string]interface{}) (string, []QueryParam, error)
+func TranspileValueFromMap(dialect Dialect, schema *Schema, logic map[string]interface{}) (string, error)
 ```
 
-Converts a pre-parsed JSON Logic map to a SQL WHERE clause with bind parameter placeholders.
+Converts a pre-parsed JSON Logic map to a SQL value expression.
 
-### TranspileParameterizedFromInterface
+### TranspileValueFromInterface
 
 ```go
-func TranspileParameterizedFromInterface(dialect Dialect, logic interface{}) (string, []QueryParam, error)
+func TranspileValueFromInterface(dialect Dialect, schema *Schema, logic interface{}) (string, error)
 ```
 
-Converts any JSON Logic interface{} to a SQL WHERE clause with bind parameter placeholders.
+Converts any JSON Logic interface{} to a SQL value expression.
 
-### TranspileConditionParameterized
+### TranspileParameterizedCondition
 
 ```go
-func TranspileConditionParameterized(dialect Dialect, jsonLogic string) (string, []QueryParam, error)
+func TranspileParameterizedCondition(dialect Dialect, schema *Schema, jsonLogic string) (string, []QueryParam, error)
 ```
 
 Converts a JSON Logic string to a SQL condition (without WHERE) with bind parameter placeholders.
 
-### TranspileConditionParameterizedFromMap
+### TranspileParameterizedConditionFromMap
 
 ```go
-func TranspileConditionParameterizedFromMap(dialect Dialect, logic map[string]interface{}) (string, []QueryParam, error)
+func TranspileParameterizedConditionFromMap(dialect Dialect, schema *Schema, logic map[string]interface{}) (string, []QueryParam, error)
 ```
 
 Converts a pre-parsed JSON Logic map to a SQL condition (without WHERE) with bind parameter placeholders.
 
-### TranspileConditionParameterizedFromInterface
+### TranspileParameterizedConditionFromInterface
 
 ```go
-func TranspileConditionParameterizedFromInterface(dialect Dialect, logic interface{}) (string, []QueryParam, error)
+func TranspileParameterizedConditionFromInterface(dialect Dialect, schema *Schema, logic interface{}) (string, []QueryParam, error)
 ```
 
 Converts any JSON Logic interface{} to a SQL condition (without WHERE) with bind parameter placeholders.
 
+### TranspileParameterizedValue
+
+```go
+func TranspileParameterizedValue(dialect Dialect, schema *Schema, jsonLogic string) (string, []QueryParam, error)
+```
+
+Converts a JSON Logic string to a SQL value expression with bind parameter placeholders.
+
+### TranspileParameterizedValueFromMap
+
+```go
+func TranspileParameterizedValueFromMap(dialect Dialect, schema *Schema, logic map[string]interface{}) (string, []QueryParam, error)
+```
+
+Converts a pre-parsed JSON Logic map to a parameterized SQL value expression.
+
+### TranspileParameterizedValueFromInterface
+
+```go
+func TranspileParameterizedValueFromInterface(dialect Dialect, schema *Schema, logic interface{}) (string, []QueryParam, error)
+```
+
+Converts any JSON Logic interface{} to a parameterized SQL value expression.
+
 ### NewTranspiler
 
 ```go
-func NewTranspiler(dialect Dialect) (*Transpiler, error)
+func NewTranspiler(dialect Dialect, schema *Schema) (*Transpiler, error)
 ```
 
-Creates a new transpiler instance with the specified dialect.
+Creates a new transpiler instance with the specified dialect and required schema. Use `NewSchema(nil)` only for literal-only expressions.
 
 ### NewTranspilerWithConfig
 
@@ -134,21 +134,20 @@ Main transpiler instance.
 
 | Method | Description |
 |--------|-------------|
-| `Transpile(jsonLogic string) (string, error)` | Convert JSON string to SQL with WHERE |
-| `TranspileFromMap(logic map[string]interface{}) (string, error)` | Convert map to SQL with WHERE |
-| `TranspileFromInterface(logic interface{}) (string, error)` | Convert interface to SQL with WHERE |
-| `TranspileCondition(jsonLogic string) (string, error)` | Convert JSON string to SQL without WHERE |
-| `TranspileConditionFromMap(logic map[string]interface{}) (string, error)` | Convert map to SQL without WHERE |
-| `TranspileConditionFromInterface(logic interface{}) (string, error)` | Convert interface to SQL without WHERE |
-| `TranspileParameterized(jsonLogic string) (string, []QueryParam, error)` | Convert JSON string to parameterized SQL with WHERE |
-| `TranspileParameterizedFromMap(logic map[string]interface{}) (string, []QueryParam, error)` | Convert map to parameterized SQL with WHERE |
-| `TranspileParameterizedFromInterface(logic interface{}) (string, []QueryParam, error)` | Convert interface to parameterized SQL with WHERE |
-| `TranspileConditionParameterized(jsonLogic string) (string, []QueryParam, error)` | Convert JSON string to parameterized SQL without WHERE |
-| `TranspileConditionParameterizedFromMap(logic map[string]interface{}) (string, []QueryParam, error)` | Convert map to parameterized SQL without WHERE |
-| `TranspileConditionParameterizedFromInterface(logic interface{}) (string, []QueryParam, error)` | Convert interface to parameterized SQL without WHERE |
+| `TranspileCondition(jsonLogic string) (string, error)` | Convert JSON string to SQL predicate |
+| `TranspileConditionFromMap(logic map[string]interface{}) (string, error)` | Convert map to SQL predicate |
+| `TranspileConditionFromInterface(logic interface{}) (string, error)` | Convert interface to SQL predicate |
+| `TranspileValue(jsonLogic string) (string, error)` | Convert JSON string to SQL value expression |
+| `TranspileValueFromMap(logic map[string]interface{}) (string, error)` | Convert map to SQL value expression |
+| `TranspileValueFromInterface(logic interface{}) (string, error)` | Convert interface to SQL value expression |
+| `TranspileParameterizedCondition(jsonLogic string) (string, []QueryParam, error)` | Convert JSON string to parameterized SQL predicate |
+| `TranspileParameterizedConditionFromMap(logic map[string]interface{}) (string, []QueryParam, error)` | Convert map to parameterized SQL predicate |
+| `TranspileParameterizedConditionFromInterface(logic interface{}) (string, []QueryParam, error)` | Convert interface to parameterized SQL predicate |
+| `TranspileParameterizedValue(jsonLogic string) (string, []QueryParam, error)` | Convert JSON string to parameterized SQL value expression |
+| `TranspileParameterizedValueFromMap(logic map[string]interface{}) (string, []QueryParam, error)` | Convert map to parameterized SQL value expression |
+| `TranspileParameterizedValueFromInterface(logic interface{}) (string, []QueryParam, error)` | Convert interface to parameterized SQL value expression |
 | `GetDialect() Dialect` | Get the configured dialect |
-| `SetSchema(schema *Schema)` | Set schema for field validation |
-| `SetNullSafeFieldEquality(enabled bool)` | Enable or disable null-safe field-to-field equality |
+| `SetSchema(schema *Schema) error` | Replace the required schema for field validation |
 | `RegisterOperator(name string, handler OperatorHandler) error` | Register custom operator with handler |
 | `RegisterOperatorFunc(name string, fn OperatorFunc) error` | Register custom operator with function |
 | `RegisterDialectAwareOperator(name string, handler DialectAwareOperatorHandler) error` | Register dialect-aware operator |
@@ -158,22 +157,36 @@ Main transpiler instance.
 | `ListCustomOperators() []string` | List all custom operator names |
 | `ClearCustomOperators()` | Remove all custom operators |
 
+`TranspileValue*` returns standalone SQL value expressions. For PostgreSQL,
+empty-array value results are rejected whenever the emitted SQL would contain
+an untyped `ARRAY[]`, because PostgreSQL requires an explicit element type that
+is not always available from the JSONLogic value alone. Foldable expressions
+such as `{"or":[[],"fallback"]}` are still allowed because they do not emit the
+empty array literal.
+
 ### TranspilerConfig
 
 Configuration options for the transpiler.
 
 ```go
 type TranspilerConfig struct {
-    Dialect               Dialect // Required: target SQL dialect
-    Schema                *Schema // Optional: schema for field validation
-    NullSafeFieldEquality bool    // Optional: null-safe field-to-field equality
+    Dialect Dialect // Required: target SQL dialect
+    Schema  *Schema // Required: schema for field validation
 }
 ```
 
-`NullSafeFieldEquality` defaults to `false`. When enabled, `==`, `===`, `!=`,
-and `!==` comparisons between two `var` operands use portable SQL that also
-matches rows where both fields are `NULL`. Field/literal comparisons are
-unchanged.
+Use an empty schema only for literal-only expressions. Any `var` field access
+must be declared in the schema.
+
+Field-to-field equality is null-safe by default for JSONLogic-compatible field
+NULL equality. `==`, `===`, `!=`, and `!==` comparisons between two `var`
+operands use portable SQL that treats two `NULL` fields as equal. Field/literal
+comparisons are unchanged. For strict comparisons between fields with
+incompatible schema types, the generated SQL omits the cross-type equality arm:
+`a === b` becomes `a IS NULL AND b IS NULL`, while `a !== b` becomes
+`a IS NOT NULL OR b IS NOT NULL`. Loose `==`/`!=` comparisons between fields
+with incompatible schema types return an unsupported-comparison error because
+runtime mixed-field coercion is not modeled portably across SQL dialects.
 
 ### Dialect
 
@@ -196,7 +209,80 @@ const (
 Function type for simple custom operator implementations.
 
 ```go
-type OperatorFunc func(operator string, args []interface{}) (string, error)
+type OperatorFunc func(operator string, args []OperatorArg) (OperatorResult, error)
+```
+
+Use `ValueSQL(sql, type)` for scalar value-producing custom operators,
+`ArrayValueSQL(sql, elementType)` for array-producing custom operators with a
+known immediate element type, and `PredicateSQL(sql)` for boolean predicate
+custom operators. For nested arrays, set `OperatorResult.ArrayElementTypes`
+with the immediate element type first.
+Raw string-returning legacy custom operator functions are not accepted; the
+result kind must be explicit so condition and value contexts can be validated.
+
+### OperatorArg
+
+Typed SQL argument passed to custom operators.
+
+```go
+type OperatorArg struct {
+    SQL                      string
+    Kind                     ExpressionKind
+    Type                     ExpressionType
+    ArrayElementType         ExpressionType
+    ArrayElementTypes        []ExpressionType
+    ArrayElementSchemaScopes []string
+}
+```
+
+### OperatorResult
+
+Typed SQL result returned by custom operators.
+
+```go
+type OperatorResult struct {
+    SQL                      string
+    Kind                     ExpressionKind
+    Type                     ExpressionType
+    EmptyArrayLiteral        bool
+    PreserveParamRefs        bool
+    ArrayElementType         ExpressionType
+    ArrayElementTypes        []ExpressionType
+    ArrayElementSchemaScopes []string
+}
+```
+
+`ArrayElementType` is only meaningful when `Type` is `ExpressionTypeArray`;
+`ExpressionTypeUnknown` means the array element type is not statically known.
+`ArrayElementTypes` carries nested array element types. For example,
+`array<array<number>>` is represented as
+`[]ExpressionType{ExpressionTypeArray, ExpressionTypeNumber}`.
+`ArrayElementSchemaScopes` carries schema paths for object-array values; set it
+when a custom operator returns an object array whose element fields should be
+available to downstream `map`/`filter`/`some` lambdas. `PreserveParamRefs` is
+reserved for parameterized custom-operator safety and is normally set by the
+parser.
+
+### ExpressionKind
+
+```go
+const (
+    ExpressionKindValue
+    ExpressionKindPredicate
+)
+```
+
+### ExpressionType
+
+```go
+const (
+    ExpressionTypeUnknown
+    ExpressionTypeNull
+    ExpressionTypeBoolean
+    ExpressionTypeString
+    ExpressionTypeNumber
+    ExpressionTypeArray
+)
 ```
 
 ### OperatorHandler
@@ -205,7 +291,7 @@ Interface for custom operator implementations that need state.
 
 ```go
 type OperatorHandler interface {
-    ToSQL(operator string, args []interface{}) (string, error)
+    ToSQL(operator string, args []OperatorArg) (OperatorResult, error)
 }
 ```
 
@@ -214,7 +300,7 @@ type OperatorHandler interface {
 Function type for dialect-aware custom operator implementations.
 
 ```go
-type DialectAwareOperatorFunc func(operator string, args []interface{}, dialect Dialect) (string, error)
+type DialectAwareOperatorFunc func(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error)
 ```
 
 ### DialectAwareOperatorHandler
@@ -223,7 +309,7 @@ Interface for dialect-aware custom operator implementations.
 
 ```go
 type DialectAwareOperatorHandler interface {
-    ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error)
+    ToSQLWithDialect(operator string, args []OperatorArg, dialect Dialect) (OperatorResult, error)
 }
 ```
 
@@ -257,6 +343,8 @@ Schema for field validation.
 | `ValidateField(fieldName string) error` | Validate field existence |
 | `GetFieldType(fieldName string) string` | Get field type as string |
 | `IsArrayType(fieldName string) bool` | Check if field is array type |
+| `HasArrayElementFields(fieldName string) bool` | Check if an array field has object element fields |
+| `GetArrayElementType(fieldName string) string` | Get declared array element type, or `object` for arrays with element fields |
 | `IsStringType(fieldName string) bool` | Check if field is string type |
 | `IsNumericType(fieldName string) bool` | Check if field is numeric type |
 | `IsBooleanType(fieldName string) bool` | Check if field is boolean type |
@@ -271,10 +359,55 @@ Field definition for schema.
 
 ```go
 type FieldSchema struct {
-    Name          string    // Field name (e.g., "order.amount")
-    Type          FieldType // Field type
-    AllowedValues []string  // For enum types: list of valid values
+    Name          string        // Field name (e.g., "order.amount")
+    Type          FieldType     // Field type
+    ElementType   FieldType     // For array element metadata
+    AllowedValues []string      // For enum types: list of valid values
+    Fields        []FieldSchema // Nested object fields
+    ElementFields []FieldSchema // Nested fields on array elements
 }
+```
+
+`Name` and `Type` are required for every entry, including nested object fields
+and array element fields. Object schemas use `Fields`; array schemas use
+`ElementFields`. `Fields` requires `Type: FieldTypeObject`; `ElementFields`
+requires `Type: FieldTypeArray`. Enum schemas require at least one
+unique `AllowedValues` entry, and non-enum schemas cannot set `AllowedValues`.
+Flattened field paths must be unique and cannot contain empty path segments.
+Object fields are containers for nested schema paths; value expressions must
+reference supported nested child fields rather than returning the object
+container itself.
+Array fields can set `ElementType` for scalar arrays, enum arrays, nested
+arrays, and object arrays. `ElementFields` implies object elements; when both
+are provided, `ElementType` must be `FieldTypeObject`. Enum arrays set
+`Type: FieldTypeArray`, `ElementType: FieldTypeEnum`, and `AllowedValues`.
+For example:
+
+```json
+[
+  {
+    "name": "profile",
+    "type": "object",
+    "fields": [
+      { "name": "country", "type": "string" },
+      { "name": "status", "type": "enum", "allowedValues": ["active", "blocked"] }
+    ]
+  },
+  {
+    "name": "payments",
+    "type": "array",
+    "elementFields": [
+      { "name": "type", "type": "enum", "allowedValues": ["BALANCE", "CARD"] },
+      {
+        "name": "details",
+        "type": "object",
+        "fields": [
+          { "name": "issuer", "type": "string" }
+        ]
+      }
+    ]
+  }
+]
 ```
 
 ### FieldType
@@ -290,7 +423,7 @@ const (
     FieldTypeNumber  FieldType = "number"  // Numeric field type (float/decimal)
     FieldTypeBoolean FieldType = "boolean" // Boolean field type
     FieldTypeArray   FieldType = "array"   // Array field type
-    FieldTypeObject  FieldType = "object"  // Object/struct field type
+    FieldTypeObject  FieldType = "object"  // Object/struct container field type
     FieldTypeEnum    FieldType = "enum"    // Enum field type (requires AllowedValues)
 )
 ```
@@ -306,7 +439,7 @@ type QueryParam struct {
 }
 ```
 
-> **Note:** JSON decoding uses `json.Decoder.UseNumber()` to preserve precision. JS-safe integers (within ±2^53−1) bind as `float64`; larger integers (both unquoted JSON literals and quoted strings exceeding `int64`) bind as `string`. Floats outside the representable float64 range (e.g., `1e309` overflow, `1e-400` underflow to zero) are also preserved as `string`. Callers binding string-typed numeric params may need to convert them to their driver's numeric type.
+> **Note:** JSON decoding uses `json.Decoder.UseNumber()` to preserve precision. JS-safe integers (within ±2^53−1) bind as `float64`; larger integers (both unquoted JSON literals and quoted strings exceeding `int64`) bind as `string`. Floats outside the representable float64 range (e.g., `1e309` overflow, `1e-400` underflow to zero) are also preserved as `string`. ClickHouse placeholders keep numeric type hints for these exact string-preserved numeric literals in numeric contexts, while ordinary string literals still render as `{pN:String}`. Other drivers may require callers to convert string-preserved numeric params to the driver's numeric type.
 
 ### TranspileError
 
@@ -367,10 +500,17 @@ Check if error has specific code.
 ### NewSchema
 
 ```go
-func NewSchema(fields []FieldSchema) *Schema
+func NewSchema(fields []FieldSchema) (*Schema, error)
 ```
 
-Create a new schema from field definitions. This constructor is source-compatible with the v1 API. It stores schema field-name validation errors so they are still reported when the schema is used by the transpiler; use `NewValidatedSchema` or `ValidateSchemaFields` when you need an immediate error.
+Create a new schema from field definitions. `NewSchema` validates the schema by
+default and returns an error for invalid field names, unsupported or missing
+types, invalid nested `fields` / `elementFields` usage, invalid enum metadata,
+duplicate flattened field paths, empty path segments, quote characters, or
+SQL-control punctuation. Field path segments must be raw, unquoted identifier
+tokens containing only letters, digits, and underscores. Segments outside the
+portable unquoted ASCII shape, such as `24h` and `café`, are accepted and quoted
+automatically by the transpiler.
 
 ### ValidateSchemaFields
 
@@ -378,15 +518,8 @@ Create a new schema from field definitions. This constructor is source-compatibl
 func ValidateSchemaFields(fields []FieldSchema) error
 ```
 
-Validate schema field definitions. Returns an error if any field name contains quote characters (backtick, double quote, or single quote). Field names must be raw, unquoted identifiers.
-
-### NewValidatedSchema
-
-```go
-func NewValidatedSchema(fields []FieldSchema) (*Schema, error)
-```
-
-Create a new schema from field definitions and return construction-time validation errors.
+Validate schema field definitions without constructing a `Schema`. It applies
+the same validation rules as `NewSchema`.
 
 ### NewSchemaFromJSON
 

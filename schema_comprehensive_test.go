@@ -7,48 +7,57 @@ import (
 	"testing"
 )
 
+func transpileSchemaExpression(transpiler *Transpiler, logic string) (string, error) {
+	result, err := transpiler.TranspileCondition(logic)
+	if IsErrorCode(err, ErrInvalidExpressionContext) {
+		return transpiler.TranspileValue(logic)
+	}
+	return result, err
+}
+
 // setupTestTranspiler creates a transpiler with custom operators registered
 // similar to how the REPL does it.
-func setupTestTranspiler() *Transpiler {
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+func setupTestTranspiler(tb testing.TB) *Transpiler {
+	tb.Helper()
+	transpiler := mustTestTranspiler(tb, DialectBigQuery)
 
 	// startsWith operator: column LIKE 'value%'
-	transpiler.RegisterOperatorFunc("startsWith", func(op string, args []interface{}) (string, error) {
+	transpiler.RegisterOperatorFunc("startsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 2 {
-			return "", fmt.Errorf("startsWith requires exactly 2 arguments")
+			return OperatorResult{}, fmt.Errorf("startsWith requires exactly 2 arguments")
 		}
-		column := args[0].(string)
-		pattern := args[1].(string)
+		column := args[0].SQL
+		pattern := args[1].SQL
 		// Extract value from quoted string (e.g., "'T'" -> "T")
 		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
 			pattern = pattern[1 : len(pattern)-1]
 		}
-		return fmt.Sprintf("%s LIKE '%s%%'", column, pattern), nil
+		return PredicateSQL(fmt.Sprintf("%s LIKE '%s%%'", column, pattern)), nil
 	})
 
 	// endsWith operator: column LIKE '%value'
-	transpiler.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
+	transpiler.RegisterOperatorFunc("endsWith", func(op string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 2 {
-			return "", fmt.Errorf("endsWith requires exactly 2 arguments")
+			return OperatorResult{}, fmt.Errorf("endsWith requires exactly 2 arguments")
 		}
-		column := args[0].(string)
-		pattern := args[1].(string)
+		column := args[0].SQL
+		pattern := args[1].SQL
 		// Extract value from quoted string
 		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
 			pattern = pattern[1 : len(pattern)-1]
 		}
-		return fmt.Sprintf("%s LIKE '%%%s'", column, pattern), nil
+		return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s'", column, pattern)), nil
 	})
 
 	// contains operator: column LIKE '%value%'
-	transpiler.RegisterOperatorFunc("contains", func(op string, args []interface{}) (string, error) {
+	transpiler.RegisterOperatorFunc("contains", func(op string, args []OperatorArg) (OperatorResult, error) {
 		if len(args) != 2 {
-			return "", fmt.Errorf("contains requires exactly 2 arguments")
+			return OperatorResult{}, fmt.Errorf("contains requires exactly 2 arguments")
 		}
 
 		var column, pattern string
-		arg0Str, arg0IsStr := args[0].(string)
-		arg1Str, arg1IsStr := args[1].(string)
+		arg0Str := args[0].SQL
+		arg1Str := args[1].SQL
 
 		// Helper function to extract value from array string representation like "[T]"
 		extractFromArrayString := func(s string) string {
@@ -62,35 +71,29 @@ func setupTestTranspiler() *Transpiler {
 			return s
 		}
 
-		if arg0IsStr && arg1IsStr {
-			if strings.HasPrefix(arg1Str, "[") && strings.HasSuffix(arg1Str, "]") {
-				column = arg0Str
-				pattern = extractFromArrayString(arg1Str)
-			} else if strings.HasPrefix(arg0Str, "[") && strings.HasSuffix(arg0Str, "]") {
-				column = arg1Str
-				pattern = extractFromArrayString(arg0Str)
-			} else {
-				arg0Quoted := len(arg0Str) >= 2 && arg0Str[0] == '\'' && arg0Str[len(arg0Str)-1] == '\''
-				arg1Quoted := len(arg1Str) >= 2 && arg1Str[0] == '\'' && arg1Str[len(arg1Str)-1] == '\''
-
-				if arg0Quoted && !arg1Quoted {
-					column = arg1Str
-					pattern = arg0Str
-				} else {
-					column = arg0Str
-					pattern = arg1Str
-				}
-			}
+		if strings.HasPrefix(arg1Str, "[") && strings.HasSuffix(arg1Str, "]") {
+			column = arg0Str
+			pattern = extractFromArrayString(arg1Str)
+		} else if strings.HasPrefix(arg0Str, "[") && strings.HasSuffix(arg0Str, "]") {
+			column = arg1Str
+			pattern = extractFromArrayString(arg0Str)
 		} else {
-			column = args[0].(string)
-			pattern = args[1].(string)
-			pattern = extractFromArrayString(pattern)
+			arg0Quoted := len(arg0Str) >= 2 && arg0Str[0] == '\'' && arg0Str[len(arg0Str)-1] == '\''
+			arg1Quoted := len(arg1Str) >= 2 && arg1Str[0] == '\'' && arg1Str[len(arg1Str)-1] == '\''
+
+			if arg0Quoted && !arg1Quoted {
+				column = arg1Str
+				pattern = arg0Str
+			} else {
+				column = arg0Str
+				pattern = arg1Str
+			}
 		}
 
 		if len(pattern) >= 2 && pattern[0] == '\'' && pattern[len(pattern)-1] == '\'' {
 			pattern = pattern[1 : len(pattern)-1]
 		}
-		return fmt.Sprintf("%s LIKE '%%%s%%'", column, pattern), nil
+		return PredicateSQL(fmt.Sprintf("%s LIKE '%%%s%%'", column, pattern)), nil
 	})
 
 	return transpiler
@@ -157,10 +160,10 @@ func TestSchemaValidationComprehensive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			transpiler, _ := NewTranspiler(DialectBigQuery)
+			transpiler := mustTestTranspiler(t, DialectBigQuery)
 			transpiler.SetSchema(schema)
 
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpileSchemaExpression(transpiler, tt.jsonLogic)
 
 			if tt.expectError {
 				if err == nil {
@@ -179,13 +182,13 @@ func TestSchemaValidationComprehensive(t *testing.T) {
 
 // TestSchemaTypeAwareBehavior tests the type-aware "in" operator behavior.
 func TestSchemaTypeAwareBehavior(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "tags", Type: FieldTypeArray},
 		{Name: "description", Type: FieldTypeString},
 		{Name: "status", Type: FieldTypeString},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler := mustTestTranspiler(t, DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -196,23 +199,23 @@ func TestSchemaTypeAwareBehavior(t *testing.T) {
 		{
 			name:      "in with array type field",
 			jsonLogic: `{"in": ["tag1", {"var": "tags"}]}`,
-			expected:  "WHERE 'tag1' IN UNNEST(tags)",
+			expected:  testNullSafeArrayMembershipSQL(DialectBigQuery, "'tag1'", "tags"),
 		},
 		{
 			name:      "in with string type field (string containment)",
 			jsonLogic: `{"in": ["hello", {"var": "description"}]}`,
-			expected:  "WHERE STRPOS(description, 'hello') > 0",
+			expected:  "STRPOS(description, 'hello') > 0",
 		},
 		{
 			name:      "in with literal array",
 			jsonLogic: `{"in": [{"var": "status"}, ["active", "pending"]]}`,
-			expected:  "WHERE status IN ('active', 'pending')",
+			expected:  "status IN ('active', 'pending')",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpileSchemaExpression(transpiler, tt.jsonLogic)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -225,7 +228,7 @@ func TestSchemaTypeAwareBehavior(t *testing.T) {
 
 // TestCustomOperatorsStartsWithEndsWithContains tests the custom operators.
 func TestCustomOperatorsStartsWithEndsWithContains(t *testing.T) {
-	transpiler := setupTestTranspiler()
+	transpiler := setupTestTranspiler(t)
 
 	tests := []struct {
 		name      string
@@ -235,28 +238,28 @@ func TestCustomOperatorsStartsWithEndsWithContains(t *testing.T) {
 		{
 			name:      "simple startsWith",
 			jsonLogic: `{"startsWith": [{"var": "request.params.input_mode"}, "T"]}`,
-			expected:  "WHERE request.params.input_mode LIKE 'T%'",
+			expected:  "request.params.input_mode LIKE 'T%'",
 		},
 		{
 			name:      "simple endsWith",
 			jsonLogic: `{"endsWith": [{"var": "request.params.input_mode"}, "T"]}`,
-			expected:  "WHERE request.params.input_mode LIKE '%T'",
+			expected:  "request.params.input_mode LIKE '%T'",
 		},
 		{
 			name:      "simple contains",
 			jsonLogic: `{"contains": [{"var": "request.params.input_mode"}, "T"]}`,
-			expected:  "WHERE request.params.input_mode LIKE '%T%'",
+			expected:  "request.params.input_mode LIKE '%T%'",
 		},
 		{
 			name:      "contains with array notation",
 			jsonLogic: `{"contains": [{"var": "request.params.input_mode"}, ["T"]]}`,
-			expected:  "WHERE request.params.input_mode LIKE '%T%'",
+			expected:  "request.params.input_mode LIKE '%T%'",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpileSchemaExpression(transpiler, tt.jsonLogic)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -269,7 +272,7 @@ func TestCustomOperatorsStartsWithEndsWithContains(t *testing.T) {
 
 // TestNegationOfCustomOperators tests the negation of custom operators with !
 func TestNegationOfCustomOperators(t *testing.T) {
-	transpiler := setupTestTranspiler()
+	transpiler := setupTestTranspiler(t)
 
 	tests := []struct {
 		name        string
@@ -300,7 +303,7 @@ func TestNegationOfCustomOperators(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpiler.TranspileCondition(tt.jsonLogic)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -313,7 +316,7 @@ func TestNegationOfCustomOperators(t *testing.T) {
 
 // TestComplexNestedExpressions tests the complex nested expressions.
 func TestComplexNestedExpressions(t *testing.T) {
-	transpiler := setupTestTranspiler()
+	transpiler := setupTestTranspiler(t)
 
 	tests := []struct {
 		name        string
@@ -354,13 +357,12 @@ func TestComplexNestedExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpiler.TranspileCondition(tt.jsonLogic)
 			if err != nil {
 				t.Fatalf("Test '%s' (%s) failed with error: %v", tt.name, tt.description, err)
 			}
-			// At minimum, should produce valid SQL
-			if !strings.HasPrefix(result, "WHERE ") {
-				t.Errorf("Expected result to start with 'WHERE ', got: %s", result)
+			if strings.TrimSpace(result) == "" {
+				t.Errorf("expected non-empty SQL, got %q", result)
 			}
 			t.Logf("Test '%s': %s", tt.name, result)
 		})
@@ -381,7 +383,7 @@ func TestSchemaWithCustomOperators(t *testing.T) {
 		t.Fatalf("Failed to create schema: %v", err)
 	}
 
-	transpiler := setupTestTranspiler()
+	transpiler := setupTestTranspiler(t)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -410,7 +412,7 @@ func TestSchemaWithCustomOperators(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpiler.TranspileCondition(tt.jsonLogic)
 
 			if tt.expectError {
 				if err == nil {
@@ -427,38 +429,21 @@ func TestSchemaWithCustomOperators(t *testing.T) {
 	}
 }
 
-// TestSchemaBackwardCompatibility tests that the transpiler works without schema.
-func TestSchemaBackwardCompatibility(t *testing.T) {
-	transpiler := setupTestTranspiler()
-	// No schema set - should accept any field
+// TestSchemaRequiredValidation verifies that the required schema is enforced.
+func TestSchemaRequiredValidation(t *testing.T) {
+	transpiler := setupTestTranspiler(t)
 
-	tests := []struct {
-		name      string
-		jsonLogic string
-		expected  string
-	}{
-		{
-			name:      "any field without schema",
-			jsonLogic: `{"==": [{"var": "any.random.field"}, "value"]}`,
-			expected:  "WHERE any.random.field = 'value'",
-		},
-		{
-			name:      "nested fields without schema",
-			jsonLogic: `{"and":[{"==":[{"var":"field1"},"a"]},{"==":[{"var":"field2"},"b"]}]}`,
-			expected:  "WHERE (field1 = 'a' AND field2 = 'b')",
-		},
+	result, err := transpiler.TranspileCondition(`{"and":[{"==":[{"var":"field1"},"a"]},{"==":[{"var":"field2"},"b"]}]}`)
+	if err != nil {
+		t.Fatalf("known schema fields returned error: %v", err)
+	}
+	if expected := "(field1 = 'a' AND field2 = 'b')"; result != expected {
+		t.Fatalf("Expected: %s\nGot: %s", expected, result)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
-			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
-			}
-			if result != tt.expected {
-				t.Errorf("Expected: %s\nGot: %s", tt.expected, result)
-			}
-		})
+	if _, err := transpiler.TranspileCondition(`{"==": [{"var": "any.random.field"}, "value"]}`); err == nil ||
+		!strings.Contains(err.Error(), "field 'any.random.field' is not defined in schema") {
+		t.Fatalf("unknown field error = %v, want schema validation error", err)
 	}
 }
 
@@ -502,13 +487,13 @@ func TestSchemaFromFileExample(t *testing.T) {
 
 // TestInOperatorWithSchemaIntegration tests the IN operator behavior with schema-based type detection.
 func TestInOperatorWithSchemaIntegration(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "user.roles", Type: FieldTypeArray},
 		{Name: "user.bio", Type: FieldTypeString},
 		{Name: "status", Type: FieldTypeString},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler := mustTestTranspiler(t, DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -517,25 +502,25 @@ func TestInOperatorWithSchemaIntegration(t *testing.T) {
 		expected  string
 	}{
 		{
-			name:      "in with array field uses IN syntax",
+			name:      "in with array field uses null-safe membership",
 			jsonLogic: `{"in": ["admin", {"var": "user.roles"}]}`,
-			expected:  "WHERE 'admin' IN UNNEST(user.roles)",
+			expected:  testNullSafeArrayMembershipSQL(DialectBigQuery, "'admin'", "user.roles"),
 		},
 		{
 			name:      "in with string field uses STRPOS",
 			jsonLogic: `{"in": ["developer", {"var": "user.bio"}]}`,
-			expected:  "WHERE STRPOS(user.bio, 'developer') > 0",
+			expected:  "STRPOS(user.bio, 'developer') > 0",
 		},
 		{
 			name:      "in with literal array on right side",
 			jsonLogic: `{"in": [{"var": "status"}, ["active", "pending", "approved"]]}`,
-			expected:  "WHERE status IN ('active', 'pending', 'approved')",
+			expected:  "status IN ('active', 'pending', 'approved')",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpiler.TranspileCondition(tt.jsonLogic)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -548,13 +533,13 @@ func TestInOperatorWithSchemaIntegration(t *testing.T) {
 
 // TestEdgeCasesWithSchema tests various edge cases.
 func TestEdgeCasesWithSchema(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 		{Name: "name", Type: FieldTypeString},
 		{Name: "active", Type: FieldTypeBoolean},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler := mustTestTranspiler(t, DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -586,7 +571,7 @@ func TestEdgeCasesWithSchema(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpiler.TranspileCondition(tt.jsonLogic)
 			if tt.expectError && err == nil {
 				t.Errorf("Expected error but got result: %s", result)
 			} else if !tt.expectError && err != nil {
@@ -599,7 +584,7 @@ func TestEdgeCasesWithSchema(t *testing.T) {
 // TestTypeAwareOperators tests type validation across all operators.
 func TestTypeAwareOperators(t *testing.T) {
 	// Create a schema with various field types
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 		{Name: "price", Type: FieldTypeNumber},
 		{Name: "name", Type: FieldTypeString},
@@ -611,7 +596,7 @@ func TestTypeAwareOperators(t *testing.T) {
 		{Name: "metadata", Type: FieldTypeObject},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler := mustTestTranspiler(t, DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -752,10 +737,9 @@ func TestTypeAwareOperators(t *testing.T) {
 			errorMsg:    "array operation on non-array field 'amount'",
 		},
 		{
-			name:        "array merge with string field",
+			name:        "array merge casts string field",
 			jsonLogic:   `{"merge": [{"var": "tags"}, {"var": "name"}]}`,
-			expectError: true,
-			errorMsg:    "array operation on non-array field 'name'",
+			expectError: false,
 		},
 
 		// Comparison operators (ordering) - valid cases
@@ -819,7 +803,7 @@ func TestTypeAwareOperators(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpileSchemaExpression(transpiler, tt.jsonLogic)
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error containing '%s' but got result: %s", tt.errorMsg, result)
@@ -835,71 +819,66 @@ func TestTypeAwareOperators(t *testing.T) {
 	}
 }
 
-// TestTypeValidationWithoutSchema verifies that validation is skipped without schema.
-func TestTypeValidationWithoutSchema(t *testing.T) {
-	transpiler, _ := NewTranspiler(DialectBigQuery)
-	// No schema set - all operations should pass
+// TestTypeValidationWithRequiredSchema verifies type validation with a schema.
+func TestTypeValidationWithRequiredSchema(t *testing.T) {
+	transpiler := mustTestTranspiler(t, DialectBigQuery)
 
 	tests := []struct {
 		name      string
 		jsonLogic string
 	}{
 		{
-			name:      "numeric on any field without schema",
-			jsonLogic: `{"+": [{"var": "anyField"}, 10]}`,
+			name:      "numeric on numeric field",
+			jsonLogic: `{"+": [{"var": "value"}, 10]}`,
 		},
 		{
-			name:      "string on any field without schema",
+			name:      "string on string fields",
 			jsonLogic: `{"cat": [{"var": "field1"}, {"var": "field2"}]}`,
 		},
 		{
-			name:      "array on any field without schema",
-			jsonLogic: `{"some": [{"var": "items"}, {"==": [{"var": ""}, "x"]}]}`,
+			name:      "array on array field",
+			jsonLogic: `{"some": [{"var": "tags"}, {"==": [{"var": ""}, "x"]}]}`,
 		},
 		{
-			name:      "ordering on any field without schema",
+			name:      "ordering on numeric field",
 			jsonLogic: `{">": [{"var": "value"}, 100]}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := transpiler.Transpile(tt.jsonLogic)
+			_, err := transpileSchemaExpression(transpiler, tt.jsonLogic)
 			if err != nil {
-				t.Errorf("Without schema, should not validate types. Got error: %v", err)
+				t.Errorf("Expected schema-valid expression, got error: %v", err)
 			}
 		})
 	}
 }
 
-// TestTypeValidationWithFieldNotInSchema verifies that fields not in schema pass validation.
+// TestTypeValidationWithFieldNotInSchema verifies that fields not in schema are rejected.
 func TestTypeValidationWithFieldNotInSchema(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "known_field", Type: FieldTypeInteger},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler := mustTestTranspiler(t, DialectBigQuery)
 	transpiler.SetSchema(schema)
 
-	// Field not in schema should pass validation (existence is checked separately)
-	_, err := transpiler.Transpile(`{"+": [{"var": "unknown_field"}, 10]}`)
-	if err != nil {
-		// If there's an error, it should be about field not being in schema, not about type
-		if strings.Contains(err.Error(), "non-numeric") {
-			t.Errorf("Fields not in schema should skip type validation. Got: %v", err)
-		}
+	_, err := transpileSchemaExpression(transpiler, `{"+": [{"var": "unknown_field"}, 10]}`)
+	if err == nil || !strings.Contains(err.Error(), "field 'unknown_field' is not defined in schema") {
+		t.Fatalf("unknown field error = %v, want schema validation error", err)
 	}
 }
 
 // TestEnumTypeSupport tests enum type validation and SQL generation.
 func TestEnumTypeSupport(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "canceled"}},
 		{Name: "priority", Type: FieldTypeEnum, AllowedValues: []string{"low", "medium", "high"}},
 		{Name: "name", Type: FieldTypeString},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler := mustTestTranspiler(t, DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	t.Run("valid enum comparisons", func(t *testing.T) {
@@ -911,33 +890,33 @@ func TestEnumTypeSupport(t *testing.T) {
 			{
 				name:      "enum equality with valid value",
 				jsonLogic: `{"==": [{"var": "status"}, "active"]}`,
-				expected:  "WHERE status = 'active'",
+				expected:  "status = 'active'",
 			},
 			{
 				name:      "enum inequality with valid value",
 				jsonLogic: `{"!=": [{"var": "status"}, "canceled"]}`,
-				expected:  "WHERE status != 'canceled'",
+				expected:  "status != 'canceled'",
 			},
 			{
 				name:      "enum in array with valid values",
 				jsonLogic: `{"in": [{"var": "status"}, ["active", "pending"]]}`,
-				expected:  "WHERE status IN ('active', 'pending')",
+				expected:  "status IN ('active', 'pending')",
 			},
 			{
 				name:      "enum strict equality",
 				jsonLogic: `{"===": [{"var": "priority"}, "high"]}`,
-				expected:  "WHERE priority = 'high'",
+				expected:  "priority = 'high'",
 			},
 			{
 				name:      "enum with null comparison",
 				jsonLogic: `{"==": [{"var": "status"}, null]}`,
-				expected:  "WHERE status IS NULL",
+				expected:  "status IS NULL",
 			},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				result, err := transpiler.Transpile(tt.jsonLogic)
+				result, err := transpiler.TranspileCondition(tt.jsonLogic)
 				if err != nil {
 					t.Fatalf("Unexpected error: %v", err)
 				}
@@ -973,7 +952,7 @@ func TestEnumTypeSupport(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				_, err := transpiler.Transpile(tt.jsonLogic)
+				_, err := transpiler.TranspileCondition(tt.jsonLogic)
 				if err == nil {
 					t.Fatal("Expected error but got none")
 				}
@@ -986,11 +965,11 @@ func TestEnumTypeSupport(t *testing.T) {
 
 	t.Run("non-enum fields should not validate enum values", func(t *testing.T) {
 		// String fields should accept any value, not validate as enum
-		result, err := transpiler.Transpile(`{"==": [{"var": "name"}, "anything"]}`)
+		result, err := transpiler.TranspileCondition(`{"==": [{"var": "name"}, "anything"]}`)
 		if err != nil {
 			t.Fatalf("String field should accept any value, got error: %v", err)
 		}
-		if result != "WHERE name = 'anything'" {
+		if result != "name = 'anything'" {
 			t.Errorf("Unexpected result: %s", result)
 		}
 	})
@@ -1041,12 +1020,12 @@ func TestEnumSchemaFromJSON(t *testing.T) {
 
 // TestEnumWithComplexExpressions tests enum validation in complex nested expressions.
 func TestEnumWithComplexExpressions(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "status", Type: FieldTypeEnum, AllowedValues: []string{"active", "pending", "canceled"}},
 		{Name: "amount", Type: FieldTypeInteger},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler := mustTestTranspiler(t, DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -1059,12 +1038,12 @@ func TestEnumWithComplexExpressions(t *testing.T) {
 		{
 			name:      "enum in AND expression",
 			jsonLogic: `{"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 100]}]}`,
-			expected:  "WHERE (status = 'active' AND amount > 100)",
+			expected:  "(status = 'active' AND amount > 100)",
 		},
 		{
 			name:      "enum in OR expression",
 			jsonLogic: `{"or": [{"==": [{"var": "status"}, "pending"]}, {"==": [{"var": "status"}, "active"]}]}`,
-			expected:  "WHERE (status = 'pending' OR status = 'active')",
+			expected:  "(status = 'pending' OR status = 'active')",
 		},
 		{
 			name:        "invalid enum in AND expression",
@@ -1076,7 +1055,7 @@ func TestEnumWithComplexExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpiler.TranspileCondition(tt.jsonLogic)
 			if tt.expectError {
 				if err == nil {
 					t.Fatal("Expected error but got none")
@@ -1096,10 +1075,10 @@ func TestEnumWithComplexExpressions(t *testing.T) {
 	}
 }
 
-// TestTypeCoercionForInOperator verifies that array elements in the "in" operator are coerced
-// to match the field type. Numbers are quoted for string fields, and string numbers are
-// unquoted for numeric fields. This prevents type errors in strict-typing databases like BigQuery.
-func TestTypeCoercionForInOperator(t *testing.T) {
+// TestStrictArrayMembershipForInOperator verifies JSONLogic indexOf-style array
+// membership. Literal array membership uses strict element equality; it does
+// not apply the loose field/literal coercion used by equality operators.
+func TestStrictArrayMembershipForInOperator(t *testing.T) {
 	schema := mustNewSchema([]FieldSchema{
 		{Name: "code", Type: FieldTypeString},
 		{Name: "status", Type: FieldTypeString},
@@ -1109,147 +1088,146 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		{Name: "active", Type: FieldTypeBoolean},
 	})
 
-	t.Run("string field with numeric array elements should quote values", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("string field with numeric array elements folds false", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.Transpile(`{"in":[{"var":"code"},[5960,9000]]}`)
+		result, err := transpiler.TranspileCondition(`{"in":[{"var":"code"},[5960,9000]]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE code IN ('5960', '9000')"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("string field with mixed array elements should coerce numbers", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("string field with mixed array elements filters mismatched numeric values", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.Transpile(`{"in":[{"var":"status"},["active",123,"pending"]]}`)
+		result, err := transpiler.TranspileCondition(`{"in":[{"var":"status"},["active",123,"pending"]]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE status IN ('active', '123', 'pending')"
+		expected := "status IN ('active', 'pending')"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("numeric field with string array elements should unquote values", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("numeric field with string array elements folds false", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.Transpile(`{"in":[{"var":"amount"},["100","200","300"]]}`)
+		result, err := transpiler.TranspileCondition(`{"in":[{"var":"amount"},["100","200","300"]]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE amount IN (100, 200, 300)"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
 	t.Run("numeric field with numeric array elements stays unchanged", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.Transpile(`{"in":[{"var":"amount"},[100,200,300]]}`)
+		result, err := transpiler.TranspileCondition(`{"in":[{"var":"amount"},[100,200,300]]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE amount IN (100, 200, 300)"
+		expected := "amount IN (100, 200, 300)"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
 	t.Run("string field with string array elements stays unchanged", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.Transpile(`{"in":[{"var":"status"},["active","pending"]]}`)
+		result, err := transpiler.TranspileCondition(`{"in":[{"var":"status"},["active","pending"]]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE status IN ('active', 'pending')"
+		expected := "status IN ('active', 'pending')"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("no schema should not coerce", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
-		// No schema set
+	t.Run("string field with numeric literal array folds false", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 
-		result, err := transpiler.Transpile(`{"in":[{"var":"code"},[5960,9000]]}`)
+		result, err := transpiler.TranspileCondition(`{"in":[{"var":"code"},[5960,9000]]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE code IN (5960, 9000)"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("string field with float values should quote correctly", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("string field with float literal array folds false", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.Transpile(`{"in":[{"var":"status"},[1.5,2.7]]}`)
+		result, err := transpiler.TranspileCondition(`{"in":[{"var":"status"},[1.5,2.7]]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE status IN ('1.5', '2.7')"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
 	t.Run("string containment with number literal coerces to string", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.Transpile(`{"in":[123,{"var":"bio"}]}`)
+		result, err := transpiler.TranspileCondition(`{"in":[123,{"var":"bio"}]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE STRPOS(bio, '123') > 0"
+		expected := "STRPOS(bio, '123') > 0"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
 	t.Run("string containment with float literal coerces to string", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.Transpile(`{"in":[3.14,{"var":"bio"}]}`)
+		result, err := transpiler.TranspileCondition(`{"in":[3.14,{"var":"bio"}]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE STRPOS(bio, '3.14') > 0"
+		expected := "STRPOS(bio, '3.14') > 0"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
 	t.Run("string containment with string literal stays unchanged", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.Transpile(`{"in":["hello",{"var":"bio"}]}`)
+		result, err := transpiler.TranspileCondition(`{"in":["hello",{"var":"bio"}]}`)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE STRPOS(bio, 'hello') > 0"
+		expected := "STRPOS(bio, 'hello') > 0"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("coercion works across all dialects", func(t *testing.T) {
+	t.Run("strict array membership filters mismatched literals across all dialects", func(t *testing.T) {
 		dialects := []Dialect{
 			DialectBigQuery,
 			DialectSpanner,
@@ -1258,26 +1236,26 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 			DialectClickHouse,
 		}
 		for _, d := range dialects {
-			transpiler, _ := NewTranspiler(d)
+			transpiler := mustTestTranspiler(t, d)
 			transpiler.SetSchema(schema)
 
-			result, err := transpiler.Transpile(`{"in":[{"var":"code"},[5960,9000]]}`)
+			result, err := transpiler.TranspileCondition(`{"in":[{"var":"code"},[5960,9000]]}`)
 			if err != nil {
 				t.Fatalf("[%s] Unexpected error: %v", d, err)
 			}
-			expected := "WHERE code IN ('5960', '9000')"
+			expected := "FALSE"
 			if result != expected {
 				t.Errorf("[%s] Expected: %s\nGot: %s", d, expected, result)
 			}
 		}
 	})
 
-	// TranspileFromMap tests: Go native int types bypass JSON unmarshaling (float64)
-	t.Run("TranspileFromMap: string field with Go int array", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	// TranspileConditionFromMap tests Go native int types that bypass JSON unmarshaling.
+	t.Run("TranspileConditionFromMap: string field with Go int array folds false", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.TranspileFromMap(map[string]interface{}{
+		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
 			"in": []interface{}{
 				map[string]interface{}{"var": "code"},
 				[]interface{}{5960, 9000},
@@ -1286,17 +1264,17 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE code IN ('5960', '9000')"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("TranspileFromMap: string field with Go int64 array", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("TranspileConditionFromMap: string field with Go int64 array folds false", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.TranspileFromMap(map[string]interface{}{
+		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
 			"in": []interface{}{
 				map[string]interface{}{"var": "code"},
 				[]interface{}{int64(5960), int64(9000)},
@@ -1305,17 +1283,17 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE code IN ('5960', '9000')"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("TranspileFromMap: int in string var (containment)", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("TranspileConditionFromMap: int in string var (containment)", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.TranspileFromMap(map[string]interface{}{
+		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
 			"in": []interface{}{
 				123,
 				map[string]interface{}{"var": "bio"},
@@ -1324,17 +1302,17 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE STRPOS(bio, '123') > 0"
+		expected := "STRPOS(bio, '123') > 0"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("TranspileFromMap: string field == Go int", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("TranspileConditionFromMap: string field == Go int", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.TranspileFromMap(map[string]interface{}{
+		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
 			"==": []interface{}{
 				map[string]interface{}{"var": "code"},
 				5960,
@@ -1343,14 +1321,14 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE code = '5960'"
+		expected := "code = '5960'"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 	})
 
-	t.Run("TranspileFromInterface: string field == large Go int64", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("TranspileConditionFromInterface: string field == large Go int64", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 		logic := map[string]interface{}{
 			"==": []interface{}{
@@ -1359,20 +1337,20 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 			},
 		}
 
-		result, err := transpiler.TranspileFromInterface(logic)
+		result, err := transpiler.TranspileConditionFromInterface(logic)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE code = '9223372036854775807'"
+		expected := "code = '9223372036854775807'"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 
-		paramSQL, paramValues, err := transpiler.TranspileParameterizedFromInterface(logic)
+		paramSQL, paramValues, err := transpiler.TranspileParameterizedConditionFromInterface(logic)
 		if err != nil {
 			t.Fatalf("Unexpected parameterized error: %v", err)
 		}
-		expectedParamSQL := "WHERE code = @p1"
+		expectedParamSQL := "code = @p1"
 		if paramSQL != expectedParamSQL {
 			t.Errorf("Expected parameterized SQL: %s\nGot: %s", expectedParamSQL, paramSQL)
 		}
@@ -1382,8 +1360,8 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		}
 	})
 
-	t.Run("TranspileFromInterface: string field == Go float32", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("TranspileConditionFromInterface: string field == Go float32", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 		logic := map[string]interface{}{
 			"==": []interface{}{
@@ -1392,20 +1370,20 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 			},
 		}
 
-		result, err := transpiler.TranspileFromInterface(logic)
+		result, err := transpiler.TranspileConditionFromInterface(logic)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE code = '1.2'"
+		expected := "code = '1.2'"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 
-		paramSQL, paramValues, err := transpiler.TranspileParameterizedFromInterface(logic)
+		paramSQL, paramValues, err := transpiler.TranspileParameterizedConditionFromInterface(logic)
 		if err != nil {
 			t.Fatalf("Unexpected parameterized error: %v", err)
 		}
-		expectedParamSQL := "WHERE code = @p1"
+		expectedParamSQL := "code = @p1"
 		if paramSQL != expectedParamSQL {
 			t.Errorf("Expected parameterized SQL: %s\nGot: %s", expectedParamSQL, paramSQL)
 		}
@@ -1415,8 +1393,8 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		}
 	})
 
-	t.Run("TranspileFromInterface: number field == large Go uint64", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("TranspileConditionFromInterface: number field == large Go uint64", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 		logic := map[string]interface{}{
 			"==": []interface{}{
@@ -1425,20 +1403,20 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 			},
 		}
 
-		result, err := transpiler.TranspileFromInterface(logic)
+		result, err := transpiler.TranspileConditionFromInterface(logic)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE price = 9223372036854775808"
+		expected := "price = 9223372036854775808"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 
-		paramSQL, paramValues, err := transpiler.TranspileParameterizedFromInterface(logic)
+		paramSQL, paramValues, err := transpiler.TranspileParameterizedConditionFromInterface(logic)
 		if err != nil {
 			t.Fatalf("Unexpected parameterized error: %v", err)
 		}
-		expectedParamSQL := "WHERE price = @p1"
+		expectedParamSQL := "price = @p1"
 		if paramSQL != expectedParamSQL {
 			t.Errorf("Expected parameterized SQL: %s\nGot: %s", expectedParamSQL, paramSQL)
 		}
@@ -1448,11 +1426,11 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		}
 	})
 
-	t.Run("TranspileFromInterface: integer field == large Go uint on 64-bit", func(t *testing.T) {
+	t.Run("TranspileConditionFromInterface: integer field == large Go uint on 64-bit", func(t *testing.T) {
 		if ^uint(0) <= uint(0xffffffff) {
 			t.Skip("large uint literal requires 64-bit uint")
 		}
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 		largeUint := uint(uint64(9007199254740993))
 		logic := map[string]interface{}{
@@ -1462,20 +1440,20 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 			},
 		}
 
-		result, err := transpiler.TranspileFromInterface(logic)
+		result, err := transpiler.TranspileConditionFromInterface(logic)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE amount = 9007199254740993"
+		expected := "amount = 9007199254740993"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
 
-		paramSQL, paramValues, err := transpiler.TranspileParameterizedFromInterface(logic)
+		paramSQL, paramValues, err := transpiler.TranspileParameterizedConditionFromInterface(logic)
 		if err != nil {
 			t.Fatalf("Unexpected parameterized error: %v", err)
 		}
-		expectedParamSQL := "WHERE amount = @p1"
+		expectedParamSQL := "amount = @p1"
 		if paramSQL != expectedParamSQL {
 			t.Errorf("Expected parameterized SQL: %s\nGot: %s", expectedParamSQL, paramSQL)
 		}
@@ -1485,11 +1463,11 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		}
 	})
 
-	t.Run("TranspileFromMap: integer field with Go string array", func(t *testing.T) {
-		transpiler, _ := NewTranspiler(DialectBigQuery)
+	t.Run("TranspileConditionFromMap: integer field with Go string array folds false", func(t *testing.T) {
+		transpiler := mustTestTranspiler(t, DialectBigQuery)
 		transpiler.SetSchema(schema)
 
-		result, err := transpiler.TranspileFromMap(map[string]interface{}{
+		result, err := transpiler.TranspileConditionFromMap(map[string]interface{}{
 			"in": []interface{}{
 				map[string]interface{}{"var": "amount"},
 				[]interface{}{"100", "200"},
@@ -1498,7 +1476,7 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		expected := "WHERE amount IN (100, 200)"
+		expected := "FALSE"
 		if result != expected {
 			t.Errorf("Expected: %s\nGot: %s", expected, result)
 		}
@@ -1509,14 +1487,14 @@ func TestTypeCoercionForInOperator(t *testing.T) {
 // based on the field being compared. This ensures proper SQL output like "field >= 50000"
 // instead of "field >= '50000'" when comparing an integer field with a string value.
 func TestTypeCoercionForComparisons(t *testing.T) {
-	schema := NewSchema([]FieldSchema{
+	schema := mustNewSchema([]FieldSchema{
 		{Name: "amount", Type: FieldTypeInteger},
 		{Name: "price", Type: FieldTypeNumber},
 		{Name: "status", Type: FieldTypeString},
 		{Name: "active", Type: FieldTypeBoolean},
 	})
 
-	transpiler, _ := NewTranspiler(DialectBigQuery)
+	transpiler := mustTestTranspiler(t, DialectBigQuery)
 	transpiler.SetSchema(schema)
 
 	tests := []struct {
@@ -1527,48 +1505,48 @@ func TestTypeCoercionForComparisons(t *testing.T) {
 		{
 			name:      "integer field with string numeric value should coerce",
 			jsonLogic: `{">=":[{"var":"amount"},"50000"]}`,
-			expected:  "WHERE amount >= 50000",
+			expected:  "amount >= 50000",
 		},
 		{
 			name:      "integer field with actual number should work",
 			jsonLogic: `{">=":[{"var":"amount"},50000]}`,
-			expected:  "WHERE amount >= 50000",
+			expected:  "amount >= 50000",
 		},
 		{
 			name:      "number field with string numeric value should coerce",
 			jsonLogic: `{">":[{"var":"price"},"99.99"]}`,
-			expected:  "WHERE price > 99.99",
+			expected:  "price > 99.99",
 		},
 		{
 			name:      "string field with string value should remain quoted",
 			jsonLogic: `{"==":[{"var":"status"},"active"]}`,
-			expected:  "WHERE status = 'active'",
+			expected:  "status = 'active'",
 		},
 		{
 			name:      "string field with numeric string should remain quoted",
 			jsonLogic: `{"==":[{"var":"status"},"123"]}`,
-			expected:  "WHERE status = '123'",
+			expected:  "status = '123'",
 		},
 		{
 			name:      "boolean field should not coerce",
 			jsonLogic: `{"==":[{"var":"active"},true]}`,
-			expected:  "WHERE active = TRUE",
+			expected:  "active = TRUE",
 		},
 		{
 			name:      "chained comparison with string values should coerce",
 			jsonLogic: `{"<":["0",{"var":"amount"},"1000"]}`,
-			expected:  "WHERE (0 < amount AND amount < 1000)",
+			expected:  "(0 < amount AND amount < 1000)",
 		},
 		{
 			name:      "reversed order - literal on left, field on right",
 			jsonLogic: `{"<":["100",{"var":"amount"}]}`,
-			expected:  "WHERE 100 < amount",
+			expected:  "100 < amount",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := transpiler.Transpile(tt.jsonLogic)
+			result, err := transpiler.TranspileCondition(tt.jsonLogic)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}

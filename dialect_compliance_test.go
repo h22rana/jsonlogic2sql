@@ -4,6 +4,14 @@ import (
 	"testing"
 )
 
+func transpileComplianceExpression(tr *Transpiler, input string) (string, error) {
+	result, err := tr.TranspileCondition(input)
+	if IsErrorCode(err, ErrInvalidExpressionContext) {
+		return tr.TranspileValue(input)
+	}
+	return result, err
+}
+
 // TestDialectComplianceAllOperators verifies that all operators produce valid SQL
 // across all supported dialects. This ensures ANSI SQL compliance where applicable.
 func TestDialectComplianceAllOperators(t *testing.T) {
@@ -49,13 +57,13 @@ func TestDialectComplianceAllOperators(t *testing.T) {
 		{"four value chain", `{"<": [1, {"var": "a"}, {"var": "b"}, 100]}`, "Four-value chained comparison"},
 
 		// Logical operators
-		{"and single", `{"and": [{"var": "flag"}]}`, "AND with single condition"},
+		{"and single", `{"and": [{"==": [{"var": "flag"}, true]}]}`, "AND with single condition"},
 		{"and multiple", `{"and": [{">": [{"var": "a"}, 1]}, {"<": [{"var": "b"}, 10]}]}`, "AND with multiple conditions"},
-		{"or single", `{"or": [{"var": "flag"}]}`, "OR with single condition"},
+		{"or single", `{"or": [{"==": [{"var": "flag"}, true]}]}`, "OR with single condition"},
 		{"or multiple", `{"or": [{"==": [{"var": "x"}, 1]}, {"==": [{"var": "y"}, 2]}]}`, "OR with multiple conditions"},
-		{"not simple", `{"!": [{"var": "flag"}]}`, "NOT operator"},
+		{"not simple", `{"!": [false]}`, "NOT operator"},
 		{"not with condition", `{"!": [{"==": [{"var": "status"}, "deleted"]}]}`, "NOT with nested condition"},
-		{"double bang", `{"!!": [{"var": "value"}]}`, "Boolean conversion"},
+		{"double bang", `{"!!": [true]}`, "Boolean conversion"},
 		{"if simple", `{"if": [{">": [{"var": "age"}, 18]}, "adult", "minor"]}`, "Simple IF condition"},
 		{"if without else", `{"if": [{">": [{"var": "x"}, 0]}, "positive"]}`, "IF without else"},
 		{"if multi-branch", `{"if": [{">": [{"var": "score"}, 90]}, "A", {">": [{"var": "score"}, 80]}, "B", "C"]}`, "Multi-branch IF"},
@@ -88,24 +96,20 @@ func TestDialectComplianceAllOperators(t *testing.T) {
 
 	for _, d := range dialects {
 		t.Run(d.String(), func(t *testing.T) {
-			tr, err := NewTranspiler(d)
+			tr, err := NewTranspiler(d, defaultTestSchema())
 			if err != nil {
 				t.Fatalf("Failed to create transpiler for %s: %v", d.String(), err)
 			}
 
 			for _, tt := range commonTests {
 				t.Run(tt.name, func(t *testing.T) {
-					result, err := tr.Transpile(tt.input)
+					result, err := transpileComplianceExpression(tr, tt.input)
 					if err != nil {
-						t.Errorf("[%s] %s: Transpile() error = %v, input = %s", d.String(), tt.description, err, tt.input)
+						t.Errorf("[%s] %s: transpile error = %v, input = %s", d.String(), tt.description, err, tt.input)
 						return
 					}
 					if result == "" {
-						t.Errorf("[%s] %s: Transpile() returned empty result", d.String(), tt.description)
-					}
-					// Verify result starts with WHERE
-					if len(result) < 6 || result[:5] != "WHERE" {
-						t.Errorf("[%s] %s: Transpile() result should start with WHERE, got: %s", d.String(), tt.description, result)
+						t.Errorf("[%s] %s: transpile returned empty result", d.String(), tt.description)
 					}
 				})
 			}
@@ -124,79 +128,79 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 	tests := []testCase{
 		{
 			name:  "map transformation",
-			input: `{"map": [{"var": "numbers"}, {"*": [{"var": "item"}, 2]}]}`,
+			input: `{"map": [{"var": "numbers"}, {"*": [{"var": ""}, 2]}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
-				DialectSpanner:    "WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
-				DialectPostgreSQL: "WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
-				DialectDuckDB:     "WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
-				DialectClickHouse: "WHERE arrayMap(elem -> (elem * 2), numbers)",
+				DialectBigQuery:   "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
+				DialectSpanner:    "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
+				DialectPostgreSQL: "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
+				DialectDuckDB:     "ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)",
+				DialectClickHouse: "arrayMap(elem -> (elem * 2), numbers)",
 			},
 		},
 		{
 			name:  "filter condition",
-			input: `{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}`,
+			input: `{"filter": [{"var": "scores"}, {">": [{"var": ""}, 70]}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
-				DialectSpanner:    "WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
-				DialectPostgreSQL: "WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
-				DialectDuckDB:     "WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
-				DialectClickHouse: "WHERE arrayFilter(elem -> elem > 70, scores)",
+				DialectBigQuery:   "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
+				DialectSpanner:    "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
+				DialectPostgreSQL: "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
+				DialectDuckDB:     "ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)",
+				DialectClickHouse: "arrayFilter(elem -> elem > 70, scores)",
 			},
 		},
 		{
 			name:  "all elements check",
-			input: `{"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}`,
+			input: `{"all": [{"var": "ages"}, {">=": [{"var": ""}, 18]}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE (ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
-				DialectSpanner:    "WHERE (ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
-				DialectPostgreSQL: "WHERE (CARDINALITY(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
-				DialectDuckDB:     "WHERE (length(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
-				DialectClickHouse: "WHERE (length(ages) > 0 AND arrayAll(elem -> elem >= 18, ages))",
+				DialectBigQuery:   "(ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
+				DialectSpanner:    "(ARRAY_LENGTH(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
+				DialectPostgreSQL: "(CARDINALITY(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
+				DialectDuckDB:     "(length(ages) > 0 AND NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18)))",
+				DialectClickHouse: "(length(ages) > 0 AND arrayAll(elem -> elem >= 18, ages))",
 			},
 		},
 		{
 			name:  "some elements check",
-			input: `{"some": [{"var": "items"}, {"==": [{"var": "item"}, "active"]}]}`,
+			input: `{"some": [{"var": "statuses"}, {"==": [{"var": ""}, "active"]}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
-				DialectSpanner:    "WHERE EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
-				DialectPostgreSQL: "WHERE EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
-				DialectDuckDB:     "WHERE EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
-				DialectClickHouse: "WHERE arrayExists(elem -> elem = 'active', items)",
+				DialectBigQuery:   "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				DialectSpanner:    "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				DialectPostgreSQL: "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				DialectDuckDB:     "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				DialectClickHouse: "arrayExists(elem -> elem = 'active', statuses)",
 			},
 		},
 		{
 			name:  "none elements check",
-			input: `{"none": [{"var": "values"}, {"==": [{"var": "item"}, "error"]}]}`,
+			input: `{"none": [{"var": "statuses"}, {"==": [{"var": ""}, "error"]}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",
-				DialectSpanner:    "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",
-				DialectPostgreSQL: "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",
-				DialectDuckDB:     "WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')",
-				DialectClickHouse: "WHERE NOT arrayExists(elem -> elem = 'error', values)",
+				DialectBigQuery:   "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'error')",
+				DialectSpanner:    "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'error')",
+				DialectPostgreSQL: "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'error')",
+				DialectDuckDB:     "NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'error')",
+				DialectClickHouse: "NOT arrayExists(elem -> elem = 'error', statuses)",
 			},
 		},
 		{
 			name:  "reduce SUM pattern",
 			input: `{"reduce": [{"var": "numbers"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
-				DialectSpanner:    "WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
-				DialectPostgreSQL: "WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
-				DialectDuckDB:     "WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
-				DialectClickHouse: "WHERE 0 + coalesce(arrayReduce('sum', numbers), 0)",
+				DialectBigQuery:   "0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
+				DialectSpanner:    "0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
+				DialectPostgreSQL: "0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
+				DialectDuckDB:     "0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)",
+				DialectClickHouse: "0 + coalesce(arrayReduce('sum', numbers), 0)",
 			},
 		},
 		{
 			name:  "merge two arrays",
 			input: `{"merge": [{"var": "arr1"}, {"var": "arr2"}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE ARRAY_CONCAT(arr1, arr2)",
-				DialectSpanner:    "WHERE ARRAY_CONCAT(arr1, arr2)",
-				DialectPostgreSQL: "WHERE (arr1 || arr2)",
-				DialectDuckDB:     "WHERE ARRAY_CONCAT(arr1, arr2)",
-				DialectClickHouse: "WHERE arrayConcat(arr1, arr2)",
+				DialectBigQuery:   "ARRAY_CONCAT(arr1, arr2)",
+				DialectSpanner:    "ARRAY_CONCAT(arr1, arr2)",
+				DialectPostgreSQL: "(arr1 || arr2)",
+				DialectDuckDB:     "ARRAY_CONCAT(arr1, arr2)",
+				DialectClickHouse: "arrayConcat(arr1, arr2)",
 			},
 		},
 	}
@@ -205,18 +209,19 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for dialect, expected := range tt.expected {
 				t.Run(dialect.String(), func(t *testing.T) {
-					tr, err := NewTranspiler(dialect)
+					tr, err := NewTranspiler(dialect, defaultTestSchema())
 					if err != nil {
 						t.Fatalf("Failed to create transpiler for %s: %v", dialect.String(), err)
 					}
 
-					result, err := tr.Transpile(tt.input)
+					result, err := transpileComplianceExpression(tr, tt.input)
 					if err != nil {
-						t.Errorf("[%s] Transpile() error = %v", dialect.String(), err)
+						t.Errorf("[%s] transpile error = %v", dialect.String(), err)
 						return
 					}
+					expected = testDuckDBUnnestSourceAliases(dialect, expected)
 					if result != expected {
-						t.Errorf("[%s] Transpile() = %q, want %q", dialect.String(), result, expected)
+						t.Errorf("[%s] transpile = %q, want %q", dialect.String(), result, expected)
 					}
 				})
 			}
@@ -225,7 +230,7 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 }
 
 // TestDialectSpecificInArrayField tests that the "in" operator with an array-typed field
-// produces dialect-specific SQL (UNNEST, ANY, list_contains, has).
+// produces null-safe JSONLogic membership SQL for each dialect.
 func TestDialectSpecificInArrayField(t *testing.T) {
 	type testCase struct {
 		name     string
@@ -233,9 +238,9 @@ func TestDialectSpecificInArrayField(t *testing.T) {
 		expected map[Dialect]string
 	}
 
-	schema := NewSchema([]FieldSchema{
-		{Name: "test.tags", Type: FieldTypeArray},
-		{Name: "test.scores", Type: FieldTypeArray},
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "test.tags", Type: FieldTypeArray, ElementType: FieldTypeString},
+		{Name: "test.scores", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 	})
 
 	tests := []testCase{
@@ -243,22 +248,22 @@ func TestDialectSpecificInArrayField(t *testing.T) {
 			name:  "in with array field variable (string value)",
 			input: `{"in": ["vip", {"var": "test.tags"}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE 'vip' IN UNNEST(test.tags)",
-				DialectSpanner:    "WHERE 'vip' IN UNNEST(test.tags)",
-				DialectPostgreSQL: "WHERE 'vip' = ANY(test.tags)",
-				DialectDuckDB:     "WHERE list_contains(test.tags, 'vip')",
-				DialectClickHouse: "WHERE has(test.tags, 'vip')",
+				DialectBigQuery:   testNullSafeArrayMembershipSQL(DialectBigQuery, "'vip'", "test.tags"),
+				DialectSpanner:    testNullSafeArrayMembershipSQL(DialectSpanner, "'vip'", "test.tags"),
+				DialectPostgreSQL: testNullSafeArrayMembershipSQL(DialectPostgreSQL, "'vip'", "test.tags"),
+				DialectDuckDB:     testNullSafeArrayMembershipSQL(DialectDuckDB, "'vip'", "test.tags"),
+				DialectClickHouse: testNullSafeArrayMembershipSQL(DialectClickHouse, "'vip'", "test.tags"),
 			},
 		},
 		{
 			name:  "in with array field variable (numeric value)",
 			input: `{"in": [42, {"var": "test.scores"}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE 42 IN UNNEST(test.scores)",
-				DialectSpanner:    "WHERE 42 IN UNNEST(test.scores)",
-				DialectPostgreSQL: "WHERE 42 = ANY(test.scores)",
-				DialectDuckDB:     "WHERE list_contains(test.scores, 42)",
-				DialectClickHouse: "WHERE has(test.scores, 42)",
+				DialectBigQuery:   testNullSafeArrayMembershipSQL(DialectBigQuery, "42", "test.scores"),
+				DialectSpanner:    testNullSafeArrayMembershipSQL(DialectSpanner, "42", "test.scores"),
+				DialectPostgreSQL: testNullSafeArrayMembershipSQL(DialectPostgreSQL, "42", "test.scores"),
+				DialectDuckDB:     testNullSafeArrayMembershipSQL(DialectDuckDB, "42", "test.scores"),
+				DialectClickHouse: testNullSafeArrayMembershipSQL(DialectClickHouse, "42", "test.scores"),
 			},
 		},
 	}
@@ -275,13 +280,13 @@ func TestDialectSpecificInArrayField(t *testing.T) {
 						t.Fatalf("Failed to create transpiler for %s: %v", d.String(), err)
 					}
 
-					result, err := tr.Transpile(tt.input)
+					result, err := transpileComplianceExpression(tr, tt.input)
 					if err != nil {
-						t.Errorf("[%s] Transpile() error = %v", d.String(), err)
+						t.Errorf("[%s] TranspileCondition() error = %v", d.String(), err)
 						return
 					}
 					if result != expected {
-						t.Errorf("[%s] Transpile() = %q, want %q", d.String(), result, expected)
+						t.Errorf("[%s] TranspileCondition() = %q, want %q", d.String(), result, expected)
 					}
 				})
 			}
@@ -303,55 +308,55 @@ func TestDialectSpecificIdentifierQuoting(t *testing.T) {
 			name:  "numeric-leading segment in comparison",
 			input: `{">=": [{"var": "fixture.windowed_metrics.24h.events.total"}, 50000]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE fixture.windowed_metrics.`24h`.events.total >= 50000",
-				DialectSpanner:    "WHERE fixture.windowed_metrics.`24h`.events.total >= 50000",
-				DialectPostgreSQL: `WHERE fixture.windowed_metrics."24h".events.total >= 50000`,
-				DialectDuckDB:     `WHERE fixture.windowed_metrics."24h".events.total >= 50000`,
-				DialectClickHouse: "WHERE fixture.windowed_metrics.`24h`.events.total >= 50000",
+				DialectBigQuery:   "fixture.windowed_metrics.`24h`.events.total >= 50000",
+				DialectSpanner:    "fixture.windowed_metrics.`24h`.events.total >= 50000",
+				DialectPostgreSQL: `fixture.windowed_metrics."24h".events.total >= 50000`,
+				DialectDuckDB:     `fixture.windowed_metrics."24h".events.total >= 50000`,
+				DialectClickHouse: "fixture.windowed_metrics.`24h`.events.total >= 50000",
 			},
 		},
 		{
 			name:  "normal segments remain unquoted",
 			input: `{">": [{"var": "user.amount"}, 100]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE user.amount > 100",
-				DialectSpanner:    "WHERE user.amount > 100",
-				DialectPostgreSQL: "WHERE user.amount > 100",
-				DialectDuckDB:     "WHERE user.amount > 100",
-				DialectClickHouse: "WHERE user.amount > 100",
+				DialectBigQuery:   "user.amount > 100",
+				DialectSpanner:    "user.amount > 100",
+				DialectPostgreSQL: "user.amount > 100",
+				DialectDuckDB:     "user.amount > 100",
+				DialectClickHouse: "user.amount > 100",
 			},
 		},
 		{
 			name:  "multiple numeric-leading segments",
 			input: `{"==": [{"var": "stats.7d.10m.count"}, 0]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE stats.`7d`.`10m`.count = 0",
-				DialectSpanner:    "WHERE stats.`7d`.`10m`.count = 0",
-				DialectPostgreSQL: `WHERE stats."7d"."10m".count = 0`,
-				DialectDuckDB:     `WHERE stats."7d"."10m".count = 0`,
-				DialectClickHouse: "WHERE stats.`7d`.`10m`.count = 0",
+				DialectBigQuery:   "stats.`7d`.`10m`.count = 0",
+				DialectSpanner:    "stats.`7d`.`10m`.count = 0",
+				DialectPostgreSQL: `stats."7d"."10m".count = 0`,
+				DialectDuckDB:     `stats."7d"."10m".count = 0`,
+				DialectClickHouse: "stats.`7d`.`10m`.count = 0",
 			},
 		},
 		{
 			name:  "missing operator with numeric-leading segment",
 			input: `{"missing": "data.history.24h.tx.count"}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE data.history.`24h`.tx.count IS NULL",
-				DialectSpanner:    "WHERE data.history.`24h`.tx.count IS NULL",
-				DialectPostgreSQL: `WHERE data.history."24h".tx.count IS NULL`,
-				DialectDuckDB:     `WHERE data.history."24h".tx.count IS NULL`,
-				DialectClickHouse: "WHERE data.history.`24h`.tx.count IS NULL",
+				DialectBigQuery:   "data.history.`24h`.tx.count IS NULL",
+				DialectSpanner:    "data.history.`24h`.tx.count IS NULL",
+				DialectPostgreSQL: `data.history."24h".tx.count IS NULL`,
+				DialectDuckDB:     `data.history."24h".tx.count IS NULL`,
+				DialectClickHouse: "data.history.`24h`.tx.count IS NULL",
 			},
 		},
 		{
 			name:  "var with default and numeric-leading segment",
 			input: `{"==": [{"var": ["metrics.30d.total", 0]}, 0]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE COALESCE(metrics.`30d`.total, 0) = 0",
-				DialectSpanner:    "WHERE COALESCE(metrics.`30d`.total, 0) = 0",
-				DialectPostgreSQL: `WHERE COALESCE(metrics."30d".total, 0) = 0`,
-				DialectDuckDB:     `WHERE COALESCE(metrics."30d".total, 0) = 0`,
-				DialectClickHouse: "WHERE COALESCE(metrics.`30d`.total, 0) = 0",
+				DialectBigQuery:   "COALESCE(metrics.`30d`.total, 0) = 0",
+				DialectSpanner:    "COALESCE(metrics.`30d`.total, 0) = 0",
+				DialectPostgreSQL: `COALESCE(metrics."30d".total, 0) = 0`,
+				DialectDuckDB:     `COALESCE(metrics."30d".total, 0) = 0`,
+				DialectClickHouse: "COALESCE(metrics.`30d`.total, 0) = 0",
 			},
 		},
 	}
@@ -360,18 +365,18 @@ func TestDialectSpecificIdentifierQuoting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for d, expected := range tt.expected {
 				t.Run(d.String(), func(t *testing.T) {
-					tr, err := NewTranspiler(d)
+					tr, err := NewTranspiler(d, defaultTestSchema())
 					if err != nil {
 						t.Fatalf("Failed to create transpiler for %s: %v", d.String(), err)
 					}
 
-					result, err := tr.Transpile(tt.input)
+					result, err := transpileComplianceExpression(tr, tt.input)
 					if err != nil {
-						t.Errorf("[%s] Transpile() error = %v", d.String(), err)
+						t.Errorf("[%s] TranspileCondition() error = %v", d.String(), err)
 						return
 					}
 					if result != expected {
-						t.Errorf("[%s] Transpile() = %q, want %q", d.String(), result, expected)
+						t.Errorf("[%s] TranspileCondition() = %q, want %q", d.String(), result, expected)
 					}
 				})
 			}
@@ -392,33 +397,33 @@ func TestDialectSpecificStringFunctions(t *testing.T) {
 			name:  "in string containment with var on right",
 			input: `{"in": ["test", {"var": "description"}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE STRPOS(description, 'test') > 0",
-				DialectSpanner:    "WHERE STRPOS(description, 'test') > 0",
-				DialectPostgreSQL: "WHERE POSITION('test' IN description) > 0",
-				DialectDuckDB:     "WHERE STRPOS(description, 'test') > 0",
-				DialectClickHouse: "WHERE position(description, 'test') > 0",
+				DialectBigQuery:   "STRPOS(description, 'test') > 0",
+				DialectSpanner:    "STRPOS(description, 'test') > 0",
+				DialectPostgreSQL: "POSITION('test' IN description) > 0",
+				DialectDuckDB:     "STRPOS(description, 'test') > 0",
+				DialectClickHouse: "position(description, 'test') > 0",
 			},
 		},
 		{
 			name:  "in string containment with literal on right",
 			input: `{"in": ["test", "this is a test string"]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE STRPOS('this is a test string', 'test') > 0",
-				DialectSpanner:    "WHERE STRPOS('this is a test string', 'test') > 0",
-				DialectPostgreSQL: "WHERE POSITION('test' IN 'this is a test string') > 0",
-				DialectDuckDB:     "WHERE STRPOS('this is a test string', 'test') > 0",
-				DialectClickHouse: "WHERE position('this is a test string', 'test') > 0",
+				DialectBigQuery:   "TRUE",
+				DialectSpanner:    "TRUE",
+				DialectPostgreSQL: "TRUE",
+				DialectDuckDB:     "TRUE",
+				DialectClickHouse: "TRUE",
 			},
 		},
 		{
 			name:  "substr with start and length",
 			input: `{"substr": [{"var": "text"}, 5, 10]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "WHERE SUBSTR(text, 6, 10)",
-				DialectSpanner:    "WHERE SUBSTR(text, 6, 10)",
-				DialectPostgreSQL: "WHERE SUBSTR(text, 6, 10)",
-				DialectDuckDB:     "WHERE SUBSTR(text, 6, 10)",
-				DialectClickHouse: "WHERE substring(text, 6, 10)",
+				DialectBigQuery:   "SUBSTR(text, 6, 10)",
+				DialectSpanner:    "SUBSTR(text, 6, 10)",
+				DialectPostgreSQL: "SUBSTR(text, 6, 10)",
+				DialectDuckDB:     "SUBSTR(text, 6, 10)",
+				DialectClickHouse: "substring(text, 6, 10)",
 			},
 		},
 	}
@@ -427,18 +432,18 @@ func TestDialectSpecificStringFunctions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for dialect, expected := range tt.expected {
 				t.Run(dialect.String(), func(t *testing.T) {
-					tr, err := NewTranspiler(dialect)
+					tr, err := NewTranspiler(dialect, defaultTestSchema())
 					if err != nil {
 						t.Fatalf("Failed to create transpiler for %s: %v", dialect.String(), err)
 					}
 
-					result, err := tr.Transpile(tt.input)
+					result, err := transpileComplianceExpression(tr, tt.input)
 					if err != nil {
-						t.Errorf("[%s] Transpile() error = %v", dialect.String(), err)
+						t.Errorf("[%s] TranspileCondition() error = %v", dialect.String(), err)
 						return
 					}
 					if result != expected {
-						t.Errorf("[%s] Transpile() = %q, want %q", dialect.String(), result, expected)
+						t.Errorf("[%s] TranspileCondition() = %q, want %q", dialect.String(), result, expected)
 					}
 				})
 			}
@@ -448,7 +453,7 @@ func TestDialectSpecificStringFunctions(t *testing.T) {
 
 // TestEdgeCasesNullHandling tests null handling edge cases.
 func TestEdgeCasesNullHandling(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -458,27 +463,27 @@ func TestEdgeCasesNullHandling(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"null == null", `{"==": [null, null]}`, "WHERE NULL IS NULL"},
-		{"null != null", `{"!=": [null, null]}`, "WHERE NULL IS NOT NULL"},
-		{"null === null", `{"===": [null, null]}`, "WHERE NULL IS NULL"},
-		{"null !== null", `{"!==": [null, null]}`, "WHERE NULL IS NOT NULL"},
-		{"var == null", `{"==": [{"var": "field"}, null]}`, "WHERE field IS NULL"},
-		{"null == var", `{"==": [null, {"var": "field"}]}`, "WHERE field IS NULL"},
-		{"var != null", `{"!=": [{"var": "field"}, null]}`, "WHERE field IS NOT NULL"},
-		{"null != var", `{"!=": [null, {"var": "field"}]}`, "WHERE field IS NOT NULL"},
-		{"null in arithmetic", `{"+": [{"var": "value"}, null]}`, "WHERE (value + NULL)"},
-		{"null in comparison chain", `{"<": [0, {"var": "x"}, null]}`, "WHERE (0 < x AND x < NULL)"},
+		{"null == null", `{"==": [null, null]}`, "TRUE"},
+		{"null != null", `{"!=": [null, null]}`, "FALSE"},
+		{"null === null", `{"===": [null, null]}`, "TRUE"},
+		{"null !== null", `{"!==": [null, null]}`, "FALSE"},
+		{"var == null", `{"==": [{"var": "field"}, null]}`, "field IS NULL"},
+		{"null == var", `{"==": [null, {"var": "field"}]}`, "field IS NULL"},
+		{"var != null", `{"!=": [{"var": "field"}, null]}`, "field IS NOT NULL"},
+		{"null != var", `{"!=": [null, {"var": "field"}]}`, "field IS NOT NULL"},
+		{"null in arithmetic", `{"+": [{"var": "value"}, null]}`, "(value + NULL)"},
+		{"null in comparison chain", `{"<": [0, {"var": "x"}, null]}`, "(0 < x AND x < NULL)"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := tr.Transpile(tt.input)
+			result, err := transpileComplianceExpression(tr, tt.input)
 			if err != nil {
-				t.Errorf("Transpile() error = %v", err)
+				t.Errorf("TranspileCondition() error = %v", err)
 				return
 			}
 			if result != tt.expected {
-				t.Errorf("Transpile() = %q, want %q", result, tt.expected)
+				t.Errorf("TranspileCondition() = %q, want %q", result, tt.expected)
 			}
 		})
 	}
@@ -486,7 +491,7 @@ func TestEdgeCasesNullHandling(t *testing.T) {
 
 // TestEdgeCasesBooleanValues tests boolean value handling.
 func TestEdgeCasesBooleanValues(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -496,25 +501,25 @@ func TestEdgeCasesBooleanValues(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"true literal", `{"==": [{"var": "flag"}, true]}`, "WHERE flag = TRUE"},
-		{"false literal", `{"==": [{"var": "flag"}, false]}`, "WHERE flag = FALSE"},
-		{"boolean in and", `{"and": [true, false]}`, "WHERE (TRUE AND FALSE)"},
-		{"boolean in or", `{"or": [false, true]}`, "WHERE (FALSE OR TRUE)"},
-		{"not true", `{"!": [true]}`, "WHERE NOT (TRUE)"},
-		{"not false", `{"!": [false]}`, "WHERE NOT (FALSE)"},
-		{"double bang true", `{"!!": [true]}`, "WHERE (TRUE IS NOT NULL AND TRUE != FALSE AND TRUE != 0 AND TRUE != '')"},
-		{"double bang false", `{"!!": [false]}`, "WHERE (FALSE IS NOT NULL AND FALSE != FALSE AND FALSE != 0 AND FALSE != '')"},
+		{"true literal", `{"==": [{"var": "flag"}, true]}`, "flag = TRUE"},
+		{"false literal", `{"==": [{"var": "flag"}, false]}`, "flag = FALSE"},
+		{"boolean in and", `{"and": [true, false]}`, "FALSE"},
+		{"boolean in or", `{"or": [false, true]}`, "TRUE"},
+		{"not true", `{"!": [true]}`, "FALSE"},
+		{"not false", `{"!": [false]}`, "TRUE"},
+		{"double bang true", `{"!!": [true]}`, "TRUE"},
+		{"double bang false", `{"!!": [false]}`, "FALSE"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := tr.Transpile(tt.input)
+			result, err := transpileComplianceExpression(tr, tt.input)
 			if err != nil {
-				t.Errorf("Transpile() error = %v", err)
+				t.Errorf("TranspileCondition() error = %v", err)
 				return
 			}
 			if result != tt.expected {
-				t.Errorf("Transpile() = %q, want %q", result, tt.expected)
+				t.Errorf("TranspileCondition() = %q, want %q", result, tt.expected)
 			}
 		})
 	}
@@ -522,7 +527,7 @@ func TestEdgeCasesBooleanValues(t *testing.T) {
 
 // TestEdgeCasesEmptyInputs tests handling of empty or minimal inputs.
 func TestEdgeCasesEmptyInputs(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -541,19 +546,19 @@ func TestEdgeCasesEmptyInputs(t *testing.T) {
 		{"primitive at root number", `42`, true},
 		{"and with empty array", `{"and": []}`, true},
 		{"or with empty array", `{"or": []}`, true},
-		{"cat with empty array", `{"cat": []}`, true},
-		{"in with empty array", `{"in": [{"var": "x"}, []]}`, true},
+		{"value-root cat rejected in condition mode", `{"cat": []}`, true},
+		{"in with empty array", `{"in": [{"var": "x"}, []]}`, false},
 		{"missing with empty array", `{"missing": []}`, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := tr.Transpile(tt.input)
+			_, err := tr.TranspileCondition(tt.input)
 			if tt.hasError && err == nil {
-				t.Errorf("Transpile() expected error for input: %s", tt.input)
+				t.Errorf("TranspileCondition() expected error for input: %s", tt.input)
 			}
 			if !tt.hasError && err != nil {
-				t.Errorf("Transpile() unexpected error = %v for input: %s", err, tt.input)
+				t.Errorf("TranspileCondition() unexpected error = %v for input: %s", err, tt.input)
 			}
 		})
 	}
@@ -561,7 +566,7 @@ func TestEdgeCasesEmptyInputs(t *testing.T) {
 
 // TestEdgeCasesSpecialCharacters tests handling of special characters in strings.
 func TestEdgeCasesSpecialCharacters(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -571,24 +576,24 @@ func TestEdgeCasesSpecialCharacters(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"single quote in string", `{"==": [{"var": "name"}, "O'Brien"]}`, "WHERE name = 'O''Brien'"},
-		{"unicode characters", `{"==": [{"var": "text"}, "日本語"]}`, "WHERE text = '日本語'"},
-		{"unicode with parentheses", `{"==": [{"var": "shop"}, "SPA(スパ)"]}`, "WHERE shop = 'SPA(スパ)'"},
-		{"empty string", `{"==": [{"var": "value"}, ""]}`, "WHERE value = ''"},
-		{"string with spaces", `{"==": [{"var": "name"}, "John Doe"]}`, "WHERE name = 'John Doe'"},
-		{"string with SQL keywords", `{"==": [{"var": "desc"}, "SELECT * FROM users"]}`, "WHERE desc = 'SELECT * FROM users'"},
-		{"string with comparison operators", `{"==": [{"var": "formula"}, "a > b AND c < d"]}`, "WHERE formula = 'a > b AND c < d'"},
+		{"single quote in string", `{"==": [{"var": "name"}, "O'Brien"]}`, "name = 'O''Brien'"},
+		{"unicode characters", `{"==": [{"var": "text"}, "café"]}`, "text = 'café'"},
+		{"unicode with parentheses", `{"==": [{"var": "shop"}, "SPA(café)"]}`, "shop = 'SPA(café)'"},
+		{"empty string", `{"==": [{"var": "text"}, ""]}`, "text = ''"},
+		{"string with spaces", `{"==": [{"var": "name"}, "John Doe"]}`, "name = 'John Doe'"},
+		{"string with SQL keywords", `{"==": [{"var": "desc"}, "SELECT * FROM users"]}`, "desc = 'SELECT * FROM users'"},
+		{"string with comparison operators", `{"==": [{"var": "formula"}, "a > b AND c < d"]}`, "formula = 'a > b AND c < d'"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := tr.Transpile(tt.input)
+			result, err := transpileComplianceExpression(tr, tt.input)
 			if err != nil {
-				t.Errorf("Transpile() error = %v", err)
+				t.Errorf("TranspileCondition() error = %v", err)
 				return
 			}
 			if result != tt.expected {
-				t.Errorf("Transpile() = %q, want %q", result, tt.expected)
+				t.Errorf("TranspileCondition() = %q, want %q", result, tt.expected)
 			}
 		})
 	}
@@ -596,7 +601,7 @@ func TestEdgeCasesSpecialCharacters(t *testing.T) {
 
 // TestEdgeCasesNumericBoundaries tests handling of numeric boundary values.
 func TestEdgeCasesNumericBoundaries(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -606,25 +611,25 @@ func TestEdgeCasesNumericBoundaries(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"zero", `{"==": [{"var": "x"}, 0]}`, "WHERE x = 0"},
-		{"negative number", `{"==": [{"var": "x"}, -100]}`, "WHERE x = -100"},
-		{"large number", `{"==": [{"var": "x"}, 9999999999999]}`, "WHERE x = 9999999999999"},
-		{"decimal", `{"==": [{"var": "x"}, 3.14159]}`, "WHERE x = 3.14159"},
-		{"scientific notation", `{"==": [{"var": "x"}, 1e10]}`, "WHERE x = 1e10"},
-		{"negative decimal", `{"==": [{"var": "x"}, -0.001]}`, "WHERE x = -0.001"},
-		{"negative in subtraction", `{"-": [5, -3]}`, "WHERE (5 - -3)"},
-		{"unary minus on negative", `{"-": [-5]}`, "WHERE (--5)"},
+		{"zero", `{"==": [{"var": "x"}, 0]}`, "x = 0"},
+		{"negative number", `{"==": [{"var": "x"}, -100]}`, "x = -100"},
+		{"large number", `{"==": [{"var": "x"}, 9999999999999]}`, "x = 9999999999999"},
+		{"decimal", `{"==": [{"var": "x"}, 3.14159]}`, "x = 3.14159"},
+		{"scientific notation", `{"==": [{"var": "x"}, 1e10]}`, "x = 1e10"},
+		{"negative decimal", `{"==": [{"var": "x"}, -0.001]}`, "x = -0.001"},
+		{"negative in subtraction", `{"-": [5, -3]}`, "(5 - -3)"},
+		{"unary minus on negative", `{"-": [-5]}`, "(-(-5))"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := tr.Transpile(tt.input)
+			result, err := transpileComplianceExpression(tr, tt.input)
 			if err != nil {
-				t.Errorf("Transpile() error = %v", err)
+				t.Errorf("TranspileCondition() error = %v", err)
 				return
 			}
 			if result != tt.expected {
-				t.Errorf("Transpile() = %q, want %q", result, tt.expected)
+				t.Errorf("TranspileCondition() = %q, want %q", result, tt.expected)
 			}
 		})
 	}
@@ -632,7 +637,7 @@ func TestEdgeCasesNumericBoundaries(t *testing.T) {
 
 // TestEdgeCasesDeeplyNested tests handling of deeply nested expressions.
 func TestEdgeCasesDeeplyNested(t *testing.T) {
-	tr, err := NewTranspiler(DialectBigQuery)
+	tr, err := NewTranspiler(DialectBigQuery, defaultTestSchema())
 	if err != nil {
 		t.Fatalf("Failed to create transpiler: %v", err)
 	}
@@ -651,7 +656,7 @@ func TestEdgeCasesDeeplyNested(t *testing.T) {
 		},
 		{
 			"nested if 3 levels",
-			`{"if": [{"var": "a"}, {"if": [{"var": "b"}, {"if": [{"var": "c"}, "deep", "c_false"]}, "b_false"]}, "a_false"]}`,
+			`{"if": [{"==": [{"var": "a"}, true]}, {"if": [{"==": [{"var": "b"}, true]}, {"if": [{"==": [{"var": "c"}, true]}, "deep", "c_false"]}, "b_false"]}, "a_false"]}`,
 		},
 		{
 			"nested arithmetic 4 levels",
@@ -665,13 +670,13 @@ func TestEdgeCasesDeeplyNested(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := tr.Transpile(tt.input)
+			result, err := transpileComplianceExpression(tr, tt.input)
 			if err != nil {
-				t.Errorf("Transpile() error = %v", err)
+				t.Errorf("TranspileCondition() error = %v", err)
 				return
 			}
 			if result == "" {
-				t.Errorf("Transpile() returned empty result for deeply nested expression")
+				t.Errorf("TranspileCondition() returned empty result for deeply nested expression")
 			}
 		})
 	}
@@ -728,7 +733,7 @@ func TestANSIComplianceCommonOperators(t *testing.T) {
 		},
 		{
 			name:        "NOT for negation",
-			input:       `{"!": [{"var": "flag"}]}`,
+			input:       `{"!": [{"==": [{"var": "flag"}, true]}]}`,
 			mustContain: []string{"NOT"},
 			description: "Logical NOT should use NOT keyword",
 		},
@@ -768,12 +773,12 @@ func TestANSIComplianceCommonOperators(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, d := range dialects {
 				t.Run(d.String(), func(t *testing.T) {
-					tr, err := NewTranspiler(d)
+					tr, err := NewTranspiler(d, defaultTestSchema())
 					if err != nil {
 						t.Fatalf("Failed to create transpiler: %v", err)
 					}
 
-					result, err := tr.Transpile(tt.input)
+					result, err := transpileComplianceExpression(tr, tt.input)
 					if err != nil {
 						t.Errorf("[%s] %s: error = %v", d.String(), tt.description, err)
 						return
@@ -819,7 +824,7 @@ func TestTranspileConditionAllDialects(t *testing.T) {
 
 	for _, d := range dialects {
 		t.Run(d.String(), func(t *testing.T) {
-			result, err := TranspileCondition(d, input)
+			result, err := TranspileCondition(d, defaultTestSchema(), input)
 			if err != nil {
 				t.Errorf("[%s] TranspileCondition() error = %v", d.String(), err)
 				return

@@ -5,11 +5,18 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
 // Dialect represents a SQL dialect that the transpiler can target.
 type Dialect int
+
+const (
+	doubleQuoteIdentifier        = `"`
+	escapedDoubleQuoteIdentifier = `""`
+	backtickIdentifier           = "`"
+	escapedBacktickIdentifier    = "``"
+	identifierQuoteChars         = "`\"'"
+)
 
 const (
 	// DialectUnspecified is the zero value, indicating no dialect was set.
@@ -54,7 +61,14 @@ func (d Dialect) String() string {
 
 // IsValid returns true if the dialect is a valid, specified dialect.
 func (d Dialect) IsValid() bool {
-	return d == DialectBigQuery || d == DialectSpanner || d == DialectPostgreSQL || d == DialectDuckDB || d == DialectClickHouse
+	switch d {
+	case DialectBigQuery, DialectSpanner, DialectPostgreSQL, DialectDuckDB, DialectClickHouse:
+		return true
+	case DialectUnspecified:
+		return false
+	default:
+		return false
+	}
 }
 
 // Validate returns an error if the dialect is not valid.
@@ -70,28 +84,49 @@ func (d Dialect) Validate() error {
 
 // NeedsQuoting returns true if an identifier segment requires quoting.
 // A segment needs quoting if it starts with a digit or contains characters
-// other than letters, digits, and underscores.
+// outside the portable unquoted ASCII set [A-Za-z0-9_]. Schema validation may
+// allow Unicode letters and digits, but quoting them keeps generated SQL
+// portable across the supported dialects.
 func NeedsQuoting(segment string) bool {
 	if segment == "" {
 		return false
 	}
-	first, _ := utf8.DecodeRuneInString(segment)
-	if unicode.IsDigit(first) {
+	if segment[0] >= '0' && segment[0] <= '9' {
 		return true
+	}
+	for i := 0; i < len(segment); i++ {
+		c := segment[i]
+		if (c >= 'A' && c <= 'Z') ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') ||
+			c == '_' {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// IsSafeIdentifierSegment reports whether a raw schema/var path segment is
+// made only of letters, digits, or underscores. Dialect-specific quoting is
+// handled later by NeedsQuoting and QuoteIdentifierSegment.
+func IsSafeIdentifierSegment(segment string) bool {
+	if segment == "" {
+		return false
 	}
 	for _, r := range segment {
 		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // ContainsQuoteCharacters returns true if the segment contains backticks, double
 // quotes, or single quotes. These characters are used for identifier quoting and
 // must not appear in raw variable names — the transpiler handles quoting automatically.
 func ContainsQuoteCharacters(segment string) bool {
-	return strings.ContainsAny(segment, "`\"'")
+	return strings.ContainsAny(segment, identifierQuoteChars)
 }
 
 // QuoteIdentifierSegment wraps a single identifier segment with dialect-appropriate
@@ -102,10 +137,10 @@ func QuoteIdentifierSegment(segment string, d Dialect) string {
 	//nolint:exhaustive // default uses backtick (safe for GoogleSQL family)
 	switch d {
 	case DialectPostgreSQL, DialectDuckDB:
-		escaped := strings.ReplaceAll(segment, `"`, `""`)
-		return `"` + escaped + `"`
+		escaped := strings.ReplaceAll(segment, doubleQuoteIdentifier, escapedDoubleQuoteIdentifier)
+		return doubleQuoteIdentifier + escaped + doubleQuoteIdentifier
 	default:
-		escaped := strings.ReplaceAll(segment, "`", "``")
-		return "`" + escaped + "`"
+		escaped := strings.ReplaceAll(segment, backtickIdentifier, escapedBacktickIdentifier)
+		return backtickIdentifier + escaped + backtickIdentifier
 	}
 }

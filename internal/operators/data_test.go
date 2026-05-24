@@ -3,6 +3,7 @@ package operators
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestDataOperator_ToSQL(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(NewOperatorConfig(0, &dataSchemaProvider{}))
 
 	tests := []struct {
 		name     string
@@ -78,6 +79,13 @@ func TestDataOperator_ToSQL(t *testing.T) {
 			hasError: true,
 		},
 		{
+			name:     "var with too many array entries",
+			operator: "var",
+			args:     []interface{}{[]interface{}{"amount", 0, 1}},
+			expected: "",
+			hasError: true,
+		},
+		{
 			name:     "var with non-string first arg",
 			operator: "var",
 			args:     []interface{}{[]interface{}{123, 0}},
@@ -88,6 +96,13 @@ func TestDataOperator_ToSQL(t *testing.T) {
 			name:     "var with no args",
 			operator: "var",
 			args:     []interface{}{},
+			expected: "",
+			hasError: true,
+		},
+		{
+			name:     "non-finite float literal",
+			operator: "var",
+			args:     []interface{}{[]interface{}{"amount", math.Inf(1)}},
 			expected: "",
 			hasError: true,
 		},
@@ -162,7 +177,7 @@ func TestDataOperator_ToSQL(t *testing.T) {
 			name:     "missing_some with dotted fields",
 			operator: "missing_some",
 			args:     []interface{}{1, []interface{}{"user.name", "user.email"}},
-			expected: "(user.name IS NULL OR user.email IS NULL)",
+			expected: "(user.name IS NULL AND user.email IS NULL)",
 			hasError: false,
 		},
 		{
@@ -232,7 +247,7 @@ func TestDataOperator_ToSQL(t *testing.T) {
 }
 
 func TestDataOperator_convertVarName(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 
 	valid := []struct {
 		input    string
@@ -264,34 +279,9 @@ func TestDataOperator_convertVarName(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid identifiers rejected without schema", func(t *testing.T) {
-		invalid := []string{
-			"",
-			"1; DROP TABLE users; --",
-			"' OR 1=1 --",
-			"field name",
-			"field\ttab",
-			"field;name",
-			"(expression)",
-			"field..name",
-			".field",
-			"field.",
-		}
-
-		for _, input := range invalid {
-			t.Run(input, func(t *testing.T) {
-				_, err := op.convertVarName(input)
-				if err == nil {
-					t.Errorf("convertVarName(%q) expected error, got none", input)
-				}
-			})
-		}
-	})
-
-	t.Run("schema bypasses identifier validation", func(t *testing.T) {
+	t.Run("schema-defined unusual identifiers are quoted", func(t *testing.T) {
 		schema := &dataSchemaProvider{}
 		opWithSchema := NewDataOperator(NewOperatorConfig(0, schema))
-		// With schema, unusual but raw names are quoted after schema validation.
 		result, err := opWithSchema.convertVarName("my field")
 		if err != nil {
 			t.Errorf("convertVarName with schema unexpected error: %v", err)
@@ -303,7 +293,7 @@ func TestDataOperator_convertVarName(t *testing.T) {
 }
 
 func TestDataOperator_convertVarName_rejectsPreQuoted(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name  string
@@ -342,13 +332,30 @@ func TestDataOperator_ToSQL_rejectsPreQuotedBeforeSchemaValidation(t *testing.T)
 // dataSchemaProvider is a minimal schema provider for data operator tests.
 type dataSchemaProvider struct{}
 
-func (m *dataSchemaProvider) HasField(_ string) bool              { return true }
-func (m *dataSchemaProvider) GetFieldType(_ string) string        { return "string" }
-func (m *dataSchemaProvider) ValidateField(_ string) error        { return nil }
-func (m *dataSchemaProvider) IsArrayType(_ string) bool           { return false }
-func (m *dataSchemaProvider) IsStringType(_ string) bool          { return true }
-func (m *dataSchemaProvider) IsNumericType(_ string) bool         { return false }
-func (m *dataSchemaProvider) IsBooleanType(_ string) bool         { return false }
+func (m *dataSchemaProvider) HasField(_ string) bool { return true }
+func (m *dataSchemaProvider) GetFieldType(fieldName string) string {
+	switch fieldName {
+	case "amount":
+		return "number"
+	case "verified":
+		return "boolean"
+	default:
+		return "string"
+	}
+}
+func (m *dataSchemaProvider) ValidateField(_ string) error { return nil }
+func (m *dataSchemaProvider) IsArrayType(_ string) bool    { return false }
+func (m *dataSchemaProvider) IsStringType(fieldName string) bool {
+	return m.GetFieldType(fieldName) == "string"
+}
+
+func (m *dataSchemaProvider) IsNumericType(fieldName string) bool {
+	return m.GetFieldType(fieldName) == "number"
+}
+
+func (m *dataSchemaProvider) IsBooleanType(fieldName string) bool {
+	return m.GetFieldType(fieldName) == "boolean"
+}
 func (m *dataSchemaProvider) IsEnumType(_ string) bool            { return false }
 func (m *dataSchemaProvider) GetAllowedValues(_ string) []string  { return nil }
 func (m *dataSchemaProvider) ValidateEnumValue(_, _ string) error { return nil }
@@ -362,7 +369,7 @@ func (m *rejectingDataSchemaProvider) ValidateField(_ string) error {
 }
 
 func TestDataOperator_valueToSQL(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -407,7 +414,7 @@ func TestDataOperator_valueToSQL(t *testing.T) {
 }
 
 func TestDataOperator_getNumber(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -533,7 +540,7 @@ func TestDataOperator_getNumber(t *testing.T) {
 }
 
 func TestDataOperator_valueToSQL_ProcessedValue(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name     string
@@ -581,7 +588,7 @@ func TestDataOperator_valueToSQL_ProcessedValue(t *testing.T) {
 }
 
 func TestDataOperator_handleVar_EmptyVarName(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 
 	// Empty var name represents the current element in array operations
 	result, err := op.ToSQL("var", []interface{}{""})
@@ -594,7 +601,7 @@ func TestDataOperator_handleVar_EmptyVarName(t *testing.T) {
 }
 
 func TestDataOperator_handleVar_NonStringNonArrayArg(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 
 	// Non-string, non-array argument
 	_, err := op.ToSQL("var", []interface{}{42})
@@ -624,7 +631,7 @@ func assertCollectedParams(t *testing.T, pc *params.ParamCollector, want []param
 }
 
 func TestDataOperator_ToSQLParam(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name        string
@@ -694,7 +701,7 @@ func TestDataOperator_ToSQLParam(t *testing.T) {
 			name:        "missing_some with count 1",
 			operator:    "missing_some",
 			args:        []interface{}{1, []interface{}{"field1", "field2", "field3"}},
-			expectedSQL: "(field1 IS NULL OR field2 IS NULL OR field3 IS NULL)",
+			expectedSQL: "(field1 IS NULL AND field2 IS NULL AND field3 IS NULL)",
 			wantParams:  nil,
 			hasError:    false,
 		},
@@ -725,6 +732,14 @@ func TestDataOperator_ToSQLParam(t *testing.T) {
 			hasError:    true,
 		},
 		{
+			name:        "var with too many array entries",
+			operator:    "var",
+			args:        []interface{}{[]interface{}{"amount", float64(0), float64(1)}},
+			expectedSQL: "",
+			wantParams:  nil,
+			hasError:    true,
+		},
+		{
 			name:        "var with non-string first arg",
 			operator:    "var",
 			args:        []interface{}{[]interface{}{123, 0}},
@@ -736,6 +751,14 @@ func TestDataOperator_ToSQLParam(t *testing.T) {
 			name:        "var with no args",
 			operator:    "var",
 			args:        []interface{}{},
+			expectedSQL: "",
+			wantParams:  nil,
+			hasError:    true,
+		},
+		{
+			name:        "non-finite float literal",
+			operator:    "var",
+			args:        []interface{}{[]interface{}{"amount", math.NaN()}},
 			expectedSQL: "",
 			wantParams:  nil,
 			hasError:    true,
@@ -784,7 +807,7 @@ func TestDataOperator_ToSQLParam(t *testing.T) {
 }
 
 func TestDataOperator_valueToSQLParam(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 
 	tests := []struct {
 		name        string
@@ -912,7 +935,7 @@ func TestDataOperator_valueToSQLParam(t *testing.T) {
 }
 
 func TestDataOperator_valueToSQLParam_PositionalStyle(t *testing.T) {
-	op := NewDataOperator(nil)
+	op := NewDataOperator(testFieldOnlyConfig())
 	pc := params.NewParamCollector(params.PlaceholderPositional)
 
 	s1, err := op.valueToSQLParam("first", pc)

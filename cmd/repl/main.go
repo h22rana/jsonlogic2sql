@@ -11,6 +11,34 @@ import (
 	"github.com/h22rana/jsonlogic2sql"
 )
 
+const (
+	modeCondition = "condition"
+	modePredicate = "predicate"
+	modeValue     = "value"
+
+	sqlArrayPrefix = "ARRAY["
+	likeWildcard   = "%"
+	noLikeAffix    = ""
+
+	replCommandHelp      = ":help"
+	replCommandExamples  = ":examples"
+	replCommandDialect   = ":dialect"
+	replCommandParams    = ":params"
+	replCommandMode      = ":mode"
+	replCommandCondition = ":condition"
+	replCommandValue     = ":value"
+	replCommandSchema    = ":schema"
+	replCommandFile      = ":file"
+	replCommandQuit      = ":quit"
+	replCommandExit      = ":exit"
+	replCommandClear     = ":clear"
+
+	ansiClearScreen = "\033[2J\033[H"
+
+	unaryOperatorArgCount  = 1
+	binaryOperatorArgCount = 2
+)
+
 // escapeLikePattern escapes special characters for SQL LIKE patterns.
 // Escapes: single quotes ('), percent (%), and underscore (_)
 // For BigQuery/Spanner, use backslash escaping for LIKE wildcards.
@@ -35,17 +63,32 @@ func unescapeSQLString(s string) string {
 	return s
 }
 
-// extractFromArrayString extracts value from array string representation like "[T]".
-func extractFromArrayString(s string) string {
+func isArrayString(s string) bool {
 	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
-		inner := s[1 : len(s)-1]
-		if len(inner) >= 2 && inner[0] == '\'' && inner[len(inner)-1] == '\'' {
-			inner = inner[1 : len(inner)-1]
-			return strings.ReplaceAll(inner, "''", "'")
-		}
-		return inner
+		return true
 	}
-	return s
+	return strings.HasPrefix(strings.ToUpper(s), sqlArrayPrefix) && strings.HasSuffix(s, "]")
+}
+
+// extractFromArrayString extracts value from array string representations like
+// "[T]" and PostgreSQL "ARRAY[T]".
+func extractFromArrayString(s string) string {
+	switch {
+	case strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]"):
+		return unquoteArrayElement(s[1 : len(s)-1])
+	case strings.HasPrefix(strings.ToUpper(s), sqlArrayPrefix) && strings.HasSuffix(s, "]"):
+		return unquoteArrayElement(s[len(sqlArrayPrefix) : len(s)-1])
+	default:
+		return s
+	}
+}
+
+func unquoteArrayElement(inner string) string {
+	if len(inner) >= 2 && inner[0] == '\'' && inner[len(inner)-1] == '\'' {
+		inner = inner[1 : len(inner)-1]
+		return strings.ReplaceAll(inner, "''", "'")
+	}
+	return inner
 }
 
 // isSQLStringLiteral returns true if s is a SQL-quoted string literal (e.g., 'hello').
@@ -60,8 +103,11 @@ func isSQLStringLiteral(s string) bool {
 // even when the bind parameter is numeric.
 func castToString(expr string, d jsonlogic2sql.Dialect) string {
 	castType := "STRING"
-	if d == jsonlogic2sql.DialectPostgreSQL || d == jsonlogic2sql.DialectDuckDB {
+	switch d {
+	case jsonlogic2sql.DialectPostgreSQL, jsonlogic2sql.DialectDuckDB:
 		castType = "TEXT"
+	case jsonlogic2sql.DialectClickHouse:
+		castType = "String"
 	}
 	return fmt.Sprintf("CAST(%s AS %s)", expr, castType)
 }
@@ -81,7 +127,8 @@ func escapeLikeExpr(expr string, d jsonlogic2sql.Dialect) string {
 //
 // Three pattern argument forms are handled:
 //  1. SQL string literal ('hello'): unquote, escape LIKE wildcards, inline.
-//  2. Bind placeholder (@p1, $1): CAST to string, wrap with REPLACE for runtime escaping.
+//  2. Bind placeholder (@p1, $1, or {p1:String}):
+//     CAST to string, wrap with REPLACE for runtime escaping.
 //  3. Unquoted primitive (1000, TRUE): treat as a literal value, escape and inline.
 func buildLikeSQL(column, patternArg, prefix, suffix string, negate bool, d jsonlogic2sql.Dialect) string {
 	keyword := "LIKE"
@@ -111,9 +158,26 @@ func buildLikeSQL(column, patternArg, prefix, suffix string, negate bool, d json
 	return fmt.Sprintf("%s %s '%s%s%s'", column, keyword, prefix, escapeLikePattern(patternArg), suffix)
 }
 
-// placeholderRe matches bind-parameter placeholders across all supported dialects:
-// @p1, @p2, ... (BigQuery, Spanner, ClickHouse) and $1, $2, ... (PostgreSQL, DuckDB).
-var placeholderRe = regexp.MustCompile(`^(?:@p\d+|\$\d+)$`)
+func normalizeWaveDashSQL(expr string, d jsonlogic2sql.Dialect) (string, error) {
+	switch d {
+	case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner:
+		return fmt.Sprintf("REGEXP_REPLACE(%s, r'[\\x{301C}\\x{FF5E}]', '~')", expr), nil
+	case jsonlogic2sql.DialectPostgreSQL:
+		return fmt.Sprintf("REGEXP_REPLACE(%s, U&'[\\301C\\FF5E]', '~', 'g')", expr), nil
+	case jsonlogic2sql.DialectDuckDB:
+		return fmt.Sprintf("regexp_replace(%s, '[\\x{301C}\\x{FF5E}]', '~', 'g')", expr), nil
+	case jsonlogic2sql.DialectClickHouse:
+		return fmt.Sprintf("replaceRegexpAll(%s, '[\\\\x{301C}\\\\x{FF5E}]', '~')", expr), nil
+	default:
+		return "", fmt.Errorf("unsupported dialect: %v", d)
+	}
+}
+
+// placeholderRe matches generated placeholders plus ClickHouse's typed
+// placeholder form for custom operator interoperability.
+const placeholderPattern = `^(?:@p\d+|\$\d+|\{p\d+:[A-Za-z][A-Za-z0-9_]*(?:\([^{}]*\))?\})$`
+
+var placeholderRe = regexp.MustCompile(placeholderPattern)
 
 // isPlaceholder reports whether s looks like a bind-parameter placeholder.
 func isPlaceholder(s string) bool {
@@ -129,31 +193,37 @@ func isBoundValue(s string) bool {
 // parseContainsArgs parses the arguments for contains/!contains operators.
 // Returns the column and the raw pattern argument (preserving SQL quoting
 // so that buildLikeSQL can distinguish literals from placeholders).
-func parseContainsArgs(args []interface{}) (column, pattern string) {
-	arg0Str, arg0IsStr := args[0].(string)
-	arg1Str, arg1IsStr := args[1].(string)
+func parseContainsArgs(args []jsonlogic2sql.OperatorArg) (column, pattern string) {
+	arg0Str := args[0].SQL
+	arg1Str := args[1].SQL
 
-	if arg0IsStr && arg1IsStr {
-		if strings.HasPrefix(arg1Str, "[") && strings.HasSuffix(arg1Str, "]") {
-			column = arg0Str
-			inner := extractFromArrayString(arg1Str)
-			return column, fmt.Sprintf("'%s'", strings.ReplaceAll(inner, "'", "''"))
+	if isArrayString(arg1Str) {
+		column = arg0Str
+		inner := extractFromArrayString(arg1Str)
+		if isPlaceholder(inner) {
+			return column, inner
 		}
-		if strings.HasPrefix(arg0Str, "[") && strings.HasSuffix(arg0Str, "]") {
-			column = arg1Str
-			inner := extractFromArrayString(arg0Str)
-			return column, fmt.Sprintf("'%s'", strings.ReplaceAll(inner, "'", "''"))
+		return column, fmt.Sprintf("'%s'", strings.ReplaceAll(inner, "'", "''"))
+	}
+	if isArrayString(arg0Str) {
+		column = arg1Str
+		inner := extractFromArrayString(arg0Str)
+		if isPlaceholder(inner) {
+			return column, inner
 		}
-		if isBoundValue(arg0Str) && !isBoundValue(arg1Str) {
-			return arg1Str, arg0Str
-		}
-		return arg0Str, arg1Str
+		return column, fmt.Sprintf("'%s'", strings.ReplaceAll(inner, "'", "''"))
+	}
+	if isBoundValue(arg0Str) && !isBoundValue(arg1Str) {
+		return arg1Str, arg0Str
 	}
 
-	column = args[0].(string)
-	pattern = args[1].(string)
-	if strings.HasPrefix(pattern, "[") && strings.HasSuffix(pattern, "]") {
+	column = arg0Str
+	pattern = arg1Str
+	if isArrayString(pattern) {
 		inner := extractFromArrayString(pattern)
+		if isPlaceholder(inner) {
+			return column, inner
+		}
 		return column, fmt.Sprintf("'%s'", strings.ReplaceAll(inner, "'", "''"))
 	}
 	return column, pattern
@@ -180,13 +250,17 @@ var currentSchema *jsonlogic2sql.Schema
 // paramsMode controls whether output uses parameterized placeholders.
 var paramsMode bool
 
+// valueMode controls whether input is transpiled as a SQL value expression.
+// When false, input is transpiled as a SQL condition/predicate expression.
+var valueMode bool
+
 // selectDialect prompts the user to select a SQL dialect.
 func selectDialect(scanner *bufio.Scanner) jsonlogic2sql.Dialect {
 	fmt.Println("Select SQL dialect:")
 	for i, d := range dialects {
 		fmt.Printf("  %d. %s\n", i+1, d.name)
 	}
-	fmt.Print("\nEnter choice [1-5] (default: 1 for BigQuery): ")
+	fmt.Printf("\nEnter choice [1-%d] (default: 1 for BigQuery): ", len(dialects))
 
 	if !scanner.Scan() {
 		return jsonlogic2sql.DialectBigQuery
@@ -204,6 +278,39 @@ func selectDialect(scanner *bufio.Scanner) jsonlogic2sql.Dialect {
 	}
 
 	return dialects[choice-1].dialect
+}
+
+func selectExpressionMode(scanner *bufio.Scanner) bool {
+	fmt.Println("Select expression mode:")
+	fmt.Println("  1. Condition/predicate")
+	fmt.Println("  2. Value")
+	fmt.Print("\nEnter choice [1-2] (default: 1 for condition): ")
+
+	if !scanner.Scan() {
+		return false
+	}
+
+	input := strings.TrimSpace(scanner.Text())
+	if input == "" {
+		return false
+	}
+
+	switch strings.ToLower(input) {
+	case "1", modeCondition, modePredicate:
+		return false
+	case "2", modeValue:
+		return true
+	default:
+		fmt.Println("Invalid choice, defaulting to condition")
+		return false
+	}
+}
+
+func expressionModeName() string {
+	if valueMode {
+		return modeValue
+	}
+	return modeCondition
 }
 
 // getDialectName returns the display name for a dialect.
@@ -231,11 +338,17 @@ func main() {
 
 	// Prompt user to select dialect
 	currentDialect = selectDialect(scanner)
-	fmt.Printf("\nUsing %s dialect\n", getDialectName(currentDialect))
-	fmt.Println("Type ':help' for commands, ':quit' to exit")
 	fmt.Println()
 
-	currentSchema = promptSchema(scanner)
+	valueMode = selectExpressionMode(scanner)
+	fmt.Println()
+
+	schema, err := promptSchema(scanner)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load schema: %v\n", err)
+		os.Exit(1)
+	}
+	currentSchema = schema
 
 	transpiler, err := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
 		Dialect: currentDialect,
@@ -248,6 +361,10 @@ func main() {
 
 	// Register all custom operators
 	registerCustomOperators(transpiler)
+
+	fmt.Printf("\nUsing %s dialect | Mode: %s\n", getDialectName(currentDialect), expressionModeName())
+	fmt.Println("Type ':help' for commands, ':quit' to exit")
+	fmt.Println()
 
 	for {
 		fmt.Printf("[%s] jsonlogic> ", getDialectName(currentDialect))
@@ -271,23 +388,7 @@ func main() {
 			continue
 		}
 
-		// Process JSON Logic input
-		if paramsMode {
-			sql, params, err := transpiler.TranspileParameterized(input)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Printf("SQL:    %s\n", sql)
-				printParams(params)
-			}
-		} else {
-			result, err := transpiler.Transpile(input)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-			} else {
-				fmt.Printf("SQL: %s\n", result)
-			}
-		}
+		processInput(input, transpiler)
 		fmt.Println()
 	}
 
@@ -297,31 +398,65 @@ func main() {
 	}
 }
 
-// promptSchema optionally loads a schema from a user-provided path.
-// Returns nil if the user skips or if loading fails.
-func promptSchema(scanner *bufio.Scanner) *jsonlogic2sql.Schema {
-	fmt.Print("Enter schema path (optional, leave empty to skip): ")
+func processInput(input string, transpiler *jsonlogic2sql.Transpiler) {
+	if paramsMode {
+		var sql string
+		var params []jsonlogic2sql.QueryParam
+		var err error
+		if valueMode {
+			sql, params, err = transpiler.TranspileParameterizedValue(input)
+		} else {
+			sql, params, err = transpiler.TranspileParameterizedCondition(input)
+		}
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
+		fmt.Printf("SQL:    %s\n", sql)
+		printParams(params)
+		return
+	}
+
+	var result string
+	var err error
+	if valueMode {
+		result, err = transpiler.TranspileValue(input)
+	} else {
+		result, err = transpiler.TranspileCondition(input)
+	}
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+	fmt.Printf("SQL: %s\n", result)
+}
+
+// promptSchema loads a schema from a user-provided path, or returns an empty
+// schema for literal-only expressions when the user leaves the path blank.
+func promptSchema(scanner *bufio.Scanner) (*jsonlogic2sql.Schema, error) {
+	fmt.Print("Enter schema path (leave empty for literal-only empty schema): ")
 	if !scanner.Scan() {
-		return nil
+		return emptySchema(), nil
 	}
 	schemaPath := strings.TrimSpace(scanner.Text())
 	if schemaPath == "" {
-		return nil
+		return emptySchema(), nil
 	}
 
-	data, err := os.ReadFile(filepath.Clean(schemaPath))
+	schema, err := loadSchemaFromPath(schemaPath)
 	if err != nil {
-		fmt.Printf("Error reading schema file: %v\n\n", err)
-		return nil
-	}
-
-	schema, err := jsonlogic2sql.NewSchemaFromJSON(data)
-	if err != nil {
-		fmt.Printf("Error parsing schema file: %v\n\n", err)
-		return nil
+		return nil, err
 	}
 
 	fmt.Printf("Schema loaded: %s\n\n", schemaPath)
+	return schema, nil
+}
+
+func emptySchema() *jsonlogic2sql.Schema {
+	schema, err := jsonlogic2sql.NewSchema(nil)
+	if err != nil {
+		panic(err)
+	}
 	return schema
 }
 
@@ -355,34 +490,59 @@ func handleCommand(input string, transpiler *jsonlogic2sql.Transpiler, scanner *
 	command := parts[0]
 
 	switch command {
-	case ":help":
+	case replCommandHelp:
 		showHelp()
-	case ":examples":
+	case replCommandExamples:
 		showExamples()
-	case ":dialect":
+	case replCommandDialect:
 		return handleDialectChange(scanner)
-	case ":params":
+	case replCommandParams:
 		paramsMode = !paramsMode
 		if paramsMode {
 			fmt.Println("Parameterized mode: ON (output uses bind placeholders)")
 		} else {
 			fmt.Println("Parameterized mode: OFF (output uses inlined literals)")
 		}
-	case ":schema":
+	case replCommandMode:
+		handleModeCommand(parts)
+	case replCommandCondition:
+		valueMode = false
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
+	case replCommandValue:
+		valueMode = true
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
+	case replCommandSchema:
 		handleSchemaCommand(parts, transpiler)
-	case ":file":
+	case replCommandFile:
 		handleFileInput(parts, transpiler)
-	case ":quit", ":exit":
+	case replCommandQuit, replCommandExit:
 		fmt.Println("Goodbye!")
 		os.Exit(0)
-	case ":clear":
+	case replCommandClear:
 		// Clear screen (works on most terminals)
-		fmt.Print("\033[2J\033[H")
+		fmt.Print(ansiClearScreen)
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
-		fmt.Println("Type ':help' for available commands")
+		fmt.Printf("Type '%s' for available commands\n", replCommandHelp)
 	}
 	return nil
+}
+
+func handleModeCommand(parts []string) {
+	if len(parts) < 2 {
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
+		return
+	}
+	switch parts[1] {
+	case modeCondition, modePredicate:
+		valueMode = false
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
+	case modeValue:
+		valueMode = true
+		fmt.Printf("Expression mode: %s\n", expressionModeName())
+	default:
+		fmt.Println("Usage: :mode condition|value")
+	}
 }
 
 // handleFileInput handles the :file command to read JSON from a file.
@@ -407,22 +567,7 @@ func handleFileInput(parts []string, transpiler *jsonlogic2sql.Transpiler) {
 		return
 	}
 
-	if paramsMode {
-		sql, params, err := transpiler.TranspileParameterized(input)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		} else {
-			fmt.Printf("SQL:    %s\n", sql)
-			printParams(params)
-		}
-	} else {
-		result, err := transpiler.Transpile(input)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		} else {
-			fmt.Printf("SQL: %s\n", result)
-		}
-	}
+	processInput(input, transpiler)
 	fmt.Println()
 }
 
@@ -458,21 +603,31 @@ func handleSchemaCommand(parts []string, transpiler *jsonlogic2sql.Transpiler) {
 	}
 
 	schemaPath := parts[1]
-	data, err := os.ReadFile(filepath.Clean(schemaPath))
+	schema, err := loadSchemaFromPath(schemaPath)
 	if err != nil {
-		fmt.Printf("Error reading schema file: %v\n", err)
-		return
-	}
-
-	schema, err := jsonlogic2sql.NewSchemaFromJSON(data)
-	if err != nil {
-		fmt.Printf("Error parsing schema file: %v\n", err)
+		fmt.Printf("Error loading schema file: %v\n", err)
 		return
 	}
 
 	currentSchema = schema
-	transpiler.SetSchema(schema)
+	if err := transpiler.SetSchema(schema); err != nil {
+		fmt.Printf("Error setting schema: %v\n", err)
+		return
+	}
 	fmt.Printf("Schema loaded: %s\n\n", schemaPath)
+}
+
+func loadSchemaFromPath(schemaPath string) (*jsonlogic2sql.Schema, error) {
+	data, err := os.ReadFile(filepath.Clean(schemaPath))
+	if err != nil {
+		return nil, fmt.Errorf("read %q: %w", schemaPath, err)
+	}
+
+	schema, err := jsonlogic2sql.NewSchemaFromJSON(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse %q: %w", schemaPath, err)
+	}
+	return schema, nil
 }
 
 // registerCustomOperators registers all custom operators for the REPL.
@@ -484,58 +639,60 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 	// ========================================================================
 
 	// startsWith operator: column LIKE 'value%'.
-	_ = transpiler.RegisterOperatorFunc("startsWith", func(_ string, args []any) (string, error) {
-		if len(args) != 2 {
-			return "", fmt.Errorf("startsWith requires exactly 2 arguments")
+	_ = transpiler.RegisterOperatorFunc("startsWith", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+		if len(args) != binaryOperatorArgCount {
+			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("startsWith requires exactly 2 arguments")
 		}
-		column := args[0].(string)
-		return buildLikeSQL(column, args[1].(string), "", "%", false, currentDialect), nil
+		sql := buildLikeSQL(args[0].SQL, args[1].SQL, noLikeAffix, likeWildcard, false, currentDialect)
+		return jsonlogic2sql.PredicateSQL(sql), nil
 	})
 
 	// !startsWith operator: column NOT LIKE 'value%'.
-	_ = transpiler.RegisterOperatorFunc("!startsWith", func(_ string, args []any) (string, error) {
-		if len(args) != 2 {
-			return "", fmt.Errorf("!startsWith requires exactly 2 arguments")
+	_ = transpiler.RegisterOperatorFunc("!startsWith", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+		if len(args) != binaryOperatorArgCount {
+			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("!startsWith requires exactly 2 arguments")
 		}
-		column := args[0].(string)
-		return buildLikeSQL(column, args[1].(string), "", "%", true, currentDialect), nil
+		sql := buildLikeSQL(args[0].SQL, args[1].SQL, noLikeAffix, likeWildcard, true, currentDialect)
+		return jsonlogic2sql.PredicateSQL(sql), nil
 	})
 
 	// endsWith operator: column LIKE '%value'.
-	_ = transpiler.RegisterOperatorFunc("endsWith", func(_ string, args []any) (string, error) {
-		if len(args) != 2 {
-			return "", fmt.Errorf("endsWith requires exactly 2 arguments")
+	_ = transpiler.RegisterOperatorFunc("endsWith", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+		if len(args) != binaryOperatorArgCount {
+			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("endsWith requires exactly 2 arguments")
 		}
-		column := args[0].(string)
-		return buildLikeSQL(column, args[1].(string), "%", "", false, currentDialect), nil
+		sql := buildLikeSQL(args[0].SQL, args[1].SQL, likeWildcard, noLikeAffix, false, currentDialect)
+		return jsonlogic2sql.PredicateSQL(sql), nil
 	})
 
 	// !endsWith operator: column NOT LIKE '%value'.
-	_ = transpiler.RegisterOperatorFunc("!endsWith", func(_ string, args []any) (string, error) {
-		if len(args) != 2 {
-			return "", fmt.Errorf("!endsWith requires exactly 2 arguments")
+	_ = transpiler.RegisterOperatorFunc("!endsWith", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+		if len(args) != binaryOperatorArgCount {
+			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("!endsWith requires exactly 2 arguments")
 		}
-		column := args[0].(string)
-		return buildLikeSQL(column, args[1].(string), "%", "", true, currentDialect), nil
+		sql := buildLikeSQL(args[0].SQL, args[1].SQL, likeWildcard, noLikeAffix, true, currentDialect)
+		return jsonlogic2sql.PredicateSQL(sql), nil
 	})
 
 	// contains operator: column LIKE '%value%'.
 	// Supports reversed args: {"contains": ["T", {"var": "field"}]}.
-	_ = transpiler.RegisterOperatorFunc("contains", func(_ string, args []any) (string, error) {
-		if len(args) != 2 {
-			return "", fmt.Errorf("contains requires exactly 2 arguments")
+	_ = transpiler.RegisterOperatorFunc("contains", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+		if len(args) != binaryOperatorArgCount {
+			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("contains requires exactly 2 arguments")
 		}
 		column, pattern := parseContainsArgs(args)
-		return buildLikeSQL(column, pattern, "%", "%", false, currentDialect), nil
+		sql := buildLikeSQL(column, pattern, likeWildcard, likeWildcard, false, currentDialect)
+		return jsonlogic2sql.PredicateSQL(sql), nil
 	})
 
 	// !contains operator: column NOT LIKE '%value%'.
-	_ = transpiler.RegisterOperatorFunc("!contains", func(_ string, args []any) (string, error) {
-		if len(args) != 2 {
-			return "", fmt.Errorf("!contains requires exactly 2 arguments")
+	_ = transpiler.RegisterOperatorFunc("!contains", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+		if len(args) != binaryOperatorArgCount {
+			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("!contains requires exactly 2 arguments")
 		}
 		column, pattern := parseContainsArgs(args)
-		return buildLikeSQL(column, pattern, "%", "%", true, currentDialect), nil
+		sql := buildLikeSQL(column, pattern, likeWildcard, likeWildcard, true, currentDialect)
+		return jsonlogic2sql.PredicateSQL(sql), nil
 	})
 
 	// ========================================================================
@@ -543,43 +700,42 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 	// ========================================================================
 
 	// normalizeNFKC operator is basically NORMALIZE(column, 'NFKC').
-	_ = transpiler.RegisterOperatorFunc("normalizeNFKC", func(_ string, args []any) (string, error) {
-		if len(args) != 1 {
-			return "", fmt.Errorf("normalizeNFKC requires exactly 1 argument")
+	_ = transpiler.RegisterOperatorFunc("normalizeNFKC", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+		if len(args) != unaryOperatorArgCount {
+			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("normalizeNFKC requires exactly 1 argument")
 		}
-		column := args[0].(string)
-		return fmt.Sprintf("NORMALIZE(%s, 'NFKC')", column), nil
+		sql := fmt.Sprintf("NORMALIZE(%s, 'NFKC')", args[0].SQL)
+		return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeString), nil
 	})
 
-	// normalizeWaveDash operator converts wave dash variants to ASCII tilde
-	// U+301C (〜) wave dash → ~
-	// U+FF5E (～) fullwidth tilde → ~
-	// SQL: REGEXP_REPLACE(column, '[〜～]', '~')
-	_ = transpiler.RegisterOperatorFunc("normalizeWaveDash", func(_ string, args []any) (string, error) {
-		if len(args) != 1 {
-			return "", fmt.Errorf("normalizeWaveDash requires exactly 1 argument")
-		}
-		column := args[0].(string)
-		// REGEXP_REPLACE to convert both wave dash (U+301C) and fullwidth tilde (U+FF5E) to ASCII tilde
-		return fmt.Sprintf("REGEXP_REPLACE(%s, '[〜～]', '~')", column), nil
-	})
+	_ = transpiler.RegisterDialectAwareOperatorFunc("normalizeWaveDash",
+		func(_ string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
+			if len(args) != unaryOperatorArgCount {
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("normalizeWaveDash requires exactly 1 argument")
+			}
+			sql, err := normalizeWaveDashSQL(args[0].SQL, dialect)
+			if err != nil {
+				return jsonlogic2sql.OperatorResult{}, err
+			}
+			return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeString), nil
+		})
 
 	// toLower operator is basically LOWER(column).
-	_ = transpiler.RegisterOperatorFunc("toLower", func(_ string, args []any) (string, error) {
-		if len(args) != 1 {
-			return "", fmt.Errorf("toLower requires exactly 1 argument")
+	_ = transpiler.RegisterOperatorFunc("toLower", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+		if len(args) != unaryOperatorArgCount {
+			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("toLower requires exactly 1 argument")
 		}
-		column := args[0].(string)
-		return fmt.Sprintf("LOWER(%s)", column), nil
+		sql := fmt.Sprintf("LOWER(%s)", args[0].SQL)
+		return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeString), nil
 	})
 
 	// toUpper operator is basically UPPER(column).
-	_ = transpiler.RegisterOperatorFunc("toUpper", func(_ string, args []any) (string, error) {
-		if len(args) != 1 {
-			return "", fmt.Errorf("toUpper requires exactly 1 argument")
+	_ = transpiler.RegisterOperatorFunc("toUpper", func(_ string, args []jsonlogic2sql.OperatorArg) (jsonlogic2sql.OperatorResult, error) {
+		if len(args) != unaryOperatorArgCount {
+			return jsonlogic2sql.OperatorResult{}, fmt.Errorf("toUpper requires exactly 1 argument")
 		}
-		column := args[0].(string)
-		return fmt.Sprintf("UPPER(%s)", column), nil
+		sql := fmt.Sprintf("UPPER(%s)", args[0].SQL)
+		return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeString), nil
 	})
 
 	// ========================================================================
@@ -596,20 +752,22 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 	// ClickHouse: now()
 	// Example: {"==": [{"currentTimestamp": []}, {"var": "created_at"}]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("currentTimestamp",
-		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
+		func(_ string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
 			if len(args) != 0 {
-				return "", fmt.Errorf("currentTimestamp takes no arguments")
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("currentTimestamp takes no arguments")
 			}
+			var sql string
 			switch dialect {
 			case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner:
-				return "CURRENT_TIMESTAMP()", nil
+				sql = "CURRENT_TIMESTAMP()"
 			case jsonlogic2sql.DialectPostgreSQL, jsonlogic2sql.DialectDuckDB:
-				return "CURRENT_TIMESTAMP", nil
+				sql = "CURRENT_TIMESTAMP"
 			case jsonlogic2sql.DialectClickHouse:
-				return "now()", nil
+				sql = "now()"
 			default:
-				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("unsupported dialect: %v", dialect)
 			}
+			return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeUnknown), nil
 		})
 
 	// dateDiff operator calculates the difference between two dates (in days).
@@ -620,24 +778,26 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 	// ClickHouse: dateDiff('day', date2, date1) -- same as DuckDB
 	// Example: {">": [{"dateDiff": [{"var": "end_date"}, {"var": "start_date"}]}, 30]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("dateDiff",
-		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
-			if len(args) != 2 {
-				return "", fmt.Errorf("dateDiff requires exactly 2 arguments")
+		func(_ string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
+			if len(args) != binaryOperatorArgCount {
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("dateDiff requires exactly 2 arguments")
 			}
-			date1 := args[0].(string)
-			date2 := args[1].(string)
+			date1 := args[0].SQL
+			date2 := args[1].SQL
+			var sql string
 			switch dialect {
 			case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner:
-				return fmt.Sprintf("DATE_DIFF(%s, %s, DAY)", date1, date2), nil
+				sql = fmt.Sprintf("DATE_DIFF(%s, %s, DAY)", date1, date2)
 			case jsonlogic2sql.DialectPostgreSQL:
 				// PostgreSQL: subtracting dates returns integer days
-				return fmt.Sprintf("(%s - %s)", date1, date2), nil
+				sql = fmt.Sprintf("(%s - %s)", date1, date2)
 			case jsonlogic2sql.DialectDuckDB, jsonlogic2sql.DialectClickHouse:
 				// DuckDB/ClickHouse: dateDiff('part', start, end) - note different argument order
-				return fmt.Sprintf("dateDiff('day', %s, %s)", date2, date1), nil
+				sql = fmt.Sprintf("dateDiff('day', %s, %s)", date2, date1)
 			default:
-				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("unsupported dialect: %v", dialect)
 			}
+			return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeNumber), nil
 		})
 
 	// arrayLength operator returns the length of an array.
@@ -648,21 +808,23 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 	// ClickHouse: length(array)
 	// Example: {">": [{"arrayLength": [{"var": "tags"}]}, 0]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("arrayLength",
-		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
-			if len(args) != 1 {
-				return "", fmt.Errorf("arrayLength requires exactly 1 argument")
+		func(_ string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
+			if len(args) != unaryOperatorArgCount {
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("arrayLength requires exactly 1 argument")
 			}
-			arr := args[0].(string)
+			arr := args[0].SQL
+			var sql string
 			switch dialect {
 			case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner, jsonlogic2sql.DialectDuckDB:
-				return fmt.Sprintf("ARRAY_LENGTH(%s)", arr), nil
+				sql = fmt.Sprintf("ARRAY_LENGTH(%s)", arr)
 			case jsonlogic2sql.DialectPostgreSQL:
-				return fmt.Sprintf("CARDINALITY(%s)", arr), nil
+				sql = fmt.Sprintf("CARDINALITY(%s)", arr)
 			case jsonlogic2sql.DialectClickHouse:
-				return fmt.Sprintf("length(%s)", arr), nil
+				sql = fmt.Sprintf("length(%s)", arr)
 			default:
-				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("unsupported dialect: %v", dialect)
 			}
+			return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeNumber), nil
 		})
 
 	// regexpContains operator checks if a string matches a regex pattern.
@@ -673,31 +835,34 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 	// ClickHouse: match(string, pattern)
 	// Example: {"regexpContains": [{"var": "email"}, "^[a-z]+@example\\.com$"]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("regexpContains",
-		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
-			if len(args) != 2 {
-				return "", fmt.Errorf("regexpContains requires exactly 2 arguments")
+		func(_ string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
+			if len(args) != binaryOperatorArgCount {
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("regexpContains requires exactly 2 arguments")
 			}
-			str := args[0].(string)
-			pattern := args[1].(string)
+			str := args[0].SQL
+			pattern := args[1].SQL
+			var sql string
 			switch dialect {
 			case jsonlogic2sql.DialectBigQuery:
 				// BigQuery raw string prefix (r'...') is only valid for literals.
 				// Placeholders/expressions must be passed without the raw prefix.
 				if isSQLStringLiteral(pattern) {
-					return fmt.Sprintf("REGEXP_CONTAINS(%s, r%s)", str, pattern), nil
+					sql = fmt.Sprintf("REGEXP_CONTAINS(%s, r%s)", str, pattern)
+					return jsonlogic2sql.PredicateSQL(sql), nil
 				}
-				return fmt.Sprintf("REGEXP_CONTAINS(%s, %s)", str, pattern), nil
+				sql = fmt.Sprintf("REGEXP_CONTAINS(%s, %s)", str, pattern)
 			case jsonlogic2sql.DialectSpanner:
-				return fmt.Sprintf("REGEXP_CONTAINS(%s, %s)", str, pattern), nil
+				sql = fmt.Sprintf("REGEXP_CONTAINS(%s, %s)", str, pattern)
 			case jsonlogic2sql.DialectPostgreSQL:
-				return fmt.Sprintf("%s ~ %s", str, pattern), nil
+				sql = fmt.Sprintf("%s ~ %s", str, pattern)
 			case jsonlogic2sql.DialectDuckDB:
-				return fmt.Sprintf("regexp_matches(%s, %s)", str, pattern), nil
+				sql = fmt.Sprintf("regexp_matches(%s, %s)", str, pattern)
 			case jsonlogic2sql.DialectClickHouse:
-				return fmt.Sprintf("match(%s, %s)", str, pattern), nil
+				sql = fmt.Sprintf("match(%s, %s)", str, pattern)
 			default:
-				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("unsupported dialect: %v", dialect)
 			}
+			return jsonlogic2sql.PredicateSQL(sql), nil
 		})
 
 	// safeDivide operator performs division that returns NULL on division by zero.
@@ -709,25 +874,27 @@ func registerCustomOperators(transpiler *jsonlogic2sql.Transpiler) {
 	// ClickHouse: if(denominator = 0, NULL, numerator / denominator)
 	// Example: {"safeDivide": [{"var": "total"}, {"var": "count"}]}
 	_ = transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
-		func(_ string, args []any, dialect jsonlogic2sql.Dialect) (string, error) {
-			if len(args) != 2 {
-				return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+		func(_ string, args []jsonlogic2sql.OperatorArg, dialect jsonlogic2sql.Dialect) (jsonlogic2sql.OperatorResult, error) {
+			if len(args) != binaryOperatorArgCount {
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("safeDivide requires exactly 2 arguments")
 			}
-			numerator := args[0].(string)
-			denominator := args[1].(string)
+			numerator := args[0].SQL
+			denominator := args[1].SQL
+			var sql string
 			switch dialect {
 			case jsonlogic2sql.DialectBigQuery:
 				// BigQuery has built-in SAFE_DIVIDE that returns NULL on division by zero
-				return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+				sql = fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator)
 			case jsonlogic2sql.DialectSpanner, jsonlogic2sql.DialectPostgreSQL, jsonlogic2sql.DialectDuckDB:
 				// Spanner, PostgreSQL, and DuckDB don't have SAFE_DIVIDE, use CASE expression
-				return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", denominator, numerator, denominator), nil
+				sql = fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", denominator, numerator, denominator)
 			case jsonlogic2sql.DialectClickHouse:
 				// ClickHouse uses if() function for conditional expressions
-				return fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), nil
+				sql = fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator)
 			default:
-				return "", fmt.Errorf("unsupported dialect: %v", dialect)
+				return jsonlogic2sql.OperatorResult{}, fmt.Errorf("unsupported dialect: %v", dialect)
 			}
+			return jsonlogic2sql.ValueSQL(sql, jsonlogic2sql.ExpressionTypeNumber), nil
 		})
 }
 
@@ -736,6 +903,9 @@ func showHelp() {
 	fmt.Println("  :help          - Show this help message")
 	fmt.Println("  :examples      - Show example JSON Logic expressions")
 	fmt.Println("  :dialect       - Change the SQL dialect")
+	fmt.Println("  :mode <mode>   - Set expression mode: condition or value")
+	fmt.Println("  :condition     - Use condition/predicate expression mode")
+	fmt.Println("  :value         - Use value expression mode")
 	fmt.Println("  :params        - Toggle parameterized query output (bind placeholders)")
 	fmt.Println("  :schema <path> - Load schema for validation and type-aware SQL")
 	fmt.Println("  :file <path>   - Read JSON Logic from a file (for large inputs)")
@@ -746,62 +916,71 @@ func showHelp() {
 	if paramsMode {
 		paramStatus = "ON"
 	}
-	fmt.Printf("Current dialect: %s | Params: %s\n", getDialectName(currentDialect), paramStatus)
+	mode := modeCondition
+	if valueMode {
+		mode = modeValue
+	}
+	fmt.Printf("Current dialect: %s | Mode: %s | Params: %s\n", getDialectName(currentDialect), mode, paramStatus)
 	fmt.Println()
-	fmt.Println("Enter JSON Logic expressions to convert them to SQL WHERE clauses.")
+	fmt.Println("Enter JSON Logic expressions to convert them to SQL.")
 	fmt.Println("Example: {\">\": [{\"var\": \"amount\"}, 1000]}")
 	fmt.Println()
 	fmt.Println("Note: For large JSON inputs (>4KB), use :file to avoid terminal limits.")
 }
 
-func showExamples() {
-	examples := []struct {
-		name string
-		json string
-		sql  string
-	}{
+type replExample struct {
+	name string
+	json string
+	sql  string
+}
+
+func replExamples() []replExample {
+	return []replExample{
 		{
 			name: "Simple Comparison",
 			json: `{">": [{"var": "amount"}, 1000]}`,
-			sql:  "WHERE amount > 1000",
+			sql:  "amount > 1000",
 		},
 		{
 			name: "Multiple Conditions (AND)",
 			json: `{"and": [{">": [{"var": "amount"}, 5000]}, {"==": [{"var": "status"}, "pending"]}]}`,
-			sql:  "WHERE (amount > 5000 AND status = 'pending')",
+			sql:  "(amount > 5000 AND status = 'pending')",
 		},
 		{
 			name: "Multiple Conditions (OR)",
 			json: `{"or": [{">=": [{"var": "failedAttempts"}, 5]}, {"in": [{"var": "country"}, ["CN", "RU"]]}]}`,
-			sql:  "WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))",
+			sql:  "(failedAttempts >= 5 OR country IN ('CN', 'RU'))",
 		},
 		{
 			name: "Nested Conditions",
 			json: `{"and": [{">": [{"var": "transaction.amount"}, 10000]}, {"or": [{"==": [{"var": "user.verified"}, false]}, {"<": [{"var": "user.accountAgeDays"}, 7]}]}]}`,
-			sql:  "WHERE (transaction_amount > 10000 AND (user_verified = FALSE OR user_accountAgeDays < 7))",
+			sql:  "(transaction_amount > 10000 AND (user_verified = FALSE OR user_accountAgeDays < 7))",
 		},
 		{
-			name: "IF Statement",
-			json: `{"if": [{">": [{"var": "age"}, 18]}, "adult", "minor"]}`,
-			sql:  "WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END",
+			name: "IF Condition",
+			json: `{"if": [{">": [{"var": "age"}, 18]}, {"==": [{"var": "status"}, "adult"]}, {"==": [{"var": "status"}, "minor"]}]}`,
+			sql:  "CASE WHEN age > 18 THEN status = 'adult' ELSE status = 'minor' END",
 		},
 		{
 			name: "Missing Field Check",
 			json: `{"missing": ["field"]}`,
-			sql:  "WHERE field IS NULL",
+			sql:  "field IS NULL",
 		},
 		{
 			name: "Missing Some Fields",
 			json: `{"missing_some": [1, ["field1", "field2"]]}`,
-			sql:  "WHERE (field1 IS NULL + field2 IS NULL) >= 1",
+			sql:  "(field1 IS NULL + field2 IS NULL) >= 1",
 		},
 		{
 			name: "NOT Operation",
 			json: `{"!": [{"==": [{"var": "verified"}, true]}]}`,
-			sql:  "WHERE NOT (verified = TRUE)",
+			sql:  "NOT (verified = TRUE)",
 		},
 	}
+}
 
+func showExamples() {
+	examples := replExamples()
 	fmt.Println("Example JSON Logic expressions:")
 	fmt.Println()
 
