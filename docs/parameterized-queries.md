@@ -152,7 +152,7 @@ type QueryParam struct {
 | `1e309` (overflow float) | `string` | Out-of-range floats preserved as original string |
 | `1e-400` (underflow float) | `string` | Non-zero values that underflow to float64 zero preserved as original string |
 
-> **Note:** JSON decoding uses `json.Decoder.UseNumber()` to preserve full precision for numeric literals. Unquoted integers like `9223372036854775808` produce exact SQL instead of lossy float64 representations. Floats outside the representable float64 range (e.g., `1e309` overflow, `1e-400` underflow to zero) are preserved as their original string to match inline transpilation behavior. Callers binding string-typed numeric params may need to convert them to their driver's numeric type.
+> **Note:** JSON decoding uses `json.Decoder.UseNumber()` to preserve full precision for numeric literals. Unquoted integers like `9223372036854775808` produce exact SQL instead of lossy float64 representations. Floats outside the representable float64 range (e.g., `1e309` overflow, `1e-400` underflow to zero) are preserved as their original string to match inline transpilation behavior. For ClickHouse, exact string-preserved numeric literals still render with numeric placeholder types in numeric contexts (for example `{p1:Int64}`, `{p1:UInt64}`, or `{p1:Float64}`), while ordinary string literals render as `{p1:String}`. For other drivers, callers binding string-preserved numeric params may need to convert them to the driver's numeric type.
 
 ## Schema Coercion
 

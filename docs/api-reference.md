@@ -439,7 +439,7 @@ type QueryParam struct {
 }
 ```
 
-> **Note:** JSON decoding uses `json.Decoder.UseNumber()` to preserve precision. JS-safe integers (within ±2^53−1) bind as `float64`; larger integers (both unquoted JSON literals and quoted strings exceeding `int64`) bind as `string`. Floats outside the representable float64 range (e.g., `1e309` overflow, `1e-400` underflow to zero) are also preserved as `string`. Callers binding string-typed numeric params may need to convert them to their driver's numeric type.
+> **Note:** JSON decoding uses `json.Decoder.UseNumber()` to preserve precision. JS-safe integers (within ±2^53−1) bind as `float64`; larger integers (both unquoted JSON literals and quoted strings exceeding `int64`) bind as `string`. Floats outside the representable float64 range (e.g., `1e309` overflow, `1e-400` underflow to zero) are also preserved as `string`. ClickHouse placeholders keep numeric type hints for these exact string-preserved numeric literals in numeric contexts, while ordinary string literals still render as `{pN:String}`. Other drivers may require callers to convert string-preserved numeric params to the driver's numeric type.
 
 ### TranspileError
 
