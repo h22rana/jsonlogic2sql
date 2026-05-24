@@ -611,8 +611,28 @@ func normalizeParserSchemaScopes(scopes []string) []string {
 
 func processedArgsPreserveParamRefs(args []interface{}) bool {
 	for _, arg := range args {
-		if pv, ok := arg.(operators.ProcessedValue); ok && pv.PreserveParamRefs {
+		if processedValuePreserveParamRefs(arg) {
 			return true
+		}
+	}
+	return false
+}
+
+func processedValuePreserveParamRefs(value interface{}) bool {
+	switch v := value.(type) {
+	case operators.ProcessedValue:
+		return v.PreserveParamRefs || processedValuePreserveParamRefs(v.Value)
+	case []interface{}:
+		for _, item := range v {
+			if processedValuePreserveParamRefs(item) {
+				return true
+			}
+		}
+	case map[string]interface{}:
+		for _, item := range v {
+			if processedValuePreserveParamRefs(item) {
+				return true
+			}
 		}
 	}
 	return false
