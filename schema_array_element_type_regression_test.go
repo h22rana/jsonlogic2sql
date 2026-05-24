@@ -407,6 +407,72 @@ func TestSchemaArrayElementTypesRejectIncompatibleDynamicNestedArraysAllDialects
 	}
 }
 
+func TestSchemaArrayElementTypesAllowEquivalentConciseAndExplicitObjectArraysAllDialects(t *testing.T) {
+	t.Parallel()
+
+	logic := `{"some":[{"if":[{"var":"flag"},{"var":"conciseItems"},{"var":"explicitItems"}]},{"some":[{"var":"kids"},{"==":[{"var":"name"},"target"]}]}]}`
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "flag", Type: FieldTypeBoolean},
+		{
+			Name: "conciseItems",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{
+					Name: "kids",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Name: "name", Type: FieldTypeString},
+					},
+				},
+			},
+		},
+		{
+			Name: "explicitItems",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{
+					Name:        "kids",
+					Type:        FieldTypeArray,
+					ElementType: FieldTypeObject,
+					ElementFields: []FieldSchema{
+						{Name: "name", Type: FieldTypeString},
+					},
+				},
+			},
+		},
+	})
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			sql, err := tr.TranspileCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
+			}
+			if !strings.Contains(sql, "kids") || !strings.Contains(sql, "name") {
+				t.Fatalf("TranspileCondition() = %q, want nested kids.name access", sql)
+			}
+
+			paramSQL, params, err := tr.TranspileParameterizedCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			if !strings.Contains(paramSQL, "kids") || !strings.Contains(paramSQL, "name") {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want nested kids.name access", paramSQL)
+			}
+			if len(params) != 1 || params[0].Name != "p1" || params[0].Value != "target" {
+				t.Fatalf("TranspileParameterizedCondition() params = %#v, want p1=target", params)
+			}
+		})
+	}
+}
+
 func TestSchemaEnumArrayMembershipValidatesLiteralNeedlesAllDialects(t *testing.T) {
 	t.Parallel()
 

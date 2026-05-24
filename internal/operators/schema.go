@@ -62,11 +62,14 @@ type ArrayElementSchemaComparator interface {
 }
 
 func schemaArrayElementType(schema SchemaProvider, fieldName string) string {
+	if objectArray, ok := schema.(ArrayElementSchemaProvider); ok && objectArray.HasArrayElementFields(fieldName) {
+		return SchemaTypeObject
+	}
 	provider, ok := schema.(ArrayElementTypeProvider)
 	if !ok {
 		return ""
 	}
-	return provider.GetArrayElementType(fieldName)
+	return normalizeSchemaType(provider.GetArrayElementType(fieldName))
 }
 
 func schemaArrayElementExpressionType(schema SchemaProvider, fieldName string) (ExpressionType, bool) {

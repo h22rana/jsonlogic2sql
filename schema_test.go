@@ -620,6 +620,62 @@ func TestSchemaArrayElementCompatibilityChecksNestedScalarElementTypes(t *testin
 	}
 }
 
+func TestSchemaArrayElementCompatibilityNormalizesObjectArrayElementTypes(t *testing.T) {
+	schema := mustNewSchema([]FieldSchema{
+		{
+			Name: "conciseItems",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{
+					Name: "kids",
+					Type: FieldTypeArray,
+					ElementFields: []FieldSchema{
+						{Name: "name", Type: FieldTypeString},
+					},
+				},
+			},
+		},
+		{
+			Name: "explicitItems",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{
+					Name:        "kids",
+					Type:        FieldTypeArray,
+					ElementType: FieldTypeObject,
+					ElementFields: []FieldSchema{
+						{Name: "name", Type: FieldTypeString},
+					},
+				},
+			},
+		},
+	})
+
+	if err := schema.ValidateArrayElementSchemasCompatible("conciseItems", "explicitItems"); err != nil {
+		t.Fatalf("ValidateArrayElementSchemasCompatible(conciseItems, explicitItems) error = %v", err)
+	}
+	if err := schema.ValidateArrayElementSchemasCompatible("explicitItems", "conciseItems"); err != nil {
+		t.Fatalf("ValidateArrayElementSchemasCompatible(explicitItems, conciseItems) error = %v", err)
+	}
+
+	for _, field := range []string{
+		"conciseItems",
+		"conciseItems.kids",
+		"explicitItems",
+		"explicitItems.kids",
+	} {
+		if got := schema.GetArrayElementType(field); got != string(FieldTypeObject) {
+			t.Fatalf("GetArrayElementType(%q) = %q, want %q", field, got, FieldTypeObject)
+		}
+	}
+
+	conciseSig := schema.ArrayElementSchemaSignature("conciseItems")
+	explicitSig := schema.ArrayElementSchemaSignature("explicitItems")
+	if conciseSig != explicitSig {
+		t.Fatalf("equivalent object-array schemas have different signatures:\nconcise: %s\nexplicit: %s", conciseSig, explicitSig)
+	}
+}
+
 func TestSchemaObjectAndArrayChildrenAreOptional(t *testing.T) {
 	schema, err := NewSchema([]FieldSchema{
 		{Name: "metadata", Type: FieldTypeObject},

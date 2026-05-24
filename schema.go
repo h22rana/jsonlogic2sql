@@ -395,10 +395,13 @@ func (s *Schema) ArrayElementSchemaSignature(fieldName string) string {
 		b.WriteString(relativeName)
 		b.WriteByte(':')
 		b.WriteString(string(field.Type))
-		if field.Type == FieldTypeArray && field.ElementType != "" {
-			b.WriteByte('<')
-			b.WriteString(string(field.ElementType))
-			b.WriteByte('>')
+		if field.Type == FieldTypeArray {
+			elementType := s.GetArrayElementType(fullName)
+			if elementType != "" {
+				b.WriteByte('<')
+				b.WriteString(elementType)
+				b.WriteByte('>')
+			}
 		}
 		if len(field.AllowedValues) > 0 {
 			allowed := slices.Clone(field.AllowedValues)
@@ -466,8 +469,12 @@ func (s *Schema) validateArrayElementSchemasCompatible(leftField, rightField str
 		if leftSchema.Type != rightSchema.Type {
 			return fmt.Errorf("field '%s' has incompatible schema types across array source scopes", relativeName)
 		}
-		if leftSchema.Type == FieldTypeArray && leftSchema.ElementType != rightSchema.ElementType {
-			return fmt.Errorf("field '%s' has incompatible array element types across array source scopes", relativeName)
+		if leftSchema.Type == FieldTypeArray {
+			leftElementType := s.GetArrayElementType(leftFull)
+			rightElementType := s.GetArrayElementType(rightFull)
+			if leftElementType != rightElementType {
+				return fmt.Errorf("field '%s' has incompatible array element types across array source scopes", relativeName)
+			}
 		}
 		if !sameStringSetSchema(leftSchema.AllowedValues, rightSchema.AllowedValues) {
 			return fmt.Errorf("field '%s' has incompatible enum values across array source scopes", relativeName)

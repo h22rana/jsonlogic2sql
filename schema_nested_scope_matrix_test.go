@@ -93,6 +93,20 @@ func nestedScopeAuditSchema() *Schema {
 				},
 			},
 		},
+		{
+			Name: "parentGroupExplicit",
+			Type: FieldTypeArray,
+			ElementFields: []FieldSchema{
+				{
+					Name:        "children",
+					Type:        FieldTypeArray,
+					ElementType: FieldTypeObject,
+					ElementFields: []FieldSchema{
+						{Name: "y", Type: FieldTypeString},
+					},
+				},
+			},
+		},
 	})
 }
 
@@ -309,6 +323,12 @@ func TestNestedSchemaScopeAudit_AllDialects(t *testing.T) {
 			valueRoot:                    true,
 			want:                         []string{"elem.transactions", "elem1.method.type"},
 			rejectGoogleNestedArrayValue: true,
+		},
+		{
+			name:     "some over dynamic source normalizes concise and explicit nested object arrays",
+			logic:    `{"some":[{"if":[{"var":"useBackup"},{"var":"parentGroupA"},{"var":"parentGroupExplicit"}]},{"some":[{"var":"children"},{"==":[{"var":"y"},"ok"]}]}]}`,
+			want:     []string{"CASE WHEN useBackup IS TRUE THEN parentGroupA ELSE parentGroupExplicit END", "elem.children", "elem1.y ="},
+			paramLen: 1,
 		},
 		{
 			name:     "some over dynamic if compatible array sources validates scoped enum",
