@@ -1044,8 +1044,8 @@ func (c *ComparisonOperator) partitionDefaultedFieldArrayMembershipItems(
 	return fieldItems, defaultItems, true
 }
 
-func (c *ComparisonOperator) arrayMembershipItemSQLs(items []interface{}, pc *params.ParamCollector) ([]string, error) {
-	values := make([]string, 0, len(items))
+func (c *ComparisonOperator) arrayMembershipItemSQLs(items []interface{}, pc *params.ParamCollector) ([]arrayLiteralMembershipItemSQL, error) {
+	values := make([]arrayLiteralMembershipItemSQL, 0, len(items))
 	for _, item := range items {
 		var (
 			valueSQL string
@@ -1059,7 +1059,7 @@ func (c *ComparisonOperator) arrayMembershipItemSQLs(items []interface{}, pc *pa
 		if err != nil {
 			return nil, fmt.Errorf("invalid array element: %w", err)
 		}
-		values = append(values, valueSQL)
+		values = append(values, newArrayLiteralMembershipItemSQL(item, valueSQL))
 	}
 	return values, nil
 }

@@ -81,25 +81,74 @@ func nullSafeArrayMemberEqualitySQL(memberSQL, valueSQL string) string {
 	)
 }
 
-func arrayLiteralMembershipSQL(valueSQL string, itemSQLs []string) string {
-	nonNullItems := make([]string, 0, len(itemSQLs))
+type arrayLiteralMembershipItemSQL struct {
+	sql          string
+	nullLiteral  bool
+	nullableExpr bool
+}
+
+func newArrayLiteralMembershipItemSQL(original interface{}, sql string) arrayLiteralMembershipItemSQL {
+	item := arrayLiteralMembershipItemSQL{
+		sql:         sql,
+		nullLiteral: strings.EqualFold(strings.TrimSpace(sql), sqlNull),
+	}
+	if item.nullLiteral {
+		return item
+	}
+	if arrayLiteralMembershipItemNeedsNullSafeEquality(original) {
+		item.nullableExpr = true
+	}
+	return item
+}
+
+func arrayLiteralMembershipItemNeedsNullSafeEquality(value interface{}) bool {
+	switch v := value.(type) {
+	case ProcessedValue:
+		return v.IsSQL && !typedNullExpression(v)
+	case map[string]interface{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func arrayLiteralMembershipSQL(valueSQL string, itemSQLs []arrayLiteralMembershipItemSQL) string {
+	nonNullLiteralItems := make([]string, 0, len(itemSQLs))
+	nullableExpressionPredicates := make([]string, 0)
 	hasNull := false
 	for _, itemSQL := range itemSQLs {
-		if strings.EqualFold(strings.TrimSpace(itemSQL), sqlNull) {
+		switch {
+		case itemSQL.nullLiteral:
 			hasNull = true
-			continue
+		case itemSQL.nullableExpr:
+			nullableExpressionPredicates = append(nullableExpressionPredicates,
+				nullSafeArrayMemberEqualitySQL(itemSQL.sql, valueSQL))
+		default:
+			nonNullLiteralItems = append(nonNullLiteralItems, itemSQL.sql)
 		}
-		nonNullItems = append(nonNullItems, itemSQL)
 	}
 
-	switch {
-	case hasNull && len(nonNullItems) == 0:
-		return fmt.Sprintf("%s IS NULL", valueSQL)
-	case hasNull:
-		return fmt.Sprintf("(%s IS NULL OR %s IN (%s))", valueSQL, valueSQL, strings.Join(nonNullItems, ", "))
-	default:
-		return fmt.Sprintf("%s IN (%s)", valueSQL, strings.Join(nonNullItems, ", "))
+	if len(nullableExpressionPredicates) == 0 {
+		switch {
+		case hasNull && len(nonNullLiteralItems) == 0:
+			return fmt.Sprintf("%s IS NULL", valueSQL)
+		case hasNull:
+			return fmt.Sprintf("(%s IS NULL OR %s IN (%s))", valueSQL, valueSQL, strings.Join(nonNullLiteralItems, ", "))
+		default:
+			return fmt.Sprintf("%s IN (%s)", valueSQL, strings.Join(nonNullLiteralItems, ", "))
+		}
 	}
+
+	predicates := make([]string, 0, len(nullableExpressionPredicates)+2)
+	predicates = append(predicates, nullableExpressionPredicates...)
+	if hasNull {
+		predicates = append(predicates, fmt.Sprintf("%s IS NULL", valueSQL))
+	}
+	if len(nonNullLiteralItems) > 0 {
+		predicates = append(predicates, fmt.Sprintf("%s IN (%s)", valueSQL, strings.Join(nonNullLiteralItems, ", ")))
+	}
+
+	return combineOrPredicates(predicates)
 }
 
 // strposFunc returns the appropriate string position function call based on dialect.
