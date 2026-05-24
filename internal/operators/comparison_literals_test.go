@@ -112,6 +112,97 @@ func TestFoldLiteralComparison_OverflowJSONNumbersAreUnknown(t *testing.T) {
 	}
 }
 
+func TestFoldLiteralComparison_OrderingUsesJSONLogicCoercion(t *testing.T) {
+	tests := []struct {
+		name      string
+		operator  string
+		args      []interface{}
+		want      bool
+		wantKnown bool
+	}{
+		{
+			name:      "string number coerces for mixed comparison",
+			operator:  OpLessThan,
+			args:      []interface{}{"2", float64(10)},
+			want:      true,
+			wantKnown: true,
+		},
+		{
+			name:      "number string coerces false",
+			operator:  OpLessThan,
+			args:      []interface{}{float64(10), "2"},
+			wantKnown: true,
+		},
+		{
+			name:      "invalid numeric string folds false",
+			operator:  OpLessThan,
+			args:      []interface{}{"abc", float64(10)},
+			wantKnown: true,
+		},
+		{
+			name:      "string string remains lexical",
+			operator:  OpLessThan,
+			args:      []interface{}{"2", "10"},
+			wantKnown: true,
+		},
+		{
+			name:      "null coerces to zero",
+			operator:  OpLessThan,
+			args:      []interface{}{nil, float64(1)},
+			want:      true,
+			wantKnown: true,
+		},
+		{
+			name:      "boolean coerces to number",
+			operator:  OpLessThan,
+			args:      []interface{}{true, "2"},
+			want:      true,
+			wantKnown: true,
+		},
+		{
+			name:      "chained ordering folds all adjacent pairs",
+			operator:  OpLessThan,
+			args:      []interface{}{"1", "2", float64(3)},
+			want:      true,
+			wantKnown: true,
+		},
+		{
+			name:      "chained ordering stops on false pair",
+			operator:  OpLessThan,
+			args:      []interface{}{"2", "10", float64(20)},
+			wantKnown: true,
+		},
+		{
+			name:      "inclusive chained ordering folds booleans",
+			operator:  OpLessThanOrEqual,
+			args:      []interface{}{nil, false, true, "2"},
+			want:      true,
+			wantKnown: true,
+		},
+		{
+			name:      "dynamic operand remains unknown",
+			operator:  OpLessThan,
+			args:      []interface{}{map[string]interface{}{OpVar: "x"}, float64(10)},
+			wantKnown: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, known, err := FoldLiteralComparison(tt.operator, tt.args)
+			if err != nil {
+				t.Fatalf("FoldLiteralComparison() error = %v", err)
+			}
+			if known != tt.wantKnown {
+				t.Fatalf("FoldLiteralComparison() known = %v, want %v", known, tt.wantKnown)
+			}
+			if got != tt.want {
+				t.Fatalf("FoldLiteralComparison() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFoldLiteralComparison_ArrayMembershipUsesStrictEquality(t *testing.T) {
 	tests := []struct {
 		name string

@@ -56,6 +56,26 @@ func (c *ComparisonOperator) validateOrderingOperandsCompatible(left, right inte
 	)
 }
 
+func shouldFoldLiteralOrderingBeforeValidation(args []interface{}) bool {
+	for i := 0; i < len(args)-1; i++ {
+		leftKind, leftKnown := literalOrderingCompatibilityKind(args[i])
+		rightKind, rightKnown := literalOrderingCompatibilityKind(args[i+1])
+		if leftKnown && rightKnown && leftKind != rightKind {
+			return true
+		}
+	}
+	return false
+}
+
+func literalOrderingCompatibilityKind(value interface{}) (ExpressionType, bool) {
+	literal, ok := equalityLiteralValue(value)
+	if !ok || equalityLiteralKind(literal) == "" {
+		return ExpressionTypeUnknown, false
+	}
+	kind, known, err := literalOrderingKind(numericOrderingOperand(literal))
+	return kind, known && err == nil
+}
+
 func (c *ComparisonOperator) orderingOperandKind(value interface{}, operator string) (ExpressionType, bool, error) {
 	if err := c.validateOrderingOperand(value, operator); err != nil {
 		return ExpressionTypeUnknown, false, err

@@ -31,8 +31,16 @@ func TestOrderingComparisonsRejectKnownIncompatibleOperandsAllDialects(t *testin
 			logic: `{">":[{"cat":["a","b"]},1]}`,
 		},
 		{
+			name:  "numeric-looking string expression versus number literal",
+			logic: `{"<":[{"cat":["2"]},10]}`,
+		},
+		{
 			name:  "number value expression versus string value expression",
 			logic: `{">":[{"+":[1,2]},{"cat":["x"]}]}`,
+		},
+		{
+			name:  "number value expression versus numeric-looking string expression",
+			logic: `{"<":[{"+":[1,2]},{"cat":["10"]}]}`,
 		},
 	}
 

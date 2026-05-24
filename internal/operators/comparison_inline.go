@@ -738,6 +738,13 @@ func (c *ComparisonOperator) handleChainedComparison(operator string, args []int
 		return "", fmt.Errorf("chained comparison requires at least 2 arguments")
 	}
 
+	if shouldFoldLiteralOrderingBeforeValidation(args) {
+		truthy, known, err := FoldLiteralComparison(operator, args)
+		if known || err != nil {
+			return boolSQL(truthy), err
+		}
+	}
+
 	// Validate operands for ordering comparisons
 	for _, arg := range args {
 		if err := c.validateOrderingOperand(arg, operator); err != nil {

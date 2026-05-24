@@ -4290,6 +4290,41 @@ func TestTranspileValue_LiteralComparisonsEmitFoldedBooleanValuesAllDialects(t *
 			want:  "TRUE",
 		},
 		{
+			name:  "string number ordering coerces true",
+			logic: `{"<":["2",10]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "number string ordering coerces false",
+			logic: `{"<":[10,"2"]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "invalid string number ordering folds false",
+			logic: `{"<":["abc",10]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "string string ordering stays lexical",
+			logic: `{"<":["2","10"]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "chained literal ordering folds all pairs",
+			logic: `{"<":["1","2",3]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "chained literal ordering folds false pair",
+			logic: `{"<":["2","10",20]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "inclusive chained literal ordering coerces null and booleans",
+			logic: `{"<=":[null,false,true,"2"]}`,
+			want:  "TRUE",
+		},
+		{
 			name:  "loose equality coerces number string",
 			logic: `{"==":[5,"5"]}`,
 			want:  "TRUE",

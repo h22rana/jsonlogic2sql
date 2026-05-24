@@ -13,12 +13,11 @@ import (
 // operands are fully known literals. The boolean return after the result tells
 // callers whether folding was possible.
 func FoldLiteralComparison(operator string, args []interface{}) (bool, bool, error) {
-	if len(args) != 2 {
-		return false, false, nil
-	}
-
 	switch operator {
 	case OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual:
+		if len(args) != 2 {
+			return false, false, nil
+		}
 		left, leftOK := equalityLiteralValue(args[0])
 		right, rightOK := equalityLiteralValue(args[1])
 		if !leftOK || !rightOK {
@@ -48,25 +47,45 @@ func FoldLiteralComparison(operator string, args []interface{}) (bool, bool, err
 		}
 		return equal, true, nil
 	case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual:
-		return foldLiteralOrderingComparison(operator, args[0], args[1])
+		truthy, known := foldLiteralOrderingComparisonChain(operator, args)
+		return truthy, known, nil
 	case OpIn:
+		if len(args) != 2 {
+			return false, false, nil
+		}
 		return foldLiteralInComparison(args[0], args[1])
 	default:
 		return false, false, nil
 	}
 }
 
-func foldLiteralOrderingComparison(operator string, leftArg, rightArg interface{}) (bool, bool, error) {
+func foldLiteralOrderingComparisonChain(operator string, args []interface{}) (bool, bool) {
+	if len(args) < 2 {
+		return false, false
+	}
+	for i := 0; i < len(args)-1; i++ {
+		truthy, known := foldLiteralOrderingComparison(operator, args[i], args[i+1])
+		if !known {
+			return false, false
+		}
+		if !truthy {
+			return false, true
+		}
+	}
+	return true, true
+}
+
+func foldLiteralOrderingComparison(operator string, leftArg, rightArg interface{}) (bool, bool) {
 	left, leftOK := equalityLiteralValue(leftArg)
 	right, rightOK := equalityLiteralValue(rightArg)
 	if !leftOK || !rightOK {
-		return false, false, nil
+		return false, false
 	}
 	if equalityLiteralKind(left) == "" || equalityLiteralKind(right) == "" {
-		return false, false, nil
+		return false, false
 	}
 	if hasOverflowedJSONNumberLiteral(left, right) {
-		return false, false, nil
+		return false, false
 	}
 
 	if leftString, ok := left.(string); ok {
@@ -74,13 +93,13 @@ func foldLiteralOrderingComparison(operator string, leftArg, rightArg interface{
 			cmp := strings.Compare(leftString, rightString)
 			switch operator {
 			case OpGreaterThan:
-				return cmp > 0, true, nil
+				return cmp > 0, true
 			case OpGreaterThanOrEqual:
-				return cmp >= 0, true, nil
+				return cmp >= 0, true
 			case OpLessThan:
-				return cmp < 0, true, nil
+				return cmp < 0, true
 			case OpLessThanOrEqual:
-				return cmp <= 0, true, nil
+				return cmp <= 0, true
 			}
 		}
 	}
@@ -88,23 +107,23 @@ func foldLiteralOrderingComparison(operator string, leftArg, rightArg interface{
 	leftNumber, leftHandled, leftValid := jsNumberFromOrderingLiteral(left)
 	rightNumber, rightHandled, rightValid := jsNumberFromOrderingLiteral(right)
 	if !leftHandled || !rightHandled {
-		return false, false, nil
+		return false, false
 	}
 	if !leftValid || !rightValid {
-		return false, true, nil
+		return false, true
 	}
 
 	switch operator {
 	case OpGreaterThan:
-		return leftNumber.float > rightNumber.float, true, nil
+		return leftNumber.float > rightNumber.float, true
 	case OpGreaterThanOrEqual:
-		return leftNumber.float >= rightNumber.float, true, nil
+		return leftNumber.float >= rightNumber.float, true
 	case OpLessThan:
-		return leftNumber.float < rightNumber.float, true, nil
+		return leftNumber.float < rightNumber.float, true
 	case OpLessThanOrEqual:
-		return leftNumber.float <= rightNumber.float, true, nil
+		return leftNumber.float <= rightNumber.float, true
 	default:
-		return false, false, nil
+		return false, false
 	}
 }
 
