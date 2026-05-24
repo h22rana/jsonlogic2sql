@@ -157,7 +157,7 @@ func validateArrayVarDefaultElementsForField(schema SchemaProvider, fieldName st
 		if actual == ExpressionTypeNull {
 			continue
 		}
-		if expected == ExpressionTypeString && schemaArrayElementType(schema, fieldName) == "enum" {
+		if expected == ExpressionTypeString && schemaArrayElementType(schema, fieldName) == SchemaTypeEnum {
 			strVal, ok := elem.(string)
 			if !ok {
 				return fmt.Errorf("default value for array field '%s' element %d has incompatible type %s; expected string or null",
@@ -172,7 +172,7 @@ func validateArrayVarDefaultElementsForField(schema SchemaProvider, fieldName st
 			return fmt.Errorf("default value for array field '%s' element %d has incompatible type %s; expected %s or null",
 				fieldName, i, expressionTypeName(actual), expressionTypeName(expected))
 		}
-		if elemSchemaType == "integer" {
+		if elemSchemaType == SchemaTypeInteger {
 			if err := validateIntegerArrayDefaultElement(fieldName, i, elem); err != nil {
 				return err
 			}
@@ -316,11 +316,11 @@ func schemaExpressionType(schema SchemaProvider, fieldName string) ExpressionTyp
 // ToSQL converts a data operator to SQL.
 func (d *DataOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	switch operator {
-	case "var":
+	case OpVar:
 		return d.handleVar(args)
-	case "missing":
+	case OpMissing:
 		return d.handleMissing(args)
-	case "missing_some":
+	case OpMissingSome:
 		return d.handleMissingSome(args)
 	default:
 		return "", fmt.Errorf("unsupported data operator: %s", operator)
@@ -445,7 +445,7 @@ func (d *DataOperator) handleMissing(args []interface{}) (string, error) {
 		}
 
 		// Check if ANY of the fields are missing (OR condition)
-		return fmt.Sprintf("(%s)", strings.Join(nullConditions, " OR ")), nil
+		return fmt.Sprintf("(%s)", strings.Join(nullConditions, sqlOrJoiner)), nil
 	}
 
 	return "", fmt.Errorf("missing operator argument must be a string or array of strings")
@@ -475,7 +475,7 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 
 	threshold := missingSomeMissingThreshold(minCount, len(varNames))
 	if threshold > len(varNames) {
-		return "FALSE", nil
+		return sqlFalse, nil
 	}
 
 	// missing_some returns the missing field list only when fewer than minCount
@@ -498,7 +498,7 @@ func (d *DataOperator) handleMissingSome(args []interface{}) (string, error) {
 			}
 			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
 		}
-		return fmt.Sprintf("(%s)", strings.Join(nullConditions, " AND ")), nil
+		return fmt.Sprintf("(%s)", strings.Join(nullConditions, sqlAndJoiner)), nil
 	}
 
 	nullCount := strings.Join(caseStatements, " + ")
@@ -659,11 +659,11 @@ func (d *DataOperator) valueToSQL(value interface{}) (string, error) {
 		return fmt.Sprintf("%v", v), nil
 	case bool:
 		if v {
-			return "TRUE", nil
+			return sqlTrue, nil
 		}
-		return "FALSE", nil
+		return sqlFalse, nil
 	case nil:
-		return "NULL", nil
+		return sqlNull, nil
 	default:
 		return "", fmt.Errorf("unsupported value type: %T", value)
 	}
@@ -678,11 +678,11 @@ func (d *DataOperator) ValueToSQL(value interface{}) (string, error) {
 // ToSQLParam is the parameterized variant of ToSQL. Keep in sync.
 func (d *DataOperator) ToSQLParam(operator string, args []interface{}, pc *params.ParamCollector) (string, error) {
 	switch operator {
-	case "var":
+	case OpVar:
 		return d.handleVarParam(args, pc)
-	case "missing":
+	case OpMissing:
 		return d.handleMissing(args)
-	case "missing_some":
+	case OpMissingSome:
 		return d.handleMissingSomeParam(args, pc)
 	default:
 		return "", fmt.Errorf("unsupported data operator: %s", operator)
@@ -779,7 +779,7 @@ func (d *DataOperator) handleMissingSomeParam(args []interface{}, pc *params.Par
 
 	threshold := missingSomeMissingThreshold(minCount, len(varNames))
 	if threshold > len(varNames) {
-		return "FALSE", nil
+		return sqlFalse, nil
 	}
 
 	var caseStatements []string
@@ -799,7 +799,7 @@ func (d *DataOperator) handleMissingSomeParam(args []interface{}, pc *params.Par
 			}
 			nullConditions = append(nullConditions, fmt.Sprintf("%s IS NULL", columnName))
 		}
-		return fmt.Sprintf("(%s)", strings.Join(nullConditions, " AND ")), nil
+		return fmt.Sprintf("(%s)", strings.Join(nullConditions, sqlAndJoiner)), nil
 	}
 
 	nullCount := strings.Join(caseStatements, " + ")
@@ -839,11 +839,11 @@ func (d *DataOperator) valueToSQLParam(value interface{}, pc *params.ParamCollec
 		return pc.Add(v), nil
 	case bool:
 		if v {
-			return "TRUE", nil
+			return sqlTrue, nil
 		}
-		return "FALSE", nil
+		return sqlFalse, nil
 	case nil:
-		return "NULL", nil
+		return sqlNull, nil
 	default:
 		return "", fmt.Errorf("unsupported value type: %T", value)
 	}

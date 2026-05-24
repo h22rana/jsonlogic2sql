@@ -11,9 +11,9 @@ import (
 // ToSQLParam is the parameterized variant of ToSQL.
 func (s *StringOperator) ToSQLParam(operator string, args []interface{}, pc *params.ParamCollector) (string, error) {
 	switch operator {
-	case "cat":
+	case OpCat:
 		return s.handleConcatenationParam(args, pc)
-	case "substr":
+	case OpSubstr:
 		if len(args) == 0 {
 			return "", fmt.Errorf("string operator %s requires at least one argument", operator)
 		}
@@ -183,14 +183,15 @@ func (s *StringOperator) valueToSQLParam(value interface{}, pc *params.ParamColl
 		if len(expr) == 1 {
 			for op, args := range expr {
 				switch op {
-				case "+", "-", "*", "/", "%":
+				case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo:
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("arithmetic operation requires array of arguments")
 					}
 					numOp := NewNumericOperator(s.config)
 					return numOp.ToSQLParam(op, argsSlice, pc)
-				case ">", ">=", "<", "<=", "==", "===", "!=", "!==":
+				case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual,
+					OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual:
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("comparison operation requires array of arguments")
@@ -201,58 +202,58 @@ func (s *StringOperator) valueToSQLParam(value interface{}, pc *params.ParamColl
 						return "", err
 					}
 					return parenthesizeComparisonSQL(sql), nil
-				case "if":
+				case OpIf:
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("if operation requires array of arguments")
 					}
 					logOp := NewLogicalOperator(s.config)
-					return logOp.ToSQLParam("if", argsSlice, pc)
-				case "substr":
+					return logOp.ToSQLParam(OpIf, argsSlice, pc)
+				case OpSubstr:
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("substr requires array of arguments")
 					}
 					return s.handleSubstringParam(argsSlice, pc)
-				case "cat":
+				case OpCat:
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("cat requires array of arguments")
 					}
 					return s.handleConcatenationParam(argsSlice, pc)
-				case "max", "min":
+				case OpMax, OpMin:
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("%s requires array of arguments", op)
 					}
 					numOp := NewNumericOperator(s.config)
 					return numOp.ToSQLParam(op, argsSlice, pc)
-				case "and", "or":
+				case OpAnd, OpOr:
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("%s requires array of arguments", op)
 					}
 					logOp := NewLogicalOperator(s.config)
 					return logOp.ToSQLParam(op, argsSlice, pc)
-				case "!":
+				case OpNot:
 					argsSlice, ok := args.([]interface{})
 					if ok {
 						logOp := NewLogicalOperator(s.config)
-						return logOp.ToSQLParam("!", argsSlice, pc)
+						return logOp.ToSQLParam(OpNot, argsSlice, pc)
 					}
 					logOp := NewLogicalOperator(s.config)
-					return logOp.ToSQLParam("!", []interface{}{args}, pc)
-				case "!!":
+					return logOp.ToSQLParam(OpNot, []interface{}{args}, pc)
+				case OpDoubleBang:
 					argsSlice, ok := args.([]interface{})
 					if ok {
 						logOp := NewLogicalOperator(s.config)
-						return logOp.ToSQLParam("!!", argsSlice, pc)
+						return logOp.ToSQLParam(OpDoubleBang, argsSlice, pc)
 					}
 					logOp := NewLogicalOperator(s.config)
-					return logOp.ToSQLParam("!!", []interface{}{args}, pc)
+					return logOp.ToSQLParam(OpDoubleBang, []interface{}{args}, pc)
 				default:
 					if s.config != nil && s.config.HasParamExpressionParser() {
-						return s.config.ParseExpressionParam(expr, "$", pc)
+						return s.config.ParseExpressionParam(expr, jsonPathRoot, pc)
 					}
 					return "", fmt.Errorf("unsupported expression type in string operation: %s", op)
 				}

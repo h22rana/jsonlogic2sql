@@ -141,15 +141,19 @@ func (s *StringOperator) inferExpressionShape(value interface{}) (ExpressionKind
 			switch op {
 			case OpVar:
 				return ExpressionKindValue, s.varExpressionType(args)
-			case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", OpAll, OpSome, OpNone:
+			case OpMissing, OpMissingSome,
+				OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual,
+				OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual,
+				OpIn, OpNot, OpDoubleBang,
+				OpAll, OpSome, OpNone:
 				return ExpressionKindPredicate, ExpressionTypeBoolean
-			case "and", "or":
+			case OpAnd, OpOr:
 				return ExpressionKindPredicate, ExpressionTypeBoolean
-			case "+", "-", "*", "/", "%", "max", "min":
+			case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo, OpMax, OpMin:
 				return ExpressionKindValue, ExpressionTypeNumber
-			case "cat", "substr":
+			case OpCat, OpSubstr:
 				return ExpressionKindValue, ExpressionTypeString
-			case "if":
+			case OpIf:
 				return ExpressionKindValue, s.inferIfExpressionType(args)
 			}
 		}
@@ -240,9 +244,9 @@ func (s *StringOperator) varExpressionType(args interface{}) ExpressionType {
 // ToSQL converts a string operation to SQL.
 func (s *StringOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	switch operator {
-	case "cat":
+	case OpCat:
 		return s.handleConcatenation(args)
-	case "substr":
+	case OpSubstr:
 		if len(args) == 0 {
 			return "", fmt.Errorf("string operator %s requires at least one argument", operator)
 		}
@@ -471,54 +475,55 @@ func (s *StringOperator) valueToSQL(value interface{}) (string, error) {
 		if len(expr) == 1 {
 			for op, args := range expr {
 				switch op {
-				case "+", "-", "*", "/", "%":
+				case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo:
 					// Handle arithmetic operations
 					return s.processArithmeticExpression(op, args)
-				case ">", ">=", "<", "<=", "==", "===", "!=", "!==":
+				case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual,
+					OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual:
 					// Handle comparison operations
 					return s.processComparisonExpression(op, args)
-				case "if":
+				case OpIf:
 					// Handle conditional expressions
 					return s.processIfExpression(args)
-				case "substr":
+				case OpSubstr:
 					// Handle nested substr operations
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("substr requires array of arguments")
 					}
 					return s.handleSubstring(argsSlice)
-				case "cat":
+				case OpCat:
 					// Handle nested cat operations
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("cat requires array of arguments")
 					}
 					return s.handleConcatenation(argsSlice)
-				case "max", "min":
+				case OpMax, OpMin:
 					// Handle max/min operations
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("%s requires array of arguments", op)
 					}
 					return s.processMaxMinExpression(op, argsSlice)
-				case "and", "or":
+				case OpAnd, OpOr:
 					// Handle logical operations
 					argsSlice, ok := args.([]interface{})
 					if !ok {
 						return "", fmt.Errorf("%s requires array of arguments", op)
 					}
 					return s.processLogicalExpression(op, argsSlice)
-				case "!":
+				case OpNot:
 					// Handle NOT operation
 					return s.processNotExpression(args)
-				case "!!":
+				case OpDoubleBang:
 					// Handle boolean coercion
 					return s.processBooleanCoercion(args)
 				default:
 					// Try to use the expression parser callback for unknown operators
 					// This enables support for custom operators in nested contexts
 					if s.config != nil && s.config.HasExpressionParser() {
-						return s.config.ParseExpression(expr, "$")
+						return s.config.ParseExpression(expr, jsonPathRoot)
 					}
 					return "", fmt.Errorf("unsupported expression type in string operation: %s", op)
 				}
@@ -701,15 +706,15 @@ func (s *StringOperator) processArithmeticExpression(op string, args interface{}
 
 	// Generate SQL based on operation
 	switch op {
-	case "+":
+	case OpAdd:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " + ")), nil
-	case "-":
+	case OpSubtract:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " - ")), nil
-	case "*":
+	case OpMultiply:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " * ")), nil
-	case "/":
+	case OpDivide:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " / ")), nil
-	case "%":
+	case OpModulo:
 		if len(operands) != 2 {
 			return "", fmt.Errorf("modulo requires exactly 2 arguments")
 		}
@@ -833,9 +838,9 @@ func (s *StringOperator) processLogicalExpression(op string, args []interface{})
 		operands[i] = operand
 	}
 
-	sqlOp := " AND "
+	sqlOp := sqlAndJoiner
 	if op == "or" {
-		sqlOp = " OR "
+		sqlOp = sqlOrJoiner
 	}
 
 	return fmt.Sprintf("(%s)", strings.Join(operands, sqlOp)), nil

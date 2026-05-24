@@ -211,12 +211,12 @@ func jsonLogicStringLiteral(value interface{}) (string, bool, error) {
 	case string:
 		return v, true, nil
 	case nil:
-		return "null", true, nil
+		return jsonLogicStringNull, true, nil
 	case bool:
 		if v {
-			return "true", true, nil
+			return jsonLogicStringTrue, true, nil
 		}
-		return "false", true, nil
+		return jsonLogicStringFalse, true, nil
 	default:
 		if literal, handled, valid := stringFieldNumericLiteralString(value); handled {
 			if !valid {

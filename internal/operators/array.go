@@ -63,7 +63,7 @@ func NewArrayOperator(config *OperatorConfig) *ArrayOperator {
 		scopeDepth:     0,
 		visibleElems:   []string{ElemVar},
 		visibleScopes:  []string{""},
-		exprPath:       "$",
+		exprPath:       jsonPathRoot,
 		valueScope:     false,
 		lambdaScope:    arrayLambdaScopeNone,
 		valueSemantics: false,
@@ -77,19 +77,19 @@ func (a *ArrayOperator) ToSQL(operator string, args []interface{}) (string, erro
 	}
 
 	switch operator {
-	case "map":
+	case OpMap:
 		return a.handleMap(args)
-	case "filter":
+	case OpFilter:
 		return a.handleFilter(args)
-	case "reduce":
+	case OpReduce:
 		return a.handleReduce(args)
-	case "all":
+	case OpAll:
 		return a.handleAll(args)
-	case "some":
+	case OpSome:
 		return a.handleSome(args)
-	case "none":
+	case OpNone:
 		return a.handleNone(args)
-	case "merge":
+	case OpMerge:
 		return a.handleMerge(args)
 	default:
 		return "", fmt.Errorf("unsupported array operator: %s", operator)

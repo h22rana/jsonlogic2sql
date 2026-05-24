@@ -36,7 +36,7 @@ func (a *ArrayOperator) withChildScope() *ArrayOperator {
 
 func (a *ArrayOperator) withPath(path string) *ArrayOperator {
 	if path == "" {
-		path = "$"
+		path = jsonPathRoot
 	}
 	child := a.clone()
 	child.exprPath = path
@@ -208,7 +208,7 @@ func (a *ArrayOperator) currentSchemaScopes() []string {
 
 func (a *ArrayOperator) currentPath() string {
 	if a == nil || a.exprPath == "" {
-		return "$"
+		return jsonPathRoot
 	}
 	return a.exprPath
 }
@@ -229,13 +229,13 @@ func (a *ArrayOperator) schemaExpressionType(fieldName string) ExpressionType {
 		return ExpressionTypeUnknown
 	}
 	switch a.schema().GetFieldType(fieldName) {
-	case "boolean":
+	case SchemaTypeBoolean:
 		return ExpressionTypeBoolean
-	case "string", "enum":
+	case SchemaTypeString, SchemaTypeEnum:
 		return ExpressionTypeString
-	case "integer", "number":
+	case SchemaTypeInteger, SchemaTypeNumber:
 		return ExpressionTypeNumber
-	case "array":
+	case SchemaTypeArray:
 		return ExpressionTypeArray
 	case objectFieldType:
 		return ExpressionTypeObject
@@ -364,7 +364,7 @@ func (a *ArrayOperator) resolveFieldNamesInScopes(scopePaths []string, fieldName
 			if typ := schema.GetFieldType(resolved); typ != firstType {
 				return nil, fmt.Errorf("field '%s' has incompatible schema types across array source scopes", fieldName)
 			}
-			if firstType == "array" && schemaArrayElementType(schema, resolved) != firstElementType {
+			if firstType == SchemaTypeArray && schemaArrayElementType(schema, resolved) != firstElementType {
 				return nil, fmt.Errorf("field '%s' has incompatible array element types across array source scopes", fieldName)
 			}
 			if !sameStringSet(schema.GetAllowedValues(resolved), firstAllowed) {
@@ -528,34 +528,34 @@ func inferLiteralValueExpressionType(expr interface{}) ExpressionType {
 func expressionTypeName(typ ExpressionType) string {
 	switch typ {
 	case ExpressionTypeNull:
-		return "null"
+		return literalKindNull
 	case ExpressionTypeBoolean:
-		return "boolean"
+		return SchemaTypeBoolean
 	case ExpressionTypeString:
-		return "string"
+		return SchemaTypeString
 	case ExpressionTypeNumber:
-		return "number"
+		return SchemaTypeNumber
 	case ExpressionTypeArray:
-		return "array"
+		return SchemaTypeArray
 	case ExpressionTypeObject:
 		return objectFieldType
 	case ExpressionTypeUnknown:
-		return "unknown"
+		return expressionTypeNameUnknown
 	default:
-		return "unknown"
+		return expressionTypeNameUnknown
 	}
 }
 
 func schemaFieldTypeExpressionType(fieldType string) ExpressionType {
 	fieldType = normalizeSchemaType(fieldType)
 	switch fieldType {
-	case "boolean":
+	case SchemaTypeBoolean:
 		return ExpressionTypeBoolean
-	case "string", "enum":
+	case SchemaTypeString, SchemaTypeEnum:
 		return ExpressionTypeString
-	case "integer", "number":
+	case SchemaTypeInteger, SchemaTypeNumber:
 		return ExpressionTypeNumber
-	case "array":
+	case SchemaTypeArray:
 		return ExpressionTypeArray
 	case objectFieldType:
 		return ExpressionTypeObject
@@ -916,7 +916,7 @@ func (a *ArrayOperator) mergeValueToArraySQL(value typedValueSQL, common mergeEl
 }
 
 func (a *ArrayOperator) typedNullSQL(typ ExpressionType, schemaType ...string) string {
-	if typ == ExpressionTypeNumber && firstSchemaType(schemaType...) == "integer" {
+	if typ == ExpressionTypeNumber && firstSchemaType(schemaType...) == SchemaTypeInteger {
 		return a.typedIntegerNullSQL()
 	}
 	switch typ {
@@ -954,9 +954,9 @@ func (a *ArrayOperator) typedNullSQL(typ ExpressionType, schemaType ...string) s
 			return "CAST(NULL AS FLOAT64)"
 		}
 	case ExpressionTypeUnknown, ExpressionTypeNull, ExpressionTypeArray, ExpressionTypeObject:
-		return "NULL"
+		return sqlNull
 	}
-	return "NULL"
+	return sqlNull
 }
 
 func (a *ArrayOperator) typedIntegerNullSQL() string {
@@ -976,21 +976,21 @@ func (a *ArrayOperator) typedIntegerNullSQL() string {
 func arrayExpressionTypeName(typ ExpressionType) string {
 	switch typ {
 	case ExpressionTypeNull:
-		return "null"
+		return literalKindNull
 	case ExpressionTypeBoolean:
-		return "boolean"
+		return SchemaTypeBoolean
 	case ExpressionTypeString:
-		return "string"
+		return SchemaTypeString
 	case ExpressionTypeNumber:
-		return "number"
+		return SchemaTypeNumber
 	case ExpressionTypeArray:
-		return "array"
+		return SchemaTypeArray
 	case ExpressionTypeObject:
 		return objectFieldType
 	case ExpressionTypeUnknown:
-		return "unknown"
+		return expressionTypeNameUnknown
 	default:
-		return "unknown"
+		return expressionTypeNameUnknown
 	}
 }
 

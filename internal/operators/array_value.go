@@ -179,7 +179,7 @@ func (a *ArrayOperator) localTruthinessExpressionSQL(expr interface{}, sql, path
 	}
 	switch result.Type {
 	case ExpressionTypeNull:
-		return "FALSE", nil
+		return sqlFalse, nil
 	case ExpressionTypeBoolean:
 		return fmt.Sprintf("%s IS TRUE", result.SQL), nil
 	case ExpressionTypeString:

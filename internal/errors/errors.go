@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const jsonPathRoot = "$"
+
 // ErrorCode represents a specific error condition.
 // Codes are organized by category:
 //   - E001-E099: Structural/validation errors
@@ -243,7 +245,7 @@ func NewArrayNotAllowed(path string) *TranspileError {
 // BuildPath constructs a JSONPath string for a given operator and index.
 func BuildPath(parent, operator string, index int) string {
 	if parent == "" {
-		parent = "$"
+		parent = jsonPathRoot
 	}
 	if index >= 0 {
 		return parent + "." + operator + "[" + strconv.Itoa(index) + "]"
@@ -254,7 +256,7 @@ func BuildPath(parent, operator string, index int) string {
 // BuildArrayPath constructs a JSONPath string for an array index.
 func BuildArrayPath(parent string, index int) string {
 	if parent == "" {
-		parent = "$"
+		parent = jsonPathRoot
 	}
 	return parent + "[" + strconv.Itoa(index) + "]"
 }

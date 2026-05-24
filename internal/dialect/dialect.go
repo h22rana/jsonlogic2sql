@@ -11,6 +11,14 @@ import (
 type Dialect int
 
 const (
+	doubleQuoteIdentifier        = `"`
+	escapedDoubleQuoteIdentifier = `""`
+	backtickIdentifier           = "`"
+	escapedBacktickIdentifier    = "``"
+	identifierQuoteChars         = "`\"'"
+)
+
+const (
 	// DialectUnspecified is the zero value, indicating no dialect was set.
 	// This will cause an error if used - users must explicitly set a dialect.
 	DialectUnspecified Dialect = iota
@@ -118,7 +126,7 @@ func IsSafeIdentifierSegment(segment string) bool {
 // quotes, or single quotes. These characters are used for identifier quoting and
 // must not appear in raw variable names — the transpiler handles quoting automatically.
 func ContainsQuoteCharacters(segment string) bool {
-	return strings.ContainsAny(segment, "`\"'")
+	return strings.ContainsAny(segment, identifierQuoteChars)
 }
 
 // QuoteIdentifierSegment wraps a single identifier segment with dialect-appropriate
@@ -129,10 +137,10 @@ func QuoteIdentifierSegment(segment string, d Dialect) string {
 	//nolint:exhaustive // default uses backtick (safe for GoogleSQL family)
 	switch d {
 	case DialectPostgreSQL, DialectDuckDB:
-		escaped := strings.ReplaceAll(segment, `"`, `""`)
-		return `"` + escaped + `"`
+		escaped := strings.ReplaceAll(segment, doubleQuoteIdentifier, escapedDoubleQuoteIdentifier)
+		return doubleQuoteIdentifier + escaped + doubleQuoteIdentifier
 	default:
-		escaped := strings.ReplaceAll(segment, "`", "``")
-		return "`" + escaped + "`"
+		escaped := strings.ReplaceAll(segment, backtickIdentifier, escapedBacktickIdentifier)
+		return backtickIdentifier + escaped + backtickIdentifier
 	}
 }

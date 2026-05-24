@@ -33,6 +33,22 @@ type QueryParam struct {
 	Value interface{}
 }
 
+const (
+	paramNamePrefix             = "p"
+	namedPlaceholderPrefix      = "@"
+	positionalPlaceholderPrefix = "$"
+	questionPlaceholder         = "?"
+	clickHousePlaceholderOpen   = "{"
+	clickHousePlaceholderSep    = ":"
+	clickHousePlaceholderClose  = "}"
+	clickHouseTypeString        = "String"
+	clickHouseTypeInt64         = "Int64"
+	clickHouseTypeUInt64        = "UInt64"
+	clickHouseTypeFloat32       = "Float32"
+	clickHouseTypeFloat64       = "Float64"
+	clickHouseTypeBool          = "Bool"
+)
+
 // ParamCollector accumulates bind parameters and generates placeholder tokens
 // during parameterized SQL generation. It is created per-call and passed
 // through method parameters to ensure thread-safety.
@@ -87,20 +103,20 @@ func StyleForDialect(d dialect.Dialect) PlaceholderStyle {
 // placeholder token to embed in the SQL string.
 func (pc *ParamCollector) Add(value interface{}) string {
 	pc.count++
-	name := "p" + strconv.Itoa(pc.count)
+	name := paramNamePrefix + strconv.Itoa(pc.count)
 	pc.params = append(pc.params, QueryParam{Name: name, Value: value})
 
 	switch pc.style {
 	case PlaceholderNamed:
-		return "@" + name
+		return namedPlaceholderPrefix + name
 	case PlaceholderPositional:
-		return "$" + strconv.Itoa(pc.count)
+		return positionalPlaceholderPrefix + strconv.Itoa(pc.count)
 	case PlaceholderQuestion:
-		return "?"
+		return questionPlaceholder
 	case PlaceholderClickHouse:
 		return clickHousePlaceholder(name, value)
 	default:
-		return "@" + name
+		return namedPlaceholderPrefix + name
 	}
 }
 
@@ -415,37 +431,37 @@ func isPlaceholderBoundaryChar(ch byte, style PlaceholderStyle) bool {
 func FormatPlaceholderForParam(index int, param QueryParam, style PlaceholderStyle) string {
 	switch style {
 	case PlaceholderNamed:
-		return "@" + param.Name
+		return namedPlaceholderPrefix + param.Name
 	case PlaceholderPositional:
-		return "$" + strconv.Itoa(index)
+		return positionalPlaceholderPrefix + strconv.Itoa(index)
 	case PlaceholderQuestion:
-		return "?"
+		return questionPlaceholder
 	case PlaceholderClickHouse:
 		return clickHousePlaceholder(param.Name, param.Value)
 	default:
-		return "@" + param.Name
+		return namedPlaceholderPrefix + param.Name
 	}
 }
 
 func clickHousePlaceholder(name string, value interface{}) string {
-	return "{" + name + ":" + clickHouseParamType(value) + "}"
+	return clickHousePlaceholderOpen + name + clickHousePlaceholderSep + clickHouseParamType(value) + clickHousePlaceholderClose
 }
 
 func clickHouseParamType(value interface{}) string {
 	switch value.(type) {
 	case string:
-		return "String"
+		return clickHouseTypeString
 	case int, int8, int16, int32, int64:
-		return "Int64"
+		return clickHouseTypeInt64
 	case uint, uint8, uint16, uint32, uint64:
-		return "UInt64"
+		return clickHouseTypeUInt64
 	case float32:
-		return "Float32"
+		return clickHouseTypeFloat32
 	case float64:
-		return "Float64"
+		return clickHouseTypeFloat64
 	case bool:
-		return "Bool"
+		return clickHouseTypeBool
 	default:
-		return "String"
+		return clickHouseTypeString
 	}
 }

@@ -28,15 +28,15 @@ func NewLogicalOperator(config *OperatorConfig) *LogicalOperator {
 // ToSQL converts a logical operator to SQL.
 func (l *LogicalOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	switch operator {
-	case "and":
+	case OpAnd:
 		return l.handleAnd(args)
-	case "or":
+	case OpOr:
 		return l.handleOr(args)
-	case "!":
+	case OpNot:
 		return l.handleNot(args)
-	case "!!":
+	case OpDoubleBang:
 		return l.handleDoubleNot(args)
-	case "if":
+	case OpIf:
 		return l.handleIf(args)
 	default:
 		return "", fmt.Errorf("unsupported logical operator: %s", operator)
@@ -62,7 +62,7 @@ func (l *LogicalOperator) handleAnd(args []interface{}) (string, error) {
 		return conditions[0], nil
 	}
 
-	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND ")), nil
+	return fmt.Sprintf("(%s)", strings.Join(conditions, sqlAndJoiner)), nil
 }
 
 // handleOr converts or operator to SQL.
@@ -84,7 +84,7 @@ func (l *LogicalOperator) handleOr(args []interface{}) (string, error) {
 		return conditions[0], nil
 	}
 
-	return fmt.Sprintf("(%s)", strings.Join(conditions, " OR ")), nil
+	return fmt.Sprintf("(%s)", strings.Join(conditions, sqlOrJoiner)), nil
 }
 
 // handleNot converts ! operator to SQL.
@@ -114,9 +114,9 @@ func (l *LogicalOperator) handleDoubleNot(args []interface{}) (string, error) {
 		// This would typically use CARDINALITY or ARRAY_LENGTH depending on the SQL dialect
 		// Using a generic approach that works with most databases
 		if len(arr) == 0 {
-			return "FALSE", nil
+			return sqlFalse, nil
 		}
-		return "TRUE", nil
+		return sqlTrue, nil
 	}
 
 	// Try to extract field name for schema-required type checking
@@ -300,15 +300,16 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 		for operator, args := range obj {
 			// Handle different operator types
 			switch operator {
-			case "var", "missing":
+			case OpVar, OpMissing:
 				return l.dataOp.ToSQL(operator, []interface{}{args})
-			case "missing_some":
+			case OpMissingSome:
 				// missing_some expects args to be an array [minCount, [varNames]]
 				if arr, ok := args.([]interface{}); ok {
 					return l.dataOp.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("missing_some operator requires array arguments")
-			case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
+			case OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual,
+				OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual, OpIn:
 				if arr, ok := args.([]interface{}); ok {
 					// Process arguments to handle complex nested expressions
 					processedArgs, err := l.processArgs(arr)
@@ -318,31 +319,31 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 					return l.comparisonOp.ToSQL(operator, processedArgs)
 				}
 				return "", fmt.Errorf("comparison operator requires array arguments")
-			case "and", "or", "if":
+			case OpAnd, OpOr, OpIf:
 				if arr, ok := args.([]interface{}); ok {
 					return l.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("logical operator requires array arguments")
-			case "!", "!!":
+			case OpNot, OpDoubleBang:
 				// Allow both array and non-array arguments for unary operators
 				if arr, ok := args.([]interface{}); ok {
 					return l.ToSQL(operator, arr)
 				}
 				// Wrap non-array argument in array for consistency
 				return l.ToSQL(operator, []interface{}{args})
-			case "+", "-", "*", "/", "%", "max", "min":
+			case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo, OpMax, OpMin:
 				if arr, ok := args.([]interface{}); ok {
 					numericOp := NewNumericOperator(l.config)
 					return numericOp.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("numeric operator requires array arguments")
-			case "cat", "substr":
+			case OpCat, OpSubstr:
 				if arr, ok := args.([]interface{}); ok {
 					stringOp := NewStringOperator(l.config)
 					return stringOp.ToSQL(operator, arr)
 				}
 				return "", fmt.Errorf("string operator requires array arguments")
-			case "map", "filter", "reduce", "all", "some", "none", "merge":
+			case OpMap, OpFilter, OpReduce, OpAll, OpSome, OpNone, OpMerge:
 				if arr, ok := args.([]interface{}); ok {
 					arrayOp := NewArrayOperator(l.config)
 					return arrayOp.ToSQL(operator, arr)
@@ -352,7 +353,7 @@ func (l *LogicalOperator) expressionToSQL(expr interface{}) (string, error) {
 				// Try to use the expression parser callback for unknown operators
 				// This enables support for custom operators in nested contexts
 				if l.config != nil && l.config.HasExpressionParser() {
-					return l.config.ParseExpression(obj, "$")
+					return l.config.ParseExpression(obj, jsonPathRoot)
 				}
 				return "", fmt.Errorf("unsupported operator in logical expression: %s", operator)
 			}
@@ -413,15 +414,15 @@ func (l *LogicalOperator) isPrimitive(value interface{}) bool {
 // ToSQLParam is the parameterized variant of ToSQL. Keep in sync.
 func (l *LogicalOperator) ToSQLParam(operator string, args []interface{}, pc *params.ParamCollector) (string, error) {
 	switch operator {
-	case "and":
+	case OpAnd:
 		return l.handleAndParam(args, pc)
-	case "or":
+	case OpOr:
 		return l.handleOrParam(args, pc)
-	case "!":
+	case OpNot:
 		return l.handleNotParam(args, pc)
-	case "!!":
+	case OpDoubleBang:
 		return l.handleDoubleNotParam(args, pc)
-	case "if":
+	case OpIf:
 		return l.handleIfParam(args, pc)
 	default:
 		return "", fmt.Errorf("unsupported logical operator: %s", operator)
@@ -444,7 +445,7 @@ func (l *LogicalOperator) handleAndParam(args []interface{}, pc *params.ParamCol
 	if len(conditions) == 1 {
 		return conditions[0], nil
 	}
-	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND ")), nil
+	return fmt.Sprintf("(%s)", strings.Join(conditions, sqlAndJoiner)), nil
 }
 
 // handleOrParam is the parameterized variant of handleOr. Keep in sync.
@@ -463,7 +464,7 @@ func (l *LogicalOperator) handleOrParam(args []interface{}, pc *params.ParamColl
 	if len(conditions) == 1 {
 		return conditions[0], nil
 	}
-	return fmt.Sprintf("(%s)", strings.Join(conditions, " OR ")), nil
+	return fmt.Sprintf("(%s)", strings.Join(conditions, sqlOrJoiner)), nil
 }
 
 // handleNotParam is the parameterized variant of handleNot. Keep in sync.
@@ -487,9 +488,9 @@ func (l *LogicalOperator) handleDoubleNotParam(args []interface{}, pc *params.Pa
 
 	if arr, ok := args[0].([]interface{}); ok {
 		if len(arr) == 0 {
-			return "FALSE", nil
+			return sqlFalse, nil
 		}
-		return "TRUE", nil
+		return sqlTrue, nil
 	}
 
 	fieldName := l.extractVarFieldName(args[0])
@@ -584,14 +585,15 @@ func (l *LogicalOperator) expressionToSQLParam(expr interface{}, pc *params.Para
 
 		for operator, args := range obj {
 			switch operator {
-			case "var", "missing":
+			case OpVar, OpMissing:
 				return l.dataOp.ToSQLParam(operator, []interface{}{args}, pc)
-			case "missing_some":
+			case OpMissingSome:
 				if arr, ok := args.([]interface{}); ok {
 					return l.dataOp.ToSQLParam(operator, arr, pc)
 				}
 				return "", fmt.Errorf("missing_some operator requires array arguments")
-			case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
+			case OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual,
+				OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual, OpIn:
 				if arr, ok := args.([]interface{}); ok {
 					processedArgs, err := l.processArgsParam(arr, pc)
 					if err != nil {
@@ -600,29 +602,29 @@ func (l *LogicalOperator) expressionToSQLParam(expr interface{}, pc *params.Para
 					return l.comparisonOp.ToSQLParam(operator, processedArgs, pc)
 				}
 				return "", fmt.Errorf("comparison operator requires array arguments")
-			case "and", "or", "if":
+			case OpAnd, OpOr, OpIf:
 				if arr, ok := args.([]interface{}); ok {
 					return l.ToSQLParam(operator, arr, pc)
 				}
 				return "", fmt.Errorf("logical operator requires array arguments")
-			case "!", "!!":
+			case OpNot, OpDoubleBang:
 				if arr, ok := args.([]interface{}); ok {
 					return l.ToSQLParam(operator, arr, pc)
 				}
 				return l.ToSQLParam(operator, []interface{}{args}, pc)
-			case "+", "-", "*", "/", "%", "max", "min":
+			case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo, OpMax, OpMin:
 				if arr, ok := args.([]interface{}); ok {
 					numericOp := NewNumericOperator(l.config)
 					return numericOp.ToSQLParam(operator, arr, pc)
 				}
 				return "", fmt.Errorf("numeric operator requires array arguments")
-			case "cat", "substr":
+			case OpCat, OpSubstr:
 				if arr, ok := args.([]interface{}); ok {
 					stringOp := NewStringOperator(l.config)
 					return stringOp.ToSQLParam(operator, arr, pc)
 				}
 				return "", fmt.Errorf("string operator requires array arguments")
-			case "map", "filter", "reduce", "all", "some", "none", "merge":
+			case OpMap, OpFilter, OpReduce, OpAll, OpSome, OpNone, OpMerge:
 				if arr, ok := args.([]interface{}); ok {
 					arrayOp := NewArrayOperator(l.config)
 					return arrayOp.ToSQLParam(operator, arr, pc)
@@ -630,7 +632,7 @@ func (l *LogicalOperator) expressionToSQLParam(expr interface{}, pc *params.Para
 				return "", fmt.Errorf("array operator requires array arguments")
 			default:
 				if l.config != nil && l.config.HasParamExpressionParser() {
-					return l.config.ParseExpressionParam(obj, "$", pc)
+					return l.config.ParseExpressionParam(obj, jsonPathRoot, pc)
 				}
 				return "", fmt.Errorf("unsupported operator in logical expression: %s", operator)
 			}

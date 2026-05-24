@@ -17,10 +17,10 @@ const (
 // predicate values where comparisons return only true or false.
 func PredicateValueSQL(sql string) string {
 	switch strings.ToUpper(strings.TrimSpace(sql)) {
-	case "TRUE":
-		return "TRUE"
-	case "FALSE":
-		return "FALSE"
+	case sqlTrue:
+		return sqlTrue
+	case sqlFalse:
+		return sqlFalse
 	}
 	condition := StripRedundantOuterParens(sql)
 	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(condition)), "CASE ") {
@@ -73,7 +73,7 @@ func BooleanValueStringSQL(sql string) string {
 // join-style stringification. null/missing becomes empty, while false remains
 // "false".
 func BooleanCatStringSQL(sql string) string {
-	return booleanValueStringSQL(sql, "''")
+	return booleanValueStringSQL(sql, sqlEmptyText)
 }
 
 func booleanValueStringSQL(sql, nullSQL string) string {
@@ -118,8 +118,8 @@ func ConcatStringSQL(config *OperatorConfig, sql string, kind ExpressionKind, ty
 	}
 
 	expr := StripRedundantOuterParens(sql)
-	if typ == ExpressionTypeNull || strings.EqualFold(strings.TrimSpace(expr), "NULL") {
-		return "''"
+	if typ == ExpressionTypeNull || strings.EqualFold(strings.TrimSpace(expr), sqlNull) {
+		return sqlEmptyText
 	}
 	if isSingleQuotedSQLLiteral(expr) {
 		return expr

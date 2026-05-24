@@ -131,13 +131,13 @@ func (p *Parser) Parse(logic interface{}) (string, error) {
 		return "", tperrors.NewValidationError(err)
 	}
 	if p.isPrimitive(logic) {
-		return "", tperrors.NewPrimitiveNotAllowed("$")
+		return "", tperrors.NewPrimitiveNotAllowed(rootPath)
 	}
 	if _, ok := logic.([]interface{}); ok {
-		return "", tperrors.NewArrayNotAllowed("$")
+		return "", tperrors.NewArrayNotAllowed(rootPath)
 	}
 
-	res, err := p.parseExpressionAny(logic, "$")
+	res, err := p.parseExpressionAny(logic, rootPath)
 	if err != nil {
 		return "", err // TranspileError already contains full context
 	}
@@ -156,7 +156,7 @@ func (p *Parser) ParseCondition(logic interface{}) (string, error) {
 		return "", tperrors.NewValidationError(err)
 	}
 
-	res, err := p.parseExpressionPredicate(logic, "$")
+	res, err := p.parseExpressionPredicate(logic, rootPath)
 	if err != nil {
 		return "", err // TranspileError already contains full context
 	}
@@ -172,14 +172,14 @@ func (p *Parser) ParseCondition(logic interface{}) (string, error) {
 func (p *Parser) ParseValue(logic interface{}) (string, error) {
 	// Value mode accepts arrays as values, including empty arrays nested below
 	// unary and logical operators, so parsing owns structural validation here.
-	res, err := p.parseExpressionValue(logic, "$")
+	res, err := p.parseExpressionValue(logic, rootPath)
 	if err != nil {
 		return "", err
 	}
 	if err := p.rejectUnsupportedPostgreSQLEmptyArrayResult(res); err != nil {
 		return "", err
 	}
-	if err := p.validateCompatibleObjectArrayScopesForResult(res, "$"); err != nil {
+	if err := p.validateCompatibleObjectArrayScopesForResult(res, rootPath); err != nil {
 		return "", err
 	}
 	return valueSQL(res), nil

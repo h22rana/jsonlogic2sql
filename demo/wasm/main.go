@@ -15,6 +15,25 @@ import (
 var transpilers = map[int]*jsonlogic2sql.Transpiler{}
 var nextID = 1
 
+const (
+	dialectIDBigQuery   = "bigquery"
+	dialectIDSpanner    = "spanner"
+	dialectIDPostgreSQL = "postgresql"
+	dialectIDDuckDB     = "duckdb"
+	dialectIDClickHouse = "clickhouse"
+)
+
+var wasmDialects = []struct {
+	id      string
+	dialect jsonlogic2sql.Dialect
+}{
+	{dialectIDBigQuery, jsonlogic2sql.DialectBigQuery},
+	{dialectIDSpanner, jsonlogic2sql.DialectSpanner},
+	{dialectIDPostgreSQL, jsonlogic2sql.DialectPostgreSQL},
+	{dialectIDDuckDB, jsonlogic2sql.DialectDuckDB},
+	{dialectIDClickHouse, jsonlogic2sql.DialectClickHouse},
+}
+
 var defaultDemoSchemaFields = []jsonlogic2sql.FieldSchema{
 	{Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
 	{Name: "status", Type: jsonlogic2sql.FieldTypeString},
@@ -64,20 +83,12 @@ func schemaFromJSONString(schemaJSON string) (*jsonlogic2sql.Schema, error) {
 }
 
 func dialetFromString(s string) (jsonlogic2sql.Dialect, bool) {
-	switch s {
-	case "bigquery":
-		return jsonlogic2sql.DialectBigQuery, true
-	case "spanner":
-		return jsonlogic2sql.DialectSpanner, true
-	case "postgresql":
-		return jsonlogic2sql.DialectPostgreSQL, true
-	case "duckdb":
-		return jsonlogic2sql.DialectDuckDB, true
-	case "clickhouse":
-		return jsonlogic2sql.DialectClickHouse, true
-	default:
-		return 0, false
+	for _, candidate := range wasmDialects {
+		if s == candidate.id {
+			return candidate.dialect, true
+		}
 	}
+	return 0, false
 }
 
 // newTranspiler(dialect: string, schemaJSON: string) => {id: number} | {error: string}
@@ -342,7 +353,10 @@ func quickTranspileCondition(_ js.Value, args []js.Value) interface{} {
 
 // getDialects() => string[] - returns list of supported dialects.
 func getDialects(_ js.Value, _ []js.Value) interface{} {
-	dialects := []interface{}{"bigquery", "spanner", "postgresql", "duckdb", "clickhouse"}
+	dialects := make([]interface{}, len(wasmDialects))
+	for i, candidate := range wasmDialects {
+		dialects[i] = candidate.id
+	}
 	return dialects
 }
 

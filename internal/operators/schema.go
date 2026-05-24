@@ -88,7 +88,7 @@ func validateSchemaAllowedValue(schema SchemaProvider, fieldName, value string) 
 }
 
 func validateSchemaEnumArrayElementValue(schema SchemaProvider, fieldName, value string) error {
-	if schemaArrayElementType(schema, fieldName) != "enum" {
+	if schemaArrayElementType(schema, fieldName) != SchemaTypeEnum {
 		return nil
 	}
 	return validateSchemaAllowedValue(schema, fieldName, value)

@@ -38,14 +38,14 @@ func (p *Parser) parseExpressionPredicate(expr interface{}, path string) (expres
 		return booleanPredicateResult(b), nil
 	}
 	if p.isPrimitive(expr) {
-		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, "predicate", "value")
+		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, expressionKindPredicate, expressionKindValue)
 	}
 	if _, ok := expr.([]interface{}); ok {
-		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, "predicate", "value")
+		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, expressionKindPredicate, expressionKindValue)
 	}
 	if pv, ok := expr.(operators.ProcessedValue); ok {
 		if pv.IsSQL {
-			return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, "predicate", "value")
+			return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, expressionKindPredicate, expressionKindValue)
 		}
 		return p.parseExpressionPredicate(pv.Value, path)
 	}
@@ -162,7 +162,7 @@ func (p *Parser) parseOperatorPredicate(operator string, args interface{}, path 
 					"custom operator failed", err)
 			}
 			if res.Kind != operators.ExpressionKindPredicate {
-				return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, "predicate", kindName(res.Kind))
+				return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, expressionKindPredicate, kindName(res.Kind))
 			}
 			return resultFromOperator(res), nil
 		}
@@ -239,7 +239,7 @@ func (p *Parser) parseOperatorPredicate(operator string, args interface{}, path 
 		operators.OpMin,
 		operators.OpCat,
 		operators.OpSubstr:
-		return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, "predicate", "value")
+		return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, expressionKindPredicate, expressionKindValue)
 	default:
 		return expressionResult{}, tperrors.NewUnsupportedOperator(operator, path)
 	}
@@ -395,29 +395,29 @@ func (p *Parser) parsePredicateLogical(operator string, args []interface{}, path
 			return expressionResult{}, err
 		}
 		if res.truthKnown {
-			if operator == logicalOpAnd && res.truthy {
+			if operator == operators.OpAnd && res.truthy {
 				continue
 			}
-			if operator == logicalOpOr && !res.truthy {
+			if operator == operators.OpOr && !res.truthy {
 				continue
 			}
-			if operator == logicalOpAnd && !res.truthy {
+			if operator == operators.OpAnd && !res.truthy {
 				return booleanPredicateResult(false), nil
 			}
-			if operator == logicalOpOr && res.truthy {
+			if operator == operators.OpOr && res.truthy {
 				return booleanPredicateResult(true), nil
 			}
 		}
 		parts = append(parts, res.SQL)
 	}
 	if len(parts) == 0 {
-		return booleanPredicateResult(operator == logicalOpAnd), nil
+		return booleanPredicateResult(operator == operators.OpAnd), nil
 	}
 	if len(parts) == 1 {
 		return predicateResult(parts[0]), nil
 	}
 	joiner := sqlAndJoiner
-	if operator == logicalOpOr {
+	if operator == operators.OpOr {
 		joiner = sqlOrJoiner
 	}
 	return predicateResult(fmt.Sprintf("(%s)", strings.Join(parts, joiner))), nil
@@ -475,8 +475,8 @@ func (p *Parser) parseNotValue(operator string, args interface{}, path string, d
 }
 
 func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionResult, error) {
-	if len(args) < 2 {
-		return expressionResult{}, tperrors.NewInsufficientArgs("if", path, 2, len(args))
+	if len(args) < ifMinArgs {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, ifMinArgs, len(args))
 	}
 	var parts []string
 	pairLimit := len(args)
@@ -484,7 +484,7 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 	if hasElse {
 		pairLimit = len(args) - 1
 	}
-	for i := 0; i < pairLimit; i += 2 {
+	for i := 0; i < pairLimit; i += ifPairStep {
 		cond, condition, err := p.parsePredicateIfCondition(args[i], tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return expressionResult{}, err
@@ -504,7 +504,7 @@ func (p *Parser) parsePredicateIf(args []interface{}, path string) (expressionRe
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
-	elseSQL := "FALSE"
+	elseSQL := sqlFalse
 	if hasElse {
 		elseRes, err := p.parsePredicateIfOperand(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1))
 		if err != nil {
@@ -533,11 +533,11 @@ func (p *Parser) parsePredicateIfOperand(expr interface{}, path string) (express
 }
 
 func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult, error) {
-	if len(args) < 2 {
-		return expressionResult{}, tperrors.NewInsufficientArgs("if", path, 2, len(args))
+	if len(args) < ifMinArgs {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, ifMinArgs, len(args))
 	}
 	var parts []string
-	resultRes := literalValueResult("NULL", operators.ExpressionTypeNull, false)
+	resultRes := literalValueResult(sqlNull, operators.ExpressionTypeNull, false)
 	typeSet := false
 	mergeResultType := func(res expressionResult) error {
 		if !typeSet {
@@ -557,7 +557,7 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 	if hasElse {
 		pairLimit = len(args) - 1
 	}
-	for i := 0; i < pairLimit; i += 2 {
+	for i := 0; i < pairLimit; i += ifPairStep {
 		cond, condition, err := p.parseTruthinessResult(args[i], tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return expressionResult{}, err
@@ -585,7 +585,7 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, valueSQL(thenRes)))
 	}
-	elseSQL := "NULL"
+	elseSQL := sqlNull
 	if hasElse {
 		elseRes, err := p.parseExpressionValue(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1))
 		if err != nil {
@@ -600,7 +600,7 @@ func (p *Parser) parseValueIf(args []interface{}, path string) (expressionResult
 		elseSQL = valueSQL(elseRes)
 	}
 	if len(parts) == 0 {
-		return literalValueResult("NULL", operators.ExpressionTypeNull, false), nil
+		return literalValueResult(sqlNull, operators.ExpressionTypeNull, false), nil
 	}
 	result := valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL), valueTypeOf(resultRes))
 	if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
@@ -621,8 +621,8 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 	argPath := tperrors.BuildArrayPath(path, index)
 	if current, ok := nonFiniteNativeFloatTruthResult(args[index]); ok {
 		if index == len(args)-1 ||
-			(operator == logicalOpOr && current.truthy) ||
-			(operator == logicalOpAnd && !current.truthy) {
+			(operator == operators.OpOr && current.truthy) ||
+			(operator == operators.OpAnd && !current.truthy) {
 			return expressionResult{}, nonFiniteNativeFloatValueError(args[index], argPath)
 		}
 		return p.parseValueLogicalFrom(operator, args, index+1, path)
@@ -636,10 +636,10 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 		return current, nil
 	}
 	if current.truthKnown {
-		if operator == logicalOpOr && current.truthy {
+		if operator == operators.OpOr && current.truthy {
 			return current, nil
 		}
-		if operator == logicalOpAnd && !current.truthy {
+		if operator == operators.OpAnd && !current.truthy {
 			return current, nil
 		}
 		return p.parseValueLogicalFrom(operator, args, index+1, path)
@@ -656,7 +656,7 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 	if err != nil {
 		return expressionResult{}, err
 	}
-	if operator == logicalOpOr {
+	if operator == operators.OpOr {
 		result := valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(current), valueSQL(rest)), valueTypeOf(resultRes))
 		if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
 			result = withArrayElementTypes(result, elemTypes...)
@@ -674,7 +674,7 @@ func (p *Parser) parseValueLogicalFrom(operator string, args []interface{}, inde
 
 func (p *Parser) parseCatValue(args []interface{}, path string) (expressionResult, error) {
 	if len(args) == 0 {
-		return valueResult("''", operators.ExpressionTypeString), nil
+		return valueResult(sqlEmptyString, operators.ExpressionTypeString), nil
 	}
 	operands := make([]string, len(args))
 	for i, arg := range args {
@@ -745,8 +745,8 @@ func (p *Parser) validateCatStringifiableResult(res expressionResult, path strin
 }
 
 func (p *Parser) parseStringifiedIf(args []interface{}, path string) (expressionResult, error) {
-	if len(args) < 2 {
-		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, 2, len(args))
+	if len(args) < ifMinArgs {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, ifMinArgs, len(args))
 	}
 	var parts []string
 	pairLimit := len(args)
@@ -754,7 +754,7 @@ func (p *Parser) parseStringifiedIf(args []interface{}, path string) (expression
 	if hasElse {
 		pairLimit = len(args) - 1
 	}
-	for i := 0; i < pairLimit; i += 2 {
+	for i := 0; i < pairLimit; i += ifPairStep {
 		cond, condition, err := p.parseTruthinessResult(args[i], tperrors.BuildArrayPath(path, i))
 		if err != nil {
 			return expressionResult{}, err
@@ -775,7 +775,7 @@ func (p *Parser) parseStringifiedIf(args []interface{}, path string) (expression
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
-	elseSQL := "''"
+	elseSQL := sqlEmptyString
 	if hasElse {
 		elseRes, err := p.parseCatStringExpression(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1))
 		if err != nil {
@@ -787,7 +787,7 @@ func (p *Parser) parseStringifiedIf(args []interface{}, path string) (expression
 		elseSQL = elseRes.SQL
 	}
 	if len(parts) == 0 {
-		return literalValueResult("''", operators.ExpressionTypeString, false), nil
+		return literalValueResult(sqlEmptyString, operators.ExpressionTypeString, false), nil
 	}
 	return valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL),
 		operators.ExpressionTypeString), nil

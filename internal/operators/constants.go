@@ -22,6 +22,35 @@ const (
 	AggregateMAX = "MAX"
 )
 
+const (
+	jsonPathRoot = "$"
+
+	sqlTrue      = "TRUE"
+	sqlFalse     = "FALSE"
+	sqlNull      = "NULL"
+	sqlEmptyText = "''"
+	sqlAndJoiner = " AND "
+	sqlOrJoiner  = " OR "
+)
+
+const (
+	literalKindNull    = "null"
+	literalKindString  = SchemaTypeString
+	literalKindBoolean = SchemaTypeBoolean
+	literalKindNumber  = SchemaTypeNumber
+	literalKindArray   = SchemaTypeArray
+)
+
+const (
+	expressionTypeNameUnknown = "unknown"
+)
+
+const (
+	jsonLogicStringNull  = "null"
+	jsonLogicStringTrue  = "true"
+	jsonLogicStringFalse = "false"
+)
+
 // JSONLogic operator names.
 const (
 	// OpVar is the variable access operator.
@@ -107,3 +136,87 @@ const (
 	// OpSubstr is the substring operator.
 	OpSubstr = "substr"
 )
+
+// IsDataOperatorName reports whether name is a built-in data-access operator.
+func IsDataOperatorName(name string) bool {
+	switch name {
+	case OpVar, OpMissing, OpMissingSome:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsLogicalOperatorName reports whether name is a built-in logical operator.
+func IsLogicalOperatorName(name string) bool {
+	switch name {
+	case OpAnd, OpOr, OpNot, OpDoubleBang, OpIf:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsNumericOperatorName reports whether name is a built-in numeric operator.
+func IsNumericOperatorName(name string) bool {
+	switch name {
+	case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo, OpMax, OpMin:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsComparisonOperatorName reports whether name is a built-in comparison or
+// containment operator.
+func IsComparisonOperatorName(name string) bool {
+	switch name {
+	case OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual,
+		OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual,
+		OpIn:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsOrderingComparisonOperatorName reports whether name is a chained ordering
+// comparison operator.
+func IsOrderingComparisonOperatorName(name string) bool {
+	switch name {
+	case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsArrayOperatorName reports whether name is a built-in array operator.
+func IsArrayOperatorName(name string) bool {
+	switch name {
+	case OpMap, OpFilter, OpReduce, OpAll, OpSome, OpNone, OpMerge:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsStringOperatorName reports whether name is a built-in string operator.
+func IsStringOperatorName(name string) bool {
+	switch name {
+	case OpCat, OpSubstr:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsBuiltInOperatorName reports whether name is reserved by the transpiler.
+func IsBuiltInOperatorName(name string) bool {
+	return IsDataOperatorName(name) ||
+		IsLogicalOperatorName(name) ||
+		IsNumericOperatorName(name) ||
+		IsComparisonOperatorName(name) ||
+		IsArrayOperatorName(name) ||
+		IsStringOperatorName(name)
+}

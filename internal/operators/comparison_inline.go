@@ -10,7 +10,7 @@ import (
 // ToSQL converts a comparison operator to SQL.
 func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string, error) {
 	// Handle chained comparisons (2+ arguments)
-	if len(args) >= 2 && (operator == "<" || operator == "<=" || operator == ">" || operator == ">=") {
+	if len(args) >= 2 && IsOrderingComparisonOperatorName(operator) {
 		return c.handleChainedComparison(operator, args)
 	}
 
@@ -19,7 +19,7 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 	}
 
 	// Special handling for 'in' operator - right side should be an array
-	if operator == "in" {
+	if operator == OpIn {
 		leftArg := materializePredicateValueOperand(args[0])
 		if sql, handled, err := c.handleInStringifiableLiteralNeedle(leftArg, args[1]); handled || err != nil {
 			return sql, err
@@ -126,8 +126,8 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 	}
 
 	// Handle NULL comparisons - use IS NULL/IS NOT NULL instead of = NULL/!= NULL
-	isLeftNull := args[0] == nil || leftSQL == "NULL"
-	isRightNull := args[1] == nil || rightSQL == "NULL"
+	isLeftNull := args[0] == nil || leftSQL == sqlNull
+	isRightNull := args[1] == nil || rightSQL == sqlNull
 
 	if isEqualityOperator(operator) && !isLeftNull && !isRightNull {
 		if leftBool, ok := sqlBooleanConstant(leftSQL); ok {
@@ -148,10 +148,10 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 	}
 
 	switch operator {
-	case "==":
+	case OpEqual:
 		// Handle NULL comparisons
 		if isLeftNull && isRightNull {
-			return "NULL IS NULL", nil
+			return sqlNull + " IS NULL", nil
 		}
 		if isLeftNull {
 			return fmt.Sprintf("%s IS NULL", rightSQL), nil
@@ -160,10 +160,10 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 			return fmt.Sprintf("%s IS NULL", leftSQL), nil
 		}
 		return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil
-	case "===":
+	case OpStrictEqual:
 		// Strict equality - same as == but handle NULL
 		if isLeftNull && isRightNull {
-			return "NULL IS NULL", nil
+			return sqlNull + " IS NULL", nil
 		}
 		if isLeftNull {
 			return fmt.Sprintf("%s IS NULL", rightSQL), nil
@@ -172,10 +172,10 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 			return fmt.Sprintf("%s IS NULL", leftSQL), nil
 		}
 		return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil
-	case "!=":
+	case OpNotEqual:
 		// Handle NULL comparisons
 		if isLeftNull && isRightNull {
-			return "NULL IS NOT NULL", nil
+			return sqlNull + " IS NOT NULL", nil
 		}
 		if isLeftNull {
 			return fmt.Sprintf("%s IS NOT NULL", rightSQL), nil
@@ -184,10 +184,10 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 			return fmt.Sprintf("%s IS NOT NULL", leftSQL), nil
 		}
 		return fmt.Sprintf("%s != %s", leftSQL, rightSQL), nil
-	case "!==":
+	case OpStrictNotEqual:
 		// Strict inequality - same as != but handle NULL
 		if isLeftNull && isRightNull {
-			return "NULL IS NOT NULL", nil
+			return sqlNull + " IS NOT NULL", nil
 		}
 		if isLeftNull {
 			return fmt.Sprintf("%s IS NOT NULL", rightSQL), nil
@@ -196,7 +196,7 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 			return fmt.Sprintf("%s IS NOT NULL", leftSQL), nil
 		}
 		return fmt.Sprintf("%s <> %s", leftSQL, rightSQL), nil
-	case ">", ">=", "<", "<=":
+	case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual:
 		// Validate operands for ordering comparisons
 		if err := c.validateOrderingOperand(leftArg, operator); err != nil {
 			return "", err
@@ -211,7 +211,7 @@ func (c *ComparisonOperator) ToSQL(operator string, args []interface{}) (string,
 }
 
 func isOrderingOperator(operator string) bool {
-	return operator == ">" || operator == ">=" || operator == "<" || operator == "<="
+	return IsOrderingComparisonOperatorName(operator)
 }
 
 // valueToSQL converts a value to SQL, handling both literals and var expressions.
@@ -231,10 +231,10 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 			return "", fmt.Errorf("operator object must have exactly one key")
 		}
 		for operator, args := range varExpr {
-			if operator == "var" {
+			if operator == OpVar {
 				// Special case: empty var name represents the current element in array operations
 				if varName, ok := args.(string); ok && varName == "" {
-					return "elem", nil
+					return ElemVar, nil
 				}
 				return c.dataOp.ToSQL(OpVar, []interface{}{args})
 			}
@@ -248,23 +248,24 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 		if len(expr) == 1 {
 			for op, args := range expr {
 				switch op {
-				case "+", "-", "*", "/", "%":
+				case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo:
 					// Handle arithmetic operations
 					return c.processArithmeticExpression(op, args)
-				case ">", ">=", "<", "<=", "==", "===", "!=", "!==":
+				case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual,
+					OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual:
 					// Handle comparison operations
 					return c.processComparisonExpression(op, args)
-				case "max", "min":
+				case OpMax, OpMin:
 					// Handle min/max operations
 					return c.processMinMaxExpression(op, args)
-				case "if":
+				case OpIf:
 					// Handle if operator - delegate to logical operator
 					if arr, ok := args.([]interface{}); ok {
 						logicalOp := NewLogicalOperator(c.config)
-						return logicalOp.ToSQL("if", arr)
+						return logicalOp.ToSQL(OpIf, arr)
 					}
 					return "", fmt.Errorf("if operator requires array arguments")
-				case "reduce", "filter", "map", "some", "all", "none", "merge":
+				case OpReduce, OpFilter, OpMap, OpSome, OpAll, OpNone, OpMerge:
 					// Array operators should have been pre-processed by the parser/logical operator
 					// If we see them here, it means they weren't processed correctly
 					// Try to process them directly as a fallback
@@ -273,7 +274,7 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 						return arrayOp.ToSQL(op, arr)
 					}
 					return "", fmt.Errorf("array operator %s requires array arguments", op)
-				case "cat", "substr":
+				case OpCat, OpSubstr:
 					// Handle string operators
 					if arr, ok := args.([]interface{}); ok {
 						stringOp := NewStringOperator(c.config)
@@ -284,7 +285,7 @@ func (c *ComparisonOperator) valueToSQL(value interface{}) (string, error) {
 					// Try to use the expression parser callback for unknown operators
 					// This enables support for custom operators in nested contexts
 					if c.config != nil && c.config.HasExpressionParser() {
-						return c.config.ParseExpression(expr, "$")
+						return c.config.ParseExpression(expr, jsonPathRoot)
 					}
 					return "", fmt.Errorf("unsupported expression type in comparison: %s", op)
 				}
@@ -799,7 +800,7 @@ func (c *ComparisonOperator) handleChainedComparison(operator string, args []int
 		conditions = append(conditions, condition)
 	}
 
-	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND ")), nil
+	return fmt.Sprintf("(%s)", strings.Join(conditions, sqlAndJoiner)), nil
 }
 
 // processArithmeticExpression handles arithmetic operations within comparison operations.
@@ -843,15 +844,15 @@ func (c *ComparisonOperator) processArithmeticExpression(op string, args interfa
 
 	// Generate SQL based on operation
 	switch op {
-	case "+":
+	case OpAdd:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " + ")), nil
-	case "-":
+	case OpSubtract:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " - ")), nil
-	case "*":
+	case OpMultiply:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " * ")), nil
-	case "/":
+	case OpDivide:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " / ")), nil
-	case "%":
+	case OpModulo:
 		if len(operands) != 2 {
 			return "", fmt.Errorf("modulo requires exactly 2 arguments")
 		}
@@ -905,9 +906,9 @@ func (c *ComparisonOperator) processMinMaxExpression(op string, args interface{}
 
 	// Generate SQL based on operation
 	switch op {
-	case "max":
+	case OpMax:
 		return c.config.GreatestSQL(operands), nil
-	case "min":
+	case OpMin:
 		return c.config.LeastSQL(operands), nil
 	default:
 		return "", fmt.Errorf("unsupported min/max operation: %s", op)

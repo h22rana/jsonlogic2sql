@@ -2,6 +2,7 @@ package jsonlogic2sql
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -42,7 +43,7 @@ type Transpiler struct {
 // SetSchema sets the required schema for field validation and type checking.
 func (t *Transpiler) SetSchema(schema *Schema) error {
 	if schema == nil {
-		return fmt.Errorf("schema is required")
+		return errors.New(schemaRequiredErrorMessage)
 	}
 	t.operatorConfig.SetSchema(schema)
 	if t.config != nil {
@@ -73,7 +74,7 @@ func newTranspiler(config TranspilerConfig) (*Transpiler, error) {
 		return nil, err
 	}
 	if config.Schema == nil {
-		return nil, fmt.Errorf("schema is required")
+		return nil, errors.New(schemaRequiredErrorMessage)
 	}
 
 	opConfig := operators.NewOperatorConfig(config.Dialect, config.Schema)

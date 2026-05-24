@@ -9,7 +9,7 @@ import (
 
 // ToSQLParam is the parameterized variant of ToSQL. Keep in sync.
 func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc *params.ParamCollector) (string, error) {
-	if len(args) >= 2 && (operator == "<" || operator == "<=" || operator == ">" || operator == ">=") {
+	if len(args) >= 2 && IsOrderingComparisonOperatorName(operator) {
 		return c.handleChainedComparisonParam(operator, args, pc)
 	}
 
@@ -17,7 +17,7 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 		return "", fmt.Errorf("%s operator requires exactly 2 arguments", operator)
 	}
 
-	if operator == "in" {
+	if operator == OpIn {
 		return c.handleInParam(materializePredicateValueOperand(args[0]), args[1], pc)
 	}
 
@@ -78,8 +78,8 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 		return "", fmt.Errorf("invalid right operand: %w", err)
 	}
 
-	isLeftNull := args[0] == nil || leftSQL == "NULL"
-	isRightNull := args[1] == nil || rightSQL == "NULL"
+	isLeftNull := args[0] == nil || leftSQL == sqlNull
+	isRightNull := args[1] == nil || rightSQL == sqlNull
 
 	if isEqualityOperator(operator) && !isLeftNull && !isRightNull {
 		if leftBool, ok := sqlBooleanConstant(leftSQL); ok {
@@ -100,9 +100,9 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 	}
 
 	switch operator {
-	case "==":
+	case OpEqual:
 		if isLeftNull && isRightNull {
-			return "NULL IS NULL", nil
+			return sqlNull + " IS NULL", nil
 		}
 		if isLeftNull {
 			return fmt.Sprintf("%s IS NULL", rightSQL), nil
@@ -111,9 +111,9 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 			return fmt.Sprintf("%s IS NULL", leftSQL), nil
 		}
 		return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil
-	case "===":
+	case OpStrictEqual:
 		if isLeftNull && isRightNull {
-			return "NULL IS NULL", nil
+			return sqlNull + " IS NULL", nil
 		}
 		if isLeftNull {
 			return fmt.Sprintf("%s IS NULL", rightSQL), nil
@@ -122,9 +122,9 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 			return fmt.Sprintf("%s IS NULL", leftSQL), nil
 		}
 		return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil
-	case "!=":
+	case OpNotEqual:
 		if isLeftNull && isRightNull {
-			return "NULL IS NOT NULL", nil
+			return sqlNull + " IS NOT NULL", nil
 		}
 		if isLeftNull {
 			return fmt.Sprintf("%s IS NOT NULL", rightSQL), nil
@@ -133,9 +133,9 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 			return fmt.Sprintf("%s IS NOT NULL", leftSQL), nil
 		}
 		return fmt.Sprintf("%s != %s", leftSQL, rightSQL), nil
-	case "!==":
+	case OpStrictNotEqual:
 		if isLeftNull && isRightNull {
-			return "NULL IS NOT NULL", nil
+			return sqlNull + " IS NOT NULL", nil
 		}
 		if isLeftNull {
 			return fmt.Sprintf("%s IS NOT NULL", rightSQL), nil
@@ -144,7 +144,7 @@ func (c *ComparisonOperator) ToSQLParam(operator string, args []interface{}, pc 
 			return fmt.Sprintf("%s IS NOT NULL", leftSQL), nil
 		}
 		return fmt.Sprintf("%s <> %s", leftSQL, rightSQL), nil
-	case ">", ">=", "<", "<=":
+	case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual:
 		if err := c.validateOrderingOperand(leftArg, operator); err != nil {
 			return "", err
 		}
@@ -171,7 +171,7 @@ func (c *ComparisonOperator) valueToSQLParam(value interface{}, pc *params.Param
 			return "", fmt.Errorf("operator object must have exactly one key")
 		}
 		for operator, args := range varExpr {
-			if operator == "var" {
+			if operator == OpVar {
 				if varName, ok := args.(string); ok && varName == "" {
 					return "elem", nil
 				}
@@ -184,25 +184,26 @@ func (c *ComparisonOperator) valueToSQLParam(value interface{}, pc *params.Param
 		if len(expr) == 1 {
 			for op, args := range expr {
 				switch op {
-				case "+", "-", "*", "/", "%":
+				case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo:
 					return c.processArithmeticExpressionParam(op, args, pc)
-				case ">", ">=", "<", "<=", "==", "===", "!=", "!==":
+				case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual,
+					OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual:
 					return c.processComparisonExpressionParam(op, args, pc)
-				case "max", "min":
+				case OpMax, OpMin:
 					return c.processMinMaxExpressionParam(op, args, pc)
-				case "if":
+				case OpIf:
 					if arr, ok := args.([]interface{}); ok {
 						logicalOp := NewLogicalOperator(c.config)
-						return logicalOp.ToSQLParam("if", arr, pc)
+						return logicalOp.ToSQLParam(OpIf, arr, pc)
 					}
 					return "", fmt.Errorf("if operator requires array arguments")
-				case "reduce", "filter", "map", "some", "all", "none", "merge":
+				case OpReduce, OpFilter, OpMap, OpSome, OpAll, OpNone, OpMerge:
 					if arr, ok := args.([]interface{}); ok {
 						arrayOp := NewArrayOperator(c.config)
 						return arrayOp.ToSQLParam(op, arr, pc)
 					}
 					return "", fmt.Errorf("array operator %s requires array arguments", op)
-				case "cat", "substr":
+				case OpCat, OpSubstr:
 					if arr, ok := args.([]interface{}); ok {
 						stringOp := NewStringOperator(c.config)
 						return stringOp.ToSQLParam(op, arr, pc)
@@ -210,7 +211,7 @@ func (c *ComparisonOperator) valueToSQLParam(value interface{}, pc *params.Param
 					return "", fmt.Errorf("string operator %s requires array arguments", op)
 				default:
 					if c.config != nil && c.config.HasParamExpressionParser() {
-						return c.config.ParseExpressionParam(expr, "$", pc)
+						return c.config.ParseExpressionParam(expr, jsonPathRoot, pc)
 					}
 					return "", fmt.Errorf("unsupported expression type in comparison: %s", op)
 				}
@@ -580,7 +581,7 @@ func (c *ComparisonOperator) handleChainedComparisonParam(operator string, args 
 		conditions = append(conditions, condition)
 	}
 
-	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND ")), nil
+	return fmt.Sprintf("(%s)", strings.Join(conditions, sqlAndJoiner)), nil
 }
 
 // processArithmeticExpressionParam is the parameterized variant of processArithmeticExpression. Keep in sync.
@@ -620,15 +621,15 @@ func (c *ComparisonOperator) processArithmeticExpressionParam(op string, args in
 	}
 
 	switch op {
-	case "+":
+	case OpAdd:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " + ")), nil
-	case "-":
+	case OpSubtract:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " - ")), nil
-	case "*":
+	case OpMultiply:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " * ")), nil
-	case "/":
+	case OpDivide:
 		return fmt.Sprintf("(%s)", strings.Join(operands, " / ")), nil
-	case "%":
+	case OpModulo:
 		if len(operands) != 2 {
 			return "", fmt.Errorf("modulo requires exactly 2 arguments")
 		}
@@ -680,9 +681,9 @@ func (c *ComparisonOperator) processMinMaxExpressionParam(op string, args interf
 	}
 
 	switch op {
-	case "max":
+	case OpMax:
 		return c.config.GreatestSQL(operands), nil
-	case "min":
+	case OpMin:
 		return c.config.LeastSQL(operands), nil
 	default:
 		return "", fmt.Errorf("unsupported min/max operation: %s", op)

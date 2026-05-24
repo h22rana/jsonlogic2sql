@@ -25,7 +25,7 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 		return "", err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return "FALSE", nil
+		return sqlFalse, nil
 	}
 
 	// First argument: array
@@ -37,7 +37,7 @@ func (a *ArrayOperator) handleAll(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid all array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return "FALSE", nil
+		return sqlFalse, nil
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
@@ -80,7 +80,7 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 		return "", err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return "FALSE", nil
+		return sqlFalse, nil
 	}
 
 	// First argument: array
@@ -92,7 +92,7 @@ func (a *ArrayOperator) handleSome(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid some array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return "FALSE", nil
+		return sqlFalse, nil
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
@@ -132,7 +132,7 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 		return "", err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return "TRUE", nil
+		return sqlTrue, nil
 	}
 
 	// First argument: array
@@ -144,7 +144,7 @@ func (a *ArrayOperator) handleNone(args []interface{}) (string, error) {
 		return "", fmt.Errorf("invalid none array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return "TRUE", nil
+		return sqlTrue, nil
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)

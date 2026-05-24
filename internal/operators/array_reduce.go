@@ -472,7 +472,10 @@ func isAggregatePredicateTerm(expr interface{}) bool {
 		return false
 	}
 	switch operator {
-	case "missing", "missing_some", "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", OpAll, OpSome, OpNone:
+	case OpMissing, OpMissingSome,
+		OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual,
+		OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual,
+		OpIn, OpNot, OpDoubleBang, OpAll, OpSome, OpNone:
 		return true
 	default:
 		return false

@@ -2,6 +2,7 @@ package jsonlogic2sql
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,11 @@ const (
 	FieldTypeArray   FieldType = "array"
 	FieldTypeObject  FieldType = "object"
 	FieldTypeEnum    FieldType = "enum"
+)
+
+const (
+	schemaPathSeparator        = "."
+	schemaRequiredErrorMessage = "schema is required"
 )
 
 // FieldSchema represents the schema/metadata for a single field.
@@ -154,7 +160,7 @@ func validateSchemaField(prefix string, field FieldSchema, seen map[string]struc
 	}
 
 	fieldName := joinSchemaPath(prefix, field.Name)
-	for _, seg := range strings.Split(fieldName, ".") {
+	for _, seg := range strings.Split(fieldName, schemaPathSeparator) {
 		if seg == "" {
 			return fmt.Errorf("schema field %q contains an empty path segment", fieldName)
 		}
@@ -255,7 +261,7 @@ func joinSchemaPath(prefix, name string) string {
 	if name == "" {
 		return prefix
 	}
-	return prefix + "." + name
+	return prefix + schemaPathSeparator + name
 }
 
 // NewSchemaFromJSON creates a new schema from a JSON byte slice.
@@ -288,7 +294,7 @@ func (s *Schema) HasField(fieldName string) bool {
 // ValidateField checks if a field exists in the schema and returns an error if not.
 func (s *Schema) ValidateField(fieldName string) error {
 	if s == nil {
-		return fmt.Errorf("schema is required")
+		return errors.New(schemaRequiredErrorMessage)
 	}
 	if _, exists := s.rootFields[fieldName]; !exists {
 		return fmt.Errorf("field '%s' is not defined in schema", fieldName)
@@ -301,7 +307,7 @@ func (s *Schema) ValidateField(fieldName string) error {
 // to "payments.type" and validates against that nested schema entry.
 func (s *Schema) ResolveScopedField(scopePath, fieldName string) (string, error) {
 	if s == nil {
-		return "", fmt.Errorf("schema is required")
+		return "", errors.New(schemaRequiredErrorMessage)
 	}
 	if fieldName == "" {
 		return scopePath, nil
@@ -415,7 +421,7 @@ func (s *Schema) ArrayElementSchemaSignature(fieldName string) string {
 // returns the first concrete field-level mismatch.
 func (s *Schema) ValidateArrayElementSchemasCompatible(leftField, rightField string) error {
 	if s == nil {
-		return fmt.Errorf("schema is required")
+		return errors.New(schemaRequiredErrorMessage)
 	}
 	return s.validateArrayElementSchemasCompatible(leftField, rightField)
 }
@@ -487,8 +493,9 @@ func mostSpecificMissingSchemaField(relativeNames []string) string {
 	}
 	best := relativeNames[0]
 	for _, candidate := range relativeNames[1:] {
-		if strings.HasPrefix(candidate, best+".") ||
-			(!strings.HasPrefix(best, candidate+".") && strings.Count(candidate, ".") > strings.Count(best, ".")) {
+		if strings.HasPrefix(candidate, best+schemaPathSeparator) ||
+			(!strings.HasPrefix(best, candidate+schemaPathSeparator) &&
+				strings.Count(candidate, schemaPathSeparator) > strings.Count(best, schemaPathSeparator)) {
 			best = candidate
 		}
 	}
@@ -552,7 +559,7 @@ func (s *Schema) GetAllowedValues(fieldName string) []string {
 // Returns nil if valid, error if invalid.
 func (s *Schema) ValidateEnumValue(fieldName, value string) error {
 	if s == nil {
-		return fmt.Errorf("schema is required")
+		return errors.New(schemaRequiredErrorMessage)
 	}
 
 	if !s.IsEnumType(fieldName) {

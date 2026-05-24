@@ -18,7 +18,7 @@ func FoldLiteralComparison(operator string, args []interface{}) (bool, bool, err
 	}
 
 	switch operator {
-	case "==", "===", "!=", "!==":
+	case OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual:
 		left, leftOK := equalityLiteralValue(args[0])
 		right, rightOK := equalityLiteralValue(args[1])
 		if !leftOK || !rightOK {
@@ -43,13 +43,13 @@ func FoldLiteralComparison(operator string, args []interface{}) (bool, bool, err
 		} else {
 			equal = equalityLiteralsLooseEqual(left, right)
 		}
-		if operator == "!=" || operator == "!==" {
+		if operator == OpNotEqual || operator == OpStrictNotEqual {
 			equal = !equal
 		}
 		return equal, true, nil
-	case ">", ">=", "<", "<=":
+	case OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual:
 		return foldLiteralOrderingComparison(operator, args[0], args[1])
-	case "in":
+	case OpIn:
 		return foldLiteralInComparison(args[0], args[1])
 	default:
 		return false, false, nil
@@ -73,13 +73,13 @@ func foldLiteralOrderingComparison(operator string, leftArg, rightArg interface{
 		if rightString, ok := right.(string); ok {
 			cmp := strings.Compare(leftString, rightString)
 			switch operator {
-			case ">":
+			case OpGreaterThan:
 				return cmp > 0, true, nil
-			case ">=":
+			case OpGreaterThanOrEqual:
 				return cmp >= 0, true, nil
-			case "<":
+			case OpLessThan:
 				return cmp < 0, true, nil
-			case "<=":
+			case OpLessThanOrEqual:
 				return cmp <= 0, true, nil
 			}
 		}
@@ -95,13 +95,13 @@ func foldLiteralOrderingComparison(operator string, leftArg, rightArg interface{
 	}
 
 	switch operator {
-	case ">":
+	case OpGreaterThan:
 		return leftNumber.float > rightNumber.float, true, nil
-	case ">=":
+	case OpGreaterThanOrEqual:
 		return leftNumber.float >= rightNumber.float, true, nil
-	case "<":
+	case OpLessThan:
 		return leftNumber.float < rightNumber.float, true, nil
-	case "<=":
+	case OpLessThanOrEqual:
 		return leftNumber.float <= rightNumber.float, true, nil
 	default:
 		return false, false, nil
@@ -196,7 +196,7 @@ func combineOrPredicates(predicates []string) string {
 	case 1:
 		return predicates[0]
 	default:
-		return fmt.Sprintf("(%s)", strings.Join(predicates, " OR "))
+		return fmt.Sprintf("(%s)", strings.Join(predicates, sqlOrJoiner))
 	}
 }
 
@@ -213,30 +213,30 @@ func combineAndPredicates(predicates []string) string {
 	case 1:
 		return filtered[0]
 	default:
-		return fmt.Sprintf("(%s)", strings.Join(filtered, " AND "))
+		return fmt.Sprintf("(%s)", strings.Join(filtered, sqlAndJoiner))
 	}
 }
 
 func boolSQL(value bool) string {
 	if value {
-		return "TRUE"
+		return sqlTrue
 	}
-	return "FALSE"
+	return sqlFalse
 }
 
 func sqlBooleanConstant(sql string) (bool, bool) {
 	s := strings.TrimSpace(sql)
 	if len(s) >= 2 && s[0] == '(' && s[len(s)-1] == ')' {
 		inner := strings.TrimSpace(s[1 : len(s)-1])
-		if inner == "TRUE" || inner == "FALSE" {
+		if inner == sqlTrue || inner == sqlFalse {
 			s = inner
 		}
 	}
 
 	switch s {
-	case "TRUE":
+	case sqlTrue:
 		return true, true
-	case "FALSE":
+	case sqlFalse:
 		return false, true
 	default:
 		return false, false
@@ -265,15 +265,15 @@ func equalityLiteralValue(value interface{}) (interface{}, bool) {
 func equalityLiteralKind(value interface{}) string {
 	switch value.(type) {
 	case nil:
-		return "null"
+		return literalKindNull
 	case string:
-		return "string"
+		return literalKindString
 	case bool:
-		return "boolean"
+		return literalKindBoolean
 	case json.Number, float32, float64,
 		int, int8, int16, int32, int64,
 		uint, uint8, uint16, uint32, uint64:
-		return "number"
+		return literalKindNumber
 	default:
 		return ""
 	}
@@ -295,17 +295,17 @@ func equalityLiteralsStrictEqual(left, right interface{}) bool {
 	}
 
 	switch leftKind {
-	case "null":
+	case literalKindNull:
 		return true
-	case "string":
+	case literalKindString:
 		leftValue, leftOK := left.(string)
 		rightValue, rightOK := right.(string)
 		return leftOK && rightOK && leftValue == rightValue
-	case "boolean":
+	case literalKindBoolean:
 		leftValue, leftOK := left.(bool)
 		rightValue, rightOK := right.(bool)
 		return leftOK && rightOK && leftValue == rightValue
-	case "number":
+	case literalKindNumber:
 		leftNumber, leftHandled, leftValid := jsNumberFromLiteral(left)
 		rightNumber, rightHandled, rightValid := jsNumberFromLiteral(right)
 		return leftHandled && rightHandled && leftValid && rightValid && leftNumber.float == rightNumber.float
@@ -320,15 +320,15 @@ func equalityLiteralsLooseEqual(left, right interface{}) bool {
 	if leftKind == "" || rightKind == "" {
 		return true
 	}
-	if leftKind == "null" || rightKind == "null" {
-		return leftKind == "null" && rightKind == "null"
+	if leftKind == literalKindNull || rightKind == literalKindNull {
+		return leftKind == literalKindNull && rightKind == literalKindNull
 	}
 	if leftKind == rightKind {
 		return equalityLiteralsStrictEqual(left, right)
 	}
-	if leftKind == "boolean" || rightKind == "boolean" ||
-		(leftKind == "number" && rightKind == "string") ||
-		(leftKind == "string" && rightKind == "number") {
+	if leftKind == literalKindBoolean || rightKind == literalKindBoolean ||
+		(leftKind == literalKindNumber && rightKind == literalKindString) ||
+		(leftKind == literalKindString && rightKind == literalKindNumber) {
 		leftNumber, leftHandled, leftValid := jsNumberFromLiteral(left)
 		rightNumber, rightHandled, rightValid := jsNumberFromLiteral(right)
 		return leftHandled && rightHandled && leftValid && rightValid && leftNumber.float == rightNumber.float

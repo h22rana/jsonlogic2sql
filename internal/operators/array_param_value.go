@@ -343,7 +343,8 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 				return a.valueExpressionToSQLParamWithContextAndPath(exprMap, pc, allowAccumulator, path)
 			}
 			switch operator {
-			case "==", "===", "!=", "!==", ">", ">=", "<", "<=", "in":
+			case OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual,
+				OpGreaterThan, OpGreaterThanOrEqual, OpLessThan, OpLessThanOrEqual, OpIn:
 				if arr, ok := args.([]interface{}); ok {
 					opPath := tperrors.BuildPath(path, operator, -1)
 					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, allowAccumulator, opPath)
@@ -357,7 +358,7 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 					arr = converted
 					return a.comparisonOp.ToSQLParam(operator, arr, pc)
 				}
-			case "and", "or":
+			case OpAnd, OpOr:
 				if arr, ok := args.([]interface{}); ok {
 					if a.valueSemantics && a.config != nil && a.config.HasParamValueExpressionParser() {
 						return a.valueExpressionToSQLParamWithContextAndPath(exprMap, pc, allowAccumulator, path)
@@ -374,15 +375,15 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 					if len(parts) == 1 {
 						return parts[0], nil
 					}
-					joiner := " AND "
-					if operator == "or" {
-						joiner = " OR "
+					joiner := sqlAndJoiner
+					if operator == OpOr {
+						joiner = sqlOrJoiner
 					}
 					return fmt.Sprintf("(%s)", strings.Join(parts, joiner)), nil
 				}
-			case "!", "!!", "if":
+			case OpNot, OpDoubleBang, OpIf:
 				if arr, ok := args.([]interface{}); ok {
-					if a.valueSemantics && operator == "if" && a.config != nil && a.config.HasParamValueExpressionParser() {
+					if a.valueSemantics && operator == OpIf && a.config != nil && a.config.HasParamValueExpressionParser() {
 						return a.valueExpressionToSQLParamWithContextAndPath(exprMap, pc, allowAccumulator, path)
 					}
 					opPath := tperrors.BuildPath(path, operator, -1)
@@ -397,7 +398,7 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 					arr = converted
 					return a.getLogicalOperator().ToSQLParam(operator, arr, pc)
 				}
-			case "+", "-", "*", "/", "%", "max", "min":
+			case OpAdd, OpSubtract, OpMultiply, OpDivide, OpModulo, OpMax, OpMin:
 				if arr, ok := args.([]interface{}); ok {
 					opPath := tperrors.BuildPath(path, operator, -1)
 					rewrittenArgs, err := a.rewriteScopedVarsForOperatorParamWithContextAndPath(arr, allowAccumulator, opPath)
@@ -411,7 +412,7 @@ func (a *ArrayOperator) expressionToSQLParamWithContextAndPath(
 					arr = converted
 					return a.numericOp.ToSQLParam(operator, arr, pc)
 				}
-			case "map", "filter", "reduce", "all", "some", "none", "merge":
+			case OpMap, OpFilter, OpReduce, OpAll, OpSome, OpNone, OpMerge:
 				if arr, ok := args.([]interface{}); ok {
 					target := a
 					nestedArgs := arr

@@ -15,19 +15,19 @@ func (a *ArrayOperator) ToSQLParam(operator string, args []interface{}, pc *para
 		return "", fmt.Errorf("array operator %s requires at least one argument", operator)
 	}
 	switch operator {
-	case "map":
+	case OpMap:
 		return a.handleMapParam(args, pc)
-	case "filter":
+	case OpFilter:
 		return a.handleFilterParam(args, pc)
-	case "reduce":
+	case OpReduce:
 		return a.handleReduceParam(args, pc)
-	case "all":
+	case OpAll:
 		return a.handleAllParam(args, pc)
-	case "some":
+	case OpSome:
 		return a.handleSomeParam(args, pc)
-	case "none":
+	case OpNone:
 		return a.handleNoneParam(args, pc)
-	case "merge":
+	case OpMerge:
 		return a.handleMergeParam(args, pc)
 	default:
 		return "", fmt.Errorf("unsupported array operator: %s", operator)
@@ -347,7 +347,7 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 		return "", err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return "FALSE", nil
+		return sqlFalse, nil
 	}
 	paramStart := len(pc.Params())
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
@@ -358,7 +358,7 @@ func (a *ArrayOperator) handleAllParam(args []interface{}, pc *params.ParamColle
 		return "", fmt.Errorf("invalid all array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return "FALSE", validateNewParamRefs("FALSE", pc, paramStart)
+		return sqlFalse, validateNewParamRefs(sqlFalse, pc, paramStart)
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
@@ -389,7 +389,7 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 		return "", err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return "FALSE", nil
+		return sqlFalse, nil
 	}
 	paramStart := len(pc.Params())
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
@@ -400,7 +400,7 @@ func (a *ArrayOperator) handleSomeParam(args []interface{}, pc *params.ParamColl
 		return "", fmt.Errorf("invalid some array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return "FALSE", validateNewParamRefs("FALSE", pc, paramStart)
+		return sqlFalse, validateNewParamRefs(sqlFalse, pc, paramStart)
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)
@@ -430,7 +430,7 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 		return "", err
 	}
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
-		return "TRUE", nil
+		return sqlTrue, nil
 	}
 	paramStart := len(pc.Params())
 	arrayValue, err := a.valueToTypedSQLParamAtPath(args[arraySourceArgIndex], pc, a.argPath(arraySourceArgIndex))
@@ -441,7 +441,7 @@ func (a *ArrayOperator) handleNoneParam(args []interface{}, pc *params.ParamColl
 		return "", fmt.Errorf("invalid none array argument: %w", arraySourceErr)
 	}
 	if arrayValue.emptyArrayLiteral {
-		return "TRUE", validateNewParamRefs("TRUE", pc, paramStart)
+		return sqlTrue, validateNewParamRefs(sqlTrue, pc, paramStart)
 	}
 	array := arrayValue.sql
 	sourceScopes := a.arraySourceSchemaScopesForValue(args[arraySourceArgIndex], arrayValue)

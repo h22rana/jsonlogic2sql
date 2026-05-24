@@ -14,7 +14,19 @@ const (
 // ExpressionType carries coarse result type metadata for context validation.
 type ExpressionType int
 
-const objectFieldType = "object"
+// Schema field type names used by internal schema-aware operators. These mirror
+// the public FieldType values without importing the root package.
+const (
+	SchemaTypeBoolean = "boolean"
+	SchemaTypeString  = "string"
+	SchemaTypeEnum    = "enum"
+	SchemaTypeInteger = "integer"
+	SchemaTypeNumber  = "number"
+	SchemaTypeArray   = "array"
+	SchemaTypeObject  = "object"
+)
+
+const objectFieldType = SchemaTypeObject
 
 const (
 	// ExpressionTypeUnknown means the value type is not known statically.

@@ -16,16 +16,16 @@ func (p *Parser) ParseParameterized(logic interface{}) (string, []params.QueryPa
 		return "", nil, tperrors.NewValidationError(err)
 	}
 	if p.isPrimitive(logic) {
-		return "", nil, tperrors.NewPrimitiveNotAllowed("$")
+		return "", nil, tperrors.NewPrimitiveNotAllowed(rootPath)
 	}
 	if _, ok := logic.([]interface{}); ok {
-		return "", nil, tperrors.NewArrayNotAllowed("$")
+		return "", nil, tperrors.NewArrayNotAllowed(rootPath)
 	}
 
 	style := params.StyleForDialect(p.config.GetDialect())
 	pc := params.NewParamCollector(style)
 
-	res, err := p.parseExpressionAnyParam(logic, "$", pc)
+	res, err := p.parseExpressionAnyParam(logic, rootPath, pc)
 	if err != nil {
 		return "", nil, err
 	}
@@ -50,7 +50,7 @@ func (p *Parser) ParseConditionParameterized(logic interface{}) (string, []param
 	style := params.StyleForDialect(p.config.GetDialect())
 	pc := params.NewParamCollector(style)
 
-	res, err := p.parseExpressionPredicateParam(logic, "$", pc)
+	res, err := p.parseExpressionPredicateParam(logic, rootPath, pc)
 	if err != nil {
 		return "", nil, err
 	}
@@ -71,14 +71,14 @@ func (p *Parser) ParseValueParameterized(logic interface{}) (string, []params.Qu
 	style := params.StyleForDialect(p.config.GetDialect())
 	pc := params.NewParamCollector(style)
 
-	res, err := p.parseExpressionValueParam(logic, "$", pc)
+	res, err := p.parseExpressionValueParam(logic, rootPath, pc)
 	if err != nil {
 		return "", nil, err
 	}
 	if err := p.rejectUnsupportedPostgreSQLEmptyArrayResult(res); err != nil {
 		return "", nil, err
 	}
-	if err := p.validateCompatibleObjectArrayScopesForResult(res, "$"); err != nil {
+	if err := p.validateCompatibleObjectArrayScopesForResult(res, rootPath); err != nil {
 		return "", nil, err
 	}
 
@@ -95,14 +95,14 @@ func (p *Parser) parseExpressionPredicateParam(expr interface{}, path string, pc
 		return booleanPredicateResult(b), nil
 	}
 	if p.isPrimitive(expr) {
-		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, "predicate", "value")
+		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, expressionKindPredicate, expressionKindValue)
 	}
 	if _, ok := expr.([]interface{}); ok {
-		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, "predicate", "value")
+		return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, expressionKindPredicate, expressionKindValue)
 	}
 	if pv, ok := expr.(operators.ProcessedValue); ok {
 		if pv.IsSQL {
-			return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, "predicate", "value")
+			return expressionResult{}, tperrors.NewInvalidExpressionContext("", path, expressionKindPredicate, expressionKindValue)
 		}
 		return p.parseExpressionPredicateParam(pv.Value, path, pc)
 	}
@@ -227,7 +227,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 					fmt.Sprintf("custom operator produced invalid parameterized SQL: placeholder %s appears inside a quoted SQL region", ph))
 			}
 			if res.Kind != operators.ExpressionKindPredicate {
-				return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, "predicate", kindName(res.Kind))
+				return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, expressionKindPredicate, kindName(res.Kind))
 			}
 			return customOperatorResult(res, customResultPreservesDroppedParamRefs(res.SQL, pc, paramCount)), nil
 		}
@@ -310,7 +310,7 @@ func (p *Parser) parseOperatorPredicateParam(operator string, args interface{}, 
 		operators.OpMin,
 		operators.OpCat,
 		operators.OpSubstr:
-		return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, "predicate", "value")
+		return expressionResult{}, tperrors.NewInvalidExpressionContext(operator, path, expressionKindPredicate, expressionKindValue)
 	default:
 		return expressionResult{}, tperrors.NewUnsupportedOperator(operator, path)
 	}
@@ -479,19 +479,19 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 			return expressionResult{}, err
 		}
 		if res.truthKnown && canRollbackParamRefs(res) {
-			if operator == logicalOpAnd && res.truthy {
+			if operator == operators.OpAnd && res.truthy {
 				pc.Restore(operandCheckpoint)
 				continue
 			}
-			if operator == logicalOpOr && !res.truthy {
+			if operator == operators.OpOr && !res.truthy {
 				pc.Restore(operandCheckpoint)
 				continue
 			}
-			if operator == logicalOpAnd && !res.truthy {
+			if operator == operators.OpAnd && !res.truthy {
 				pc.Restore(checkpoint)
 				return booleanPredicateResult(false), nil
 			}
-			if operator == logicalOpOr && res.truthy {
+			if operator == operators.OpOr && res.truthy {
 				pc.Restore(checkpoint)
 				return booleanPredicateResult(true), nil
 			}
@@ -500,13 +500,13 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 		partResults = append(partResults, res)
 	}
 	if len(parts) == 0 {
-		return booleanPredicateResult(operator == logicalOpAnd), nil
+		return booleanPredicateResult(operator == operators.OpAnd), nil
 	}
 	if len(parts) == 1 {
 		return preserveParamRefsIfNeeded(predicateResult(parts[0]), partResults[0]), nil
 	}
 	joiner := sqlAndJoiner
-	if operator == logicalOpOr {
+	if operator == operators.OpOr {
 		joiner = sqlOrJoiner
 	}
 	return preserveParamRefsIfNeeded(predicateResult(fmt.Sprintf("(%s)", strings.Join(parts, joiner))), partResults...), nil
@@ -563,8 +563,8 @@ func (p *Parser) parseNotValueParam(
 }
 
 func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
-	if len(args) < 2 {
-		return expressionResult{}, tperrors.NewInsufficientArgs("if", path, 2, len(args))
+	if len(args) < ifMinArgs {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, ifMinArgs, len(args))
 	}
 	var parts []string
 	var paramRefs paramRefPreserver
@@ -573,7 +573,7 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 	if hasElse {
 		pairLimit = len(args) - 1
 	}
-	for i := 0; i < pairLimit; i += 2 {
+	for i := 0; i < pairLimit; i += ifPairStep {
 		conditionCheckpoint := pc.Checkpoint()
 		cond, condition, err := p.parsePredicateIfConditionParam(args[i], tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
@@ -604,7 +604,7 @@ func (p *Parser) parsePredicateIfParam(args []interface{}, path string, pc *para
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
-	elseSQL := "FALSE"
+	elseSQL := sqlFalse
 	if hasElse {
 		elseRes, err := p.parsePredicateIfOperandParam(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1), pc)
 		if err != nil {
@@ -638,12 +638,12 @@ func (p *Parser) parsePredicateIfOperandParam(expr interface{}, path string, pc 
 }
 
 func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
-	if len(args) < 2 {
-		return expressionResult{}, tperrors.NewInsufficientArgs("if", path, 2, len(args))
+	if len(args) < ifMinArgs {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, ifMinArgs, len(args))
 	}
 	var parts []string
 	var paramRefs paramRefPreserver
-	resultRes := literalValueResult("NULL", operators.ExpressionTypeNull, false)
+	resultRes := literalValueResult(sqlNull, operators.ExpressionTypeNull, false)
 	typeSet := false
 	mergeResultType := func(res expressionResult) error {
 		if !typeSet {
@@ -663,7 +663,7 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 	if hasElse {
 		pairLimit = len(args) - 1
 	}
-	for i := 0; i < pairLimit; i += 2 {
+	for i := 0; i < pairLimit; i += ifPairStep {
 		cond, condition, err := p.parseTruthinessResultParam(args[i], tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return expressionResult{}, err
@@ -694,7 +694,7 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, valueSQL(thenRes)))
 	}
-	elseSQL := "NULL"
+	elseSQL := sqlNull
 	if hasElse {
 		elseRes, err := p.parseExpressionValueParam(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1), pc)
 		if err != nil {
@@ -710,7 +710,7 @@ func (p *Parser) parseValueIfParam(args []interface{}, path string, pc *params.P
 		elseSQL = valueSQL(elseRes)
 	}
 	if len(parts) == 0 {
-		return paramRefs.apply(literalValueResult("NULL", operators.ExpressionTypeNull, false)), nil
+		return paramRefs.apply(literalValueResult(sqlNull, operators.ExpressionTypeNull, false)), nil
 	}
 	result := valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL), valueTypeOf(resultRes))
 	if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
@@ -731,8 +731,8 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 	argPath := tperrors.BuildArrayPath(path, index)
 	if current, ok := nonFiniteNativeFloatTruthResult(args[index]); ok {
 		if index == len(args)-1 ||
-			(operator == logicalOpOr && current.truthy) ||
-			(operator == logicalOpAnd && !current.truthy) {
+			(operator == operators.OpOr && current.truthy) ||
+			(operator == operators.OpAnd && !current.truthy) {
 			return expressionResult{}, nonFiniteNativeFloatValueError(args[index], argPath)
 		}
 		return p.parseValueLogicalFromParam(operator, args, index+1, path, pc)
@@ -747,10 +747,10 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 		return current, nil
 	}
 	if current.truthKnown {
-		if operator == logicalOpOr && current.truthy {
+		if operator == operators.OpOr && current.truthy {
 			return current, nil
 		}
-		if operator == logicalOpAnd && !current.truthy {
+		if operator == operators.OpAnd && !current.truthy {
 			return current, nil
 		}
 		if canRollbackParamRefs(current) {
@@ -776,7 +776,7 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 	if err != nil {
 		return expressionResult{}, err
 	}
-	if operator == logicalOpOr {
+	if operator == operators.OpOr {
 		result := valueResult(fmt.Sprintf("CASE WHEN %s THEN %s ELSE %s END", condition, valueSQL(current), valueSQL(rest)), valueTypeOf(resultRes))
 		if elemTypes, ok := arrayElementTypesOf(resultRes); ok {
 			result = withArrayElementTypes(result, elemTypes...)
@@ -794,7 +794,7 @@ func (p *Parser) parseValueLogicalFromParam(operator string, args []interface{},
 
 func (p *Parser) parseCatValueParam(args []interface{}, path string, pc *params.ParamCollector) (expressionResult, error) {
 	if len(args) == 0 {
-		return valueResult("''", operators.ExpressionTypeString), nil
+		return valueResult(sqlEmptyString, operators.ExpressionTypeString), nil
 	}
 	operands := make([]string, len(args))
 	var paramRefs paramRefPreserver
@@ -846,8 +846,8 @@ func (p *Parser) parseStringifiedIfParam(
 	path string,
 	pc *params.ParamCollector,
 ) (expressionResult, error) {
-	if len(args) < 2 {
-		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, 2, len(args))
+	if len(args) < ifMinArgs {
+		return expressionResult{}, tperrors.NewInsufficientArgs(operators.OpIf, path, ifMinArgs, len(args))
 	}
 	var parts []string
 	var paramRefs paramRefPreserver
@@ -856,7 +856,7 @@ func (p *Parser) parseStringifiedIfParam(
 	if hasElse {
 		pairLimit = len(args) - 1
 	}
-	for i := 0; i < pairLimit; i += 2 {
+	for i := 0; i < pairLimit; i += ifPairStep {
 		cond, condition, err := p.parseTruthinessResultParam(args[i], tperrors.BuildArrayPath(path, i), pc)
 		if err != nil {
 			return expressionResult{}, err
@@ -879,7 +879,7 @@ func (p *Parser) parseStringifiedIfParam(
 		}
 		parts = append(parts, fmt.Sprintf("WHEN %s THEN %s", condition, thenRes.SQL))
 	}
-	elseSQL := "''"
+	elseSQL := sqlEmptyString
 	if hasElse {
 		elseRes, err := p.parseCatStringExpressionParam(args[len(args)-1], tperrors.BuildArrayPath(path, len(args)-1), pc)
 		if err != nil {
@@ -892,7 +892,7 @@ func (p *Parser) parseStringifiedIfParam(
 		elseSQL = elseRes.SQL
 	}
 	if len(parts) == 0 {
-		return paramRefs.apply(literalValueResult("''", operators.ExpressionTypeString, false)), nil
+		return paramRefs.apply(literalValueResult(sqlEmptyString, operators.ExpressionTypeString, false)), nil
 	}
 	return paramRefs.apply(valueResult(fmt.Sprintf("CASE %s ELSE %s END", strings.Join(parts, " "), elseSQL),
 		operators.ExpressionTypeString)), nil

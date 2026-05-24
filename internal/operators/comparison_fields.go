@@ -156,13 +156,13 @@ func (c *ComparisonOperator) arrayElementEqualityKind(fieldName string) (string,
 	}
 	switch elemType {
 	case ExpressionTypeString:
-		return "string", true
+		return literalKindString, true
 	case ExpressionTypeNumber:
-		return "number", true
+		return literalKindNumber, true
 	case ExpressionTypeBoolean:
-		return "boolean", true
+		return literalKindBoolean, true
 	case ExpressionTypeArray:
-		return "array", true
+		return literalKindArray, true
 	case ExpressionTypeObject:
 		return objectFieldType, true
 	case ExpressionTypeUnknown, ExpressionTypeNull:
@@ -180,17 +180,17 @@ func (c *ComparisonOperator) validateArrayMembershipNeedle(fieldName string, nee
 	if !needleKnown {
 		return true, nil
 	}
-	if _, ok := needleKinds["null"]; ok {
+	if _, ok := needleKinds[literalKindNull]; ok {
 		return true, nil
 	}
 	needleKind := elemKind
-	if elemKind == "enum" {
-		needleKind = "string"
+	if elemKind == SchemaTypeEnum {
+		needleKind = SchemaTypeString
 	}
 	if _, ok := needleKinds[needleKind]; !ok {
 		return false, nil
 	}
-	if literal, ok := equalityLiteralValue(needle); ok && equalityLiteralKind(literal) == "string" {
+	if literal, ok := equalityLiteralValue(needle); ok && equalityLiteralKind(literal) == SchemaTypeString {
 		str, ok := literal.(string)
 		if !ok {
 			return true, nil
@@ -409,7 +409,12 @@ func setEqualityFieldDefault(operand *equalityFieldOperand, defaultValue interfa
 }
 
 func isEqualityOperator(operator string) bool {
-	return operator == "==" || operator == "===" || operator == "!=" || operator == "!=="
+	switch operator {
+	case OpEqual, OpStrictEqual, OpNotEqual, OpStrictNotEqual:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *ComparisonOperator) shouldUseNullSafeFieldEquality(operator string, leftArg, rightArg interface{}) bool {
@@ -423,7 +428,7 @@ func (c *ComparisonOperator) looseIncompatibleFieldEqualityError(
 	operator string,
 	leftField, rightField equalityFieldOperand,
 ) error {
-	if operator != "==" && operator != "!=" {
+	if operator != OpEqual && operator != OpNotEqual {
 		return nil
 	}
 	leftKind, leftKnown := c.schemaEqualityKind(leftField.fieldName)
@@ -449,7 +454,7 @@ func (c *ComparisonOperator) strictIncompatibleFieldEqualitySQL(
 		return "", false
 	}
 
-	if operator == "===" {
+	if operator == OpStrictEqual {
 		return fmt.Sprintf("(%s IS NULL AND %s IS NULL)", leftSQL, rightSQL), true
 	}
 	return fmt.Sprintf("(%s IS NOT NULL OR %s IS NOT NULL)", leftSQL, rightSQL), true
@@ -487,13 +492,13 @@ func isProcessedSQLFieldOperand(value interface{}) bool {
 
 func nullSafeFieldEqualitySQL(operator, leftSQL, rightSQL string) string {
 	switch operator {
-	case "==", "===":
+	case OpEqual, OpStrictEqual:
 		return fmt.Sprintf("((%s IS NULL AND %s IS NULL) OR (%s IS NOT NULL AND %s IS NOT NULL AND %s = %s))",
 			leftSQL, rightSQL, leftSQL, rightSQL, leftSQL, rightSQL)
-	case "!=":
+	case OpNotEqual:
 		return fmt.Sprintf("((%s IS NULL AND %s IS NOT NULL) OR (%s IS NOT NULL AND %s IS NULL) OR (%s IS NOT NULL AND %s IS NOT NULL AND %s != %s))",
 			leftSQL, rightSQL, leftSQL, rightSQL, leftSQL, rightSQL, leftSQL, rightSQL)
-	case "!==":
+	case OpStrictNotEqual:
 		return fmt.Sprintf("((%s IS NULL AND %s IS NOT NULL) OR (%s IS NOT NULL AND %s IS NULL) OR (%s IS NOT NULL AND %s IS NOT NULL AND %s <> %s))",
 			leftSQL, rightSQL, leftSQL, rightSQL, leftSQL, rightSQL, leftSQL, rightSQL)
 	default:
@@ -502,20 +507,20 @@ func nullSafeFieldEqualitySQL(operator, leftSQL, rightSQL string) string {
 }
 
 func isStrictEqualityOperator(operator string) bool {
-	return operator == "===" || operator == "!=="
+	return operator == OpStrictEqual || operator == OpStrictNotEqual
 }
 
 func impossibleEqualityPredicateConstant(operator string) *bool {
-	result := operator == "!=" || operator == "!=="
+	result := operator == OpNotEqual || operator == OpStrictNotEqual
 
 	return &result
 }
 
 func equalityPredicateConstant(operator string, left, right bool) bool {
 	switch operator {
-	case "==", "===":
+	case OpEqual, OpStrictEqual:
 		return left == right
-	case "!=", "!==":
+	case OpNotEqual, OpStrictNotEqual:
 		return left != right
 	default:
 		return false

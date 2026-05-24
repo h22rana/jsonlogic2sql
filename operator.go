@@ -305,7 +305,9 @@ func (r *OperatorRegistry) Merge(other *OperatorRegistry) {
 	maps.Copy(r.handlers, other.handlers)
 }
 
-var validOperatorNameRe = regexp.MustCompile(`^!?[a-zA-Z_][a-zA-Z0-9_]*$`)
+const validOperatorNamePattern = `!?[a-zA-Z_][a-zA-Z0-9_]*`
+
+var validOperatorNameRe = regexp.MustCompile("^" + validOperatorNamePattern + "$")
 
 // validateOperatorName checks if an operator name is valid.
 // Names must be non-empty, match ^!?[a-zA-Z_][a-zA-Z0-9_]*$ (optional !
@@ -316,7 +318,7 @@ func validateOperatorName(name string) error {
 		return fmt.Errorf("operator name must not be empty")
 	}
 	if !validOperatorNameRe.MatchString(name) {
-		return fmt.Errorf("operator name %q must match pattern !?[a-zA-Z_][a-zA-Z0-9_]*", name)
+		return fmt.Errorf("operator name %q must match pattern %s", name, validOperatorNamePattern)
 	}
 
 	if isBuiltInOperatorName(name) {
@@ -326,14 +328,5 @@ func validateOperatorName(name string) error {
 }
 
 func isBuiltInOperatorName(name string) bool {
-	switch name {
-	case "var", "missing", "missing_some",
-		"if", "==", "===", "!=", "!==", "and", "or", "!", "!!",
-		">", ">=", "<", "<=", "+", "-", "*", "/", "%", "max", "min",
-		"cat", "substr", "in",
-		"map", "filter", "reduce", "all", "some", "none", "merge":
-		return true
-	default:
-		return false
-	}
+	return operators.IsBuiltInOperatorName(name)
 }

@@ -11,7 +11,7 @@ func (p *Parser) rejectUnsupportedPostgreSQLEmptyArrayResult(res expressionResul
 	if !p.isUnsupportedPostgreSQLEmptyArrayResult(res) {
 		return nil
 	}
-	return tperrors.New(tperrors.ErrInvalidArgument, "", "$",
+	return tperrors.New(tperrors.ErrInvalidArgument, "", rootPath,
 		"empty PostgreSQL array literals require an explicit element type")
 }
 
@@ -73,13 +73,15 @@ func containsBarePostgreSQLEmptyArrayLiteral(sql string) bool {
 			continue
 		}
 
-		if i+len("ARRAY[]") > len(sql) || !strings.EqualFold(sql[i:i+len("ARRAY[]")], "ARRAY[]") {
+		if i+len(postgresEmptyArrayLiteral) > len(sql) ||
+			!strings.EqualFold(sql[i:i+len(postgresEmptyArrayLiteral)], postgresEmptyArrayLiteral) {
 			continue
 		}
 		if i > 0 && isSQLIdentifierChar(sql[i-1]) {
 			continue
 		}
-		if i+len("ARRAY[]") < len(sql) && isSQLIdentifierChar(sql[i+len("ARRAY[]")]) {
+		if i+len(postgresEmptyArrayLiteral) < len(sql) &&
+			isSQLIdentifierChar(sql[i+len(postgresEmptyArrayLiteral)]) {
 			continue
 		}
 		if isTypedPostgreSQLEmptyArrayLiteral(sql, i) {
@@ -152,7 +154,7 @@ func isDollarQuoteTagChar(ch byte) bool {
 }
 
 func isTypedPostgreSQLEmptyArrayLiteral(sql string, start int) bool {
-	end := start + len("ARRAY[]")
+	end := start + len(postgresEmptyArrayLiteral)
 	next := skipSQLSpaces(sql, end)
 	if strings.HasPrefix(sql[next:], "::") {
 		return true

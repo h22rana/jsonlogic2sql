@@ -85,7 +85,7 @@ func arrayLiteralMembershipSQL(valueSQL string, itemSQLs []string) string {
 	nonNullItems := make([]string, 0, len(itemSQLs))
 	hasNull := false
 	for _, itemSQL := range itemSQLs {
-		if strings.EqualFold(strings.TrimSpace(itemSQL), "NULL") {
+		if strings.EqualFold(strings.TrimSpace(itemSQL), sqlNull) {
 			hasNull = true
 			continue
 		}

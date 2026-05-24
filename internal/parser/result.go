@@ -10,14 +10,21 @@ import (
 )
 
 const (
-	sqlTrue        = "TRUE"
-	sqlFalse       = "FALSE"
-	logicalOpAnd   = "and"
-	logicalOpOr    = "or"
-	sqlAndJoiner   = " AND "
-	sqlOrJoiner    = " OR "
-	unknownTypeSQL = "unknown"
-	objectTypeSQL  = "object"
+	rootPath                  = "$"
+	expressionKindPredicate   = "predicate"
+	expressionKindValue       = "value"
+	nullTypeSQL               = "null"
+	sqlTrue                   = "TRUE"
+	sqlFalse                  = "FALSE"
+	sqlNull                   = "NULL"
+	sqlEmptyString            = "''"
+	sqlAndJoiner              = " AND "
+	sqlOrJoiner               = " OR "
+	postgresEmptyArrayLiteral = "ARRAY[]"
+	unknownTypeSQL            = "unknown"
+	objectTypeSQL             = operators.SchemaTypeObject
+	ifMinArgs                 = 2
+	ifPairStep                = 2
 )
 
 type expressionResult struct {
@@ -273,9 +280,9 @@ func literalValueResultWithRaw(sql string, typ operators.ExpressionType, truthy 
 func kindName(kind operators.ExpressionKind) string {
 	switch kind {
 	case operators.ExpressionKindPredicate:
-		return "predicate"
+		return expressionKindPredicate
 	case operators.ExpressionKindValue:
-		return "value"
+		return expressionKindValue
 	default:
 		return unknownTypeSQL
 	}
@@ -284,15 +291,15 @@ func kindName(kind operators.ExpressionKind) string {
 func typeName(typ operators.ExpressionType) string {
 	switch typ {
 	case operators.ExpressionTypeNull:
-		return "null"
+		return nullTypeSQL
 	case operators.ExpressionTypeBoolean:
-		return "boolean"
+		return operators.SchemaTypeBoolean
 	case operators.ExpressionTypeString:
-		return "string"
+		return operators.SchemaTypeString
 	case operators.ExpressionTypeNumber:
-		return "number"
+		return operators.SchemaTypeNumber
 	case operators.ExpressionTypeArray:
-		return "array"
+		return operators.SchemaTypeArray
 	case operators.ExpressionTypeObject:
 		return objectTypeSQL
 	case operators.ExpressionTypeUnknown:
@@ -365,13 +372,13 @@ func (p *Parser) fieldArrayElementExpressionType(fieldName string) (operators.Ex
 func schemaFieldTypeExpressionType(fieldType string) operators.ExpressionType {
 	fieldType = normalizeSchemaType(fieldType)
 	switch fieldType {
-	case "boolean":
+	case operators.SchemaTypeBoolean:
 		return operators.ExpressionTypeBoolean
-	case "string", "enum":
+	case operators.SchemaTypeString, operators.SchemaTypeEnum:
 		return operators.ExpressionTypeString
-	case "integer", "number":
+	case operators.SchemaTypeInteger, operators.SchemaTypeNumber:
 		return operators.ExpressionTypeNumber
-	case "array":
+	case operators.SchemaTypeArray:
 		return operators.ExpressionTypeArray
 	case objectTypeSQL:
 		return operators.ExpressionTypeObject

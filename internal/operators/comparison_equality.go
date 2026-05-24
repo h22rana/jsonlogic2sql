@@ -14,11 +14,11 @@ func (c *ComparisonOperator) fieldEqualityKind(fieldName string) string {
 	}
 	switch {
 	case c.schema().IsNumericType(fieldName):
-		return "number"
+		return literalKindNumber
 	case c.schema().IsBooleanType(fieldName):
-		return "boolean"
+		return literalKindBoolean
 	case c.schema().IsStringType(fieldName), c.schema().IsEnumType(fieldName):
-		return "string"
+		return literalKindString
 	default:
 		return ""
 	}
@@ -223,7 +223,7 @@ func (c *ComparisonOperator) defaultedFieldNeedsNullSplit(field equalityFieldOpe
 		return false
 	}
 	defaultKind := equalityLiteralKind(field.defaultLiteral)
-	return defaultKind != "" && defaultKind != "null" && defaultKind != fieldKind
+	return defaultKind != "" && defaultKind != literalKindNull && defaultKind != fieldKind
 }
 
 func (o defaultedFieldLiteralOperand) withoutDefault() interface{} {
@@ -308,11 +308,11 @@ func (c *ComparisonOperator) fieldLiteralEqualityBranchSQL(
 	}
 
 	switch operator {
-	case "==", "===":
+	case OpEqual, OpStrictEqual:
 		return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil, nil
-	case "!=":
+	case OpNotEqual:
 		return fmt.Sprintf("%s != %s", leftSQL, rightSQL), nil, nil
-	case "!==":
+	case OpStrictNotEqual:
 		return fmt.Sprintf("%s <> %s", leftSQL, rightSQL), nil, nil
 	default:
 		return "", nil, fmt.Errorf("unsupported equality operator: %s", operator)
@@ -380,8 +380,8 @@ func (c *ComparisonOperator) equalityBranchSQL(
 		return "", nil, fmt.Errorf("invalid right operand: %w", err)
 	}
 
-	isLeftNull := leftArg == nil || leftSQL == "NULL"
-	isRightNull := rightArg == nil || rightSQL == "NULL"
+	isLeftNull := leftArg == nil || leftSQL == sqlNull
+	isRightNull := rightArg == nil || rightSQL == sqlNull
 
 	if !isLeftNull && !isRightNull {
 		if leftBool, ok := sqlBooleanConstant(leftSQL); ok {
@@ -399,7 +399,7 @@ func (c *ComparisonOperator) equalityBranchSQL(
 	}
 
 	switch operator {
-	case "==", "===":
+	case OpEqual, OpStrictEqual:
 		switch {
 		case isLeftNull && isRightNull:
 			result := true
@@ -411,7 +411,7 @@ func (c *ComparisonOperator) equalityBranchSQL(
 		default:
 			return fmt.Sprintf("%s = %s", leftSQL, rightSQL), nil, nil
 		}
-	case "!=", "!==":
+	case OpNotEqual, OpStrictNotEqual:
 		switch {
 		case isLeftNull && isRightNull:
 			result := false
@@ -420,7 +420,7 @@ func (c *ComparisonOperator) equalityBranchSQL(
 			return fmt.Sprintf("%s IS NOT NULL", rightSQL), nil, nil
 		case isRightNull:
 			return fmt.Sprintf("%s IS NOT NULL", leftSQL), nil, nil
-		case operator == "!=":
+		case operator == OpNotEqual:
 			return fmt.Sprintf("%s != %s", leftSQL, rightSQL), nil, nil
 		default:
 			return fmt.Sprintf("%s <> %s", leftSQL, rightSQL), nil, nil
@@ -437,7 +437,7 @@ func defaultLiteralEqualityResult(operator string, defaultLiteral, literal inter
 	} else {
 		equal = equalityLiteralsLooseEqual(defaultLiteral, literal)
 	}
-	return (operator == "==" || operator == "===") == equal
+	return (operator == OpEqual || operator == OpStrictEqual) == equal
 }
 
 func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, rightArg interface{}) equalityDecision {
@@ -536,7 +536,7 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 			dec.constant = impossibleEqualityPredicateConstant(operator)
 			return dec
 		}
-		if fieldKind == "number" {
+		if fieldKind == literalKindNumber {
 			if _, isJSONNumber := literal.(json.Number); !isJSONNumber {
 				if _, handled, valid := jsNumberFromLiteral(literal); handled && !valid {
 					dec.constant = impossibleEqualityPredicateConstant(operator)
@@ -544,7 +544,7 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 				}
 			}
 		}
-		if fieldKind == "number" && c.schema().GetFieldType(fieldName) == "integer" {
+		if fieldKind == literalKindNumber && c.schema().GetFieldType(fieldName) == SchemaTypeInteger {
 			if jsonNumberIntegerOutsideInt64(literal) {
 				if field.hasDefault && field.defaultCanStrictEqual(literal) {
 					return dec
@@ -576,8 +576,8 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 	}
 
 	switch fieldKind {
-	case "number":
-		if c.schema().GetFieldType(fieldName) == "number" {
+	case literalKindNumber:
+		if c.schema().GetFieldType(fieldName) == literalKindNumber {
 			if _, ok := literal.(json.Number); ok {
 				return dec
 			}
@@ -594,7 +594,7 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 			return dec
 		}
 		value := n.value
-		if c.schema().GetFieldType(fieldName) == "integer" {
+		if c.schema().GetFieldType(fieldName) == SchemaTypeInteger {
 			if jsonNumberIntegerOutsideInt64(literal) {
 				if field.hasDefault && field.defaultCanLooseEqual(literal) {
 					return dec
@@ -620,7 +620,7 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 			value = i
 		}
 		c.setLiteralForFieldSide(&dec, fieldOnLeft, value)
-	case "boolean":
+	case literalKindBoolean:
 		n, handled, valid := jsNumberFromLiteral(literal)
 		if !handled {
 			return dec
@@ -643,13 +643,13 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 			}
 			dec.constant = impossibleEqualityPredicateConstant(operator)
 		}
-	case "string":
+	case literalKindString:
 		if _, ok := literal.(bool); ok {
 			dec.unsupported = fmt.Errorf(
 				"loose equality between string field %q and boolean literal is not supported", fieldName)
 			return dec
 		}
-		if equalityLiteralKind(literal) == "number" {
+		if equalityLiteralKind(literal) == literalKindNumber {
 			if canonical, handled, possible := stringFieldNumericLiteralString(literal); handled {
 				if !possible {
 					dec.constant = impossibleEqualityPredicateConstant(operator)
@@ -722,7 +722,7 @@ func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityD
 			dec.constant = impossibleEqualityPredicateConstant(operator)
 			return dec
 		}
-		if exprKind == "number" {
+		if exprKind == literalKindNumber {
 			if _, isJSONNumber := literal.(json.Number); !isJSONNumber {
 				if _, handled, valid := jsNumberFromLiteral(literal); handled && !valid {
 					dec.handled = true
@@ -735,7 +735,7 @@ func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityD
 	}
 
 	switch exprKind {
-	case "number":
+	case literalKindNumber:
 		n, handled, valid := jsNumberFromLiteral(literal)
 		if !handled {
 			return dec
@@ -746,7 +746,7 @@ func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityD
 			return dec
 		}
 		c.setLiteralForFieldSide(&dec, exprOnLeft, n.value)
-	case "boolean":
+	case literalKindBoolean:
 		n, handled, valid := jsNumberFromLiteral(literal)
 		if !handled {
 			return dec
@@ -764,13 +764,13 @@ func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityD
 		default:
 			dec.constant = impossibleEqualityPredicateConstant(operator)
 		}
-	case "string":
+	case literalKindString:
 		dec.handled = true
 		if _, ok := literal.(bool); ok {
 			dec.unsupported = fmt.Errorf("loose equality between string expression and boolean literal is not supported")
 			return dec
 		}
-		if equalityLiteralKind(literal) == "number" {
+		if equalityLiteralKind(literal) == literalKindNumber {
 			if canonical, handled, possible := stringFieldNumericLiteralString(literal); handled {
 				if !possible {
 					dec.constant = impossibleEqualityPredicateConstant(operator)
@@ -790,19 +790,19 @@ func expressionEqualityKind(value interface{}) (string, bool) {
 		return "", false
 	}
 	if pv.Kind == ExpressionKindPredicate {
-		return "boolean", true
+		return literalKindBoolean, true
 	}
 	switch pv.Type {
 	case ExpressionTypeNull:
-		return "null", true
+		return literalKindNull, true
 	case ExpressionTypeBoolean:
-		return "boolean", true
+		return literalKindBoolean, true
 	case ExpressionTypeString:
-		return "string", true
+		return literalKindString, true
 	case ExpressionTypeNumber:
-		return "number", true
+		return literalKindNumber, true
 	case ExpressionTypeArray:
-		return "array", true
+		return literalKindArray, true
 	case ExpressionTypeObject:
 		return objectFieldType, true
 	case ExpressionTypeUnknown:
@@ -814,13 +814,13 @@ func expressionEqualityKind(value interface{}) (string, bool) {
 func (c *ComparisonOperator) schemaEqualityKind(fieldName string) (string, bool) {
 	switch {
 	case c.schema().IsStringType(fieldName), c.schema().IsEnumType(fieldName):
-		return "string", true
+		return literalKindString, true
 	case c.schema().IsNumericType(fieldName):
-		return "number", true
+		return literalKindNumber, true
 	case c.schema().IsBooleanType(fieldName):
-		return "boolean", true
+		return literalKindBoolean, true
 	case c.schema().IsArrayType(fieldName):
-		return "array", true
+		return literalKindArray, true
 	case c.schema().GetFieldType(fieldName) == objectFieldType:
 		return objectFieldType, true
 	default:
@@ -872,7 +872,7 @@ func (c *ComparisonOperator) strictArrayMembershipItems(
 	filtered := make([]interface{}, 0, len(items))
 	for _, item := range items {
 		if itemKind, ok := expressionEqualityKind(item); ok {
-			if _, ok := leftKinds[itemKind]; itemKind == "null" || itemKind == "" || ok {
+			if _, ok := leftKinds[itemKind]; itemKind == literalKindNull || itemKind == "" || ok {
 				filtered = append(filtered, item)
 			}
 			continue
@@ -883,7 +883,7 @@ func (c *ComparisonOperator) strictArrayMembershipItems(
 			continue
 		}
 		itemKind := equalityLiteralKind(literal)
-		if _, ok := leftKinds[itemKind]; itemKind == "null" || itemKind == "" || ok {
+		if _, ok := leftKinds[itemKind]; itemKind == literalKindNull || itemKind == "" || ok {
 			filtered = append(filtered, item)
 		}
 	}
@@ -1067,7 +1067,7 @@ func (c *ComparisonOperator) arrayMembershipItemSQLs(items []interface{}, pc *pa
 func (c *ComparisonOperator) validateEnumArrayMembershipItems(fieldName string, items []interface{}) error {
 	for _, item := range items {
 		literal, ok := equalityLiteralValue(item)
-		if !ok || equalityLiteralKind(literal) != "string" {
+		if !ok || equalityLiteralKind(literal) != literalKindString {
 			continue
 		}
 		if err := c.validateEnumValue(item, fieldName); err != nil {
