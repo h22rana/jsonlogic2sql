@@ -253,10 +253,6 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 
 			if fieldName != "" {
 				if c.schema().IsArrayType(fieldName) {
-					leftSQL, lErr := c.valueToSQLParam(leftOriginal, pc)
-					if lErr != nil {
-						return "", fmt.Errorf("invalid left operand: %w", lErr)
-					}
 					if sql, handled, membershipErr := c.objectArrayHaystackMembershipSQL(leftOriginal, ProcessedValue{
 						Value:             rightSQL,
 						IsSQL:             true,
@@ -274,6 +270,10 @@ func (c *ComparisonOperator) handleInParam(leftOriginal, rightValue interface{},
 					}
 					if !compatible {
 						return boolSQL(false), nil
+					}
+					leftSQL, lErr := c.valueToSQLParam(leftOriginal, pc)
+					if lErr != nil {
+						return "", fmt.Errorf("invalid left operand: %w", lErr)
 					}
 					return c.arrayMembershipSQL(leftSQL, rightSQL), nil
 				} else if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
@@ -416,6 +416,31 @@ func (c *ComparisonOperator) handleInSQLRightParam(
 	pc *params.ParamCollector,
 ) (string, error) {
 	if fieldName != "" {
+		if c.schema().IsArrayType(fieldName) {
+			if sql, handled, err := c.objectArrayHaystackMembershipSQL(leftOriginal, ProcessedValue{
+				Value:             rightSQL,
+				IsSQL:             true,
+				IsField:           true,
+				FieldName:         fieldName,
+				HasExpressionInfo: true,
+				Kind:              ExpressionKindValue,
+				Type:              ExpressionTypeArray,
+			}); handled || err != nil {
+				return sql, err
+			}
+			compatible, err := c.validateArrayMembershipNeedle(fieldName, leftOriginal)
+			if err != nil {
+				return "", err
+			}
+			if !compatible {
+				return boolSQL(false), nil
+			}
+			leftSQL, err := c.valueToSQLParam(leftOriginal, pc)
+			if err != nil {
+				return "", fmt.Errorf("invalid left operand: %w", err)
+			}
+			return c.arrayMembershipSQL(leftSQL, rightSQL), nil
+		}
 		if c.schema().IsStringType(fieldName) || c.schema().IsEnumType(fieldName) {
 			sql, err := c.stringContainmentSQLParamAuto(rightSQL, leftOriginal, pc)
 			if err != nil {

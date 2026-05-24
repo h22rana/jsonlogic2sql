@@ -8,6 +8,9 @@ import (
 func arrayElementTypeRegressionSchema() *Schema {
 	return mustNewSchema([]FieldSchema{
 		{Name: "flag", Type: FieldTypeBoolean},
+		{Name: "age", Type: FieldTypeInteger},
+		{Name: "score", Type: FieldTypeNumber},
+		{Name: "label", Type: FieldTypeString},
 		{Name: "ints", Type: FieldTypeArray, ElementType: FieldTypeInteger},
 		{Name: "numbers", Type: FieldTypeArray, ElementType: FieldTypeNumber},
 		{Name: "tags", Type: FieldTypeArray, ElementType: FieldTypeString},
@@ -327,6 +330,141 @@ func TestSchemaArrayElementTypesAllowNullMembershipNeedlesAllDialects(t *testing
 			}
 			if paramSQL == "FALSE" || !strings.Contains(paramSQL, "IS NULL") {
 				t.Fatalf("TranspileParameterizedCondition() = %q, want null-safe array membership", paramSQL)
+			}
+		})
+	}
+}
+
+func TestSchemaArrayElementTypesAllowIntegerArrayNumericMembershipAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := arrayElementTypeRegressionSchema()
+	tests := []struct {
+		name         string
+		logic        string
+		inlineNeedle string
+		paramNeedle  func(Dialect) string
+		wantParam    bool
+	}{
+		{
+			name:         "integer literal",
+			logic:        `{"in":[1,{"var":"ints"}]}`,
+			inlineNeedle: "1",
+			paramNeedle:  func(d Dialect) string { return testPlaceholder(d, 1) },
+			wantParam:    true,
+		},
+		{
+			name:         "integer field",
+			logic:        `{"in":[{"var":"age"},{"var":"ints"}]}`,
+			inlineNeedle: "age",
+			paramNeedle:  func(Dialect) string { return "age" },
+		},
+		{
+			name:         "number field",
+			logic:        `{"in":[{"var":"score"},{"var":"ints"}]}`,
+			inlineNeedle: "score",
+			paramNeedle:  func(Dialect) string { return "score" },
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if want := testNullSafeArrayMembershipSQL(d, tt.inlineNeedle, "ints"); sql != want {
+						t.Fatalf("TranspileCondition() = %q, want %q", sql, want)
+					}
+
+					paramSQL, params, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if want := testNullSafeArrayMembershipSQL(d, tt.paramNeedle(d), "ints"); paramSQL != want {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want %q", paramSQL, want)
+					}
+					if tt.wantParam {
+						if len(params) != 1 {
+							t.Fatalf("TranspileParameterizedCondition() params = %#v, want one numeric param", params)
+						}
+						if value, ok := params[0].Value.(float64); !ok || value != 1 {
+							t.Fatalf("TranspileParameterizedCondition() params = %#v, want float64(1)", params)
+						}
+					} else if len(params) != 0 {
+						t.Fatalf("TranspileParameterizedCondition() params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestSchemaArrayElementTypesRejectImpossibleIntegerArrayMembershipAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := arrayElementTypeRegressionSchema()
+	tests := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "fractional literal",
+			logic: `{"in":[1.5,{"var":"ints"}]}`,
+		},
+		{
+			name:  "integer literal outside int64 range",
+			logic: `{"in":[9223372036854775808,{"var":"ints"}]}`,
+		},
+		{
+			name:  "string field with null default",
+			logic: `{"in":[{"var":["label",null]},{"var":"ints"}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if sql != "FALSE" {
+						t.Fatalf("TranspileCondition() = %q, want FALSE", sql)
+					}
+
+					paramSQL, params, err := tr.TranspileParameterizedCondition(tt.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if paramSQL != "FALSE" {
+						t.Fatalf("TranspileParameterizedCondition() = %q, want FALSE", paramSQL)
+					}
+					if len(params) != 0 {
+						t.Fatalf("TranspileParameterizedCondition() params = %#v, want none for folded FALSE", params)
+					}
+				})
 			}
 		})
 	}

@@ -171,8 +171,23 @@ func (c *ComparisonOperator) arrayElementEqualityKind(fieldName string) (string,
 	return "", false
 }
 
-func (c *ComparisonOperator) validateArrayMembershipNeedle(fieldName string, needle interface{}) (bool, error) {
+func (c *ComparisonOperator) arrayElementMembershipKind(fieldName string) (string, bool) {
 	elemKind, elemKnown := c.arrayElementEqualityKind(fieldName)
+	if !elemKnown {
+		return "", false
+	}
+	switch elemKind {
+	case SchemaTypeInteger:
+		return literalKindNumber, true
+	case SchemaTypeEnum:
+		return literalKindString, true
+	default:
+		return elemKind, true
+	}
+}
+
+func (c *ComparisonOperator) validateArrayMembershipNeedle(fieldName string, needle interface{}) (bool, error) {
+	elemKind, elemKnown := c.arrayElementMembershipKind(fieldName)
 	if !elemKnown {
 		return true, nil
 	}
@@ -181,14 +196,15 @@ func (c *ComparisonOperator) validateArrayMembershipNeedle(fieldName string, nee
 		return true, nil
 	}
 	if _, ok := needleKinds[literalKindNull]; ok {
-		return true, nil
+		if len(needleKinds) == 1 {
+			return true, nil
+		}
 	}
-	needleKind := elemKind
-	if elemKind == SchemaTypeEnum {
-		needleKind = SchemaTypeString
-	}
-	if _, ok := needleKinds[needleKind]; !ok {
+	if _, ok := needleKinds[elemKind]; !ok {
 		return false, nil
+	}
+	if schemaArrayElementType(c.schema(), fieldName) == SchemaTypeInteger {
+		return integerArrayMembershipNeedleCompatible(needle)
 	}
 	if literal, ok := equalityLiteralValue(needle); ok && equalityLiteralKind(literal) == SchemaTypeString {
 		str, ok := literal.(string)
@@ -206,6 +222,25 @@ func (c *ComparisonOperator) validateArrayMembershipNeedle(fieldName string, nee
 		}
 	}
 	return true, nil
+}
+
+func integerArrayMembershipNeedleCompatible(needle interface{}) (bool, error) {
+	literal, ok := equalityLiteralValue(needle)
+	if !ok || equalityLiteralKind(literal) != literalKindNumber {
+		return true, nil
+	}
+	if err := validateEqualityJSONNumberLiteral(literal); err != nil {
+		return false, err
+	}
+	n, handled, valid := jsNumberFromLiteral(literal)
+	if !handled {
+		return true, nil
+	}
+	if !valid || !n.integral {
+		return false, nil
+	}
+	_, ok = int64FromJSNumber(n)
+	return ok, nil
 }
 
 func (c *ComparisonOperator) validateFieldEqualityArrayCompatibility(
