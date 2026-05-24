@@ -522,7 +522,7 @@ func (c *ComparisonOperator) hasStrictIncompatibleFieldEqualityOperands(operator
 
 	leftField, leftOK := c.extractEqualityFieldOperand(leftArg)
 	rightField, rightOK := c.extractEqualityFieldOperand(rightArg)
-	if !leftOK || !rightOK || leftField.hasDefault || rightField.hasDefault {
+	if !leftOK || !rightOK || !strictIncompatibleFieldsCanUseNullBranch(leftField, rightField) {
 		return false
 	}
 

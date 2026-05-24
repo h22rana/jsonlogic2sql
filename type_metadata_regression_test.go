@@ -61,6 +61,26 @@ func expectValueAndParamErrorContains(t *testing.T, tr *Transpiler, logic, want 
 	}
 }
 
+func expectConditionAndParamErrorContains(t *testing.T, tr *Transpiler, logic, want string) {
+	t.Helper()
+
+	sql, err := tr.TranspileCondition(logic)
+	if err == nil {
+		t.Fatalf("TranspileCondition() SQL = %q, want error containing %q", sql, want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("TranspileCondition() error = %v, want containing %q", err, want)
+	}
+
+	sql, params, err := tr.TranspileParameterizedCondition(logic)
+	if err == nil {
+		t.Fatalf("TranspileParameterizedCondition() SQL = %q params = %#v, want error containing %q", sql, params, want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("TranspileParameterizedCondition() error = %v, want containing %q", err, want)
+	}
+}
+
 func TestTypeMetadataRejectsObjectArrayScalarArrayBranchesAllDialects(t *testing.T) {
 	t.Parallel()
 
@@ -153,6 +173,153 @@ func TestTypeMetadataRejectsIncompatibleObjectArrayLiteralElements(t *testing.T)
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
 			expectValueAndParamErrorContains(t, tr, logic, "compatible object element schemas")
+		})
+	}
+}
+
+func TestTypeMetadataRejectsArrayScalarLooseEqualityAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "age", Type: FieldTypeNumber},
+	})
+	cases := []struct {
+		name    string
+		logic   string
+		wantErr string
+	}{
+		{
+			name:    "array field equals scalar",
+			logic:   `{"==":[{"var":"arr"},1]}`,
+			wantErr: "array equality",
+		},
+		{
+			name:    "defaulted array field equals scalar",
+			logic:   `{"==":[{"var":["arr",[1]]},1]}`,
+			wantErr: "array equality",
+		},
+		{
+			name:    "scalar not equals defaulted array field",
+			logic:   `{"!=":[1,{"var":["arr",[1]]}]}`,
+			wantErr: "array equality",
+		},
+		{
+			name:    "defaulted array field equals scalar field",
+			logic:   `{"==":[{"var":["arr",[1]]},{"var":"age"}]}`,
+			wantErr: "array field",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					expectConditionAndParamErrorContains(t, tr, tc.logic, tc.wantErr)
+					expectValueAndParamErrorContains(t, tr, tc.logic, tc.wantErr)
+				})
+			}
+		})
+	}
+}
+
+func TestTypeMetadataFoldsArrayScalarStrictEqualityAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "arr", Type: FieldTypeArray, ElementType: FieldTypeNumber},
+		{Name: "age", Type: FieldTypeNumber},
+	})
+	cases := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "array field strict equals scalar",
+			logic: `{"===":[{"var":"arr"},1]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "defaulted array field strict equals scalar",
+			logic: `{"===":[{"var":["arr",[1]]},1]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "scalar strict not equals defaulted array field",
+			logic: `{"!==":[1,{"var":["arr",[1]]}]}`,
+			want:  "TRUE",
+		},
+		{
+			name:  "defaulted array field strict equals scalar field",
+			logic: `{"===":[{"var":["arr",[1]]},{"var":"age"}]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "scalar field strict not equals defaulted array field",
+			logic: `{"!==":[{"var":"age"},{"var":["arr",[1]]}]}`,
+			want:  "TRUE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileCondition() SQL = %q, want %q", sql, tc.want)
+					}
+
+					sql, params, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", sql, tc.want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("TranspileParameterizedCondition() params = %#v, want none", params)
+					}
+
+					sql, err = tr.TranspileValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileValue() SQL = %q, want %q", sql, tc.want)
+					}
+
+					sql, params, err = tr.TranspileParameterizedValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", sql, tc.want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("TranspileParameterizedValue() params = %#v, want none", params)
+					}
+				})
+			}
 		})
 	}
 }

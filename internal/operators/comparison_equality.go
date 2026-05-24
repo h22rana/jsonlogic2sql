@@ -440,6 +440,45 @@ func defaultLiteralEqualityResult(operator string, defaultLiteral, literal inter
 	return (operator == OpEqual || operator == OpStrictEqual) == equal
 }
 
+func equalityOperandKind(value interface{}) (string, bool) {
+	if kind, ok := expressionEqualityKind(value); ok {
+		return kind, true
+	}
+	if _, ok := value.([]interface{}); ok {
+		return literalKindArray, true
+	}
+	literal, ok := equalityLiteralValue(value)
+	if !ok {
+		return "", false
+	}
+	kind := equalityLiteralKind(literal)
+	return kind, kind != ""
+}
+
+func equalityKindsHaveArrayScalar(leftKind, rightKind string) bool {
+	return (leftKind == literalKindArray && isScalarEqualityKind(rightKind)) ||
+		(rightKind == literalKindArray && isScalarEqualityKind(leftKind))
+}
+
+func isScalarEqualityKind(kind string) bool {
+	switch kind {
+	case literalKindString, literalKindBoolean, literalKindNumber:
+		return true
+	default:
+		return false
+	}
+}
+
+func applyArrayScalarEqualitySemantics(dec equalityDecision, operator string) equalityDecision {
+	dec.handled = true
+	if isStrictEqualityOperator(operator) {
+		dec.constant = impossibleEqualityPredicateConstant(operator)
+		return dec
+	}
+	dec.unsupported = fmt.Errorf("array equality with scalar operands is not supported")
+	return dec
+}
+
 func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, rightArg interface{}) equalityDecision {
 	dec := equalityDecision{left: leftArg, right: rightArg}
 	if !isEqualityOperator(operator) {
@@ -468,6 +507,11 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 			dec.handled = true
 			return dec
 		}
+		if isStrictEqualityOperator(operator) && !strictIncompatibleFieldsCanUseNullBranch(leftField, rightField) {
+			if c.arrayScalarFieldEquality(leftField, rightField) {
+				return applyArrayScalarEqualitySemantics(dec, operator)
+			}
+		}
 		if err := c.looseIncompatibleFieldEqualityError(operator, leftField, rightField); err != nil {
 			dec.unsupported = err
 			dec.handled = true
@@ -494,6 +538,13 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 		literalArg = nil
 	}
 	fieldName := field.fieldName
+	if fieldKind, ok := c.schemaEqualityKind(fieldName); ok {
+		if literalKind, literalKnown := equalityOperandKind(literalArg); literalKnown {
+			if equalityKindsHaveArrayScalar(fieldKind, literalKind) {
+				return applyArrayScalarEqualitySemantics(dec, operator)
+			}
+		}
+	}
 
 	fieldKind := c.fieldEqualityKind(fieldName)
 	if fieldKind == "" {
@@ -683,6 +734,9 @@ func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityD
 	leftKind, leftTyped := expressionEqualityKind(leftArg)
 	rightKind, rightTyped := expressionEqualityKind(rightArg)
 	if leftTyped && rightTyped {
+		if equalityKindsHaveArrayScalar(leftKind, rightKind) {
+			return applyArrayScalarEqualitySemantics(dec, operator)
+		}
 		if isStrictEqualityOperator(operator) && leftKind != rightKind {
 			dec.handled = true
 			dec.constant = impossibleEqualityPredicateConstant(operator)
@@ -714,9 +768,12 @@ func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityD
 	if literal == nil {
 		return dec
 	}
+	literalKind := equalityLiteralKind(literal)
+	if equalityKindsHaveArrayScalar(exprKind, literalKind) {
+		return applyArrayScalarEqualitySemantics(dec, operator)
+	}
 
 	if isStrictEqualityOperator(operator) {
-		literalKind := equalityLiteralKind(literal)
 		if literalKind != "" && literalKind != exprKind {
 			dec.handled = true
 			dec.constant = impossibleEqualityPredicateConstant(operator)
@@ -826,6 +883,25 @@ func (c *ComparisonOperator) schemaEqualityKind(fieldName string) (string, bool)
 	default:
 		return "", false
 	}
+}
+
+func (c *ComparisonOperator) arrayScalarFieldEquality(
+	leftField, rightField equalityFieldOperand,
+) bool {
+	leftKind, leftKnown := c.schemaEqualityKind(leftField.fieldName)
+	rightKind, rightKnown := c.schemaEqualityKind(rightField.fieldName)
+	if !leftKnown || !rightKnown {
+		return false
+	}
+	return equalityKindsHaveArrayScalar(leftKind, rightKind)
+}
+
+func strictIncompatibleFieldsCanUseNullBranch(leftField, rightField equalityFieldOperand) bool {
+	return equalityFieldCanEvaluateNull(leftField) && equalityFieldCanEvaluateNull(rightField)
+}
+
+func equalityFieldCanEvaluateNull(field equalityFieldOperand) bool {
+	return !field.hasDefault || (field.defaultLiteralKnown && field.defaultLiteral == nil)
 }
 
 func (c *ComparisonOperator) strictArrayMembershipLeftKinds(leftOriginal interface{}) (map[string]struct{}, bool) {
