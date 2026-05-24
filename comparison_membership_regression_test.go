@@ -124,3 +124,61 @@ func TestArrayLiteralMixedExpressionMembershipKeepsLiteralINFastPathAllDialects(
 		})
 	}
 }
+
+func TestArrayLiteralExpressionMembershipFiltersKnownIncompatibleItemsAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "status", Type: FieldTypeString},
+	})
+	logic := `{"in":[{"var":"status"},[{"+":[1,2]}]]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspilerWithConfig(&TranspilerConfig{Dialect: d, Schema: schema})
+			if err != nil {
+				t.Fatalf("NewTranspilerWithConfig() error = %v", err)
+			}
+
+			gotCondition, err := tr.TranspileCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileCondition() error = %v", err)
+			}
+			if gotCondition != "FALSE" {
+				t.Fatalf("TranspileCondition() = %q, want FALSE", gotCondition)
+			}
+
+			gotParameterizedCondition, conditionParams, err := tr.TranspileParameterizedCondition(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+			}
+			if gotParameterizedCondition != "FALSE" {
+				t.Fatalf("TranspileParameterizedCondition() = %q, want FALSE", gotParameterizedCondition)
+			}
+			if len(conditionParams) != 0 {
+				t.Fatalf("TranspileParameterizedCondition() params = %#v, want none", conditionParams)
+			}
+
+			gotValue, err := tr.TranspileValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileValue() error = %v", err)
+			}
+			if gotValue != "FALSE" {
+				t.Fatalf("TranspileValue() = %q, want FALSE", gotValue)
+			}
+
+			gotParameterizedValue, valueParams, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if gotParameterizedValue != "FALSE" {
+				t.Fatalf("TranspileParameterizedValue() = %q, want FALSE", gotParameterizedValue)
+			}
+			if len(valueParams) != 0 {
+				t.Fatalf("TranspileParameterizedValue() params = %#v, want none", valueParams)
+			}
+		})
+	}
+}
