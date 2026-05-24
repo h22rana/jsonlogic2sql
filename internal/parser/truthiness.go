@@ -267,12 +267,24 @@ func (p *Parser) parseTruthinessLogicalParam(
 				continue
 			}
 			if operator == operators.OpAnd && !res.truthy {
-				pc.Restore(checkpoint)
-				return booleanPredicateResult(false), sqlFalse, nil
+				folded := foldedLogicalParamResult(
+					pc,
+					checkpoint,
+					operandCheckpoint,
+					booleanPredicateResult(false),
+					partResults...,
+				)
+				return folded, folded.SQL, nil
 			}
 			if operator == operators.OpOr && res.truthy {
-				pc.Restore(checkpoint)
-				return booleanPredicateResult(true), sqlTrue, nil
+				folded := foldedLogicalParamResult(
+					pc,
+					checkpoint,
+					operandCheckpoint,
+					booleanPredicateResult(true),
+					partResults...,
+				)
+				return folded, folded.SQL, nil
 			}
 		}
 		parts = append(parts, condition)

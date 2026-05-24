@@ -93,6 +93,22 @@ func preserveParamRefsIfNeeded(res expressionResult, sources ...expressionResult
 	return res
 }
 
+func foldedLogicalParamResult(
+	pc *params.ParamCollector,
+	logicalCheckpoint params.Checkpoint,
+	decisiveOperandCheckpoint params.Checkpoint,
+	res expressionResult,
+	earlierParts ...expressionResult,
+) expressionResult {
+	res = preserveParamRefsIfNeeded(res, earlierParts...)
+	if canRollbackParamRefs(res) {
+		pc.Restore(logicalCheckpoint)
+		return res
+	}
+	pc.Restore(decisiveOperandCheckpoint)
+	return res
+}
+
 type paramRefPreserver struct {
 	preserve bool
 }

@@ -39,6 +39,26 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 			logic: `{"or":[{"or":[{"always":["x"]},false]},false]}`,
 		},
 		{
+			name:  "or later truthy constant preserves earlier dropped-param marker",
+			logic: `{"or":[{"never":["x"]},true]}`,
+		},
+		{
+			name:  "and later falsy constant preserves earlier dropped-param marker",
+			logic: `{"and":[{"never":["x"]},false]}`,
+		},
+		{
+			name:  "and later falsy constant preserves earlier truthy dropped-param marker",
+			logic: `{"and":[{"always":["x"]},false]}`,
+		},
+		{
+			name:  "double bang or later truthy constant preserves earlier dropped-param marker",
+			logic: `{"!!":{"or":[{"never":["x"]},true]}}`,
+		},
+		{
+			name:  "double bang and later falsy constant preserves earlier dropped-param marker",
+			logic: `{"!!":{"and":[{"always":["x"]},false]}}`,
+		},
+		{
 			name:  "double bang nested logical preserves dropped-param marker",
 			logic: `{"!!":{"and":[{"always":["x"]},true]}}`,
 		},
@@ -69,6 +89,11 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 		{
 			name:      "value or short-circuits truthy constant",
 			logic:     `{"or":[{"always":["x"]},false]}`,
+			valueMode: true,
+		},
+		{
+			name:      "value double bang or later truthy constant preserves earlier dropped-param marker",
+			logic:     `{"!!":{"or":[{"never":["x"]},true]}}`,
 			valueMode: true,
 		},
 		{
@@ -172,6 +197,11 @@ func TestParameterizedCustomPredicateConstantsPreserveDroppedParamDetection(t *t
 						return PredicateSQL("TRUE"), nil
 					}); regErr != nil {
 						t.Fatalf("RegisterOperatorFunc(always) error: %v", regErr)
+					}
+					if regErr := tr.RegisterOperatorFunc("never", func(_ string, _ []OperatorArg) (OperatorResult, error) {
+						return PredicateSQL("FALSE"), nil
+					}); regErr != nil {
+						t.Fatalf("RegisterOperatorFunc(never) error: %v", regErr)
 					}
 
 					var sql string

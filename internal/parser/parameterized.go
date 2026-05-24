@@ -488,12 +488,22 @@ func (p *Parser) parsePredicateLogicalParam(operator string, args []interface{},
 				continue
 			}
 			if operator == operators.OpAnd && !res.truthy {
-				pc.Restore(checkpoint)
-				return booleanPredicateResult(false), nil
+				return foldedLogicalParamResult(
+					pc,
+					checkpoint,
+					operandCheckpoint,
+					booleanPredicateResult(false),
+					partResults...,
+				), nil
 			}
 			if operator == operators.OpOr && res.truthy {
-				pc.Restore(checkpoint)
-				return booleanPredicateResult(true), nil
+				return foldedLogicalParamResult(
+					pc,
+					checkpoint,
+					operandCheckpoint,
+					booleanPredicateResult(true),
+					partResults...,
+				), nil
 			}
 		}
 		parts = append(parts, res.SQL)
