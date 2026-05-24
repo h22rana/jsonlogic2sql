@@ -324,6 +324,179 @@ func TestTypeMetadataFoldsArrayScalarStrictEqualityAllDialects(t *testing.T) {
 	}
 }
 
+func TestTypeMetadataRejectsObjectScalarLooseEqualityAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "profile", Type: FieldTypeObject, Fields: []FieldSchema{
+			{Name: "name", Type: FieldTypeString},
+		}},
+		{Name: "items", Type: FieldTypeArray, ElementFields: []FieldSchema{
+			{Name: "name", Type: FieldTypeString},
+		}},
+	})
+	cases := []struct {
+		name  string
+		logic string
+	}{
+		{
+			name:  "root object equals scalar",
+			logic: `{"==":[{"var":"profile"},"x"]}`,
+		},
+		{
+			name:  "scalar not equals root object",
+			logic: `{"!=":["x",{"var":"profile"}]}`,
+		},
+		{
+			name:  "whole object array element equals scalar",
+			logic: `{"some":[{"var":"items"},{"==":[{"var":""},"x"]}]}`,
+		},
+		{
+			name:  "whole object array element equals scoped scalar field",
+			logic: `{"some":[{"var":"items"},{"==":[{"var":""},{"var":"name"}]}]}`,
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					expectConditionAndParamErrorContains(t, tr, tc.logic, "object equality")
+					expectValueAndParamErrorContains(t, tr, tc.logic, "object equality")
+				})
+			}
+		})
+	}
+}
+
+func TestTypeMetadataFoldsObjectScalarStrictLiteralEqualityAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "profile", Type: FieldTypeObject, Fields: []FieldSchema{
+			{Name: "name", Type: FieldTypeString},
+		}},
+		{Name: "items", Type: FieldTypeArray, ElementFields: []FieldSchema{
+			{Name: "name", Type: FieldTypeString},
+		}},
+	})
+	cases := []struct {
+		name  string
+		logic string
+		want  string
+	}{
+		{
+			name:  "root object strict equals scalar",
+			logic: `{"===":[{"var":"profile"},"x"]}`,
+			want:  "FALSE",
+		},
+		{
+			name:  "scalar strict not equals root object",
+			logic: `{"!==":["x",{"var":"profile"}]}`,
+			want:  "TRUE",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+
+					sql, err := tr.TranspileCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileCondition() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileCondition() SQL = %q, want %q", sql, tc.want)
+					}
+
+					sql, params, err := tr.TranspileParameterizedCondition(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedCondition() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileParameterizedCondition() SQL = %q, want %q", sql, tc.want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("TranspileParameterizedCondition() params = %#v, want none", params)
+					}
+
+					sql, err = tr.TranspileValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileValue() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileValue() SQL = %q, want %q", sql, tc.want)
+					}
+
+					sql, params, err = tr.TranspileParameterizedValue(tc.logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if sql != tc.want {
+						t.Fatalf("TranspileParameterizedValue() SQL = %q, want %q", sql, tc.want)
+					}
+					if len(params) != 0 {
+						t.Fatalf("TranspileParameterizedValue() params = %#v, want none", params)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTypeMetadataRejectsObjectScalarDefaultsInEqualityAllDialects(t *testing.T) {
+	t.Parallel()
+
+	schema := mustNewSchema([]FieldSchema{
+		{Name: "profile", Type: FieldTypeObject, Fields: []FieldSchema{
+			{Name: "name", Type: FieldTypeString},
+		}},
+		{Name: "items", Type: FieldTypeArray, ElementFields: []FieldSchema{
+			{Name: "profile", Type: FieldTypeObject, Fields: []FieldSchema{
+				{Name: "name", Type: FieldTypeString},
+			}},
+		}},
+	})
+	cases := []string{
+		`{"==":[{"var":["profile","x"]},"x"]}`,
+		`{"==":[{"var":["profile",1]},1]}`,
+		`{"some":[{"var":"items"},{"==":[{"var":["profile","x"]},"x"]}]}`,
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			tr, err := NewTranspiler(d, schema)
+			if err != nil {
+				t.Fatalf("NewTranspiler() error = %v", err)
+			}
+			for _, logic := range cases {
+				t.Run(logic, func(t *testing.T) {
+					t.Parallel()
+					expectConditionAndParamErrorContains(t, tr, logic, "expected object or null")
+					expectValueAndParamErrorContains(t, tr, logic, "expected object or null")
+				})
+			}
+		})
+	}
+}
+
 func TestTypeMetadataSupportsArrayDefaultsAllDialects(t *testing.T) {
 	t.Parallel()
 

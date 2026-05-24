@@ -5593,7 +5593,7 @@ func TestTranspileParameterizedValue_ArrayTransformationsUseValueSemantics(t *te
 func TestTranspileValue_ArrayPredicateContextsUseTruthinessLogicals(t *testing.T) {
 	t.Parallel()
 
-	logic := `{"filter":[{"var":"items"},{"or":[0,{"==":[{"var":""},1]}]}]}`
+	logic := `{"filter":[{"var":"numbers"},{"or":[0,{"==":[{"var":""},1.5]}]}]}`
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
@@ -5604,11 +5604,11 @@ func TestTranspileValue_ArrayPredicateContextsUseTruthinessLogicals(t *testing.T
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
 
-			want := "ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE elem = 1)"
-			wantParam := "ARRAY(SELECT elem FROM UNNEST(items) AS elem WHERE elem = " + testPlaceholder(d, 1) + ")"
+			want := "ARRAY(SELECT elem FROM UNNEST(numbers) AS elem WHERE elem = 1.5)"
+			wantParam := "ARRAY(SELECT elem FROM UNNEST(numbers) AS elem WHERE elem = " + testPlaceholder(d, 1) + ")"
 			if d == DialectClickHouse {
-				want = "arrayFilter(elem -> elem = 1, items)"
-				wantParam = "arrayFilter(elem -> elem = " + testPlaceholder(d, 1) + ", items)"
+				want = "arrayFilter(elem -> elem = 1.5, numbers)"
+				wantParam = "arrayFilter(elem -> elem = " + testPlaceholder(d, 1) + ", numbers)"
 			} else {
 				want = testDuckDBUnnestSourceAliases(d, want)
 				wantParam = testDuckDBUnnestSourceAliases(d, wantParam)
@@ -5629,7 +5629,7 @@ func TestTranspileValue_ArrayPredicateContextsUseTruthinessLogicals(t *testing.T
 			if gotParam != wantParam {
 				t.Fatalf("TranspileParameterizedValue() = %q, want %q", gotParam, wantParam)
 			}
-			wantParams := []QueryParam{{Name: "p1", Value: float64(1)}}
+			wantParams := []QueryParam{{Name: "p1", Value: float64(1.5)}}
 			if !reflect.DeepEqual(gotParams, wantParams) {
 				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
 			}

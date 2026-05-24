@@ -677,7 +677,7 @@ func TestTranspileCondition_RejectsValueOperandsInPredicateContexts(t *testing.T
 func TestTranspileCondition_ArrayPredicateLambdasAcceptTruthinessFallbacks(t *testing.T) {
 	t.Parallel()
 
-	logic := `{"some":[{"var":"items"},{"or":[0,{"==":[{"var":""},1]}]}]}`
+	logic := `{"some":[{"var":"numbers"},{"or":[0,{"==":[{"var":""},1.5]}]}]}`
 
 	for _, d := range allDialects() {
 		t.Run(d.String(), func(t *testing.T) {
@@ -688,11 +688,11 @@ func TestTranspileCondition_ArrayPredicateLambdasAcceptTruthinessFallbacks(t *te
 				t.Fatalf("NewTranspiler() error = %v", err)
 			}
 
-			want := "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 1)"
-			wantParam := "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = " + testPlaceholder(d, 1) + ")"
+			want := "EXISTS (SELECT 1 FROM UNNEST(numbers) AS elem WHERE elem = 1.5)"
+			wantParam := "EXISTS (SELECT 1 FROM UNNEST(numbers) AS elem WHERE elem = " + testPlaceholder(d, 1) + ")"
 			if d == DialectClickHouse {
-				want = "arrayExists(elem -> elem = 1, items)"
-				wantParam = "arrayExists(elem -> elem = " + testPlaceholder(d, 1) + ", items)"
+				want = "arrayExists(elem -> elem = 1.5, numbers)"
+				wantParam = "arrayExists(elem -> elem = " + testPlaceholder(d, 1) + ", numbers)"
 			} else {
 				want = testDuckDBUnnestSourceAliases(d, want)
 				wantParam = testDuckDBUnnestSourceAliases(d, wantParam)
@@ -713,7 +713,7 @@ func TestTranspileCondition_ArrayPredicateLambdasAcceptTruthinessFallbacks(t *te
 			if gotParam != wantParam {
 				t.Fatalf("TranspileParameterizedCondition() = %q, want %q", gotParam, wantParam)
 			}
-			wantParams := []QueryParam{{Name: "p1", Value: float64(1)}}
+			wantParams := []QueryParam{{Name: "p1", Value: float64(1.5)}}
 			if !reflect.DeepEqual(gotParams, wantParams) {
 				t.Fatalf("params = %#v, want %#v", gotParams, wantParams)
 			}

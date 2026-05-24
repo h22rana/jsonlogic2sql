@@ -49,6 +49,9 @@ func (c *ComparisonOperator) validateEqualityFieldOperand(field equalityFieldOpe
 	if err := validateEqualityJSONNumberLiteral(field.defaultLiteral); err != nil {
 		return err
 	}
+	if c.schema().GetFieldType(field.fieldName) == objectFieldType {
+		return validateVarDefaultForField(c.schema(), field.fieldName, field.defaultLiteral)
+	}
 	if c.schema().IsEnumType(field.fieldName) {
 		return c.validateEnumValue(field.defaultLiteral, field.fieldName)
 	}
@@ -455,9 +458,19 @@ func equalityOperandKind(value interface{}) (string, bool) {
 	return kind, kind != ""
 }
 
-func equalityKindsHaveArrayScalar(leftKind, rightKind string) bool {
-	return (leftKind == literalKindArray && isScalarEqualityKind(rightKind)) ||
-		(rightKind == literalKindArray && isScalarEqualityKind(leftKind))
+func equalityKindsHaveStructuredScalar(leftKind, rightKind string) (string, bool) {
+	switch {
+	case isStructuredEqualityKind(leftKind) && isScalarEqualityKind(rightKind):
+		return leftKind, true
+	case isStructuredEqualityKind(rightKind) && isScalarEqualityKind(leftKind):
+		return rightKind, true
+	default:
+		return "", false
+	}
+}
+
+func isStructuredEqualityKind(kind string) bool {
+	return kind == literalKindArray || kind == objectFieldType
 }
 
 func isScalarEqualityKind(kind string) bool {
@@ -469,13 +482,13 @@ func isScalarEqualityKind(kind string) bool {
 	}
 }
 
-func applyArrayScalarEqualitySemantics(dec equalityDecision, operator string) equalityDecision {
+func applyStructuredScalarEqualitySemantics(dec equalityDecision, operator, structuredKind string) equalityDecision {
 	dec.handled = true
 	if isStrictEqualityOperator(operator) {
 		dec.constant = impossibleEqualityPredicateConstant(operator)
 		return dec
 	}
-	dec.unsupported = fmt.Errorf("array equality with scalar operands is not supported")
+	dec.unsupported = fmt.Errorf("%s equality with scalar operands is not supported", structuredKind)
 	return dec
 }
 
@@ -508,8 +521,8 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 			return dec
 		}
 		if isStrictEqualityOperator(operator) && !strictIncompatibleFieldsCanUseNullBranch(leftField, rightField) {
-			if c.arrayScalarFieldEquality(leftField, rightField) {
-				return applyArrayScalarEqualitySemantics(dec, operator)
+			if structuredKind, ok := c.structuredScalarFieldEqualityKind(leftField, rightField); ok {
+				return applyStructuredScalarEqualitySemantics(dec, operator, structuredKind)
 			}
 		}
 		if err := c.looseIncompatibleFieldEqualityError(operator, leftField, rightField); err != nil {
@@ -540,8 +553,8 @@ func (c *ComparisonOperator) applyEqualitySemantics(operator string, leftArg, ri
 	fieldName := field.fieldName
 	if fieldKind, ok := c.schemaEqualityKind(fieldName); ok {
 		if literalKind, literalKnown := equalityOperandKind(literalArg); literalKnown {
-			if equalityKindsHaveArrayScalar(fieldKind, literalKind) {
-				return applyArrayScalarEqualitySemantics(dec, operator)
+			if structuredKind, ok := equalityKindsHaveStructuredScalar(fieldKind, literalKind); ok {
+				return applyStructuredScalarEqualitySemantics(dec, operator, structuredKind)
 			}
 		}
 	}
@@ -734,8 +747,8 @@ func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityD
 	leftKind, leftTyped := expressionEqualityKind(leftArg)
 	rightKind, rightTyped := expressionEqualityKind(rightArg)
 	if leftTyped && rightTyped {
-		if equalityKindsHaveArrayScalar(leftKind, rightKind) {
-			return applyArrayScalarEqualitySemantics(dec, operator)
+		if structuredKind, ok := equalityKindsHaveStructuredScalar(leftKind, rightKind); ok {
+			return applyStructuredScalarEqualitySemantics(dec, operator, structuredKind)
 		}
 		if isStrictEqualityOperator(operator) && leftKind != rightKind {
 			dec.handled = true
@@ -769,8 +782,8 @@ func (c *ComparisonOperator) applyTypedExpressionEqualitySemantics(dec equalityD
 		return dec
 	}
 	literalKind := equalityLiteralKind(literal)
-	if equalityKindsHaveArrayScalar(exprKind, literalKind) {
-		return applyArrayScalarEqualitySemantics(dec, operator)
+	if structuredKind, ok := equalityKindsHaveStructuredScalar(exprKind, literalKind); ok {
+		return applyStructuredScalarEqualitySemantics(dec, operator, structuredKind)
 	}
 
 	if isStrictEqualityOperator(operator) {
@@ -885,15 +898,15 @@ func (c *ComparisonOperator) schemaEqualityKind(fieldName string) (string, bool)
 	}
 }
 
-func (c *ComparisonOperator) arrayScalarFieldEquality(
+func (c *ComparisonOperator) structuredScalarFieldEqualityKind(
 	leftField, rightField equalityFieldOperand,
-) bool {
+) (string, bool) {
 	leftKind, leftKnown := c.schemaEqualityKind(leftField.fieldName)
 	rightKind, rightKnown := c.schemaEqualityKind(rightField.fieldName)
 	if !leftKnown || !rightKnown {
-		return false
+		return "", false
 	}
-	return equalityKindsHaveArrayScalar(leftKind, rightKind)
+	return equalityKindsHaveStructuredScalar(leftKind, rightKind)
 }
 
 func strictIncompatibleFieldsCanUseNullBranch(leftField, rightField equalityFieldOperand) bool {

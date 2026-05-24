@@ -17,7 +17,7 @@ func TestNestedBareFieldUsesInnerAlias_AllDialects(t *testing.T) {
 		DialectClickHouse,
 	}
 
-	logic := `{"map":[{"var":"groups"},{"filter":[{"var":"values"},{"and":[{"==":[{"var":""},1]},{">=":[{"var":"base"},0]}]}]}]}`
+	logic := `{"map":[{"var":"groups"},{"filter":[{"var":"values"},{"and":[{"==":[{"var":"value"},1]},{">=":[{"var":"base"},0]}]}]}]}`
 
 	for _, d := range dialects {
 		t.Run(d.String(), func(t *testing.T) {

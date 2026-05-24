@@ -837,7 +837,7 @@ func TestTypeValidationWithRequiredSchema(t *testing.T) {
 		},
 		{
 			name:      "array on array field",
-			jsonLogic: `{"some": [{"var": "items"}, {"==": [{"var": ""}, "x"]}]}`,
+			jsonLogic: `{"some": [{"var": "tags"}, {"==": [{"var": ""}, "x"]}]}`,
 		},
 		{
 			name:      "ordering on numeric field",

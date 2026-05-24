@@ -161,13 +161,13 @@ func TestDialectSpecificArrayOperators(t *testing.T) {
 		},
 		{
 			name:  "some elements check",
-			input: `{"some": [{"var": "items"}, {"==": [{"var": ""}, "active"]}]}`,
+			input: `{"some": [{"var": "statuses"}, {"==": [{"var": ""}, "active"]}]}`,
 			expected: map[Dialect]string{
-				DialectBigQuery:   "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
-				DialectSpanner:    "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
-				DialectPostgreSQL: "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
-				DialectDuckDB:     "EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')",
-				DialectClickHouse: "arrayExists(elem -> elem = 'active', items)",
+				DialectBigQuery:   "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				DialectSpanner:    "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				DialectPostgreSQL: "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				DialectDuckDB:     "EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')",
+				DialectClickHouse: "arrayExists(elem -> elem = 'active', statuses)",
 			},
 		},
 		{
