@@ -121,3 +121,99 @@ func TestReduceAggregateAllowsNumericSchemaElementFieldsAllDialects(t *testing.T
 		})
 	}
 }
+
+func TestReduceAggregateParameterizedNumericStringInitialsUseNumericParamsAllDialects(t *testing.T) {
+	tests := []struct {
+		name              string
+		initial           string
+		wantParamValue    interface{}
+		wantClickHouseSQL string
+	}{
+		{
+			name:              "integer string",
+			initial:           "1",
+			wantParamValue:    int64(1),
+			wantClickHouseSQL: "{p1:Int64}",
+		},
+		{
+			name:              "negative integer string",
+			initial:           "-2",
+			wantParamValue:    int64(-2),
+			wantClickHouseSQL: "{p1:Int64}",
+		},
+		{
+			name:              "float string",
+			initial:           "1.5",
+			wantParamValue:    1.5,
+			wantClickHouseSQL: "{p1:Float64}",
+		},
+		{
+			name:              "exact unsigned integer string",
+			initial:           "9223372036854775808",
+			wantParamValue:    "9223372036854775808",
+			wantClickHouseSQL: "{p1:UInt64}",
+		},
+	}
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d, reduceAggregateSchema(t))
+			if err != nil {
+				t.Fatalf("NewTranspiler: %v", err)
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					logic := `{"reduce":[{"var":"numbers"},{"+":[{"var":"accumulator"},{"var":"current"}]},"` +
+						tt.initial + `"]}`
+
+					sql, params, err := tr.TranspileParameterizedValue(logic)
+					if err != nil {
+						t.Fatalf("TranspileParameterizedValue() error = %v", err)
+					}
+					if len(params) == 0 {
+						t.Fatalf("params = %#v, want numeric initial parameter", params)
+					}
+					if params[0].Value != tt.wantParamValue {
+						t.Fatalf("initial param value = %#v, want %#v", params[0].Value, tt.wantParamValue)
+					}
+					if strings.Contains(sql, "CAST(") && strings.Contains(sql, ":String") {
+						t.Fatalf("SQL = %q, want numeric initial placeholder without string cast", sql)
+					}
+					if d == DialectClickHouse {
+						if !strings.Contains(sql, tt.wantClickHouseSQL) {
+							t.Fatalf("ClickHouse SQL = %q, want %s", sql, tt.wantClickHouseSQL)
+						}
+						if strings.Contains(sql, "{p1:String}") {
+							t.Fatalf("ClickHouse SQL = %q, want numeric p1 placeholder", sql)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestReduceParameterizedEmptyArrayKeepsNumericStringInitialAsStringAllDialects(t *testing.T) {
+	logic := `{"reduce":[[],{"+":[{"var":"accumulator"},{"var":"current"}]},"1"]}`
+
+	for _, d := range allDialects() {
+		t.Run(d.String(), func(t *testing.T) {
+			tr, err := NewTranspiler(d, reduceAggregateSchema(t))
+			if err != nil {
+				t.Fatalf("NewTranspiler: %v", err)
+			}
+
+			sql, params, err := tr.TranspileParameterizedValue(logic)
+			if err != nil {
+				t.Fatalf("TranspileParameterizedValue() error = %v", err)
+			}
+			if len(params) != 1 || params[0].Value != "1" {
+				t.Fatalf("params = %#v, want string initial parameter", params)
+			}
+			if d == DialectClickHouse && sql != "{p1:String}" {
+				t.Fatalf("ClickHouse SQL = %q, want {p1:String}", sql)
+			}
+		})
+	}
+}

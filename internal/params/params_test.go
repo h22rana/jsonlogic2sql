@@ -143,6 +143,132 @@ func TestParamCollectorAddClickHouseExactNumberString(t *testing.T) {
 	}
 }
 
+func TestParamCollectorAddNumericString(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		wantSQL   string
+		wantValue interface{}
+	}{
+		{
+			name:      "integer",
+			value:     "1",
+			wantSQL:   "{p1:Int64}",
+			wantValue: int64(1),
+		},
+		{
+			name:      "float",
+			value:     "1.5",
+			wantSQL:   "{p1:Float64}",
+			wantValue: 1.5,
+		},
+		{
+			name:      "exact unsigned integer",
+			value:     "9223372036854775808",
+			wantSQL:   "{p1:UInt64}",
+			wantValue: "9223372036854775808",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParamCollector(PlaceholderClickHouse)
+			gotSQL, ok := pc.AddNumericString(tt.value)
+			if !ok {
+				t.Fatalf("AddNumericString(%q) returned false", tt.value)
+			}
+			if gotSQL != tt.wantSQL {
+				t.Fatalf("AddNumericString(%q) = %q, want %q", tt.value, gotSQL, tt.wantSQL)
+			}
+			gotParams := pc.Params()
+			if len(gotParams) != 1 || gotParams[0].Value != tt.wantValue {
+				t.Fatalf("Params() = %#v, want value %#v", gotParams, tt.wantValue)
+			}
+		})
+	}
+}
+
+func TestParamCollectorAddNumericStringRejectsNonNumericStrings(t *testing.T) {
+	pc := NewParamCollector(PlaceholderClickHouse)
+	if gotSQL, ok := pc.AddNumericString("not numeric"); ok {
+		t.Fatalf("AddNumericString(non-numeric) = %q, true; want false", gotSQL)
+	}
+}
+
+func TestParamCollectorRewriteStringParamAsNumeric(t *testing.T) {
+	tests := []struct {
+		name      string
+		style     PlaceholderStyle
+		value     string
+		wantSQL   string
+		wantValue interface{}
+	}{
+		{
+			name:      "named integer",
+			style:     PlaceholderNamed,
+			value:     "1",
+			wantSQL:   "@p1",
+			wantValue: int64(1),
+		},
+		{
+			name:      "clickhouse integer",
+			style:     PlaceholderClickHouse,
+			value:     "1",
+			wantSQL:   "{p1:Int64}",
+			wantValue: int64(1),
+		},
+		{
+			name:      "clickhouse float",
+			style:     PlaceholderClickHouse,
+			value:     "1.5",
+			wantSQL:   "{p1:Float64}",
+			wantValue: 1.5,
+		},
+		{
+			name:      "clickhouse exact unsigned integer",
+			style:     PlaceholderClickHouse,
+			value:     "9223372036854775808",
+			wantSQL:   "{p1:UInt64}",
+			wantValue: "9223372036854775808",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParamCollector(tt.style)
+			_ = pc.Add(tt.value)
+
+			gotSQL, ok := pc.RewriteStringParamAsNumeric(0, tt.value)
+			if !ok {
+				t.Fatalf("RewriteStringParamAsNumeric(%q) returned false", tt.value)
+			}
+			if gotSQL != tt.wantSQL {
+				t.Fatalf("RewriteStringParamAsNumeric(%q) = %q, want %q", tt.value, gotSQL, tt.wantSQL)
+			}
+
+			gotParams := pc.Params()
+			if len(gotParams) != 1 || gotParams[0].Value != tt.wantValue {
+				t.Fatalf("Params() = %#v, want value %#v", gotParams, tt.wantValue)
+			}
+			if pc.PlaceholderValueIsString(gotSQL) {
+				t.Fatalf("PlaceholderValueIsString(%q) = true, want false after numeric rewrite", gotSQL)
+			}
+		})
+	}
+}
+
+func TestParamCollectorRewriteStringParamAsNumericRejectsMismatches(t *testing.T) {
+	pc := NewParamCollector(PlaceholderClickHouse)
+	_ = pc.Add("1")
+
+	if gotSQL, ok := pc.RewriteStringParamAsNumeric(0, "2"); ok {
+		t.Fatalf("RewriteStringParamAsNumeric with mismatched value = %q, true; want false", gotSQL)
+	}
+	if gotSQL, ok := pc.RewriteStringParamAsNumeric(1, "1"); ok {
+		t.Fatalf("RewriteStringParamAsNumeric with out-of-range index = %q, true; want false", gotSQL)
+	}
+}
+
 func TestParamCollectorOrdering(t *testing.T) {
 	pc := NewParamCollector(PlaceholderNamed)
 	pc.Add("first")

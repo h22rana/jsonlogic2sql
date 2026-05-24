@@ -237,10 +237,12 @@ func (a *ArrayOperator) handleReduceResultParam(args []interface{}, pc *params.P
 	if err := a.validateArrayOperand(args[arraySourceArgIndex]); err != nil {
 		return OperatorResult{}, err
 	}
+	initialParamStart := len(pc.RawParams())
 	initialValue, err := a.valueToTypedSQLParamAtPath(args[arrayReduceInitialArgIndex], pc, a.argPath(arrayReduceInitialArgIndex))
 	if err != nil {
 		return OperatorResult{}, fmt.Errorf("invalid reduce initial argument: %w", err)
 	}
+	initialParamEnd := len(pc.RawParams())
 	initial := initialValue.sql
 	if isEmptyArrayLiteral(args[arraySourceArgIndex]) {
 		return operatorResultFromTypedValue(initialValue), nil
@@ -265,10 +267,6 @@ func (a *ArrayOperator) handleReduceResultParam(args []interface{}, pc *params.P
 
 	reduceScoped := a.withArrayLambdaSource(arrayLambdaScopeReduce, sourceScopes, arrayValue, false)
 	if pattern := reduceScoped.detectAggregatePattern(reducerExpr); pattern != nil {
-		numericInitial, initialErr := a.numericAggregateInitialSQLParam(args[arrayReduceInitialArgIndex], initialValue)
-		if initialErr != nil {
-			return OperatorResult{}, fmt.Errorf("invalid reduce initial argument: %w", initialErr)
-		}
 		if aggregateErr := reduceScoped.validateAggregatePattern(pattern); aggregateErr != nil {
 			return OperatorResult{}, aggregateErr
 		}
@@ -289,6 +287,16 @@ func (a *ArrayOperator) handleReduceResultParam(args []interface{}, pc *params.P
 				}
 				aggregateInput = fmt.Sprintf("arrayMap(%s -> %s, %s)", mapAlias, mappedRef, array)
 			}
+			numericInitial, initialErr := a.numericAggregateInitialSQLParam(
+				args[arrayReduceInitialArgIndex],
+				initialValue,
+				pc,
+				initialParamStart,
+				initialParamEnd,
+			)
+			if initialErr != nil {
+				return OperatorResult{}, fmt.Errorf("invalid reduce initial argument: %w", initialErr)
+			}
 			aggregateSQL := fmt.Sprintf("arrayReduce('%s', %s)", strings.ToLower(pattern.function), aggregateInput)
 			return preserveParamRefsFromTypedValues(
 				ValueSQL(renderReduceAggregateResult(pattern.function, numericInitial, aggregateSQL, true, array), ExpressionTypeNumber),
@@ -299,6 +307,16 @@ func (a *ArrayOperator) handleReduceResultParam(args []interface{}, pc *params.P
 			if quoteErr != nil {
 				return OperatorResult{}, quoteErr
 			}
+			numericInitial, initialErr := a.numericAggregateInitialSQLParam(
+				args[arrayReduceInitialArgIndex],
+				initialValue,
+				pc,
+				initialParamStart,
+				initialParamEnd,
+			)
+			if initialErr != nil {
+				return OperatorResult{}, fmt.Errorf("invalid reduce initial argument: %w", initialErr)
+			}
 			aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 			return preserveParamRefsFromTypedValues(
 				ValueSQL(renderReduceAggregateResult(pattern.function, numericInitial, aggregateSQL, false, ""), ExpressionTypeNumber),
@@ -308,6 +326,16 @@ func (a *ArrayOperator) handleReduceResultParam(args []interface{}, pc *params.P
 		elemRef, quoteErr := reduceScoped.aggregateElementSQLParam(alias, pattern, pc)
 		if quoteErr != nil {
 			return OperatorResult{}, quoteErr
+		}
+		numericInitial, initialErr := a.numericAggregateInitialSQLParam(
+			args[arrayReduceInitialArgIndex],
+			initialValue,
+			pc,
+			initialParamStart,
+			initialParamEnd,
+		)
+		if initialErr != nil {
+			return OperatorResult{}, fmt.Errorf("invalid reduce initial argument: %w", initialErr)
 		}
 		aggregateSQL := fmt.Sprintf("(SELECT %s(%s) FROM %s)", pattern.function, elemRef, a.unnestSourceSQL(array, alias))
 		return preserveParamRefsFromTypedValues(

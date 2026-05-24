@@ -766,18 +766,8 @@ func (n *NumericOperator) valueToSQLParam(value interface{}, pc *params.ParamCol
 	}
 
 	if str, ok := value.(string); ok {
-		trimmed := strings.TrimSpace(str)
-		if isIntegerLiteral(trimmed) {
-			n, err := strconv.ParseInt(trimmed, 10, 64)
-			if err == nil {
-				return pc.Add(n), nil
-			}
-			// Integer overflows int64; store as string to preserve full precision
-			// while retaining numeric placeholder metadata for dialects that need it.
-			return pc.AddExactNumberString(trimmed), nil
-		}
-		if num, err := strconv.ParseFloat(trimmed, 64); err == nil && !math.IsNaN(num) && !math.IsInf(num, 0) {
-			return pc.Add(num), nil
+		if placeholder, ok := pc.AddNumericString(str); ok {
+			return placeholder, nil
 		}
 		return n.dataOp.valueToSQLParam(str, pc)
 	}

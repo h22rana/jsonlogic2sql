@@ -376,8 +376,16 @@ func (a *ArrayOperator) numericAggregateInitialSQL(value interface{}, initial ty
 func (a *ArrayOperator) numericAggregateInitialSQLParam(
 	value interface{},
 	initial typedValueSQL,
+	pc *params.ParamCollector,
+	paramStart int,
+	paramEnd int,
 ) (string, error) {
 	if str, ok := value.(string); ok && isNumericString(str) {
+		if paramEnd == paramStart+1 {
+			if placeholder, ok := pc.RewriteStringParamAsNumeric(paramStart, str); ok {
+				return placeholder, nil
+			}
+		}
 		return fmt.Sprintf("CAST(%s AS NUMERIC)", initial.sql), nil
 	}
 	return a.numericAggregateInitialSQL(value, initial)

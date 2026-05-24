@@ -4,6 +4,7 @@ package params
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -122,6 +123,40 @@ func (pc *ParamCollector) Add(value interface{}) string {
 // internal type inference.
 func (pc *ParamCollector) AddExactNumberString(value string) string {
 	return pc.add(value, clickHouseExactNumberStringType(value))
+}
+
+// AddNumericString registers a string literal that has already been proven to
+// be used in a numeric context. It binds ordinary integers/floats as numeric Go
+// values and preserves oversized numeric literals as exact strings with
+// dialect-specific numeric metadata.
+func (pc *ParamCollector) AddNumericString(value string) (string, bool) {
+	numericValue, clickHouseType, ok := numericStringParamValue(value)
+	if !ok {
+		return "", false
+	}
+	return pc.add(numericValue, clickHouseType), true
+}
+
+// RewriteStringParamAsNumeric converts an already-collected string parameter to
+// the same numeric parameter shape used by numeric operators. It is intended for
+// paths where an operand must be collected before the surrounding expression can
+// prove that a JSON string is being used in a numeric context.
+func (pc *ParamCollector) RewriteStringParamAsNumeric(index int, value string) (string, bool) {
+	if index < 0 || index >= len(pc.params) {
+		return "", false
+	}
+	current, ok := pc.params[index].Value.(string)
+	if !ok || current != value || pc.params[index].clickHouseType != "" {
+		return "", false
+	}
+
+	numericValue, clickHouseType, ok := numericStringParamValue(value)
+	if !ok {
+		return "", false
+	}
+	pc.params[index].Value = numericValue
+	pc.params[index].clickHouseType = clickHouseType
+	return FormatPlaceholderForParam(index+1, pc.params[index], pc.style), true
 }
 
 func (pc *ParamCollector) add(value interface{}, sqlType string) string {
@@ -527,6 +562,23 @@ func clickHouseExactNumberStringType(value string) string {
 		return clickHouseIntegerStringType(trimmed)
 	}
 	return clickHouseTypeFloat64
+}
+
+func numericStringParamValue(value string) (interface{}, string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if isSignedDecimalIntegerLiteral(trimmed) {
+		n, err := strconv.ParseInt(trimmed, 10, 64)
+		if err == nil {
+			return n, "", true
+		}
+		return trimmed, clickHouseExactNumberStringType(trimmed), true
+	}
+
+	num, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
+		return nil, "", false
+	}
+	return num, "", true
 }
 
 func clickHouseIntegerStringType(value string) string {
