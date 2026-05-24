@@ -343,7 +343,12 @@ func main() {
 	valueMode = selectExpressionMode(scanner)
 	fmt.Println()
 
-	currentSchema = promptSchema(scanner)
+	schema, err := promptSchema(scanner)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load schema: %v\n", err)
+		os.Exit(1)
+	}
+	currentSchema = schema
 
 	transpiler, err := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
 		Dialect: currentDialect,
@@ -428,30 +433,23 @@ func processInput(input string, transpiler *jsonlogic2sql.Transpiler) {
 
 // promptSchema loads a schema from a user-provided path, or returns an empty
 // schema for literal-only expressions when the user leaves the path blank.
-func promptSchema(scanner *bufio.Scanner) *jsonlogic2sql.Schema {
+func promptSchema(scanner *bufio.Scanner) (*jsonlogic2sql.Schema, error) {
 	fmt.Print("Enter schema path (leave empty for literal-only empty schema): ")
 	if !scanner.Scan() {
-		return emptySchema()
+		return emptySchema(), nil
 	}
 	schemaPath := strings.TrimSpace(scanner.Text())
 	if schemaPath == "" {
-		return emptySchema()
+		return emptySchema(), nil
 	}
 
-	data, err := os.ReadFile(filepath.Clean(schemaPath))
+	schema, err := loadSchemaFromPath(schemaPath)
 	if err != nil {
-		fmt.Printf("Error reading schema file: %v\n\n", err)
-		return emptySchema()
-	}
-
-	schema, err := jsonlogic2sql.NewSchemaFromJSON(data)
-	if err != nil {
-		fmt.Printf("Error parsing schema file: %v\n\n", err)
-		return emptySchema()
+		return nil, err
 	}
 
 	fmt.Printf("Schema loaded: %s\n\n", schemaPath)
-	return schema
+	return schema, nil
 }
 
 func emptySchema() *jsonlogic2sql.Schema {
@@ -605,15 +603,9 @@ func handleSchemaCommand(parts []string, transpiler *jsonlogic2sql.Transpiler) {
 	}
 
 	schemaPath := parts[1]
-	data, err := os.ReadFile(filepath.Clean(schemaPath))
+	schema, err := loadSchemaFromPath(schemaPath)
 	if err != nil {
-		fmt.Printf("Error reading schema file: %v\n", err)
-		return
-	}
-
-	schema, err := jsonlogic2sql.NewSchemaFromJSON(data)
-	if err != nil {
-		fmt.Printf("Error parsing schema file: %v\n", err)
+		fmt.Printf("Error loading schema file: %v\n", err)
 		return
 	}
 
@@ -623,6 +615,19 @@ func handleSchemaCommand(parts []string, transpiler *jsonlogic2sql.Transpiler) {
 		return
 	}
 	fmt.Printf("Schema loaded: %s\n\n", schemaPath)
+}
+
+func loadSchemaFromPath(schemaPath string) (*jsonlogic2sql.Schema, error) {
+	data, err := os.ReadFile(filepath.Clean(schemaPath))
+	if err != nil {
+		return nil, fmt.Errorf("read %q: %w", schemaPath, err)
+	}
+
+	schema, err := jsonlogic2sql.NewSchemaFromJSON(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse %q: %w", schemaPath, err)
+	}
+	return schema, nil
 }
 
 // registerCustomOperators registers all custom operators for the REPL.

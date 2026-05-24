@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -598,6 +599,87 @@ func TestSelectExpressionMode(t *testing.T) {
 				t.Fatalf("selectExpressionMode() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPromptSchemaBlankInputUsesEmptySchema(t *testing.T) {
+	scanner := bufio.NewScanner(strings.NewReader("\n"))
+
+	schema, err := promptSchema(scanner)
+	if err != nil {
+		t.Fatalf("promptSchema() error = %v, want nil", err)
+	}
+	if schema == nil {
+		t.Fatal("promptSchema() returned nil schema")
+	}
+	if schema.HasField("field") {
+		t.Fatal("blank promptSchema() returned schema with fields, want literal-only empty schema")
+	}
+}
+
+func TestPromptSchemaInvalidNonEmptyPathReturnsError(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "missing-schema.json")
+	scanner := bufio.NewScanner(strings.NewReader(missingPath + "\n"))
+
+	schema, err := promptSchema(scanner)
+	if err == nil {
+		t.Fatalf("promptSchema() schema = %#v, error nil; want missing-path error", schema)
+	}
+	if schema != nil {
+		t.Fatalf("promptSchema() schema = %#v, want nil on explicit schema load failure", schema)
+	}
+}
+
+func TestPromptSchemaMalformedJSONReturnsError(t *testing.T) {
+	schemaPath := filepath.Join(t.TempDir(), "schema.json")
+	if err := os.WriteFile(schemaPath, []byte(`not-json`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	scanner := bufio.NewScanner(strings.NewReader(schemaPath + "\n"))
+
+	schema, err := promptSchema(scanner)
+	if err == nil {
+		t.Fatalf("promptSchema() schema = %#v, error nil; want parse error", schema)
+	}
+	if schema != nil {
+		t.Fatalf("promptSchema() schema = %#v, want nil on parse failure", schema)
+	}
+}
+
+func TestPromptSchemaValidPathLoadsSchema(t *testing.T) {
+	schemaPath := filepath.Join(t.TempDir(), "schema.json")
+	if err := os.WriteFile(schemaPath, []byte(`[{"name":"loaded","type":"string"}]`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	scanner := bufio.NewScanner(strings.NewReader(schemaPath + "\n"))
+
+	schema, err := promptSchema(scanner)
+	if err != nil {
+		t.Fatalf("promptSchema() error = %v, want nil", err)
+	}
+	if !schema.HasField("loaded") {
+		t.Fatalf("promptSchema() did not load declared field")
+	}
+}
+
+func TestHandleSchemaCommandMissingPathPreservesCurrentSchema(t *testing.T) {
+	origSchema := currentSchema
+	defer func() { currentSchema = origSchema }()
+
+	schema := replTestSchema(t)
+	currentSchema = schema
+	transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery, schema)
+	if err != nil {
+		t.Fatalf("NewTranspiler() error = %v", err)
+	}
+
+	handleSchemaCommand([]string{replCommandSchema, filepath.Join(t.TempDir(), "missing-schema.json")}, transpiler)
+
+	if currentSchema != schema {
+		t.Fatal("handleSchemaCommand() replaced currentSchema after missing schema path")
+	}
+	if _, err := transpiler.TranspileCondition(`{"==":[{"var":"amount"},1]}`); err != nil {
+		t.Fatalf("transpiler schema was not preserved after missing schema path: %v", err)
 	}
 }
 
